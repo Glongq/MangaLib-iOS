@@ -12,6 +12,9 @@ struct MangaDetailView: View {
     private let listItem: MangaItem?
 
     @State private var tab: Tab = .about
+    /// Показ sheet со всеми названиями тайтла (по тапу на название в шапке) —
+    /// см. TitleNamesSheet.
+    @State private var showTitleNames = false
     /// Пространство координат для "переезжающего" индикатора активной вкладки
     /// (см. tabButton/matchedGeometryEffect) — благодаря общему namespace
     /// SwiftUI анимирует подчёркивание как ОДНУ вьюху, плавно перемещая её (и
@@ -151,6 +154,15 @@ struct MangaDetailView: View {
         }
         .sheet(isPresented: $showLoginForComment) { LoginView() }
         .sheet(isPresented: $showLoginForSimilarVote) { LoginView() }
+        .sheet(isPresented: $showTitleNames) {
+            TitleNamesSheet(
+                rusName: viewModel.detail?.rusName ?? listItem?.rusName,
+                originalName: viewModel.detail?.name ?? listItem?.name,
+                engName: viewModel.detail?.engName ?? listItem?.engName,
+                otherNames: viewModel.detail?.otherNames ?? []
+            )
+            .presentationDetents([.medium, .large])
+        }
     }
 
     // MARK: Hero-баннер + выступающая обложка
@@ -409,6 +421,12 @@ struct MangaDetailView: View {
 
             // Рейтинг перенесён на саму обложку (см. heroHeader.coverRatingBadge).
         }
+        // Тап по названию открывает sheet со всеми названиями тайтла (русское/
+        // оригинальное/английское/альтернативные) — см. TitleNamesSheet.
+        // contentShape(Rectangle()) — чтобы тап ловился по всей области блока,
+        // включая пустые промежутки между строками, а не только по буквам.
+        .contentShape(Rectangle())
+        .onTapGesture { showTitleNames = true }
     }
 
     // MARK: Info row (блоки Тип/Статус/Год/Просмотры/Формат)
@@ -912,9 +930,15 @@ struct MangaDetailView: View {
             // теги) — как попросили, вместо двух отдельных секций. Возрастной
             // рейтинг (см. ageRatingChip) — первым в списке, если это 18+/16+
             // (12+/6+/"Нет" не показываются вовсе — как попросили).
+            // Жанры и теги — один блок, но по-разному: сначала жанры обычными
+            // чипами (без префикса), затем теги, каждый с "#" (как хештег) —
+            // как попросили. Возрастной рейтинг (ageRatingChip) по-прежнему
+            // самым первым, если это 18+/16+.
             let genres = sortedNames(viewModel.detail?.genres)
             let tags = sortedNames(viewModel.detail?.tags)
-            let chipItems = [ageRatingChip].compactMap { $0 } + (genres + tags).map { CollapsibleChips.Item(text: $0) }
+            let genreItems = genres.map { CollapsibleChips.Item(text: $0) }
+            let tagItems = tags.map { CollapsibleChips.Item(text: "#\($0)") }
+            let chipItems = [ageRatingChip].compactMap { $0 } + genreItems + tagItems
             if !chipItems.isEmpty {
                 blockTitle("Жанры и теги")
                 CollapsibleChips(items: chipItems)

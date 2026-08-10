@@ -516,6 +516,14 @@ struct MangaDetail: Decodable, Identifiable {
     let genres: [NamedEntity]?
     let tags: [NamedEntity]?
     let authors: [NamedEntity]?
+    /// Альтернативные названия ("I Alone Level-Up", "Соло Левелинг", ...) —
+    /// показываются в sheet по тапу на название (см. TitleNamesSheet).
+    /// ЗАГЛУШКА/на будущее: точный ключ реальным перехватом НЕ подтверждён,
+    /// поэтому "otherNames" СОЗНАТЕЛЬНО НЕ добавлен в fields[] запроса
+    /// (fetchMangaDetail) — одно неизвестное серверу значение fields[] валит
+    /// весь /manga/{slug} с 422. Разбираем, только если сервер сам пришлёт его
+    /// по умолчанию; иначе nil — sheet покажет "Нет данных".
+    let otherNames: [String]?
     let releaseDate: String?
     let views: Int?
     let format: [FlexibleLabelEntity]?
@@ -580,6 +588,8 @@ struct MangaDetail: Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, slug, cover, background, rating, status, type, summary, genres, tags, authors, views, format, moderated
+        case otherNames = "otherNames"
+        case otherNamesSnake = "other_names"
         case ageRestriction = "ageRestriction"
         case isLicensed = "is_licensed"
         case rusName = "rus_name"
@@ -620,6 +630,7 @@ struct MangaDetail: Decodable, Identifiable {
         genres = try? c.decodeIfPresent([NamedEntity].self, forKey: .genres) ?? nil
         tags = try? c.decodeIfPresent([NamedEntity].self, forKey: .tags) ?? nil
         authors = try? c.decodeIfPresent([NamedEntity].self, forKey: .authors) ?? nil
+        otherNames = Self.decodeStringList(c, .otherNames, .otherNamesSnake)
         // Подтверждено реальным JSON: [{"id":6,"name":"Веб"}] — ключ "name",
         // как у жанров/тегов. FlexibleLabelEntity также пробует "label"
         // запасным вариантом.
@@ -662,6 +673,24 @@ struct MangaDetail: Decodable, Identifiable {
         } else {
             views = nil
         }
+    }
+
+    /// Разбор списка альтернативных названий из любого из переданных ключей.
+    /// Сервер может отдать их либо простым массивом строк (["Solo Leveling",
+    /// ...]), либо массивом объектов вида {"name": "..."} (как жанры/теги) —
+    /// пробуем оба варианта. Пустой/отсутствующий → nil.
+    private static func decodeStringList(_ c: KeyedDecodingContainer<CodingKeys>, _ keys: CodingKeys...) -> [String]? {
+        for key in keys {
+            if let arr = (try? c.decodeIfPresent([String].self, forKey: key)) ?? nil {
+                let cleaned = arr.filter { !$0.isEmpty }
+                if !cleaned.isEmpty { return cleaned }
+            }
+            if let objs = (try? c.decodeIfPresent([NamedEntity].self, forKey: key)) ?? nil {
+                let names = objs.map(\.name).filter { !$0.isEmpty }
+                if !names.isEmpty { return names }
+            }
+        }
+        return nil
     }
 
     /// Гибкое декодирование текстового поля (описания): пробуем по очереди —
