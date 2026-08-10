@@ -1,0 +1,286 @@
+import Foundation
+
+/// Режим сортировки комментариев — "Старые"/"Новые" реально уходят на сервер
+/// (sort_type=asc/desc, тот же подтверждённый параметр, что и в fetchComments
+/// по умолчанию), "Популярные" считается на клиенте по score (см.
+/// MangaDetailView.commentsList) — серверная сортировка по популярности НЕ
+/// подтверждена перехватом.
+enum CommentSort: String, CaseIterable, Identifiable {
+    case popular, old, new
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .popular: return "Популярные"
+        case .old: return "Старые"
+        case .new: return "Новые"
+        }
+    }
+}
+
+/// ViewModel детальной карточки: загружает информацию о манге и список её глав по `slug`.
+@MainActor
+final class MangaDetailViewModel: ObservableObject {
+
+    @Published private(set) var detail: MangaDetail?
+    @Published private(set) var chapters: [ChapterItem] = []
+    @Published private(set) var isLoading: Bool = false
+    @Published private(set) var errorMessage: String?
+    /// Ошибка ИМЕННО загрузки карточки (detail), в отличие от errorMessage
+    /// выше — тот заполняется только если ОБА запроса (detail и chapters)
+    /// провалились. Из-за этого, если главы загрузились, а карточка
+    /// (тип/статус/жанры/описание) — нет, errorMessage оставался пустым и
+    /// реальная причина падения carточки была не видна нигде на экране.
+    @Published private(set) var detailErrorMessage: String?
+
+    // MARK: Комментарии (GET/POST /comments — ПОДТВЕРЖДЕНО перехватом, см.
+    // MangaNetworkService.fetchComments/postComment).
+    @Published private(set) var comments: [Comment] = []
+    @Published private(set) var isLoadingComments = false
+    @Published private(set) var commentsError: String?
+    @Published private(set) var hasLoadedComments = false
+    @Published private(set) var hasMoreComments = false
+    @Published private(set) var isPostingComment = false
+    @Published private(set) var commentSort: CommentSort = .new
+    private var commentsPage = 1
+
+    // MARK: Похожее (GET /manga/{slug}/similar, POST /similar/{id}/vote —
+    // ПОДТВЕРЖДЕНО перехватом, см. MangaNetworkService.fetchSimilar/voteSimilar).
+    /// Опциональный, вспомогательный блок — ошибку загрузки НЕ показываем
+    /// отдельно (нет своего errorMessage), просто оставляем пустым; при
+    /// пустом списке весь блок скрывается в UI (см. MangaDetailView.similarSection).
+    @Published private(set) var similar: [SimilarItem] = []
+
+    // MARK: Связанное (GET /manga/{slug}/relations — ПОДТВЕРЖДЕНО перехватом,
+    // см. MangaNetworkService.fetchRelated). Тоже опциональный блок, как и
+    // "Похожее" выше — своего errorMessage нет, пустой список просто прячет UI.
+    @Published private(set) var related: [RelatedItem] = []
+
+    let slug: String
+    private let service: MangaNetworkService
+
+    init(slug: String, service: MangaNetworkService = .shared) {
+        self.slug = slug
+        self.service = service
+    }
+
+    var totalChapters: Int { chapters.count }
+
+    /// Глава для кнопки «Продолжить» по сохранённому прогрессу (или nil).
+    func continueChapter(progress: ReadingProgress?) -> ChapterItem? {
+        guard let progress else { return nil }
+        return chapters.first {
+            $0.number == progress.lastChapterNumber && $0.volume == progress.lastChapterVolume
+        } ?? chapters.first
+    }
+
+    /// Позиция главы в списке (1-based) — для сохранения прогресса.
+    func position(of chapter: ChapterItem) -> Int {
+        (chapters.firstIndex(of: chapter) ?? 0) + 1
+    }
+
+    /// Загружает карточку и главы параллельно и независимо:
+    /// ошибка одного запроса не отменяет другой.
+    func load() async {
+        isLoading = true
+        errorMessage = nil
+        detailErrorMessage = nil
+
+        // "Похожее" грузится ПАРАЛЛЕЛЬНО с detail/chapters, но независимо от
+        // них — это опциональный, вспомогательный блок карточки, поэтому его
+        // ошибка НЕ участвует в errorMessage/detailErrorMessage ниже (не
+        // должна показывать общий экран ошибки, если сам тайтл загрузился
+        // нормально, а только "Похожее" — нет).
+        async let detailResult = loadDetail()
+        async let chaptersResult = loadChapters()
+        async let similarResult: Void = loadSimilar()
+        async let relatedResult: Void = loadRelated()
+        let (detailError, chaptersError, _, _) = await (detailResult, chaptersResult, similarResult, relatedResult)
+
+        // detailErrorMessage — ВСЕГДА реальная причина провала detail, не
+        // завязана на то, загрузились ли главы (см. комментарий у объявления
+        // detailErrorMessage выше).
+        detailErrorMessage = detailError
+
+        // Показываем общую ошибку только если ничего не удалось загрузить.
+        if detail == nil, chapters.isEmpty {
+            errorMessage = detailError ?? chaptersError
+        }
+        isLoading = false
+    }
+
+    private func loadDetail() async -> String? {
+        do {
+            detail = try await service.fetchMangaDetail(slug: slug)
+            return nil
+        } catch NetworkError.cancelled {
+            return nil
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func loadChapters() async -> String? {
+        do {
+            chapters = sortChapters(try await service.fetchChapters(slug: slug))
+            return nil
+        } catch NetworkError.cancelled {
+            return nil
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func loadSimilar() async {
+        do {
+            similar = try await service.fetchSimilar(slug: slug)
+        } catch {
+            // Тихо игнорируем — "Похожее" опциональный блок карточки, не
+            // должен ломать/затенять основной экран при ошибке загрузки
+            // (нет отдельного errorMessage/retry-состояния — см. комментарий
+            // у объявления similar выше).
+        }
+    }
+
+    private func loadRelated() async {
+        do {
+            related = try await service.fetchRelated(slug: slug)
+        } catch {
+            // Тихо игнорируем — по той же причине, что и loadSimilar выше:
+            // "Связанное" опциональный блок, у большинства тайтлов его вообще
+            // нет, ошибка загрузки не должна затенять основной экран.
+        }
+    }
+
+    /// Голос "+"/"-" за элемент "Похожего" (см. MangaNetworkService.voteSimilar).
+    /// Сервер возвращает АКТУАЛЬНЫЕ up/down/user целиком — подставляем их
+    /// сразу в нужный элемент similar, без перезагрузки всего списка.
+    @discardableResult
+    func voteSimilar(_ item: SimilarItem, isUp: Bool) async -> Bool {
+        guard let index = similar.firstIndex(where: { $0.id == item.id }) else { return false }
+        do {
+            similar[index].votes = try await service.voteSimilar(id: item.id, isUp: isUp)
+            return true
+        } catch NetworkError.cancelled {
+            return false
+        } catch {
+            return false
+        }
+    }
+
+    /// Сортировка глав по возрастанию тома, затем номера главы.
+    private func sortChapters(_ items: [ChapterItem]) -> [ChapterItem] {
+        items.sorted { lhs, rhs in
+            let lv = Double(lhs.volume) ?? 0, rv = Double(rhs.volume) ?? 0
+            if lv != rv { return lv < rv }
+            let ln = Double(lhs.number) ?? 0, rn = Double(rhs.number) ?? 0
+            return ln < rn
+        }
+    }
+
+    // MARK: Комментарии
+
+    /// Вызывается при первом открытии вкладки "Комментарии" — грузит один
+    /// раз, повторные появления вкладки не дёргают сеть заново (см.
+    /// hasLoadedComments). Явное обновление — через loadComments() напрямую
+    /// (потянуть-обновить/кнопка "Повторить").
+    func loadCommentsIfNeeded() async {
+        guard !hasLoadedComments, !isLoadingComments else { return }
+        await loadComments()
+    }
+
+    /// sort_type для сервера — только Старые/Новые реально сортируются на
+    /// сервере (см. MangaNetworkService.fetchComments); Популярные грузятся
+    /// как Новые, а пересортировка по score — на клиенте (см. MangaDetailView).
+    private var sortTypeParam: String { commentSort == .old ? "asc" : "desc" }
+
+    func loadComments() async {
+        guard let mangaId = detail?.id else {
+            // detail ещё не загружен (или не удалось) — без числового id
+            // тайтла запрос отправить нечем; попробовать снова можно после
+            // успешной загрузки detail.
+            commentsError = "Не удалось определить тайтл"
+            return
+        }
+        isLoadingComments = true
+        commentsError = nil
+        commentsPage = 1
+        do {
+            let result = try await service.fetchComments(postId: mangaId, sortType: sortTypeParam, page: 1)
+            comments = result.comments
+            hasMoreComments = result.hasNextPage
+            hasLoadedComments = true
+        } catch NetworkError.cancelled {
+            // Экран закрыли/задача отменена — не показываем ошибку.
+        } catch {
+            commentsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        isLoadingComments = false
+    }
+
+    /// Смена сортировки — всегда перезагружает список с первой страницы
+    /// (клиентская пересортировка по score для "Популярные" применяется в
+    /// самом View, здесь только меняем параметр сервера для Старые/Новые).
+    func changeCommentSort(_ sort: CommentSort) async {
+        guard sort != commentSort else { return }
+        commentSort = sort
+        await loadComments()
+    }
+
+    /// Подгрузка следующей страницы — вызывать из `.onAppear` последнего
+    /// показанного КОРНЕВОГО комментария (не любого — дерево строится на
+    /// клиенте, см. MangaDetailView.commentsList, и сама проверка "это
+    /// правда последний" там же на уровне корней, а не плоского списка).
+    func loadMoreCommentsIfNeeded(currentComment: Comment) async {
+        guard hasMoreComments, !isLoadingComments, let mangaId = detail?.id else { return }
+        isLoadingComments = true
+        let nextPage = commentsPage + 1
+        do {
+            let result = try await service.fetchComments(postId: mangaId, sortType: sortTypeParam, page: nextPage)
+            comments.append(contentsOf: result.comments)
+            hasMoreComments = result.hasNextPage
+            commentsPage = nextPage
+        } catch {
+            // Тихо игнорируем ошибку подгрузки продолжения — уже показанные
+            // комментарии не должны пропадать или показывать баннер ошибки
+            // поверх всего списка.
+        }
+        isLoadingComments = false
+    }
+
+    /// Отправка нового комментария (или ответа, если replyingTo != nil).
+    /// Возвращает true при успехе. Сервер реально возвращает созданный
+    /// комментарий (см. MangaNetworkService.postComment) — вставляем его
+    /// локально сразу, без полной перезагрузки списка.
+    ///
+    /// Принимает целиком Comment, на который отвечаем (а не голый id) — это
+    /// нужно, чтобы вычислить comment_level ответа: сервер требует его явно
+    /// (подтверждено реальным 422 "Поле comment level обязательно для
+    /// заполнения", см. MangaNetworkService.postComment) и сам НЕ вычисляет
+    /// из parent_comment. Схема — та же, что видна в подтверждённых
+    /// GET-ответах: корневой комментарий = 0, любой ответ = commentLevel
+    /// родителя + 1.
+    @discardableResult
+    func postComment(text: String, replyingTo: Comment? = nil) async -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let mangaId = detail?.id else { return false }
+        isPostingComment = true
+        commentsError = nil
+        let level = (replyingTo?.commentLevel).map { $0 + 1 } ?? 0
+        do {
+            let created = try await service.postComment(
+                postId: mangaId, text: trimmed,
+                commentLevel: level, parentComment: replyingTo?.id
+            )
+            comments.insert(created, at: 0)
+            isPostingComment = false
+            return true
+        } catch NetworkError.cancelled {
+            isPostingComment = false
+            return false
+        } catch {
+            commentsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            isPostingComment = false
+            return false
+        }
+    }
+}
