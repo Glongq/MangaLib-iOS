@@ -10,6 +10,10 @@ import SwiftUI
 /// материале (тот же принцип, что и в остальных экранах приложения). Поиск —
 /// отдельное плавающее поле снизу, над главной панелью.
 struct HistoryView: View {
+    /// true — открыт PUSH-переходом внутри вкладки «Меню» (без своего
+    /// NavigationStack; у экрана своя плавающая шапка с кнопкой «назад»).
+    var embedded: Bool = false
+
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var store = BookmarksStore.shared
     @State private var query = ""
@@ -34,26 +38,37 @@ struct HistoryView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Theme.background.ignoresSafeArea()
-                list
-            }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                header
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                searchField
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
-            }
-            .navigationDestination(for: HistoryEntry.self) { entry in
-                MangaDetailView(slug: entry.media.apiSlug, fallbackTitle: entry.media.displayTitle,
-                                 coverURL: entry.media.cover?.bestURL, item: entry.media)
+        Group {
+            if embedded {
+                content
+            } else {
+                NavigationStack { content }
             }
         }
         .tint(Theme.accent)
         .task { await store.syncHistoryFromServer() }
+    }
+
+    private var content: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
+            list
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            header
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            searchField
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+        }
+        // У экрана своя плавающая шапка — системный навбар скрываем всегда.
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(for: HistoryEntry.self) { entry in
+            MangaDetailView(slug: entry.media.apiSlug, fallbackTitle: entry.media.displayTitle,
+                             coverURL: entry.media.cover?.bestURL, item: entry.media)
+        }
+        .background { if embedded { InteractivePopGesture() } }
     }
 
     // MARK: Шапка — заголовок и кнопка закрытия плавают раздельно

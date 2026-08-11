@@ -295,6 +295,7 @@ struct MangaDetailView: View {
                 .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
                 .overlay(alignment: .topLeading) { bookmarkStatusBadge }
                 .overlay(alignment: .topTrailing) { coverRatingBadge }
+                .overlay(alignment: .bottomLeading) { coverStatsBadge }
 
                 titleBlockOverlay
             }
@@ -529,6 +530,47 @@ struct MangaDetailView: View {
             rating: (viewModel.detail?.rating ?? listItem?.rating)?.value,
             fontSize: 9, horizontalPadding: 6, verticalPadding: 3
         )
+    }
+
+    /// Бейдж «оценка / просмотры» снизу слева обложки (напр. «6.2 / 2.43K»).
+    /// Верхний бейдж оценки при этом остаётся (по просьбе — оба).
+    @ViewBuilder
+    private var coverStatsBadge: some View {
+        let rating = (viewModel.detail?.rating ?? listItem?.rating)?.value
+        let views = viewModel.detail?.views
+        let parts: [String] = {
+            var p: [String] = []
+            if let rating, rating > 0 { p.append(String(format: "%.1f", rating)) }
+            if let views, views > 0 { p.append(Self.shortCount(views)) }
+            return p
+        }()
+        if !parts.isEmpty {
+            Text(parts.joined(separator: " / "))
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.black.opacity(0.55), in: Capsule())
+                .padding(6)
+        }
+    }
+
+    /// Короткий формат числа: 2.43K, 1.2M (без хвостовых нулей).
+    private static func shortCount(_ n: Int) -> String {
+        func trim(_ v: Double) -> String {
+            var s = String(format: "%.2f", v)
+            if s.contains(".") {
+                while s.hasSuffix("0") { s.removeLast() }
+                if s.hasSuffix(".") { s.removeLast() }
+            }
+            return s
+        }
+        switch n {
+        case 1_000_000...: return trim(Double(n) / 1_000_000) + "M"
+        case 1_000...:     return trim(Double(n) / 1_000) + "K"
+        default:           return "\(n)"
+        }
     }
 
     private var titleBlock: some View {

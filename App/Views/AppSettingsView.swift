@@ -26,53 +26,67 @@ enum AppVersionInfo {
 /// короткое "о приложении". Дальше можно добавлять реальные настройки
 /// (тема, уведомления и т.д.) сюда же, по мере появления.
 struct AppSettingsView: View {
+    /// true — экран открыт PUSH-переходом внутри вкладки «Меню» (свой
+    /// NavigationStack не нужен, «Готово» убираем — есть системная «назад»).
+    var embedded: Bool = false
+
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var siteSession = SiteSession.shared
     @ObservedObject private var authSession = AuthSession.shared
     @State private var debugTokenInput = ""
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Theme.background.ignoresSafeArea()
+        if embedded {
+            content
+        } else {
+            NavigationStack { content }
+        }
+    }
 
-                ScrollView {
-                    VStack(spacing: 20) {
-                        card {
-                            infoRow(title: "Версия", value: AppVersionInfo.display)
-                            infoRow(title: "Активный сайт", value: siteSession.activeSite.displayName, showDivider: false)
-                        }
+    private var content: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
 
-                        card {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("О приложении")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(Theme.textPrimary)
-                                Text("Неофициальный клиент экосистемы MangaLib. Приложение находится в активной разработке — часть разделов и функций ещё дорабатывается.")
-                                    .font(.footnote)
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                            .padding(16)
-                        }
-
-                        debugAuthCard
-                        debugNetworkLogsCard
-
-                        Spacer(minLength: 0)
+            ScrollView {
+                VStack(spacing: 20) {
+                    card {
+                        infoRow(title: "Версия", value: AppVersionInfo.display)
+                        infoRow(title: "Активный сайт", value: siteSession.activeSite.displayName, showDivider: false)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 20)
-                    .padding(.bottom, 24)
+
+                    card {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("О приложении")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.textPrimary)
+                            Text("Неофициальный клиент экосистемы MangaLib. Приложение находится в активной разработке — часть разделов и функций ещё дорабатывается.")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        .padding(16)
+                    }
+
+                    debugAuthCard
+                    debugNetworkLogsCard
+
+                    Spacer(minLength: 0)
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 20)
+                .padding(.bottom, 24)
             }
-            .navigationTitle("Настройки")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
+        }
+        .navigationTitle("Настройки")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if !embedded {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Готово") { dismiss() }
                 }
             }
         }
+        // Жест «назад» из левой половины на pushed-экране.
+        .background { if embedded { InteractivePopGesture() } }
     }
 
     private func card(@ViewBuilder content: () -> some View) -> some View {

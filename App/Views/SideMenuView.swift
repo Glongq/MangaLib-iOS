@@ -45,14 +45,10 @@ struct SideMenuView: View {
 
     // История по-прежнему свой локальный sheet прямо здесь — быстрая кнопка
     // профиля её не касается, поэтому не нужно поднимать выше в RootView.
-    @State private var showHistory = false
-    // Настройки — раньше вели на generic-заглушку StubView, теперь реальный
-    // экран (см. AppSettingsView.swift) с версией приложения. Открывается
-    // ПОВЕРХ меню, как и История, а не через select(title).
-    @State private var showSettings = false
-    // Загрузки — реальный экран со списком скачанных тайтлов (см. DownloadsView),
-    // открывается ПОВЕРХ меню, как История/Настройки.
-    @State private var showDownloads = false
+    // История/Настройки/Загрузки теперь не sheet, а обычные PUSH-переходы внутри
+    // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
+    private enum MenuRoute: Hashable { case history, settings, downloads }
+    @State private var path: [MenuRoute] = []
 
     // Какие сворачиваемые разделы сейчас развёрнуты (Профиль/Каталог/Другое) —
     // у каждого своя стрелка вверх/вниз в заголовке подложки. По умолчанию все
@@ -65,42 +61,41 @@ struct SideMenuView: View {
     @State private var siteExpanded = false
 
     var body: some View {
-        ZStack {
-            Theme.background.ignoresSafeArea()
+        NavigationStack(path: $path) {
+            ZStack {
+                Theme.background.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                header
+                VStack(spacing: 0) {
+                    header
 
-                ScrollView {
-                    // Блоки-карточки с отступами между ними — как на референсе
-                    // (лист аккаунта Apple): каждая логическая группа пунктов —
-                    // отдельная закруглённая карточка, между карточками зазор.
-                    // spacing 28→34 — чуть больше воздуха между блоками.
-                    VStack(spacing: 34) {
-                        block1
-                        quickBlock
-                        profileSection
-                        catalogSection
-                        otherSection
-                        searchSitesBlock
+                    ScrollView {
+                        // Блоки-карточки с отступами между ними — как на референсе
+                        // (лист аккаунта Apple): каждая логическая группа пунктов —
+                        // отдельная закруглённая карточка, между карточками зазор.
+                        VStack(spacing: 34) {
+                            block1
+                            quickBlock
+                            profileSection
+                            catalogSection
+                            otherSection
+                            searchSitesBlock
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 22)
+                        .padding(.bottom, 24)
                     }
-                    .padding(.horizontal, 16)
-                    // 8→22 — больше отступ профиля (верх блока 1) от надписи
-                    // "Меню" в шапке.
-                    .padding(.top, 22)
-                    .padding(.bottom, 24)
+                    .scrollIndicators(.hidden)
                 }
-                .scrollIndicators(.hidden)
             }
-        }
-        .sheet(isPresented: $showHistory) {
-            HistoryView().preferredColorScheme(.dark)
-        }
-        .sheet(isPresented: $showSettings) {
-            AppSettingsView().preferredColorScheme(.dark)
-        }
-        .sheet(isPresented: $showDownloads) {
-            DownloadsView()
+            // У меню своя шапка «Меню» — системный навбар прячем.
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: MenuRoute.self) { route in
+                switch route {
+                case .history:   HistoryView(embedded: true)
+                case .settings:  AppSettingsView(embedded: true)
+                case .downloads: DownloadsView(embedded: true)
+                }
+            }
         }
     }
 
@@ -208,9 +203,9 @@ struct SideMenuView: View {
     // с реальными действиями (открываются ПОВЕРХ меню).
     private var quickBlock: some View {
         card {
-            row("Настройки", icon: "gearshape", action: { showSettings = true })
-            row("История", icon: "clock.arrow.circlepath", action: { showHistory = true })
-            row("Загрузки", icon: "arrow.down.circle", showDivider: false, action: { showDownloads = true })
+            row("Настройки", icon: "gearshape", action: { path.append(.settings) })
+            row("История", icon: "clock.arrow.circlepath", action: { path.append(.history) })
+            row("Загрузки", icon: "arrow.down.circle", showDivider: false, action: { path.append(.downloads) })
         }
     }
 

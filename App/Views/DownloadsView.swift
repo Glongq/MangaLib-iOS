@@ -6,6 +6,10 @@ import SwiftUI
 /// «Удалить» (когда скачано). Стрелки-шеврона справа нет.
 struct DownloadsView: View {
 
+    /// true — открыт PUSH-переходом внутри вкладки «Меню» (без своего
+    /// NavigationStack и «Готово», есть системная «назад»).
+    var embedded: Bool = false
+
     @ObservedObject private var downloads = DownloadsManager.shared
     @Environment(\.dismiss) private var dismiss
 
@@ -13,52 +17,61 @@ struct DownloadsView: View {
     @State private var selected: DownloadedTitle?
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Theme.background.ignoresSafeArea()
+        if embedded {
+            content
+        } else {
+            NavigationStack { content }
+                .preferredColorScheme(.dark)
+        }
+    }
 
-                if downloads.titles.isEmpty {
-                    ContentUnavailableView(
-                        "Нет загрузок",
-                        systemImage: "arrow.down.circle",
-                        description: Text("Скачанные тайтлы появятся здесь. Открой карточку тайтла → «...» → «Скачать тайтл».")
-                    )
-                } else {
-                    List {
-                        ForEach(downloads.titles) { title in
-                            row(title)
-                                .contentShape(Rectangle())
-                                .onTapGesture { selected = title }
-                                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                        }
-                    }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                }
-            }
-            .navigationTitle("Загрузки")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(item: $selected) { title in
-                // Полноценная карточка тайтла (1-в-1 как из каталога). Онлайн —
-                // подтянет описание/похожее и т.д.; в разделе «Главы» уже
-                // скачанные главы помечаются и читаются офлайн (см.
-                // MangaDetailView.displayChapters / downloadedChapterIds).
-                MangaDetailView(
-                    slug: title.slug,
-                    fallbackTitle: title.title,
-                    coverURL: title.coverURLString.flatMap(URL.init(string:))
+    private var content: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
+
+            if downloads.titles.isEmpty {
+                ContentUnavailableView(
+                    "Нет загрузок",
+                    systemImage: "arrow.down.circle",
+                    description: Text("Скачанные тайтлы появятся здесь. Открой карточку тайтла → «...» → «Скачать тайтл».")
                 )
+            } else {
+                List {
+                    ForEach(downloads.titles) { title in
+                        row(title)
+                            .contentShape(Rectangle())
+                            .onTapGesture { selected = title }
+                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
-            .toolbar {
+        }
+        .navigationTitle("Загрузки")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $selected) { title in
+            // Полноценная карточка тайтла (1-в-1 как из каталога). Онлайн —
+            // подтянет описание/похожее и т.д.; в разделе «Главы» уже
+            // скачанные главы помечаются и читаются офлайн (см.
+            // MangaDetailView.displayChapters / downloadedChapterIds).
+            MangaDetailView(
+                slug: title.slug,
+                fallbackTitle: title.title,
+                coverURL: title.coverURLString.flatMap(URL.init(string:))
+            )
+        }
+        .toolbar {
+            if !embedded {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Готово") { dismiss() }
                         .foregroundStyle(Theme.accent)
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .background { if embedded { InteractivePopGesture() } }
     }
 
     private func row(_ title: DownloadedTitle) -> some View {
