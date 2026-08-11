@@ -21,6 +21,12 @@ import SwiftUI
 /// "оценка подтянулась в закладках сразу и там пишет 0.0 хотя тайтл не 0.0").
 struct RatingChip: View {
     let rating: Double?
+    /// Необязательный размер шрифта — nil значит стандартный caption2 (как в
+    /// каталоге/закладках). Задаётся, например, в карточке тайтла, чтобы бейдж
+    /// оценки был ТОЙ ЖЕ высоты, что и бейдж статуса («Читаю») на обложке.
+    var fontSize: CGFloat? = nil
+    var horizontalPadding: CGFloat = 7
+    var verticalPadding: CGFloat = 3
 
     private func color(for value: Double) -> Color {
         switch value {
@@ -35,11 +41,11 @@ struct RatingChip: View {
     var body: some View {
         if let rating {
             Text(String(format: "%.1f", rating))
-                .font(.caption2.weight(.bold))
+                .font(fontSize.map { .system(size: $0, weight: .bold) } ?? .caption2.weight(.bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, verticalPadding)
                 .background(color(for: rating), in: Capsule())
                 .padding(6)
         }

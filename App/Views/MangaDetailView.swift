@@ -6,6 +6,7 @@ struct MangaDetailView: View {
 
     @StateObject private var viewModel: MangaDetailViewModel
     @ObservedObject private var bookmarks = BookmarksStore.shared
+    @ObservedObject private var downloads = DownloadsManager.shared
     @Environment(\.dismiss) private var dismiss
 
     private let fallbackTitle: String
@@ -184,7 +185,8 @@ struct MangaDetailView: View {
                 typeLabel: viewModel.detail?.type?.label ?? listItem?.type?.label,
                 chapters: viewModel.chapters
             )
-            .presentationDetents([.medium, .large])
+            // Открывается сразу до верха.
+            .presentationDetents([.large])
         }
         // Кастомное меню "..." поверх всего экрана (см. actionMenuOverlay).
         .overlay { actionMenuOverlay }
@@ -529,7 +531,12 @@ struct MangaDetailView: View {
     /// стиль/цвет, что и на карточках каталога и в закладках. Сверху справа
     /// (было снизу справа) — как явно попросили.
     private var coverRatingBadge: some View {
-        RatingChip(rating: (viewModel.detail?.rating ?? listItem?.rating)?.value)
+        // Те же метрики, что у bookmarkStatusBadge (шрифт 9, h6/v3) — чтобы
+        // оценка справа была ОДИНАКОВОЙ высоты с бейджем статуса слева.
+        RatingChip(
+            rating: (viewModel.detail?.rating ?? listItem?.rating)?.value,
+            fontSize: 9, horizontalPadding: 6, verticalPadding: 3
+        )
     }
 
     private var titleBlock: some View {
@@ -924,7 +931,7 @@ struct MangaDetailView: View {
             // Продолжить / Начать.
             if let target = viewModel.continueChapter(progress: progress), let progress {
                 readerLink(chapter: target, label: "Продолжить \(progress.lastChapterNumber)/\(viewModel.totalChapters)")
-            } else if let first = viewModel.chapters.first {
+            } else if let first = displayChapters.first {
                 readerLink(chapter: first, label: "Начать")
             } else {
                 // Раньше это был Text с ручным RoundedRectangle(10) — форма
@@ -955,10 +962,11 @@ struct MangaDetailView: View {
     }
 
     private func readerView(for chapter: ChapterItem) -> some View {
-        MangaReaderView(
+        let chapters = displayChapters
+        return MangaReaderView(
             slug: viewModel.slug,
-            chapters: viewModel.chapters,
-            startIndex: max(viewModel.position(of: chapter) - 1, 0),
+            chapters: chapters,
+            startIndex: max(chapters.firstIndex(where: { $0.id == chapter.id }) ?? 0, 0),
             // Numeric id тайтла — нужен для реальной отметки главы
             // просмотренной в аккаунте (см. ReaderViewModel.recordProgress).
             mangaId: viewModel.detail?.id ?? listItem?.id,
@@ -980,7 +988,7 @@ struct MangaDetailView: View {
         HStack(spacing: 24) {
             Spacer(minLength: 0)
             tabButton("О тайтле", .about)
-            tabButton(viewModel.chapters.isEmpty ? "Главы" : "Главы \(viewModel.totalChapters)", .chapters)
+            tabButton(displayChapters.isEmpty ? "Главы" : "Главы \(max(viewModel.totalChapters, displayChapters.count))", .chapters)
             tabButton("Комментарии", .comments)
             Spacer(minLength: 0)
         }
@@ -1103,7 +1111,8 @@ struct MangaDetailView: View {
 
     @ViewBuilder
     private var chaptersTab: some View {
-        if viewModel.chapters.isEmpty {
+        let chapters = displayChapters
+        if chapters.isEmpty {
             VStack(spacing: 10) {
                 Image(systemName: viewModel.isLoading ? "hourglass" : "book.closed")
                     .font(.title2).foregroundStyle(Theme.textSecondary)
@@ -1115,7 +1124,7 @@ struct MangaDetailView: View {
         } else {
             // Плоская подложка со всеми главами вместо стеклянной карточки.
             VStack(spacing: 0) {
-                ForEach(Array(viewModel.chapters.enumerated()), id: \.element.id) { index, chapter in
+                ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
                     Button { readerChapter = chapter } label: {
                         HStack {
                             Text(chapter.displayTitle)
@@ -1124,6 +1133,12 @@ struct MangaDetailView: View {
                                 .foregroundStyle(Theme.textPrimary)
                                 .multilineTextAlignment(.leading)
                             Spacer()
+                            // Зелёная отметка «скачано» — появляется у уже
+                            // скачанных глав (см. downloadedChapterIds).
+                            if isDownloaded(chapter) {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .font(.caption).foregroundStyle(.green)
+                            }
                             if isRead(chapter) {
                                 Image(systemName: "checkmark").font(.caption).foregroundStyle(Theme.accent)
                             }
@@ -1135,7 +1150,7 @@ struct MangaDetailView: View {
                     }
                     .buttonStyle(.plain)
 
-                    if index < viewModel.chapters.count - 1 {
+                    if index < chapters.count - 1 {
                         Divider().overlay(Theme.separator).padding(.leading, 14)
                     }
                 }
@@ -1147,6 +1162,31 @@ struct MangaDetailView: View {
     private func isRead(_ chapter: ChapterItem) -> Bool {
         guard let p = bookmarks.readingProgress(forSlug: viewModel.slug) else { return false }
         return viewModel.position(of: chapter) <= p.readCount
+    }
+
+    // MARK: Скачанные главы (для отметки/оффлайна)
+
+    /// Запись этого тайтла в загрузках (если он скачан хоть частично).
+    private var downloadedEntry: DownloadedTitle? {
+        downloads.titles.first(where: { $0.slug == viewModel.slug })
+    }
+
+    /// id скачанных глав — для зелёной отметки в списке.
+    private var downloadedChapterIds: Set<Int> {
+        Set(downloadedEntry?.chapters.map(\.id) ?? [])
+    }
+
+    /// Главы для показа/чтения: обычно из сети (полный список), но если сеть не
+    /// дала список (например, зашли из «Загрузок» офлайн) — показываем хотя бы
+    /// уже скачанные главы (из manifest), чтобы «в разделе Главы появлялось то,
+    /// что скачано», и их можно было читать офлайн.
+    private var displayChapters: [ChapterItem] {
+        if !viewModel.chapters.isEmpty { return viewModel.chapters }
+        return downloadedEntry?.chapterItems ?? []
+    }
+
+    private func isDownloaded(_ chapter: ChapterItem) -> Bool {
+        downloadedChapterIds.contains(chapter.id)
     }
 
     // MARK: Tab «Комментарии»

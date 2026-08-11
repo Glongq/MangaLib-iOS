@@ -24,6 +24,7 @@ struct DownloadTitleSheet: View {
     /// ImageServerChoice/ReaderSettingsSheet). Реально влияет на то, откуда
     /// качаются страницы (MangaImageURL.pageURLs).
     @AppStorage(ImageServerChoice.defaultsKey) private var serverChoice = 0
+    @State private var serverExpanded = false
 
     private enum ChapterScope: String, CaseIterable, Identifiable {
         case all = "Все"
@@ -60,7 +61,10 @@ struct DownloadTitleSheet: View {
                 translatorSection
                 downloadButton
             }
-            .padding(20)
+            // Больше отступ сверху (от «шапки» листа).
+            .padding(.horizontal, 20)
+            .padding(.top, 40)
+            .padding(.bottom, 28)
         }
         .scrollIndicators(.hidden)
         .background(Theme.surface)
@@ -78,9 +82,10 @@ struct DownloadTitleSheet: View {
             } failure: {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
-            .frame(width: 74, height: 104)
+            // Обложка увеличена в 1.5× (74×104 → 111×156).
+            .frame(width: 111, height: 156)
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
@@ -105,13 +110,23 @@ struct DownloadTitleSheet: View {
     private var serverSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Сервер")
-            Menu {
-                Picker("Сервер", selection: $serverChoice) {
-                    ForEach(ImageServerChoice.allCases) { Text($0.title).tag($0.rawValue) }
+            // Раскрывающийся вниз список — тот же паттерн, что и «Главы».
+            VStack(spacing: 0) {
+                expandHeaderRow(text: ImageServerChoice(rawValue: serverChoice)?.title ?? "Первый",
+                                expanded: serverExpanded) {
+                    withAnimation(.easeInOut(duration: 0.2)) { serverExpanded.toggle() }
                 }
-            } label: {
-                selectorLabel(ImageServerChoice(rawValue: serverChoice)?.title ?? "Первый")
+                if serverExpanded {
+                    ForEach(ImageServerChoice.allCases) { choice in
+                        rowDivider
+                        optionRow(text: choice.title, selected: choice.rawValue == serverChoice) {
+                            serverChoice = choice.rawValue
+                            withAnimation(.easeInOut(duration: 0.2)) { serverExpanded = false }
+                        }
+                    }
+                }
             }
+            .modifier(BlockContainer())
         }
     }
 

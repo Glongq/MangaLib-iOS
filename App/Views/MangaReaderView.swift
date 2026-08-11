@@ -544,9 +544,13 @@ struct ReaderSettingsSheet: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(20)
+            // Больше отступ сверху (от «шапки» листа).
+            .padding(.horizontal, 20)
+            .padding(.top, 40)
+            .padding(.bottom, 20)
         }
-        .presentationDetents([.height(480)])
+        // Открывается сразу до верха.
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .presentationBackground(.thinMaterial)
         .preferredColorScheme(.dark)
