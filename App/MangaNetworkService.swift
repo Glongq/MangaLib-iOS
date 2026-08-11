@@ -889,6 +889,11 @@ enum MangaImageURL {
         guard let raw = page.relativePath?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
             return []
         }
+        // Локальный файл скачанной страницы (см. DownloadsManager/оффлайн-режим
+        // ReaderViewModel) — отдаём как есть, без подстановки серверов картинок.
+        if raw.hasPrefix("file://"), let local = URL(string: raw) {
+            return [local]
+        }
         // Уже абсолютный URL.
         if raw.hasPrefix("http"), let absolute = URL(string: raw) {
             return [absolute]

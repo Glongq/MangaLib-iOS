@@ -57,6 +57,16 @@ final class RemoteImageLoader: ObservableObject {
         task = Task { [weak self] in
             for url in candidates {
                 if Task.isCancelled { return }
+                // Локальный файл скачанной страницы: URLSession не умеет file://,
+                // читаем картинку прямо с диска.
+                if url.isFileURL {
+                    if let image = UIImage(contentsOfFile: url.path) {
+                        RemoteImageCache.shared.insert(image, for: key)
+                        if !Task.isCancelled { self?.state = .success(image) }
+                        return
+                    }
+                    continue
+                }
                 do {
                     let (data, response) = try await Self.session.data(from: url)
                     if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
@@ -88,6 +98,13 @@ final class RemoteImageLoader: ObservableObject {
         Task(priority: .utility) {
             for url in candidates {
                 if Task.isCancelled { return }
+                if url.isFileURL {
+                    if let image = UIImage(contentsOfFile: url.path) {
+                        RemoteImageCache.shared.insert(image, for: key)
+                        return
+                    }
+                    continue
+                }
                 do {
                     let (data, response) = try await session.data(from: url)
                     if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
