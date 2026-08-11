@@ -68,7 +68,26 @@ struct MangaReaderView: View {
             if showUI {
                 overlayUI.transition(.opacity)
             }
+
+            // Тост закладки — отдельным слоем поверх всего, ВНЕ
+            // GlassEffectContainer (иначе стекло названия и тоста «перетекает» и
+            // получается рывок вбок). Приезжает сверху и так же плавно уезжает
+            // вверх — 1-в-1 как «Загрузка начата».
+            if let toast = viewModel.bookmarkToast {
+                VStack {
+                    BookmarkAddedToast(
+                        text: toast,
+                        systemImage: toast.localizedCaseInsensitiveContains("убрано")
+                            ? "bookmark.slash.fill" : "bookmark.fill"
+                    )
+                    .padding(.top, 4)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .allowsHitTesting(false)
+            }
         }
+        .animation(.spring(response: 0.45, dampingFraction: 0.9), value: viewModel.bookmarkToast)
         // Только НИЖНЯЯ safe area игнорируется (как в RootView.swift) — низ
         // safe area на Face ID экранах даёт ~34pt от истинного края из-за
         // home indicator, и .padding(.bottom, 20) у bottomBar раньше
@@ -260,27 +279,12 @@ struct MangaReaderView: View {
     // как было раньше в общем HStack).
     private var topBar: some View {
         ZStack {
-            // Центр: обычно название тайтла. После нажатия на закладку название
-            // ПЛАВНО уходит (fade), а на его место сверху приезжает тост; через
-            // пару секунд тост так же уезжает вверх, и название возвращается.
-            ZStack {
-                if let toast = viewModel.bookmarkToast {
-                    BookmarkAddedToast(
-                        text: toast,
-                        systemImage: toast.localizedCaseInsensitiveContains("убрано")
-                            ? "bookmark.slash.fill" : "bookmark.fill"
-                    )
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                } else {
-                    titleBadge
-                        .transition(.opacity)
-                }
-            }
-            // Контейнер ВСЕГДА на всю ширину — тогда название и тост центрируются
-            // стабильно, а смена их разной ширины больше не анимируется вбок
-            // (раньше отсюда был «дёрг чуть вправо и назад»).
-            .frame(maxWidth: .infinity)
-            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: viewModel.bookmarkToast)
+            // Название плавно прячется, пока показывается тост закладки (сам тост
+            // рисуется отдельным слоем в body — ВНЕ GlassEffectContainer, иначе
+            // стекло «перетекало» из названия в тост и получался дёрг вбок).
+            titleBadge
+                .opacity(viewModel.bookmarkToast == nil ? 1 : 0)
+                .animation(.easeInOut(duration: 0.3), value: viewModel.bookmarkToast)
 
             HStack {
                 Button { dismiss() } label: {
