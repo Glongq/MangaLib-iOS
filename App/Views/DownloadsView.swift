@@ -41,11 +41,9 @@ struct DownloadsView: View {
             .navigationTitle("Загрузки")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $selected) { title in
-                MangaDetailView(
-                    slug: title.slug,
-                    fallbackTitle: title.title,
-                    coverURL: title.coverURLString.flatMap(URL.init(string:))
-                )
+                // Оффлайн-список глав скачанного тайтла (из manifest, без сети) —
+                // отсюда открывается ридер, читающий локальные файлы.
+                DownloadedTitleView(title: title)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -119,6 +117,77 @@ struct DownloadsView: View {
             }
             .buttonStyle(.plain)
             .padding(6)
+        }
+    }
+}
+
+/// Оффлайн-экран одного скачанного тайтла: список скачанных глав (из manifest,
+/// без сети). Тап открывает ридер, который читает страницы с диска.
+struct DownloadedTitleView: View {
+
+    let title: DownloadedTitle
+    @ObservedObject private var downloads = DownloadsManager.shared
+
+    private struct ReaderStart: Identifiable { let id = UUID(); let index: Int }
+    @State private var readerStart: ReaderStart?
+
+    /// Актуальная запись тайтла из менеджера (чтобы список глав рос по мере
+    /// докачивания), с откатом на переданную копию.
+    private var current: DownloadedTitle {
+        downloads.titles.first(where: { $0.slug == title.slug }) ?? title
+    }
+
+    var body: some View {
+        let chapters = current.chapters
+        ZStack {
+            Theme.background.ignoresSafeArea()
+
+            if chapters.isEmpty {
+                ContentUnavailableView("Главы качаются…", systemImage: "arrow.down.circle")
+            } else {
+                List {
+                    ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+                        Button {
+                            readerStart = ReaderStart(index: index)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(chapter.displayTitle)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(Theme.textPrimary)
+                                        .multilineTextAlignment(.leading)
+                                    Text("\(chapter.pageCount) стр.")
+                                        .font(.caption2)
+                                        .foregroundStyle(Theme.textSecondary)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.accent)
+                            }
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparatorTint(Theme.separator)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+        }
+        .navigationTitle(current.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(item: $readerStart) { start in
+            MangaReaderView(
+                slug: current.slug,
+                chapters: current.chapterItems,
+                startIndex: start.index,
+                mangaTitle: current.title,
+                mangaTypeName: current.typeLabel,
+                coverURL: current.coverURLString
+            )
         }
     }
 }

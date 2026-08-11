@@ -795,6 +795,17 @@ struct ChapterItem: Decodable, Identifiable, Hashable {
     static func == (lhs: ChapterItem, rhs: ChapterItem) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
+    /// Локальная сборка (для оффлайн-чтения скачанных глав) — без сети/декодера.
+    init(id: Int, volume: String, number: String, name: String?,
+         branches: [ChapterBranch]? = nil, createdAt: String? = nil) {
+        self.id = id
+        self.volume = volume
+        self.number = number
+        self.name = name
+        self.branches = branches
+        self.createdAt = createdAt
+    }
+
     // Значения volume/number приходят то строкой, то числом — нормализуем к String.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

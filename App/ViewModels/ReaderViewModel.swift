@@ -68,6 +68,20 @@ final class ReaderViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         pages = []
+
+        // Оффлайн/скачано: если у главы есть локально сохранённые страницы —
+        // читаем их с диска, вообще не обращаясь к сети (см. DownloadsManager).
+        // PageItem.url = file://… ; RemoteImage/MangaImageURL отдают такой URL
+        // как есть, а RemoteImageLoader читает картинку прямо с диска.
+        let localFiles = DownloadsManager.shared.localPageFiles(slug: slug, chapterId: chapter.id)
+        if !localFiles.isEmpty {
+            pages = localFiles.enumerated().map { idx, url in
+                PageItem(id: idx, slug: nil, image: nil, url: url.absoluteString, width: nil, height: nil)
+            }
+            isLoading = false
+            return
+        }
+
         do {
             let result = try await service.fetchPages(
                 slug: slug,

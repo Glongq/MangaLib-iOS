@@ -28,6 +28,12 @@ struct DownloadedTitle: Codable, Identifiable, Hashable {
     var coverURLString: String?
     var chapters: [DownloadedChapter]
     var addedAt: Date
+
+    /// Скачанные главы в виде ChapterItem — для передачи в оффлайн-ридер
+    /// (branch_id не нужен: страницы читаются из локальных файлов по id главы).
+    var chapterItems: [ChapterItem] {
+        chapters.map { ChapterItem(id: $0.id, volume: $0.volume, number: $0.number, name: $0.name) }
+    }
 }
 
 // MARK: - Менеджер загрузок
@@ -99,6 +105,17 @@ final class DownloadsManager: ObservableObject {
     func localCoverURL(slug: String) -> URL? {
         let f = titleDir(slug).appendingPathComponent("cover.jpg")
         return fm.fileExists(atPath: f.path) ? f : nil
+    }
+
+    /// Локальные файлы страниц скачанной главы (отсортированы по имени: 000, 001…).
+    /// Пусто — глава не скачана, тогда ридер грузит из сети (см. ReaderViewModel).
+    func localPageFiles(slug: String, chapterId: Int) -> [URL] {
+        let dir = titleDir(slug).appendingPathComponent("\(chapterId)", isDirectory: true)
+        guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return [] }
+        let exts: Set<String> = ["jpg", "jpeg", "png", "webp", "gif", "avif"]
+        return files
+            .filter { exts.contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     /// Поставить ВСЕ переданные главы тайтла в очередь и начать загрузку.
