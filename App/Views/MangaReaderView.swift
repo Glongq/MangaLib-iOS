@@ -483,6 +483,9 @@ struct ChapterListSheet: View {
 struct ReaderSettingsSheet: View {
     @Binding var fitWidth: Bool
     @Binding var preloadCount: Int
+    /// Сервер картинок (Первый/Второй/Сжатия) — общий с окном скачивания, см.
+    /// ImageServerChoice. Влияет на то, откуда грузятся/качаются страницы.
+    @AppStorage(ImageServerChoice.defaultsKey) private var serverChoice = 0
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -526,11 +529,24 @@ struct ReaderSettingsSheet: View {
                 Text("Следующие \(preloadCount) стр. будут скачиваться заранее, пока вы читаете текущую.")
                     .font(.caption).foregroundStyle(Theme.textSecondary)
 
+                // Сервер картинок — тот же сегментированный «слайдер», что и
+                // предзагрузка. Выбранный сервер пробуется первым и в читалке,
+                // и при скачивании (см. MangaImageURL.pageURLs).
+                Text("Сервер картинок").font(.subheadline).foregroundStyle(Theme.textSecondary)
+
+                Picker("", selection: $serverChoice) {
+                    ForEach(ImageServerChoice.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+
+                Text("Если страницы не грузятся — попробуйте другой сервер.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+
                 Spacer(minLength: 0)
             }
             .padding(20)
         }
-        .presentationDetents([.height(380)])
+        .presentationDetents([.height(480)])
         .presentationDragIndicator(.visible)
         .presentationBackground(.thinMaterial)
         .preferredColorScheme(.dark)

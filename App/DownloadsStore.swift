@@ -226,9 +226,17 @@ final class DownloadsManager: ObservableObject {
     // MARK: Persistence
 
     private func load() {
-        guard let data = try? Data(contentsOf: manifestURL),
-              let decoded = try? JSONDecoder().decode([DownloadedTitle].self, from: data) else { return }
-        titles = decoded
+        guard let data = try? Data(contentsOf: manifestURL) else { return }
+        // ВАЖНО: стратегия дат ДОЛЖНА совпадать с save() (.iso8601). Раньше
+        // здесь был обычный JSONDecoder() (стратегия .deferredToDate — ждёт
+        // число), а save() писал даты строкой ISO8601 — из-за рассинхрона
+        // manifest НЕ декодировался после перезапуска, и все скачанные тайтлы
+        // "пропадали" из вкладки Загрузки (файлы при этом оставались на диске).
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let decoded = try? decoder.decode([DownloadedTitle].self, from: data) {
+            titles = decoded
+        }
     }
 
     private func save() {

@@ -59,9 +59,9 @@ struct NotificationsView: View {
     // MARK: Шапка
 
     private var header: some View {
-        // Заголовок крупнее (×1.2 от title3 ≈ 24pt) и прижат влево-вверх.
+        // Заголовок крупнее (title3 20 → ×1.2 → ×1.2 ≈ 29pt) и прижат влево-вверх.
         Text("Уведомления")
-            .font(.system(size: 24, weight: .bold))
+            .font(.system(size: 29, weight: .bold))
             .foregroundStyle(Theme.textPrimary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)

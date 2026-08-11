@@ -102,7 +102,7 @@ struct BookmarksView: View {
         VStack(spacing: 10) {
             if !headerCollapsed {
                 Text("Закладки")
-                    .font(.system(size: 24, weight: .bold))
+                    .font(.system(size: 29, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .transition(.opacity)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Экран тайтла: шапка, инфо-строка, кнопки, вкладки (О тайтле / Главы / Комментарии).
 struct MangaDetailView: View {
@@ -187,6 +188,10 @@ struct MangaDetailView: View {
         }
         // Кастомное меню "..." поверх всего экрана (см. actionMenuOverlay).
         .overlay { actionMenuOverlay }
+        // Жест «назад» свайпом из левой половины экрана (системный интерактивный
+        // переход — во время свайпа виден предыдущий экран). См.
+        // InteractivePopGesture. Только на карточке тайтла.
+        .background(InteractivePopGesture())
     }
 
     // MARK: Hero-баннер + выступающая обложка
@@ -373,7 +378,7 @@ struct MangaDetailView: View {
                 // ширину баннера выглядит "разрезанной" без блюра). Если пришёл
                 // настоящий background — он уже задуман как широкий баннер,
                 // блюр только портил бы детали, поэтому убираем совсем (radius 0).
-                .blur(radius: heroIsRealBackground ? 0 : 6)
+                .blur(radius: heroIsRealBackground ? 0 : 5)
                 .clipped()
                 .offset(y: -stretch)
             }

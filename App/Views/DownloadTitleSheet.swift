@@ -18,11 +18,12 @@ struct DownloadTitleSheet: View {
 
     private var chaptersCount: Int { chapters.count }
 
-    // MARK: Локальный (заглушечный) выбор параметров
+    // MARK: Выбор параметров
 
-    /// Варианты «сервера/сжатия» — имена условные, до подключения реального API.
-    private let servers = ["Сжатия первый", "Сжатия второй"]
-    @State private var selectedServer = "Сжатия первый"
+    /// Сервер картинок (Первый/Второй/Сжатия) — общий с читалкой (см.
+    /// ImageServerChoice/ReaderSettingsSheet). Реально влияет на то, откуда
+    /// качаются страницы (MangaImageURL.pageURLs).
+    @AppStorage(ImageServerChoice.defaultsKey) private var serverChoice = 0
 
     private enum ChapterScope: String, CaseIterable, Identifiable {
         case all = "Все"
@@ -105,11 +106,11 @@ struct DownloadTitleSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Сервер")
             Menu {
-                Picker("Сервер", selection: $selectedServer) {
-                    ForEach(servers, id: \.self) { Text($0).tag($0) }
+                Picker("Сервер", selection: $serverChoice) {
+                    ForEach(ImageServerChoice.allCases) { Text($0.title).tag($0.rawValue) }
                 }
             } label: {
-                selectorLabel(selectedServer)
+                selectorLabel(ImageServerChoice(rawValue: serverChoice)?.title ?? "Первый")
             }
         }
     }

@@ -848,6 +848,45 @@ private struct SimilarVotePayload: Encodable {
     let vote: Int
 }
 
+// MARK: - Выбор сервера картинок (Первый / Второй / Сжатия)
+
+/// Как на сайте MangaLib — три варианта сервера картинок. Пользователь
+/// выбирает предпочитаемый (в читалке-настройках и в окне скачивания); он
+/// пробуется ПЕРВЫМ, остальные остаются резервом (см. MangaImageURL.pageURLs).
+/// Значение хранится в UserDefaults по ключу Key.
+enum ImageServerChoice: Int, CaseIterable, Identifiable {
+    case first = 0     // Первый  (основной)
+    case second = 1    // Второй  (зеркало)
+    case compress = 2  // Сжатия  (сжатый/лёгкий)
+
+    var id: Int { rawValue }
+    static let defaultsKey = "image_server_choice"
+
+    var title: String {
+        switch self {
+        case .first:    return "Первый"
+        case .second:   return "Второй"
+        case .compress: return "Сжатия"
+        }
+    }
+
+    /// Базовый хост для этого варианта. Значения — известные серверы картинок
+    /// экосистемы Lib (могут быть перекрыты реальным списком из /constants, см.
+    /// MangaImageURL.updateServers).
+    var baseURL: String {
+        switch self {
+        case .first:    return "https://img2.imglib.info"
+        case .second:   return "https://img4.imgslib.link"
+        case .compress: return "https://img3.cdnlibs.org"
+        }
+    }
+
+    /// Текущее сохранённое значение (по умолчанию — Первый).
+    static var current: ImageServerChoice {
+        ImageServerChoice(rawValue: UserDefaults.standard.integer(forKey: defaultsKey)) ?? .first
+    }
+}
+
 // MARK: - Image URL helpers
 
 /// Построение полных URL изображений (обложки/страницы) из относительных путей.
@@ -902,7 +941,19 @@ enum MangaImageURL {
         var path = raw
         while path.hasPrefix("/") { path.removeFirst() }
         guard !path.isEmpty else { return [] }
-        return imageServers.compactMap { URL(string: $0 + "/" + path) }
+
+        // Выбранный пользователем сервер (Первый/Второй/Сжатия) пробуем ПЕРВЫМ,
+        // остальные — как резерв (если выбранный не отдал картинку). Так и
+        // читалка (перебор кандидатов в RemoteImage), и скачивание
+        // (DownloadsManager.fetchData) используют предпочитаемый сервер.
+        let preferred = ImageServerChoice.current.baseURL
+        var ordered = imageServers
+        if let idx = ordered.firstIndex(of: preferred) {
+            ordered.remove(at: idx)
+        }
+        ordered.insert(preferred, at: 0)
+
+        return ordered.compactMap { URL(string: $0 + "/" + path) }
     }
 
     /// Основной URL страницы (первый сервер).
