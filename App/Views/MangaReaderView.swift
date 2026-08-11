@@ -529,15 +529,21 @@ struct ReaderSettingsSheet: View {
         ZStack {
             Theme.background.ignoresSafeArea()
             VStack(alignment: .leading, spacing: 16) {
-                HStack {
+                ZStack {
+                    // Заголовок по центру, крестик — у правого края.
                     Text("Настройки").font(.headline).foregroundStyle(Theme.textPrimary)
-                    Spacer()
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark").foregroundStyle(Theme.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    HStack {
+                        Spacer()
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark").foregroundStyle(Theme.textSecondary)
+                        }
                     }
                 }
 
-                Text("Вписывать изображение").font(.subheadline).foregroundStyle(Theme.textSecondary)
+                // Подписи разделов крупнее (×1.5 от subheadline 15 → ~22.5).
+                Text("Вписывать изображение")
+                    .font(.system(size: 22.5, weight: .semibold)).foregroundStyle(Theme.textSecondary)
 
                 // «Слайдер» между режимами: сегментированный переключатель.
                 Picker("", selection: $fitWidth) {
@@ -554,7 +560,8 @@ struct ReaderSettingsSheet: View {
                 // Предзагрузка страниц вперёд — всегда включена (варианта
                 // "выкл" нет), регулируется только количество: тот же
                 // сегментированный стиль, что и у режима вписывания выше.
-                Text("Предзагрузка страниц").font(.subheadline).foregroundStyle(Theme.textSecondary)
+                Text("Предзагрузка страниц")
+                    .font(.system(size: 22.5, weight: .semibold)).foregroundStyle(Theme.textSecondary)
 
                 Picker("", selection: $preloadCount) {
                     Text("1").tag(1)
@@ -569,7 +576,8 @@ struct ReaderSettingsSheet: View {
                 // Сервер картинок — тот же сегментированный «слайдер», что и
                 // предзагрузка. Выбранный сервер пробуется первым и в читалке,
                 // и при скачивании (см. MangaImageURL.pageURLs).
-                Text("Сервер картинок").font(.subheadline).foregroundStyle(Theme.textSecondary)
+                Text("Сервер картинок")
+                    .font(.system(size: 22.5, weight: .semibold)).foregroundStyle(Theme.textSecondary)
 
                 Picker("", selection: $serverChoice) {
                     ForEach(ImageServerChoice.allCases) { Text($0.title).tag($0.rawValue) }

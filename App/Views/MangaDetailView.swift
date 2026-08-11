@@ -213,15 +213,15 @@ struct MangaDetailView: View {
     /// heroHeader) — тоже вынесен в константу по той же причине.
     private static let heroCoverTitleSpacing: CGFloat = 10
 
-    /// Фиксированное расстояние от верха баннера до верха обложки (см.
-    /// heroHeader) — 400-223-10=167, ниже кнопки "назад" (та занимает
-    /// 54...102 сверху) с большим запасом, независимо от того, сколько строк
-    /// займёт название под обложкой (см. общий комментарий у heroHeader про
-    /// естественный, однопроходный layout — старая схема через @State/
-    /// PreferenceKey с задержкой измерения давала ДВЕ разные версии одного и
-    /// того же бага: то обложка залезала на кнопку "назад", то, после
-    /// первого фикса, название вылезало под кнопками снизу).
-    private static let heroCoverTopOffset: CGFloat = heroBaseHeight - heroCoverSize.height - heroCoverTitleSpacing
+    /// Фиксированное расстояние от верха баннера до верха обложки. Раньше
+    /// считалось как heroBaseHeight-высота_обложки-spacing (=167) — из-за чего
+    /// обложка «приколачивалась» к самому низу баннера и выглядела съехавшей
+    /// вниз. Теперь это НЕЗАВИСИМАЯ фиксированная величина: кнопка «назад»
+    /// занимает 54...102 сверху, поэтому 120 = гарантированный зазор под ней.
+    /// Обложка стоит СТРОГО на этой высоте независимо от длины названия (оно
+    /// ниже обложки и на неё не наезжает), баннер естественно растёт под
+    /// название — один проход, без @State/PreferenceKey.
+    private static let heroCoverTopOffset: CGFloat = 120
 
     /// Обновляет, какую картинку показывает hero-баннер — ВСЕГДА с плавным
     /// переходом (fade), даже если это уже вторая/третья смена подряд (сперва
@@ -536,10 +536,14 @@ struct MangaDetailView: View {
             Text(title)
                 .font(.title3.weight(.bold))
                 .foregroundStyle(Theme.textPrimary)
+                // Максимум 2 строки + обрезка — чтобы длинное название не
+                // раздувало баннер и не наезжало на элементы (обложка теперь
+                // на фиксированной высоте, см. heroCoverTopOffset).
+                .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let eng = viewModel.detail?.name ?? listItem?.name, eng != title {
-                Text(eng).font(.footnote).foregroundStyle(Theme.textSecondary)
+                Text(eng).font(.footnote).foregroundStyle(Theme.textSecondary).lineLimit(1)
             }
 
             // Рейтинг перенесён на саму обложку (см. heroHeader.coverRatingBadge).
@@ -1131,18 +1135,25 @@ struct MangaDetailView: View {
             VStack(spacing: 0) {
                 ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
                     Button { readerChapter = chapter } label: {
-                        HStack {
+                        HStack(spacing: 8) {
                             Text(chapter.displayTitle)
-                                // ~1.3х от .subheadline (15pt → 19.5pt), как попросили.
-                                // Серый — если тайтл качается/скачан, а ЭТА глава
-                                // ещё не докачана; белый — когда скачана (или
-                                // тайтл вообще не качали, тогда всё белое).
-                                .font(.system(size: 19.5))
+                                // Уменьшено ×1.2 (19.5 → ~16.25). Одна строка,
+                                // длинное название обрезается «…». Серый — если
+                                // тайтл качается/скачан, а ЭТА глава ещё не
+                                // докачана; белый — когда скачана (или тайтл вообще
+                                // не качали, тогда всё белое).
+                                .font(.system(size: 16.25))
                                 .foregroundStyle(chapterColor(chapter))
-                                .multilineTextAlignment(.leading)
-                            Spacer()
-                            // Отметка «скачано» теперь ТОЛЬКО цветом текста
-                            // (белый — скачано, серый — ещё нет), без иконки.
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer(minLength: 8)
+                            // Дата выпуска главы (дд.мм.гггг), серым, тот же размер.
+                            if let date = chapter.dateString {
+                                Text(date)
+                                    .font(.system(size: 16.25))
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .lineLimit(1)
+                            }
                             if isRead(chapter) {
                                 Image(systemName: "checkmark").font(.caption).foregroundStyle(Theme.accent)
                             }
