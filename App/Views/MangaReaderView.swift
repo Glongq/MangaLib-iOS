@@ -276,6 +276,10 @@ struct MangaReaderView: View {
                         .transition(.opacity)
                 }
             }
+            // Контейнер ВСЕГДА на всю ширину — тогда название и тост центрируются
+            // стабильно, а смена их разной ширины больше не анимируется вбок
+            // (раньше отсюда был «дёрг чуть вправо и назад»).
+            .frame(maxWidth: .infinity)
             .animation(.spring(response: 0.4, dampingFraction: 0.85), value: viewModel.bookmarkToast)
 
             HStack {

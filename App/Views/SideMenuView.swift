@@ -61,6 +61,8 @@ struct SideMenuView: View {
     // Внутри раздела «Каталог»: показывается ли под-экран выбора типа тайтла
     // (Манга/ОЭЛ манга/…), заменяющий обычный список раздела (см. catalogSection).
     @State private var catalogShowingTypes = false
+    // Раскрыт ли список выбора активного сайта в блоке профиля (см. siteRow).
+    @State private var siteExpanded = false
 
     var body: some View {
         ZStack {
@@ -145,36 +147,61 @@ struct SideMenuView: View {
     // аккаунт работает на всех сайтах экосистемы, так что перелогин при
     // переключении не требуется (общий Bearer-токен, см. LibSite.swift).
     private var siteRow: some View {
-        Menu {
-            ForEach(LibSite.allCases) { site in
-                Button {
-                    siteSession.activeSite = site
-                } label: {
-                    if site == siteSession.activeSite {
-                        Label(site.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(site.displayName)
+        VStack(spacing: 0) {
+            // Шапка строки — тап разворачивает/сворачивает список сайтов вниз
+            // (вместо всплывающего Menu), как в остальных списках меню.
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { siteExpanded.toggle() }
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "globe")
+                        .font(.title3)
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 52)
+                    Text("Сайт")
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    Text(siteSession.activeSite.displayName)
+                        .foregroundStyle(Theme.textSecondary)
+                    Image(systemName: siteExpanded ? "chevron.up" : "chevron.down")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary.opacity(0.6))
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 52)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if siteExpanded {
+                ForEach(LibSite.allCases) { site in
+                    Divider().overlay(Theme.separator)
+                        .padding(.leading, 16 + 52 + 14).padding(.trailing, 16)
+                    Button {
+                        siteSession.activeSite = site
+                        withAnimation(.easeInOut(duration: 0.2)) { siteExpanded = false }
+                    } label: {
+                        HStack(spacing: 14) {
+                            // Пустая колонка шириной иконки — чтобы название
+                            // выровнялось под «Сайт» выше.
+                            Color.clear.frame(width: 52)
+                            Text(site.displayName)
+                                .foregroundStyle(site == siteSession.activeSite ? Theme.accent : Theme.textPrimary)
+                            Spacer()
+                            if site == siteSession.activeSite {
+                                Image(systemName: "checkmark")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Theme.accent)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 48)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
             }
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: "globe")
-                    .font(.title3)
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 52)
-                Text("Сайт")
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Text(siteSession.activeSite.displayName)
-                    .foregroundStyle(Theme.textSecondary)
-                chevron
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 52)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
     }
 
     // Быстрый блок БЕЗ заголовка подложки: Настройки, История, Загрузки — все
@@ -325,19 +352,14 @@ struct SideMenuView: View {
                 }
             }
         } label: {
-            ZStack {
-                // Заголовок подкатегории — ПО ЦЕНТРУ (как попросили), а стрелка
-                // сворачивания остаётся у правого края.
+            HStack {
                 Text(title)
                     .font(.headline)
                     .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                HStack {
-                    Spacer()
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.textSecondary)
-                }
+                Spacer()
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.textSecondary)
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 52)

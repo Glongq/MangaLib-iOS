@@ -1122,6 +1122,19 @@ struct MangaDetailView: View {
             .frame(maxWidth: .infinity, minHeight: 120)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         } else {
+            VStack(alignment: .leading, spacing: 12) {
+                // Пока идёт скачивание — показываем прогресс над списком.
+                if let p = activeDownloadProgress {
+                    HStack(spacing: 10) {
+                        ProgressView().tint(Theme.accent)
+                        Text("Главы качаются… \(p.completed)/\(p.total)")
+                            .font(.subheadline).foregroundStyle(Theme.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+
             // Плоская подложка со всеми главами вместо стеклянной карточки.
             VStack(spacing: 0) {
                 ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
@@ -1129,8 +1142,11 @@ struct MangaDetailView: View {
                         HStack {
                             Text(chapter.displayTitle)
                                 // ~1.3х от .subheadline (15pt → 19.5pt), как попросили.
+                                // Серый — если тайтл качается/скачан, а ЭТА глава
+                                // ещё не докачана; белый — когда скачана (или
+                                // тайтл вообще не качали, тогда всё белое).
                                 .font(.system(size: 19.5))
-                                .foregroundStyle(Theme.textPrimary)
+                                .foregroundStyle(chapterColor(chapter))
                                 .multilineTextAlignment(.leading)
                             Spacer()
                             // Зелёная отметка «скачано» — появляется у уже
@@ -1156,6 +1172,7 @@ struct MangaDetailView: View {
                 }
             }
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
         }
     }
 
@@ -1187,6 +1204,24 @@ struct MangaDetailView: View {
 
     private func isDownloaded(_ chapter: ChapterItem) -> Bool {
         downloadedChapterIds.contains(chapter.id)
+    }
+
+    /// Идёт ли прямо сейчас скачивание этого тайтла (см. DownloadsManager).
+    private var activeDownloadProgress: DownloadsManager.Progress? {
+        if let p = downloads.progress[viewModel.slug], !p.finished { return p }
+        return nil
+    }
+
+    /// Есть ли вообще «контекст загрузки» — тайтл скачан (хотя бы частично) или
+    /// качается сейчас. Только в этом случае красим главы серым/белым по факту
+    /// скачанности; иначе (тайтл не качали) — всё как обычно, белым.
+    private var hasDownloadContext: Bool {
+        downloadedEntry != nil || activeDownloadProgress != nil
+    }
+
+    private func chapterColor(_ chapter: ChapterItem) -> Color {
+        guard hasDownloadContext else { return Theme.textPrimary }
+        return isDownloaded(chapter) ? Theme.textPrimary : Theme.textSecondary
     }
 
     // MARK: Tab «Комментарии»
