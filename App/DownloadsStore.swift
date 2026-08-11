@@ -52,12 +52,23 @@ final class DownloadsManager: ObservableObject {
         var fraction: Double { total > 0 ? Double(completed) / Double(total) : 0 }
     }
 
+    /// Всплывающее уведомление (тост) — например «Загрузка начата». Своё id у
+    /// каждого события, чтобы одинаковый текст подряд всё равно переанимировался.
+    struct Banner: Equatable, Identifiable {
+        let id = UUID()
+        let text: String
+    }
+
     /// Список скачанных тайтлов (самые свежие сверху).
     @Published private(set) var titles: [DownloadedTitle] = []
     /// Прогресс по slug — есть запись, пока идёт загрузка (и ещё пару секунд после).
     @Published private(set) var progress: [String: Progress] = [:]
+    /// Текущий тост (nil — ничего не показываем). Наблюдается в RootView.
+    @Published private(set) var banner: Banner?
 
     private let fm = FileManager.default
+    /// Активные задачи загрузки по slug — нужны, чтобы отменять скачивание.
+    private var tasks: [String: Task<Void, Never>] = [:]
 
     private init() { load() }
 
@@ -96,17 +107,37 @@ final class DownloadsManager: ObservableObject {
         guard progress[slug]?.finished != false else { return } // уже качается
 
         progress[slug] = Progress(total: chapters.count, completed: 0, currentTitle: "", finished: false, failed: false)
-        Task {
-            await run(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, chapters: chapters)
+        showBanner("Загрузка начата")
+        let task = Task { [weak self] in
+            await self?.run(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, chapters: chapters)
+            self?.tasks[slug] = nil
         }
+        tasks[slug] = task
     }
 
-    /// Удалить скачанный тайтл целиком (файлы + запись).
+    /// Отменить активную загрузку (то же, что удалить — недокачанное
+    /// выбрасывается). Отдельное имя ради читаемости на вызывающей стороне.
+    func cancel(slug: String) { delete(slug: slug) }
+
+    /// Удалить скачанный тайтл целиком (файлы + запись) и остановить загрузку,
+    /// если она ещё идёт.
     func delete(slug: String) {
+        tasks[slug]?.cancel()
+        tasks[slug] = nil
         try? fm.removeItem(at: titleDir(slug))
         titles.removeAll { $0.slug == slug }
         progress[slug] = nil
         save()
+    }
+
+    /// Показать тост и убрать его через пару секунд (если его не сменил новый).
+    private func showBanner(_ text: String) {
+        let b = Banner(text: text)
+        banner = b
+        Task {
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            if banner?.id == b.id { banner = nil }
+        }
     }
 
     // MARK: Процесс загрузки
@@ -126,11 +157,13 @@ final class DownloadsManager: ObservableObject {
         }
 
         for chapter in chapters {
+            if Task.isCancelled { return } // отменили — cancel()/delete() уже всё убрал
             progress[slug]?.currentTitle = "Том \(chapter.volume) Глава \(chapter.number)"
             let dir = titleDir(slug).appendingPathComponent("\(chapter.id)", isDirectory: true)
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
 
             let pageCount = await Self.downloadChapter(slug: slug, chapter: chapter, into: dir)
+            if Task.isCancelled { return }
             if pageCount > 0 {
                 appendChapter(
                     DownloadedChapter(id: chapter.id, volume: chapter.volume,
@@ -140,6 +173,8 @@ final class DownloadsManager: ObservableObject {
             }
             progress[slug]?.completed += 1
         }
+
+        if Task.isCancelled { return }
 
         // Если вообще ничего не скачалось — убираем пустую запись и помечаем сбой.
         if let idx = titles.firstIndex(where: { $0.slug == slug }), titles[idx].chapters.isEmpty {
@@ -224,6 +259,7 @@ final class DownloadsManager: ObservableObject {
 
         var saved = 0
         for (idx, page) in result.pages.enumerated() {
+            if Task.isCancelled { break }
             let candidates = MangaImageURL.pageURLs(for: page)
             guard !candidates.isEmpty, let data = await fetchData(candidates) else { continue }
             let ext = (candidates.first?.pathExtension).flatMap { $0.isEmpty ? nil : $0 } ?? "jpg"

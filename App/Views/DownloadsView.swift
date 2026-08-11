@@ -2,11 +2,15 @@ import SwiftUI
 
 /// Экран «Загрузки» — список скачанных тайтлов (как закладки): обложка,
 /// название, число скачанных глав, прогресс-бар для активных загрузок. Тап по
-/// тайтлу открывает его карточку, свайп влево удаляет загрузку с устройства.
+/// тайтлу открывает его карточку. Справа снизу — «Отменить» (пока качается) или
+/// «Удалить» (когда скачано). Стрелки-шеврона справа нет.
 struct DownloadsView: View {
 
     @ObservedObject private var downloads = DownloadsManager.shared
     @Environment(\.dismiss) private var dismiss
+
+    /// Куда навигируемся по тапу (вместо NavigationLink со стрелкой).
+    @State private var selected: DownloadedTitle?
 
     var body: some View {
         NavigationStack {
@@ -22,25 +26,12 @@ struct DownloadsView: View {
                 } else {
                     List {
                         ForEach(downloads.titles) { title in
-                            NavigationLink {
-                                MangaDetailView(
-                                    slug: title.slug,
-                                    fallbackTitle: title.title,
-                                    coverURL: title.coverURLString.flatMap(URL.init(string:))
-                                )
-                            } label: {
-                                row(title)
-                            }
-                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    downloads.delete(slug: title.slug)
-                                } label: {
-                                    Label("Удалить", systemImage: "trash")
-                                }
-                            }
+                            row(title)
+                                .contentShape(Rectangle())
+                                .onTapGesture { selected = title }
+                                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
                         }
                     }
                     .listStyle(.plain)
@@ -49,6 +40,13 @@ struct DownloadsView: View {
             }
             .navigationTitle("Загрузки")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(item: $selected) { title in
+                MangaDetailView(
+                    slug: title.slug,
+                    fallbackTitle: title.title,
+                    coverURL: title.coverURLString.flatMap(URL.init(string:))
+                )
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Готово") { dismiss() }
@@ -61,6 +59,7 @@ struct DownloadsView: View {
 
     private func row(_ title: DownloadedTitle) -> some View {
         let progress = downloads.progress[title.slug]
+        let downloading = progress.map { !$0.finished } ?? false
         let coverURL = downloads.localCoverURL(slug: title.slug) ?? title.coverURLString.flatMap(URL.init(string:))
 
         return HStack(spacing: 12) {
@@ -88,23 +87,39 @@ struct DownloadsView: View {
                 }
 
                 if let progress, !progress.finished {
-                    // Активная загрузка — прогресс-бар + счётчик.
                     ProgressView(value: progress.fraction)
                         .tint(Theme.accent)
                     Text("Скачивание \(progress.completed)/\(progress.total)")
                         .font(.caption2)
                         .foregroundStyle(Theme.textSecondary)
-                } else {
-                    Text("\(title.chapters.count) глав скачано")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
                 }
+
+                // Всегда показываем, сколько глав реально скачано (на всякий).
+                Text("Скачано глав: \(title.chapters.count)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
             }
 
             Spacer(minLength: 0)
         }
         .padding(10)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        // Справа снизу: «Отменить» пока идёт загрузка, «Удалить» — когда готово.
+        .overlay(alignment: .bottomTrailing) {
+            Button {
+                if downloading { downloads.cancel(slug: title.slug) }
+                else { downloads.delete(slug: title.slug) }
+            } label: {
+                Text(downloading ? "Отменить" : "Удалить")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(downloading ? Theme.accent : .red)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(6)
+        }
     }
 }
 

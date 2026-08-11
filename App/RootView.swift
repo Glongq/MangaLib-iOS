@@ -24,6 +24,9 @@ struct RootView: View {
     @State private var showAccount = false
     @State private var stubRequest: StubRequest?
 
+    // Для всплывающего тоста «Загрузка начата» и т.п. (см. DownloadsManager.banner).
+    @ObservedObject private var downloads = DownloadsManager.shared
+
     // Высота панели + отступ от низа — те же числа, что уже "зашиты" в
     // .safeAreaInset(edge: .bottom) внутри MangaCatalogView/BookmarksView
     // (см. комментарии там: "84 = высота панели"). Резервируем именно эту
@@ -57,6 +60,17 @@ struct RootView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, tabBarBottomMargin)
             }
+            // Тост сверху: выезжает вниз из-под верхней кромки и уезжает обратно
+            // вверх (transition .move(edge: .top)). Полупрозрачная стеклянная
+            // подложка (glassEffect), как у остальных элементов приложения.
+            .overlay(alignment: .top) {
+                if let banner = downloads.banner {
+                    DownloadToast(text: banner.text)
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(response: 0.42, dampingFraction: 0.82), value: downloads.banner)
             .preferredColorScheme(.dark)
             .tint(Theme.accent)
             .sheet(isPresented: $showLogin) { LoginView() }
@@ -88,6 +102,22 @@ struct RootView: View {
 private struct StubRequest: Identifiable {
     let id = UUID()
     let title: String
+}
+
+/// Небольшой тост со стеклянной полупрозрачной подложкой — короткий текст
+/// вроде «Загрузка начата». Анимация появления/исчезновения задаётся снаружи
+/// (см. RootView.overlay).
+private struct DownloadToast: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .glassEffect(.regular, in: Capsule())
+            .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
+    }
 }
 
 /// Плавающая капсула с 4 вкладками — тот же `.glassEffect`, что используется
