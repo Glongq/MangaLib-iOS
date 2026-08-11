@@ -48,6 +48,9 @@ struct SideMenuView: View {
     // экран (см. AppSettingsView.swift) с версией приложения. Открывается
     // ПОВЕРХ меню, как и История, а не через select(title).
     @State private var showSettings = false
+    // Загрузки — реальный экран со списком скачанных тайтлов (см. DownloadsView),
+    // открывается ПОВЕРХ меню, как История/Настройки.
+    @State private var showDownloads = false
 
     var body: some View {
         ZStack {
@@ -81,6 +84,9 @@ struct SideMenuView: View {
         }
         .sheet(isPresented: $showSettings) {
             AppSettingsView().preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showDownloads) {
+            DownloadsView()
         }
     }
 
@@ -165,7 +171,7 @@ struct SideMenuView: View {
             // Свой action вместо select(title) — не должно закрывать меню,
             // История открывается ПОВЕРХ него (см. showHistory выше).
             row("История", icon: "clock.arrow.circlepath", action: { showHistory = true })
-            row("Загрузки", icon: "arrow.down.circle")
+            row("Загрузки", icon: "arrow.down.circle", action: { showDownloads = true })
             row("Комментарии", icon: "text.bubble", showDivider: false)
         }
     }

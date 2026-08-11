@@ -1,18 +1,22 @@
 import SwiftUI
 
 /// Sheet «Скачать тайтл» — открывается из меню "..." в шапке карточки (см.
-/// MangaDetailView). ПОКА ПОЛНОСТЬЮ ЗАГЛУШКА: реального скачивания глав нет,
-/// весь UI (выбор сервера/сжатия, объёма глав, переводчика) работает локально
-/// на @State и ничего не качает — кнопка «Скачать» просто закрывает sheet.
-/// Структура и вид уже на месте, чтобы позже подключить настоящую загрузку.
+/// MangaDetailView). Выбор сервера/сжатия и переводчика — пока ЗАГЛУШКА (на
+/// эти параметры реальная загрузка не завязана), но сама загрузка настоящая:
+/// кнопка «Скачать» ставит ВСЕ главы тайтла в очередь DownloadsManager, который
+/// реально качает страницы и складывает их структурировано на устройство.
+/// Прогресс и список скачанного видно в разделе «Загрузки» (см. DownloadsView).
 struct DownloadTitleSheet: View {
 
+    let slug: String
     let coverURL: URL?
     let title: String
     let typeLabel: String?
-    let chaptersCount: Int
+    let chapters: [ChapterItem]
 
     @Environment(\.dismiss) private var dismiss
+
+    private var chaptersCount: Int { chapters.count }
 
     // MARK: Локальный (заглушечный) выбор параметров
 
@@ -26,6 +30,7 @@ struct DownloadTitleSheet: View {
         var id: String { rawValue }
     }
     @State private var chapterScope: ChapterScope = .all
+    @State private var chapterScopeExpanded = false
 
     /// Заглушка списка переводчиков: пара «команд» + ВСЕГДА «Неизвестный» с 0
     /// глав в самом низу (как попросили).
@@ -43,9 +48,6 @@ struct DownloadTitleSheet: View {
     @State private var translatorListExpanded = false
 
     private var activeTranslator: Translator { selectedTranslator ?? translators.first! }
-
-    /// Сколько глав реально «скачается» — заглушка: у выбранного переводчика.
-    private var downloadableCount: Int { activeTranslator.chapters }
 
     var body: some View {
         ScrollView {
@@ -97,7 +99,7 @@ struct DownloadTitleSheet: View {
         }
     }
 
-    // MARK: «Сервер» — выпадающий выбор сжатия
+    // MARK: «Сервер» — выпадающий выбор сжатия (остался системным Menu)
 
     private var serverSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -112,88 +114,97 @@ struct DownloadTitleSheet: View {
         }
     }
 
-    // MARK: «Главы» — все / непрочитанное
+    // MARK: «Главы» — раскрывающийся вниз список (как переводчик)
 
     private var chapterScopeSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Главы")
-            Menu {
-                Picker("Главы", selection: $chapterScope) {
-                    ForEach(ChapterScope.allCases) { Text($0.rawValue).tag($0) }
+            // Единый цельный блок: шапка + (если раскрыт) варианты внутри той
+            // же скруглённой подложки, разделители во всю ширину.
+            VStack(spacing: 0) {
+                expandHeaderRow(text: chapterScope.rawValue, expanded: chapterScopeExpanded) {
+                    withAnimation(.easeInOut(duration: 0.2)) { chapterScopeExpanded.toggle() }
                 }
-            } label: {
-                selectorLabel(chapterScope.rawValue)
+                if chapterScopeExpanded {
+                    ForEach(ChapterScope.allCases) { scope in
+                        rowDivider
+                        optionRow(text: scope.rawValue, selected: scope == chapterScope) {
+                            chapterScope = scope
+                            withAnimation(.easeInOut(duration: 0.2)) { chapterScopeExpanded = false }
+                        }
+                    }
+                }
             }
+            .modifier(BlockContainer())
         }
     }
 
-    // MARK: «Переводчик» — разворачивающийся список
+    // MARK: «Переводчик» — раскрывающийся вниз список, единым блоком
 
     private var translatorSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Переводчик")
-
-            // Текущий выбранный переводчик — тап разворачивает/сворачивает список.
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) { translatorListExpanded.toggle() }
-            } label: {
-                translatorRow(activeTranslator, showChevron: true)
-            }
-            .buttonStyle(.plain)
-
-            if translatorListExpanded {
-                VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                translatorRow(activeTranslator, isHeader: true, selected: false) {
+                    withAnimation(.easeInOut(duration: 0.2)) { translatorListExpanded.toggle() }
+                }
+                if translatorListExpanded {
                     ForEach(translators) { t in
-                        Button {
+                        rowDivider
+                        translatorRow(t, isHeader: false, selected: t.id == activeTranslator.id) {
                             selectedTranslator = t
                             withAnimation(.easeInOut(duration: 0.2)) { translatorListExpanded = false }
-                        } label: {
-                            translatorRow(t, showChevron: false, selected: t == activeTranslator)
-                        }
-                        .buttonStyle(.plain)
-
-                        if t.id != translators.last?.id {
-                            Divider().overlay(Theme.separator).padding(.leading, 42)
                         }
                     }
                 }
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
+            .modifier(BlockContainer())
         }
     }
 
-    private func translatorRow(_ t: Translator, showChevron: Bool, selected: Bool = false) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "person.2.fill")
-                .font(.footnote)
-                .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
-                .frame(width: 22)
+    private func translatorRow(_ t: Translator, isHeader: Bool, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "person.2.fill")
+                    .font(.footnote)
+                    .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
+                    .frame(width: 22)
 
-            Text(t.name)
-                .font(.subheadline.weight(selected ? .semibold : .regular))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
+                Text(t.name)
+                    .font(.subheadline.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
 
-            Spacer(minLength: 8)
+                Spacer(minLength: 8)
 
-            countChip("\(t.chapters)", background: Theme.surfaceElevated, foreground: Theme.textSecondary)
+                countChip("\(t.chapters)", background: Theme.surface, foreground: Theme.textSecondary)
 
-            if showChevron {
-                Image(systemName: translatorListExpanded ? "chevron.up" : "chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.textSecondary)
+                if isHeader {
+                    Image(systemName: translatorListExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                }
             }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 50)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 48)
-        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .buttonStyle(.plain)
     }
 
     // MARK: Кнопка «Скачать» + чип кол-ва глав
 
     private var downloadButton: some View {
         Button {
-            // ЗАГЛУШКА: реального скачивания нет — просто закрываем sheet.
+            // Ставим ВСЕ главы тайтла в реальную очередь загрузки. Параметры
+            // сервера/переводчика/объёма — пока не влияют (заглушка), качаем всё.
+            DownloadsManager.shared.download(
+                slug: slug,
+                title: title,
+                typeLabel: typeLabel,
+                coverURLString: coverURL?.absoluteString,
+                chapters: chapters
+            )
             dismiss()
         } label: {
             ZStack {
@@ -204,9 +215,8 @@ struct DownloadTitleSheet: View {
 
                 HStack {
                     Spacer()
-                    // Чип чуть светлее самой кнопки (белая полупрозрачная
-                    // заливка поверх акцента) — как попросили.
-                    countChip("\(downloadableCount)", background: .white.opacity(0.25), foreground: .white)
+                    // Чип чуть светлее самой кнопки — как попросили.
+                    countChip("\(chaptersCount)", background: .white.opacity(0.25), foreground: .white)
                 }
                 .padding(.trailing, 6)
             }
@@ -214,10 +224,64 @@ struct DownloadTitleSheet: View {
             .background(Theme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
+        .disabled(chapters.isEmpty)
+        .opacity(chapters.isEmpty ? 0.5 : 1)
         .padding(.top, 4)
     }
 
-    // MARK: Helpers
+    // MARK: Общие строки/хелперы
+
+    /// Скруглённая подложка для «единого» раскрывающегося блока + clip, чтобы
+    /// разделители внутри не вылезали за скругления.
+    private struct BlockContainer: ViewModifier {
+        func body(content: Content) -> some View {
+            content
+                .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var rowDivider: some View {
+        Divider().overlay(Theme.separator)
+    }
+
+    private func expandHeaderRow(text: String, expanded: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(text)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 8)
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func optionRow(text: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(text)
+                    .font(.subheadline.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 8)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
 
     private func sectionTitle(_ text: String) -> some View {
         Text(text).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textPrimary)
@@ -234,7 +298,7 @@ struct DownloadTitleSheet: View {
                 .foregroundStyle(Theme.textSecondary)
         }
         .padding(.horizontal, 14)
-        .frame(minHeight: 48)
+        .frame(minHeight: 50)
         .frame(maxWidth: .infinity)
         .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -246,17 +310,5 @@ struct DownloadTitleSheet: View {
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
             .background(background, in: Capsule())
-    }
-}
-
-#Preview {
-    Color.black.sheet(isPresented: .constant(true)) {
-        DownloadTitleSheet(
-            coverURL: nil,
-            title: "Игра Абсолютного Бога",
-            typeLabel: "Манга",
-            chaptersCount: 35
-        )
-        .presentationDetents([.medium, .large])
     }
 }

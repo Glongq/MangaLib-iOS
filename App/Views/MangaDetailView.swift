@@ -177,10 +177,11 @@ struct MangaDetailView: View {
         }
         .sheet(isPresented: $showDownloadSheet) {
             DownloadTitleSheet(
+                slug: viewModel.slug,
                 coverURL: viewModel.detail?.cover?.bestURL ?? coverURL ?? listItem?.cover?.bestURL,
                 title: title,
                 typeLabel: viewModel.detail?.type?.label ?? listItem?.type?.label,
-                chaptersCount: viewModel.totalChapters
+                chapters: viewModel.chapters
             )
             .presentationDetents([.medium, .large])
         }
