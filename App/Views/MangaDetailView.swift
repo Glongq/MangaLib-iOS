@@ -15,6 +15,18 @@ struct MangaDetailView: View {
     /// Показ sheet со всеми названиями тайтла (по тапу на название в шапке) —
     /// см. TitleNamesSheet.
     @State private var showTitleNames = false
+    /// Раскрыто ли меню "..." (три точки справа сверху в шапке) — своё
+    /// кастомное выпадающее меню, а не системное Menu: нужно, чтобы пункт
+    /// «Скачать тайтл» был ЗЕЛЁНЫМ (системное контекстное меню iOS не даёт
+    /// красить отдельные пункты в произвольный цвет).
+    @State private var showActionMenu = false
+    /// Sheet «Скачать тайтл» (заглушка) — см. DownloadTitleSheet.
+    @State private var showDownloadSheet = false
+    /// URL тайтла для «Поделиться» (см. actionMenu) — обычная ссылка на
+    /// страницу тайтла на активном сайте.
+    private var shareURL: URL? {
+        URL(string: "https://\(SiteSession.shared.activeSite.host)/ru/manga/\(viewModel.slug)")
+    }
     /// Пространство координат для "переезжающего" индикатора активной вкладки
     /// (см. tabButton/matchedGeometryEffect) — благодаря общему namespace
     /// SwiftUI анимирует подчёркивание как ОДНУ вьюху, плавно перемещая её (и
@@ -163,6 +175,17 @@ struct MangaDetailView: View {
             )
             .presentationDetents([.medium, .large])
         }
+        .sheet(isPresented: $showDownloadSheet) {
+            DownloadTitleSheet(
+                coverURL: viewModel.detail?.cover?.bestURL ?? coverURL ?? listItem?.cover?.bestURL,
+                title: title,
+                typeLabel: viewModel.detail?.type?.label ?? listItem?.type?.label,
+                chaptersCount: viewModel.totalChapters
+            )
+            .presentationDetents([.medium, .large])
+        }
+        // Кастомное меню "..." поверх всего экрана (см. actionMenuOverlay).
+        .overlay { actionMenuOverlay }
     }
 
     // MARK: Hero-баннер + выступающая обложка
@@ -368,6 +391,101 @@ struct MangaDetailView: View {
             .padding(.leading, 16)
             .padding(.top, 54) // ниже статус-бара, баннер уходит под него целиком
         }
+        .overlay(alignment: .topTrailing) {
+            // Кнопка "..." — зеркало кнопки "назад" слева, тот же стеклянный
+            // круг. Тап разворачивает кастомное меню действий (см. actionMenu).
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { showActionMenu.toggle() }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .glassEffect(.regular, in: Circle())
+            }
+            .padding(.trailing, 16)
+            .padding(.top, 54)
+        }
+    }
+
+    // MARK: Меню действий "..." (кастомное выпадающее)
+
+    /// Полупрозрачный слой на весь экран + сама карточка меню в правом верхнем
+    /// углу. Своё меню (а не системное Menu) — чтобы «Скачать тайтл» был
+    /// зелёным. Тап мимо карточки закрывает меню.
+    @ViewBuilder
+    private var actionMenuOverlay: some View {
+        if showActionMenu {
+            ZStack(alignment: .topTrailing) {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture { withAnimation(.easeInOut(duration: 0.18)) { showActionMenu = false } }
+
+                actionMenuCard
+                    .padding(.trailing, 16)
+                    .padding(.top, 96) // сразу под кнопкой "..."
+            }
+            .transition(.opacity)
+        }
+    }
+
+    private var actionMenuCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // «Поделиться» — системный share sheet (внутри есть «Скопировать»,
+            // т.е. копирование ссылки — тоже отсюда).
+            if let shareURL {
+                ShareLink(item: shareURL) {
+                    actionMenuRowLabel("Поделиться", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.plain)
+                .simultaneousGesture(TapGesture().onEnded { showActionMenu = false })
+            }
+
+            actionMenuDivider
+            actionMenuButton("Редактирование глав", systemImage: "square.and.pencil") { /* ЗАГЛУШКА */ }
+            actionMenuDivider
+            actionMenuButton("Добавить главы", systemImage: "plus") { /* ЗАГЛУШКА */ }
+            actionMenuDivider
+            actionMenuButton("Редактирование тайтла", systemImage: "pencil") { /* ЗАГЛУШКА */ }
+            actionMenuDivider
+            // Зелёным (иконка + текст) — как попросили.
+            actionMenuButton("Скачать тайтл", systemImage: "arrow.down.circle", tint: .green) {
+                showDownloadSheet = true
+            }
+        }
+        .frame(width: 250)
+        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.separator, lineWidth: 1))
+        .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
+    }
+
+    private var actionMenuDivider: some View {
+        Divider().overlay(Theme.separator)
+    }
+
+    private func actionMenuButton(_ title: String, systemImage: String, tint: Color? = nil, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) { showActionMenu = false }
+            action()
+        } label: {
+            actionMenuRowLabel(title, systemImage: systemImage, tint: tint)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func actionMenuRowLabel(_ title: String, systemImage: String, tint: Color? = nil) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16))
+                .frame(width: 22)
+            Text(title)
+                .font(.subheadline)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(tint ?? Theme.textPrimary)
+        .padding(.horizontal, 14)
+        .frame(height: 46)
+        .contentShape(Rectangle())
     }
 
     /// titleBlock с отступом справа — вынесено отдельно от heroHeader просто
@@ -937,7 +1055,7 @@ struct MangaDetailView: View {
             let genres = sortedNames(viewModel.detail?.genres)
             let tags = sortedNames(viewModel.detail?.tags)
             let genreItems = genres.map { CollapsibleChips.Item(text: $0) }
-            let tagItems = tags.map { CollapsibleChips.Item(text: "#\($0)") }
+            let tagItems = tags.map { CollapsibleChips.Item(text: "# \($0)") }
             let chipItems = [ageRatingChip].compactMap { $0 } + genreItems + tagItems
             if !chipItems.isEmpty {
                 blockTitle("Жанры и теги")
