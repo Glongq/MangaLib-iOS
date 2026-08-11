@@ -71,7 +71,7 @@ struct MangaReaderView: View {
             if viewModel.justAddedToReading {
                 VStack {
                     BookmarkAddedToast()
-                        .padding(.top, 54)
+                        .padding(.top, 12)
                     Spacer()
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -330,18 +330,17 @@ struct MangaReaderView: View {
     // (см. выше) намеренно НЕ синхронизирован с этими размерами — его
     // вернули к прежнему виду по просьбе.
     private var bottomBar: some View {
+        // Каждая кнопка — отдельная круглая стеклянная подложка (а не общая
+        // капсула), как попросили.
         HStack {
             readerButton(icon: "line.3.horizontal") { showChapters = true }
             Spacer()
             readerButton(icon: "bookmark") {
-                viewModel.markProgress()
+                viewModel.addBookmarkManually()
             }
             Spacer()
             readerButton(icon: "gearshape") { showSettings = true }
         }
-        .padding(.horizontal, 28)
-        .frame(height: 64)
-        .glassEffect(.regular, in: Capsule())
         .padding(.horizontal, 20)
         .padding(.bottom, 20)
     }
@@ -349,10 +348,11 @@ struct MangaReaderView: View {
     private func readerButton(icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 26, weight: .regular))
+                .font(.system(size: 24, weight: .regular))
                 .foregroundStyle(.white)
-                .frame(width: 57, height: 57)
-                .contentShape(Rectangle())
+                .frame(width: 56, height: 56)
+                .glassEffect(.regular, in: Circle())
+                .contentShape(Circle())
         }
     }
 }
@@ -390,9 +390,8 @@ struct ChapterListSheet: View {
             VStack(spacing: 0) {
                 header
                 ScrollView {
-                    // Плоский список на самом фоне (по референсу) — без
-                    // стеклянной карточки/обводки, только тонкие разделители
-                    // между строками.
+                    // Список на скруглённой подложке (как в настройках), с теми
+                    // же тонкими разделителями между строками.
                     LazyVStack(spacing: 0) {
                         ForEach(Array(ordered.enumerated()), id: \.element.id) { position, item in
                             row(item.index, item.chapter)
@@ -401,7 +400,8 @@ struct ChapterListSheet: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 20)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 16)
                     .padding(.top, 8)
                     .padding(.bottom, 20)
                 }
@@ -448,7 +448,7 @@ struct ChapterListSheet: View {
     // ChapterItem.shortTitle ("Том X Глава Y"), которым по-прежнему
     // пользуется topBar ридера.
     private func rowTitle(_ chapter: ChapterItem) -> String {
-        "Том\(chapter.volume) Гл.\(chapter.number)"
+        "Том \(chapter.volume) • Глава \(chapter.number)"
     }
 
     private func row(_ index: Int, _ chapter: ChapterItem) -> some View {
@@ -472,6 +472,7 @@ struct ChapterListSheet: View {
                         .foregroundStyle(Theme.accent)
                 }
             }
+            .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
@@ -666,17 +667,19 @@ struct ZoomablePage: View {
 /// просто статичная плашка.
 struct BookmarkAddedToast: View {
     var body: some View {
+        // Стеклянная капсула сверху — 1-в-1 стиль/положение тоста «Загрузка
+        // начата» (см. RootView.DownloadToast).
         HStack(spacing: 8) {
             Image(systemName: "bookmark.fill")
                 .font(.footnote)
                 .foregroundStyle(Theme.accent)
             Text("Добавлено в закладки")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.textPrimary)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Theme.surfaceElevated, in: Capsule())
-        .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .glassEffect(.regular, in: Capsule())
+        .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
     }
 }

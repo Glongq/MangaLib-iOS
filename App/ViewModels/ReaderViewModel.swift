@@ -108,6 +108,25 @@ final class ReaderViewModel: ObservableObject {
     /// Отметить текущую главу как последнюю прочитанную.
     func markProgress() { recordProgress() }
 
+    /// Явное добавление в закладки по кнопке в ридере — РЕАЛЬНО добавляет тайтл
+    /// (в «Читаю», если его ещё нет в закладках; уже выбранную папку не трогаем)
+    /// и показывает тост «Добавлено в закладки».
+    func addBookmarkManually() {
+        if !BookmarksStore.shared.isBookmarked(slug: slug) {
+            BookmarksStore.shared.add(
+                slug: slug,
+                title: mangaTitle ?? slug,
+                coverURL: coverURL,
+                toFolder: BookmarkFolder.reading.id
+            )
+        }
+        justAddedToReading = true
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            justAddedToReading = false
+        }
+    }
+
     private func recordProgress() {
         guard let chapter = currentChapter else { return }
         BookmarksStore.shared.setProgress(
@@ -131,11 +150,8 @@ final class ReaderViewModel: ObservableObject {
                 coverURL: coverURL,
                 toFolder: BookmarkFolder.reading.id
             )
-            justAddedToReading = true
-            Task {
-                try? await Task.sleep(nanoseconds: 2_200_000_000)
-                justAddedToReading = false
-            }
+            // ТИХО, без тоста — авто-добавление при заходе делаем в фоне (как
+            // попросили). Явный тост — только по кнопке (addBookmarkManually).
         }
 
         // Локальный прогресс сохранён выше — а это реальная, подтверждённая

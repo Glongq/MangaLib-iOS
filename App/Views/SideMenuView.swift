@@ -268,7 +268,7 @@ struct SideMenuView: View {
         }
     }
 
-    // Строка типа тайтла — название ПО ЦЕНТРУ (как попросили). Тап закрывает
+    // Строка типа тайтла — название СЛЕВА (как попросили). Тап закрывает
     // под-экран и открывает Каталог с фильтром по этому типу (id из
     // FilterCatalog.types).
     private func catalogTypeRow(_ title: String, typeId: Int, showDivider: Bool = true) -> some View {
@@ -279,7 +279,8 @@ struct SideMenuView: View {
             } label: {
                 Text(title)
                     .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
                     .frame(minHeight: 52)
                     .contentShape(Rectangle())
             }
@@ -324,14 +325,19 @@ struct SideMenuView: View {
                 }
             }
         } label: {
-            HStack {
+            ZStack {
+                // Заголовок подкатегории — ПО ЦЕНТРУ (как попросили), а стрелка
+                // сворачивания остаётся у правого края.
                 Text(title)
                     .font(.headline)
                     .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                HStack {
+                    Spacer()
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                }
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 52)
