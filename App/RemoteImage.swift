@@ -84,6 +84,32 @@ final class RemoteImageLoader: ObservableObject {
         }
     }
 
+    /// Загрузка UIImage для UIKit-вьюх (нативный зум-скролл в читалке, см.
+    /// ZoomableImageScrollView): тот же кэш, те же заголовки и та же поддержка
+    /// локальных файлов (file://), что и у SwiftUI-варианта.
+    static func fetchImage(candidates: [URL]) async -> UIImage? {
+        guard let key = candidates.first else { return nil }
+        if let cached = RemoteImageCache.shared.image(for: key) { return cached }
+        for url in candidates {
+            if Task.isCancelled { return nil }
+            if url.isFileURL {
+                if let img = UIImage(contentsOfFile: url.path) {
+                    RemoteImageCache.shared.insert(img, for: key)
+                    return img
+                }
+                continue
+            }
+            do {
+                let (data, response) = try await session.data(from: url)
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { continue }
+                guard let img = UIImage(data: data) else { continue }
+                RemoteImageCache.shared.insert(img, for: key)
+                return img
+            } catch { continue }
+        }
+        return nil
+    }
+
     /// Тихая предзагрузка "про запас" — без создания View/State, просто качает
     /// картинку и кладёт её в тот же RemoteImageCache/URLCache, которым потом
     /// пользуется обычный RemoteImage. Нужна для настройки "Предзагрузка

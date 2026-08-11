@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Полноэкранная читалка: горизонтальное листание страниц, тап переключает интерфейс.
 struct MangaReaderView: View {
@@ -154,11 +155,12 @@ struct MangaReaderView: View {
     private var pager: some View {
         TabView(selection: $currentPage) {
             ForEach(Array(viewModel.pages.enumerated()), id: \.offset) { index, page in
-                ZoomablePage(
+                ZoomableImageScrollView(
                     candidates: viewModel.imageURLs(for: page),
                     fitWidth: fitWidth,
                     onSingleTap: { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
                 )
+                .ignoresSafeArea()
                 .tag(index)
             }
 
@@ -585,106 +587,186 @@ struct ReaderSettingsSheet: View {
     }
 }
 
-/// Страница главы с честным pinch-to-zoom (якорь в точке щипка), двойным тапом и панорамой.
-struct ZoomablePage: View {
+// MARK: - Нативный зум страницы (UIScrollView)
+
+/// UIScrollView-обёртка вокруг картинки — «масляно» плавный pinch/pan/двойной
+/// тап с инерцией и корректным центрированием (как в родных вьюверах). SwiftUI-
+/// жесты давали резину; здесь весь зум делает UIKit.
+///
+/// - `fitWidth == false`: страница вписана целиком по высоте (обычная манга).
+/// - `fitWidth == true`: страница по ширине, длинные страницы скроллятся вниз
+///   даже без зума (вебтун/манхва).
+/// Одиночный тап — `onSingleTap` (показать/скрыть интерфейс). Двойной тап —
+/// зум к точке / сброс. Горизонтальный свайп на масштабе 1 не перехватывается
+/// (контент вписан → не скроллится вбок), поэтому листание страниц TabView
+/// продолжает работать.
+struct ZoomableImageScrollView: UIViewRepresentable {
     let candidates: [URL]
     let fitWidth: Bool
     let onSingleTap: () -> Void
 
-    @State private var scale: CGFloat = 1
-    @State private var lastScale: CGFloat = 1
-    @State private var offset: CGSize = .zero
-    @State private var lastOffset: CGSize = .zero
+    func makeCoordinator() -> Coordinator { Coordinator(onSingleTap: onSingleTap, fitWidth: fitWidth) }
 
-    private let maxScale: CGFloat = 5
+    func makeUIView(context: Context) -> UIScrollView {
+        let scroll = LayoutCallbackScrollView()
+        scroll.delegate = context.coordinator
+        scroll.maximumZoomScale = 5
+        scroll.minimumZoomScale = 1
+        scroll.showsVerticalScrollIndicator = false
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.backgroundColor = .clear
+        scroll.contentInsetAdjustmentBehavior = .never
+        scroll.bouncesZoom = true
+        scroll.decelerationRate = .fast
 
-    var body: some View {
-        GeometryReader { geo in
-            pageContent(geo)
-                .frame(width: geo.size.width, height: geo.size.height)
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) { withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { toggleZoom() } }
-                .onTapGesture(count: 1) { onSingleTap() }
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleToFill
+        imageView.backgroundColor = .clear
+        imageView.isUserInteractionEnabled = true
+        scroll.addSubview(imageView)
+
+        let spinner = UIActivityIndicatorView(style: .medium)
+        spinner.color = .white
+        spinner.hidesWhenStopped = true
+        spinner.startAnimating()
+        scroll.addSubview(spinner)
+
+        context.coordinator.scrollView = scroll
+        context.coordinator.imageView = imageView
+        context.coordinator.spinner = spinner
+
+        let single = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap))
+        single.numberOfTapsRequired = 1
+        let double = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        double.numberOfTapsRequired = 2
+        single.require(toFail: double)
+        scroll.addGestureRecognizer(single)
+        scroll.addGestureRecognizer(double)
+
+        scroll.onLayout = { [weak coordinator = context.coordinator] in coordinator?.boundsChanged() }
+
+        context.coordinator.load(candidates: candidates)
+        return scroll
+    }
+
+    func updateUIView(_ uiView: UIScrollView, context: Context) {
+        context.coordinator.onSingleTap = onSingleTap
+        if context.coordinator.fitWidth != fitWidth {
+            context.coordinator.fitWidth = fitWidth
+            context.coordinator.layoutImage(resetZoom: true)
+        }
+        if context.coordinator.currentKey != candidates.first {
+            context.coordinator.load(candidates: candidates)
         }
     }
 
-    private var image: some View {
-        RemoteImage(candidates: candidates) { img in
-            img.resizable().scaledToFit()
-        } placeholder: {
-            ProgressView().tint(.white)
-        } failure: {
-            Image(systemName: "photo").font(.largeTitle).foregroundStyle(.white.opacity(0.4))
-        }
-    }
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        weak var scrollView: UIScrollView?
+        weak var imageView: UIImageView?
+        weak var spinner: UIActivityIndicatorView?
+        var onSingleTap: () -> Void
+        var fitWidth: Bool
+        var currentKey: URL?
+        private var loadTask: Task<Void, Never>?
+        private var lastBounds: CGSize = .zero
 
-    @ViewBuilder
-    private func pageContent(_ geo: GeometryProxy) -> some View {
-        if fitWidth {
-            // По ширине: заполняем ширину, длинные страницы прокручиваются вниз.
-            ScrollView(.vertical, showsIndicators: false) {
-                image.frame(width: geo.size.width)
-            }
-        } else {
-            let base = image
-                .frame(width: geo.size.width, height: geo.size.height)
-                .scaleEffect(scale, anchor: .center)   // всегда от центра — предсказуемо и плавно
-                .offset(offset)
-                .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.86), value: scale)
-                .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.86), value: offset)
-                .gesture(magnify(geo))
-            if scale > 1 {
-                base.simultaneousGesture(pan(geo))
-            } else {
-                base
-            }
+        init(onSingleTap: @escaping () -> Void, fitWidth: Bool) {
+            self.onSingleTap = onSingleTap
+            self.fitWidth = fitWidth
         }
-    }
 
-    // Pinch от центра: плавно, с мягким возвратом и ограничением сдвига.
-    private func magnify(_ geo: GeometryProxy) -> some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                scale = min(max(lastScale * value.magnification, 1), maxScale)
-                offset = clamped(offset, in: geo)
-            }
-            .onEnded { _ in
-                lastScale = scale
-                if scale <= 1.02 {
-                    scale = 1; lastScale = 1; resetPan()
-                } else {
-                    offset = clamped(offset, in: geo)
-                    lastOffset = offset
+        func load(candidates: [URL]) {
+            currentKey = candidates.first
+            loadTask?.cancel()
+            imageView?.image = nil
+            spinner?.startAnimating()
+            let key = currentKey
+            loadTask = Task { [weak self] in
+                let img = await RemoteImageLoader.fetchImage(candidates: candidates)
+                await MainActor.run {
+                    guard let self, self.currentKey == key else { return }
+                    self.spinner?.stopAnimating()
+                    self.imageView?.image = img
+                    self.layoutImage(resetZoom: true)
                 }
             }
-    }
+        }
 
-    private func pan(_ geo: GeometryProxy) -> some Gesture {
-        DragGesture()
-            .onChanged { value in
-                offset = clamped(CGSize(width: lastOffset.width + value.translation.width,
-                                        height: lastOffset.height + value.translation.height), in: geo)
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+        func scrollViewDidZoom(_ scrollView: UIScrollView) { centerImage() }
+
+        @objc func handleSingleTap() { onSingleTap() }
+
+        @objc func handleDoubleTap(_ g: UITapGestureRecognizer) {
+            guard let scroll = scrollView, let imageView, imageView.image != nil else { return }
+            if scroll.zoomScale > scroll.minimumZoomScale + 0.01 {
+                scroll.setZoomScale(scroll.minimumZoomScale, animated: true)
+            } else {
+                let point = g.location(in: imageView)
+                let newScale: CGFloat = min(2.5, scroll.maximumZoomScale)
+                let w = scroll.bounds.width / newScale
+                let h = scroll.bounds.height / newScale
+                scroll.zoom(to: CGRect(x: point.x - w / 2, y: point.y - h / 2, width: w, height: h), animated: true)
             }
-            .onEnded { _ in lastOffset = offset }
-    }
+        }
 
-    /// Не даём утащить картинку за края — она всегда «стремится» к центру.
-    private func clamped(_ value: CGSize, in geo: GeometryProxy) -> CGSize {
-        let maxX = max((geo.size.width * scale - geo.size.width) / 2, 0)
-        let maxY = max((geo.size.height * scale - geo.size.height) / 2, 0)
-        return CGSize(width: min(max(value.width, -maxX), maxX),
-                      height: min(max(value.height, -maxY), maxY))
-    }
+        func boundsChanged() {
+            guard let scroll = scrollView, scroll.bounds.size != lastBounds else { return }
+            lastBounds = scroll.bounds.size
+            // Переразмечаем только когда не в зуме (иначе сбили бы текущий зум).
+            layoutImage(resetZoom: scroll.zoomScale <= scroll.minimumZoomScale + 0.01)
+        }
 
-    private func toggleZoom() {
-        if scale > 1 {
-            scale = 1; lastScale = 1; resetPan()
-        } else {
-            scale = 2.5; lastScale = 2.5; resetPan()
+        /// Вписывает картинку (по высоте или по ширине) и центрирует.
+        func layoutImage(resetZoom: Bool) {
+            guard let scroll = scrollView, let imageView, let image = imageView.image else {
+                // Нет картинки — центрируем спиннер.
+                centerSpinner()
+                return
+            }
+            let bounds = scroll.bounds.size
+            guard bounds.width > 0, bounds.height > 0, image.size.width > 0, image.size.height > 0 else { return }
+
+            if resetZoom { scroll.zoomScale = 1 }
+
+            let size: CGSize
+            if fitWidth {
+                let scale = bounds.width / image.size.width
+                size = CGSize(width: bounds.width, height: image.size.height * scale)
+            } else {
+                let scale = min(bounds.width / image.size.width, bounds.height / image.size.height)
+                size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            }
+            imageView.frame = CGRect(origin: .zero, size: size)
+            scroll.contentSize = size
+            centerImage()
+            centerSpinner()
+        }
+
+        private func centerImage() {
+            guard let scroll = scrollView, let imageView else { return }
+            let bounds = scroll.bounds.size
+            let content = imageView.frame.size
+            let insetX = max((bounds.width - content.width) / 2, 0)
+            let insetY = max((bounds.height - content.height) / 2, 0)
+            scroll.contentInset = UIEdgeInsets(top: insetY, left: insetX, bottom: insetY, right: insetX)
+        }
+
+        private func centerSpinner() {
+            guard let scroll = scrollView, let spinner else { return }
+            spinner.center = CGPoint(x: scroll.bounds.midX, y: scroll.bounds.midY)
         }
     }
+}
 
-    private func resetPan() { offset = .zero; lastOffset = .zero }
+/// UIScrollView, сообщающий во внешний код о смене bounds (для перевёрстки
+/// картинки при первом появлении/повороте) — у UIScrollView нет делегата на это.
+final class LayoutCallbackScrollView: UIScrollView {
+    var onLayout: (() -> Void)?
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?()
+    }
 }
 
 /// Маленький тост "Добавлено в закладки" (иконка закладки слева + текст) —
