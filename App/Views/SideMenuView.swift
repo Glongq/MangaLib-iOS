@@ -31,6 +31,8 @@ struct SideMenuView: View {
     var onOpenLogin: () -> Void
     /// Открыть экран информации об аккаунте — общий с быстрой кнопкой профиля.
     var onOpenAccount: () -> Void
+    /// Открыть Каталог с выбранным типом тайтла (меню «Тайтлы» → Манга/Манхва/…).
+    var onOpenCatalog: (Int) -> Void
 
     // Реальная сессия — см. AuthSession.swift/LoginView.swift. Карточка
     // профиля переключается между "Войти" и данными аккаунта автоматически.
@@ -232,35 +234,22 @@ struct SideMenuView: View {
     }
 
     // Под-экран выбора типа тайтла — заменяет обычный список раздела «Каталог».
-    // Сверху слева стрелка «назад» (над «Манга»), внизу оранжевая кнопка
-    // «Случайный тайтл» с иконкой кубика. Пункты типов — заглушки.
+    // Сверху «Назад» (над «Манга»), затем типы по центру, внизу оранжевая
+    // кнопка «Случайный тайтл». Тап по типу открывает Каталог с этим фильтром.
     private var catalogTypesView: some View {
         VStack(spacing: 0) {
-            Button {
+            // «Назад» той же строкой-шаблоном (row), что и остальные пункты
+            // меню — та же высота (52) и тот же размер текста/иконки, поэтому
+            // при открытии «Тайтлы» ничего не смещается вниз.
+            row("Назад", icon: "chevron.left", showChevron: false, action: {
                 withAnimation(.easeInOut(duration: 0.2)) { catalogShowingTypes = false }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "chevron.left")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text("Назад")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textPrimary)
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            })
 
-            sectionDivider
-
-            row("Манга", icon: "book", showChevron: false)
-            row("ОЭЛ манга", icon: "book", showChevron: false)
-            row("Манхва", icon: "book", showChevron: false)
-            row("Руманга", icon: "book", showChevron: false)
-            row("Комикс", icon: "book", showDivider: false, showChevron: false)
+            catalogTypeRow("Манга", typeId: 1)
+            catalogTypeRow("ОЭЛ манга", typeId: 4)
+            catalogTypeRow("Манхва", typeId: 5)
+            catalogTypeRow("Руманга", typeId: 8)
+            catalogTypeRow("Комикс", typeId: 9, showDivider: false)
 
             Button {
                 // ЗАГЛУШКА: случайный тайтл.
@@ -276,6 +265,29 @@ struct SideMenuView: View {
             }
             .buttonStyle(.plain)
             .padding(16)
+        }
+    }
+
+    // Строка типа тайтла — название ПО ЦЕНТРУ (как попросили). Тап закрывает
+    // под-экран и открывает Каталог с фильтром по этому типу (id из
+    // FilterCatalog.types).
+    private func catalogTypeRow(_ title: String, typeId: Int, showDivider: Bool = true) -> some View {
+        VStack(spacing: 0) {
+            Button {
+                catalogShowingTypes = false
+                onOpenCatalog(typeId)
+            } label: {
+                Text(title)
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(minHeight: 52)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showDivider {
+                Divider().overlay(Theme.separator).padding(.horizontal, 16)
+            }
         }
     }
 
@@ -538,6 +550,6 @@ struct SideMenuView: View {
 }
 
 #Preview {
-    SideMenuView(onSelect: { _ in }, onOpenLogin: {}, onOpenAccount: {})
+    SideMenuView(onSelect: { _ in }, onOpenLogin: {}, onOpenAccount: {}, onOpenCatalog: { _ in })
         .preferredColorScheme(.dark)
 }

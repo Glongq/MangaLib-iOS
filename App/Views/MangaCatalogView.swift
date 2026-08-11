@@ -93,7 +93,19 @@ struct MangaCatalogView: View {
             }
         }
         .tint(Theme.accent)
-        .onAppear { viewModel.loadInitialIfNeeded() }
+        .onAppear {
+            // Пришли из меню «Тайтлы» с выбранным типом — применяем его фильтром
+            // (обычный каталог с фильтром), иначе обычная первичная загрузка.
+            if let typeId = CatalogNavigator.shared.pendingTypeId {
+                CatalogNavigator.shared.pendingTypeId = nil
+                ConstantsStore.shared.loadIfNeeded()
+                var f = MangaFilter()
+                f.types.included = [typeId]
+                viewModel.apply(filter: f)
+            } else {
+                viewModel.loadInitialIfNeeded()
+            }
+        }
     }
 
     // MARK: Шапка (без общей подложки)
@@ -102,10 +114,9 @@ struct MangaCatalogView: View {
         VStack(spacing: 10) {
             if !headerCollapsed {
                 Text("Каталог")
-                    .font(.title3.weight(.bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .transition(.opacity)
             }
 

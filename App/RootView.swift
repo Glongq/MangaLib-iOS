@@ -93,7 +93,12 @@ struct RootView: View {
             SideMenuView(
                 onSelect: { title in stubRequest = StubRequest(title: title) },
                 onOpenLogin: { showLogin = true },
-                onOpenAccount: { showAccount = true }
+                onOpenAccount: { showAccount = true },
+                onOpenCatalog: { typeId in
+                    // Меню «Тайтлы» → тип: кладём фильтр и уходим на Каталог.
+                    CatalogNavigator.shared.pendingTypeId = typeId
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 1 }
+                }
             )
         }
     }

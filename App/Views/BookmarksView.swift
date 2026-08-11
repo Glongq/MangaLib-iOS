@@ -102,10 +102,9 @@ struct BookmarksView: View {
         VStack(spacing: 10) {
             if !headerCollapsed {
                 Text("Закладки")
-                    .font(.title3.weight(.bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .transition(.opacity)
             }
             searchField

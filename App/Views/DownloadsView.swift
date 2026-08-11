@@ -110,7 +110,7 @@ struct DownloadsView: View {
             } label: {
                 Text(downloading ? "Отменить" : "Удалить")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(downloading ? Theme.accent : .red)
+                    .foregroundStyle(.red)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .contentShape(Rectangle())
