@@ -52,6 +52,14 @@ struct SideMenuView: View {
     // открывается ПОВЕРХ меню, как История/Настройки.
     @State private var showDownloads = false
 
+    // Какие сворачиваемые разделы сейчас развёрнуты (Профиль/Каталог/Другое) —
+    // у каждого своя стрелка вверх/вниз в заголовке подложки. По умолчанию все
+    // развёрнуты.
+    @State private var expandedSections: Set<String> = ["Профиль", "Каталог", "Другое"]
+    // Внутри раздела «Каталог»: показывается ли под-экран выбора типа тайтла
+    // (Манга/ОЭЛ манга/…), заменяющий обычный список раздела (см. catalogSection).
+    @State private var catalogShowingTypes = false
+
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
@@ -66,8 +74,10 @@ struct SideMenuView: View {
                     // spacing 28→34 — чуть больше воздуха между блоками.
                     VStack(spacing: 34) {
                         block1
-                        block2
-                        block3
+                        quickBlock
+                        profileSection
+                        catalogSection
+                        otherSection
                         searchSitesBlock
                     }
                     .padding(.horizontal, 16)
@@ -165,27 +175,161 @@ struct SideMenuView: View {
         .buttonStyle(.plain)
     }
 
-    // Блок 2: История, Загрузки, Комментарии.
-    private var block2: some View {
+    // Быстрый блок БЕЗ заголовка подложки: Настройки, История, Загрузки — все
+    // с реальными действиями (открываются ПОВЕРХ меню).
+    private var quickBlock: some View {
         card {
-            // Свой action вместо select(title) — не должно закрывать меню,
-            // История открывается ПОВЕРХ него (см. showHistory выше).
+            row("Настройки", icon: "gearshape", action: { showSettings = true })
             row("История", icon: "clock.arrow.circlepath", action: { showHistory = true })
-            row("Загрузки", icon: "arrow.down.circle", action: { showDownloads = true })
-            row("Комментарии", icon: "text.bubble", showDivider: false)
+            row("Загрузки", icon: "arrow.down.circle", showDivider: false, action: { showDownloads = true })
         }
     }
 
-    // Блок 3: Список друзей, Избранное, Коллекции, Настройки.
-    private var block3: some View {
-        card {
+    // Сворачиваемый раздел «Профиль» — все пункты пока заглушки (StubView).
+    private var profileSection: some View {
+        collapsibleCard("Профиль") {
+            row("Комментарии", icon: "text.bubble")
             row("Список друзей", icon: "person.2")
             row("Избранное", icon: "heart")
             row("Коллекции", icon: "square.stack")
-            // Свой action вместо select(title) — теперь реальный экран
-            // (AppSettingsView), а не generic-заглушка.
-            row("Настройки", icon: "gearshape", showDivider: false, action: { showSettings = true })
+            row("Игнор-лист", icon: "hand.raised")
+            row("История банов", icon: "nosign", showDivider: false)
         }
+    }
+
+    // Сворачиваемый раздел «Каталог». Особый: у «Тайтлы» стрелка вправо, тап по
+    // ней ЗАМЕНЯЕТ содержимое подложки на под-экран выбора типа (см.
+    // catalogTypesView). Остальные пункты — заглушки.
+    private var catalogSection: some View {
+        let expanded = expandedSections.contains("Каталог")
+        return card {
+            sectionHeader("Каталог", expanded: expanded)
+            if expanded {
+                sectionDivider
+                if catalogShowingTypes {
+                    catalogTypesView
+                } else {
+                    catalogRootRows
+                }
+            }
+        }
+    }
+
+    private var catalogRootRows: some View {
+        VStack(spacing: 0) {
+            row("Тайтлы", icon: "book", action: {
+                withAnimation(.easeInOut(duration: 0.2)) { catalogShowingTypes = true }
+            })
+            row("Сейчас читают", icon: "flame")
+            row("Коллекции", icon: "square.stack")
+            row("Команды", icon: "person.3")
+            row("Люди", icon: "person.crop.rectangle")
+            row("Персонажи", icon: "face.smiling")
+            row("Франшизы", icon: "sparkles")
+            row("Издательства", icon: "building.2")
+            row("Пользователи", icon: "person.crop.circle", showDivider: false)
+        }
+    }
+
+    // Под-экран выбора типа тайтла — заменяет обычный список раздела «Каталог».
+    // Сверху слева стрелка «назад» (над «Манга»), внизу оранжевая кнопка
+    // «Случайный тайтл» с иконкой кубика. Пункты типов — заглушки.
+    private var catalogTypesView: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { catalogShowingTypes = false }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.left")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("Назад")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            sectionDivider
+
+            row("Манга", icon: "book", showChevron: false)
+            row("ОЭЛ манга", icon: "book", showChevron: false)
+            row("Манхва", icon: "book", showChevron: false)
+            row("Руманга", icon: "book", showChevron: false)
+            row("Комикс", icon: "book", showDivider: false, showChevron: false)
+
+            Button {
+                // ЗАГЛУШКА: случайный тайтл.
+                select("Случайный тайтл")
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "dice.fill")
+                    Text("Случайный тайтл").font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(16)
+        }
+    }
+
+    // Сворачиваемый раздел «Другое».
+    private var otherSection: some View {
+        collapsibleCard("Другое") {
+            row("Вопросы и ответы", icon: "questionmark.circle", showDivider: false)
+        }
+    }
+
+    // MARK: Сворачиваемая подложка (заголовок со стрелкой вверх/вниз + контент)
+
+    private func collapsibleCard(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        let expanded = expandedSections.contains(title)
+        return card {
+            sectionHeader(title, expanded: expanded)
+            if expanded {
+                sectionDivider
+                content()
+            }
+        }
+    }
+
+    private func sectionHeader(_ title: String, expanded: Bool) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                if expanded {
+                    expandedSections.remove(title)
+                    // Сворачивая «Каталог», сбрасываем под-экран типов, чтобы при
+                    // следующем раскрытии снова показывался обычный список.
+                    if title == "Каталог" { catalogShowingTypes = false }
+                } else {
+                    expandedSections.insert(title)
+                }
+            }
+        } label: {
+            HStack {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var sectionDivider: some View {
+        Divider().overlay(Theme.separator).padding(.horizontal, 16)
     }
 
     // Блок 4 (в самом низу): чекбоксы всех сайтов экосистемы, КРОМЕ AnimeLib
@@ -359,7 +503,7 @@ struct SideMenuView: View {
     // action — переопределяет поведение по тапу (по умолчанию — select(title),
     // закрывает меню и уходит на StubView); используется, когда строка должна
     // открыть что-то ПОВЕРХ меню, не закрывая его (см. "История").
-    private func row(_ title: String, icon: String, showDivider: Bool = true, iconWidth: CGFloat = 24, action: (() -> Void)? = nil) -> some View {
+    private func row(_ title: String, icon: String, showDivider: Bool = true, showChevron: Bool = true, iconWidth: CGFloat = 24, action: (() -> Void)? = nil) -> some View {
         VStack(spacing: 0) {
             Button { (action ?? { select(title) })() } label: {
                 HStack(spacing: 14) {
@@ -370,7 +514,7 @@ struct SideMenuView: View {
                     Text(title)
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
-                    chevron
+                    if showChevron { chevron }
                 }
                 .padding(.horizontal, 16)
                 .frame(minHeight: 52)
