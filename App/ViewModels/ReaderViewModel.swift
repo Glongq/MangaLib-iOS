@@ -14,11 +14,11 @@ final class ReaderViewModel: ObservableObject {
     /// не отправляем, он не нужен.
     private var currentChapterAlreadyViewed = false
 
-    /// Триггер тоста "Добавлено в закладки" (см. recordProgress ниже) —
-    /// View наблюдает за этим флагом и показывает короткую анимацию, когда
-    /// он становится true; сам себя сбрасывает обратно в false через
-    /// небольшую паузу, View ничего таймером считать не должно.
-    @Published private(set) var justAddedToReading = false
+    /// Текст тоста закладки в ридере ("Добавлено в закладки" / "Убрано из
+    /// закладок"); nil — тост скрыт. Ставится по кнопке (см. setBookmark),
+    /// сам сбрасывается через пару секунд. View показывает его в верхней
+    /// панели вместо названия тайтла.
+    @Published private(set) var bookmarkToast: String?
 
     let slug: String
     let chapters: [ChapterItem]
@@ -108,22 +108,31 @@ final class ReaderViewModel: ObservableObject {
     /// Отметить текущую главу как последнюю прочитанную.
     func markProgress() { recordProgress() }
 
-    /// Явное добавление в закладки по кнопке в ридере — РЕАЛЬНО добавляет тайтл
-    /// (в «Читаю», если его ещё нет в закладках; уже выбранную папку не трогаем)
-    /// и показывает тост «Добавлено в закладки».
-    func addBookmarkManually() {
-        if !BookmarksStore.shared.isBookmarked(slug: slug) {
-            BookmarksStore.shared.add(
-                slug: slug,
-                title: mangaTitle ?? slug,
-                coverURL: coverURL,
-                toFolder: BookmarkFolder.reading.id
-            )
+    /// Кнопка-закладка в ридере как переключатель: add=true — добавить в «Читаю»
+    /// (если ещё нет), add=false — РЕАЛЬНО убрать из закладок (BookmarksStore.
+    /// remove — локально + запрос на сервер). Показывает соответствующий тост.
+    func setBookmark(_ add: Bool) {
+        if add {
+            if !BookmarksStore.shared.isBookmarked(slug: slug) {
+                BookmarksStore.shared.add(
+                    slug: slug,
+                    title: mangaTitle ?? slug,
+                    coverURL: coverURL,
+                    toFolder: BookmarkFolder.reading.id
+                )
+            }
+            showBookmarkToast("Добавлено в закладки")
+        } else {
+            BookmarksStore.shared.remove(slug: slug)
+            showBookmarkToast("Убрано из закладок")
         }
-        justAddedToReading = true
+    }
+
+    private func showBookmarkToast(_ text: String) {
+        bookmarkToast = text
         Task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            justAddedToReading = false
+            if bookmarkToast == text { bookmarkToast = nil }
         }
     }
 

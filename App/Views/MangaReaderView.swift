@@ -10,6 +10,9 @@ struct MangaReaderView: View {
     @State private var showUI = true
     @State private var showChapters = false
     @State private var showSettings = false
+    /// Залита ли кнопка-закладка белым (bookmark.fill). Локальное визуальное
+    /// состояние: тап переключает, переход на след. главу сбрасывает.
+    @State private var bookmarkFilled = false
 
     /// Режим вписывания: false — по высоте (вся страница), true — по ширине.
     /// Ключ теперь параметризован ТИПОМ тайтла (Манга/Манхва/...), а не общий
@@ -64,21 +67,7 @@ struct MangaReaderView: View {
             if showUI {
                 overlayUI.transition(.opacity)
             }
-
-            // Тост "Добавлено в закладки" — показывается независимо от showUI
-            // (пользователь мог как раз спрятать интерфейс, чтобы читать), см.
-            // ReaderViewModel.recordProgress/justAddedToReading.
-            if viewModel.justAddedToReading {
-                VStack {
-                    BookmarkAddedToast()
-                        .padding(.top, 12)
-                    Spacer()
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .allowsHitTesting(false)
-            }
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: viewModel.justAddedToReading)
         // Только НИЖНЯЯ safe area игнорируется (как в RootView.swift) — низ
         // safe area на Face ID экранах даёт ~34pt от истинного края из-за
         // home indicator, и .padding(.bottom, 20) у bottomBar раньше
@@ -94,7 +83,11 @@ struct MangaReaderView: View {
             if viewModel.pages.isEmpty { await viewModel.load() }
             preloadUpcoming(from: currentPage)
         }
-        .onChange(of: viewModel.currentIndex) { _, _ in currentPage = 0 }
+        .onChange(of: viewModel.currentIndex) { _, _ in
+            currentPage = 0
+            // На новой главе заливка закладки возвращается «как была».
+            withAnimation(.easeInOut(duration: 0.2)) { bookmarkFilled = false }
+        }
         .onChange(of: currentPage) { _, page in preloadUpcoming(from: page) }
         // Срабатывает и на первую загрузку страниц, и при переходе на
         // следующую главу (goTo → load() заново наполняет pages).
@@ -265,7 +258,23 @@ struct MangaReaderView: View {
     // как было раньше в общем HStack).
     private var topBar: some View {
         ZStack {
-            titleBadge
+            // Центр: обычно название тайтла. После нажатия на закладку название
+            // ПЛАВНО уходит (fade), а на его место сверху приезжает тост; через
+            // пару секунд тост так же уезжает вверх, и название возвращается.
+            ZStack {
+                if let toast = viewModel.bookmarkToast {
+                    BookmarkAddedToast(
+                        text: toast,
+                        systemImage: toast.localizedCaseInsensitiveContains("убрано")
+                            ? "bookmark.slash.fill" : "bookmark.fill"
+                    )
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                } else {
+                    titleBadge
+                        .transition(.opacity)
+                }
+            }
+            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: viewModel.bookmarkToast)
 
             HStack {
                 Button { dismiss() } label: {
@@ -335,9 +344,7 @@ struct MangaReaderView: View {
         HStack {
             readerButton(icon: "line.3.horizontal") { showChapters = true }
             Spacer()
-            readerButton(icon: "bookmark") {
-                viewModel.addBookmarkManually()
-            }
+            bookmarkButton
             Spacer()
             readerButton(icon: "gearshape") { showSettings = true }
         }
@@ -350,6 +357,25 @@ struct MangaReaderView: View {
             Image(systemName: icon)
                 .font(.system(size: 24, weight: .regular))
                 .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .glassEffect(.regular, in: Circle())
+                .contentShape(Circle())
+        }
+    }
+
+    /// Кнопка-закладка: тап заливает её белым (bookmark.fill) и добавляет тайтл;
+    /// повторный тап (когда уже белая) — убирает из закладок и обесцвечивает.
+    /// При переходе на след. главу заливка сбрасывается (см. onChange currentIndex).
+    private var bookmarkButton: some View {
+        Button {
+            let nowFilled = !bookmarkFilled
+            withAnimation(.easeInOut(duration: 0.2)) { bookmarkFilled = nowFilled }
+            viewModel.setBookmark(nowFilled)
+        } label: {
+            Image(systemName: bookmarkFilled ? "bookmark.fill" : "bookmark")
+                .font(.system(size: 24, weight: .regular))
+                .foregroundStyle(.white)
+                .contentTransition(.symbolEffect(.replace))
                 .frame(width: 56, height: 56)
                 .glassEffect(.regular, in: Circle())
                 .contentShape(Circle())
@@ -666,14 +692,17 @@ struct ZoomablePage: View {
 /// .transition в месте использования (MangaReaderView.body), сам по себе
 /// просто статичная плашка.
 struct BookmarkAddedToast: View {
+    var text: String = "Добавлено в закладки"
+    var systemImage: String = "bookmark.fill"
+
     var body: some View {
-        // Стеклянная капсула сверху — 1-в-1 стиль/положение тоста «Загрузка
-        // начата» (см. RootView.DownloadToast).
+        // Стеклянная капсула — 1-в-1 стиль/положение тоста «Загрузка начата»
+        // (см. RootView.DownloadToast).
         HStack(spacing: 8) {
-            Image(systemName: "bookmark.fill")
+            Image(systemName: systemImage)
                 .font(.footnote)
                 .foregroundStyle(Theme.accent)
-            Text("Добавлено в закладки")
+            Text(text)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.textPrimary)
         }

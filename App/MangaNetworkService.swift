@@ -486,6 +486,11 @@ final class MangaNetworkService {
             URLQueryItem(name: "fields[]", value: "releaseDate"),
             URLQueryItem(name: "fields[]", value: "views"),
             URLQueryItem(name: "fields[]", value: "background"),
+            // ПОДТВЕРЖДЕНО реальным перехватом запроса сайта (fields[]=otherNames,
+            // fields[]=eng_name → 200): альтернативные названия и английское имя
+            // для sheet по тапу на название (см. TitleNamesSheet / MangaDetail).
+            URLQueryItem(name: "fields[]", value: "otherNames"),
+            URLQueryItem(name: "fields[]", value: "eng_name"),
             // "moderated" — ПОДТВЕРЖДЕНО реальным перехваченным запросом (см.
             // MangaDetail.moderated) — нужно для проверки "главы удалены по
             // требованию правообладателя/РКН, либо тайтл на проверке".
