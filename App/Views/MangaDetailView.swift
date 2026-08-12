@@ -1177,29 +1177,41 @@ struct MangaDetailView: View {
             VStack(spacing: 0) {
                 ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
                     Button { readerChapter = chapter } label: {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 10) {
+                            // Слева: глазок → отметить прочитанными ДО этой главы.
+                            // Если глава уже в прочитанном прогрессе — значок
+                            // закладки, иначе глазок.
+                            Button { markReadUpTo(chapter) } label: {
+                                Image(systemName: isRead(chapter) ? "bookmark.fill" : "eye")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(isRead(chapter) ? Theme.accent : Theme.textSecondary)
+                                    .frame(width: 26, height: 30)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
                             Text(chapter.displayTitle)
                                 // Уменьшено ×1.2 (19.5 → ~16.25). Одна строка,
                                 // длинное название обрезается «…». Серый — если
                                 // тайтл качается/скачан, а ЭТА глава ещё не
-                                // докачана; белый — когда скачана (или тайтл вообще
-                                // не качали, тогда всё белое).
+                                // докачана; белый — когда скачана.
                                 .font(.system(size: 16.25))
                                 .foregroundStyle(chapterColor(chapter))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
+
                             Spacer(minLength: 8)
-                            // Дата выпуска главы (дд.мм.гггг), серым, тот же размер.
+
+                            // Дата выпуска главы (дд.мм.гггг), серым.
                             if let date = chapter.dateString {
                                 Text(date)
-                                    .font(.system(size: 16.25))
+                                    .font(.system(size: 13))
                                     .foregroundStyle(Theme.textSecondary)
                                     .lineLimit(1)
                             }
-                            if isRead(chapter) {
-                                Image(systemName: "checkmark").font(.caption).foregroundStyle(Theme.accent)
-                            }
-                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textSecondary)
+
+                            // Справа: значок скачивания → кружок прогресса → «…».
+                            chapterDownloadControl(chapter)
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
@@ -1263,6 +1275,86 @@ struct MangaDetailView: View {
     private func chapterColor(_ chapter: ChapterItem) -> Color {
         guard hasDownloadContext else { return Theme.textPrimary }
         return isDownloaded(chapter) ? Theme.textPrimary : Theme.textSecondary
+    }
+
+    /// Глазок слева: отметить прочитанными все главы ДО этой включительно
+    /// (прогресс чтения). Тайтл при этом добавляется в «Читаю», если его ещё
+    /// нет в закладках (иначе прогресс некуда писать).
+    private func markReadUpTo(_ chapter: ChapterItem) {
+        if !bookmarks.isBookmarked(slug: viewModel.slug) {
+            bookmarks.add(
+                slug: viewModel.slug, title: title,
+                coverURL: coverURL?.absoluteString ?? listItem?.coverURLString,
+                toFolder: BookmarkFolder.reading.id
+            )
+        }
+        let pos = viewModel.position(of: chapter)
+        bookmarks.setProgress(
+            slug: viewModel.slug,
+            chapterNumber: chapter.number, chapterVolume: chapter.volume,
+            readCount: pos, total: displayChapters.count
+        )
+    }
+
+    /// Контрол скачивания главы справа: серый значок «скачать» → кружок
+    /// прогресса (заливается зелёным по %) → «…» с меню (размер / скачать ещё
+    /// раз / удалить).
+    @ViewBuilder
+    private func chapterDownloadControl(_ chapter: ChapterItem) -> some View {
+        let slug = viewModel.slug
+        if downloads.isChapterDownloaded(slug: slug, chapterId: chapter.id) {
+            Menu {
+                Section("Размер: \(downloads.chapterSizeString(slug: slug, chapterId: chapter.id))") {
+                    Button { redownloadChapter(chapter) } label: {
+                        Label("Скачать ещё раз", systemImage: "arrow.clockwise")
+                    }
+                    Button(role: .destructive) {
+                        downloads.deleteChapter(slug: slug, chapterId: chapter.id)
+                    } label: {
+                        Label("Удалить", systemImage: "trash")
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 28, height: 30)
+                    .contentShape(Rectangle())
+            }
+        } else if let frac = downloads.chapterFraction(slug: slug, chapterId: chapter.id) {
+            ZStack {
+                Circle().stroke(Theme.separator, lineWidth: 2)
+                Circle().trim(from: 0, to: max(0.02, frac))
+                    .stroke(.green, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 20, height: 20)
+            .animation(.linear(duration: 0.15), value: frac)
+        } else {
+            Button { startChapterDownload(chapter) } label: {
+                Image(systemName: "arrow.down.to.line")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 28, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func startChapterDownload(_ chapter: ChapterItem) {
+        downloads.downloadChapter(
+            slug: viewModel.slug,
+            title: title,
+            typeLabel: viewModel.detail?.type?.label ?? listItem?.type?.label,
+            coverURLString: (viewModel.detail?.cover?.bestURL ?? coverURL ?? listItem?.cover?.bestURL)?.absoluteString,
+            chapter: chapter
+        )
+    }
+
+    private func redownloadChapter(_ chapter: ChapterItem) {
+        downloads.deleteChapter(slug: viewModel.slug, chapterId: chapter.id)
+        startChapterDownload(chapter)
     }
 
     // MARK: Tab «Комментарии»

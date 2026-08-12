@@ -71,10 +71,14 @@ final class DownloadsManager: ObservableObject {
     @Published private(set) var progress: [String: Progress] = [:]
     /// Текущий тост (nil — ничего не показываем). Наблюдается в RootView.
     @Published private(set) var banner: Banner?
+    /// Прогресс скачивания ОТДЕЛЬНОЙ главы (0…1), ключ "slug#chapterId". Есть
+    /// запись, пока глава качается; по завершении удаляется.
+    @Published private(set) var chapterProgress: [String: Double] = [:]
 
     private let fm = FileManager.default
     /// Активные задачи загрузки по slug — нужны, чтобы отменять скачивание.
     private var tasks: [String: Task<Void, Never>] = [:]
+    private var chapterTasks: [String: Task<Void, Never>] = [:]
 
     private init() { load() }
 
@@ -130,6 +134,105 @@ final class DownloadsManager: ObservableObject {
             self?.tasks[slug] = nil
         }
         tasks[slug] = task
+    }
+
+    // MARK: По-главное скачивание (отдельная глава)
+
+    func chapterKey(_ slug: String, _ id: Int) -> String { "\(slug)#\(id)" }
+
+    func isChapterDownloaded(slug: String, chapterId: Int) -> Bool {
+        titles.first(where: { $0.slug == slug })?.chapters.contains(where: { $0.id == chapterId }) ?? false
+    }
+
+    /// Прогресс скачивания главы 0…1, или nil если она сейчас не качается.
+    func chapterFraction(slug: String, chapterId: Int) -> Double? {
+        chapterProgress[chapterKey(slug, chapterId)]
+    }
+
+    /// Скачать ОДНУ главу (с прогрессом по %). Тайтл появляется/дополняется в
+    /// «Загрузках». Общая кнопка «Скачать тайтл» продолжает работать отдельно.
+    func downloadChapter(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapter: ChapterItem) {
+        let key = chapterKey(slug, chapter.id)
+        guard chapterProgress[key] == nil, !isChapterDownloaded(slug: slug, chapterId: chapter.id) else { return }
+        chapterProgress[key] = 0
+        let task = Task { [weak self] in
+            await self?.runChapter(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, chapter: chapter)
+            self?.chapterTasks[key] = nil
+        }
+        chapterTasks[key] = task
+    }
+
+    /// Удалить одну скачанную главу (если у тайтла не осталось глав — убираем и
+    /// сам тайтл из «Загрузок»).
+    func deleteChapter(slug: String, chapterId: Int) {
+        let key = chapterKey(slug, chapterId)
+        chapterTasks[key]?.cancel()
+        chapterTasks[key] = nil
+        chapterProgress[key] = nil
+        try? fm.removeItem(at: titleDir(slug).appendingPathComponent("\(chapterId)", isDirectory: true))
+        if let idx = titles.firstIndex(where: { $0.slug == slug }) {
+            titles[idx].chapters.removeAll { $0.id == chapterId }
+            if titles[idx].chapters.isEmpty {
+                titles.remove(at: idx)
+                try? fm.removeItem(at: titleDir(slug))
+            }
+            save()
+        }
+    }
+
+    /// Человекочитаемый размер скачанной главы на диске (напр. «12,3 МБ»).
+    func chapterSizeString(slug: String, chapterId: Int) -> String {
+        let dir = titleDir(slug).appendingPathComponent("\(chapterId)", isDirectory: true)
+        let bytes = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey]))?
+            .reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) } ?? 0
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private func runChapter(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapter: ChapterItem) async {
+        let key = chapterKey(slug, chapter.id)
+        try? fm.createDirectory(at: titleDir(slug), withIntermediateDirectories: true)
+
+        // Заводим запись тайтла, если её ещё нет (+ обложку для оффлайна).
+        if !titles.contains(where: { $0.slug == slug }) {
+            upsertTitle(DownloadedTitle(slug: slug, title: title, typeLabel: typeLabel,
+                                        coverURLString: coverURLString, chapters: [], addedAt: Date()))
+            if let coverURLString, let url = URL(string: coverURLString),
+               let data = await Self.fetchData([url]) {
+                try? data.write(to: titleDir(slug).appendingPathComponent("cover.jpg"))
+            }
+        }
+
+        let dir = titleDir(slug).appendingPathComponent("\(chapter.id)", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        guard let result = try? await MangaNetworkService.shared.fetchPages(
+            slug: slug, volume: chapter.volume, number: chapter.number, branchId: chapter.primaryBranchId
+        ), !result.pages.isEmpty else {
+            chapterProgress[key] = nil
+            return
+        }
+
+        let total = result.pages.count
+        var saved = 0
+        for (idx, page) in result.pages.enumerated() {
+            if Task.isCancelled { chapterProgress[key] = nil; return }
+            let candidates = MangaImageURL.pageURLs(for: page)
+            if !candidates.isEmpty, let data = await Self.fetchData(candidates) {
+                let ext = (candidates.first?.pathExtension).flatMap { $0.isEmpty ? nil : $0 } ?? "jpg"
+                try? data.write(to: dir.appendingPathComponent(String(format: "%03d.%@", idx, ext)))
+                saved += 1
+            }
+            chapterProgress[key] = Double(idx + 1) / Double(total)
+        }
+
+        if saved > 0 {
+            appendChapter(
+                DownloadedChapter(id: chapter.id, volume: chapter.volume,
+                                  number: chapter.number, name: chapter.name, pageCount: saved),
+                toSlug: slug
+            )
+        }
+        chapterProgress[key] = nil
     }
 
     /// Отменить активную загрузку (то же, что удалить — недокачанное
