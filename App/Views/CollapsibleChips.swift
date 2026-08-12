@@ -14,6 +14,9 @@ struct CollapsibleChips: View {
     struct Item {
         let text: String
         var tint: Color? = nil
+        /// Действие по тапу (напр. открыть каталог по этому жанру/тегу). nil —
+        /// чип некликабельный, как раньше.
+        var onTap: (() -> Void)? = nil
     }
 
     let items: [Item]
@@ -35,7 +38,7 @@ struct CollapsibleChips: View {
     @State private var expanded = false
     @State private var totalHeight: CGFloat = 0
 
-    private struct Chip: Identifiable { let id: Int; let text: String; let toggle: Bool; let tint: Color? }
+    private struct Chip: Identifiable { let id: Int; let text: String; let toggle: Bool; let tint: Color?; let onTap: (() -> Void)? }
 
     private static let font = UIFont.preferredFont(forTextStyle: .caption1)
     // Горизонтальный паддинг чипа (12+12) + зазор до следующего (8) — те же
@@ -82,12 +85,12 @@ struct CollapsibleChips: View {
 
     private func chips(collapsedVisible: Int) -> [Chip] {
         let visible = expanded ? items : Array(items.prefix(collapsedVisible))
-        var result = visible.enumerated().map { Chip(id: $0.offset, text: $0.element.text, toggle: false, tint: $0.element.tint) }
+        var result = visible.enumerated().map { Chip(id: $0.offset, text: $0.element.text, toggle: false, tint: $0.element.tint, onTap: $0.element.onTap) }
         let hidden = items.count - visible.count
         if !expanded && hidden > 0 {
-            result.append(Chip(id: -1, text: "+еще \(hidden)", toggle: true, tint: nil))
+            result.append(Chip(id: -1, text: "+еще \(hidden)", toggle: true, tint: nil, onTap: nil))
         } else if expanded && items.count > collapsedVisible {
-            result.append(Chip(id: -2, text: "свернуть", toggle: true, tint: nil))
+            result.append(Chip(id: -2, text: "свернуть", toggle: true, tint: nil, onTap: nil))
         }
         return result
     }
@@ -148,6 +151,9 @@ struct CollapsibleChips: View {
                     withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
                 } label: { content }
                 .buttonStyle(.plain)
+            } else if let onTap = chip.onTap {
+                Button(action: onTap) { content }
+                    .buttonStyle(.plain)
             } else {
                 content
             }

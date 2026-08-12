@@ -6,6 +6,9 @@ struct MangaCatalogView: View {
     @StateObject private var viewModel = CatalogViewModel()
     @State private var showFilters = false
     @FocusState private var searchFocused: Bool
+    /// Путь навигации — нужен, чтобы при тапе по жанру/тегу в уже открытой
+    /// карточке вернуться к корню каталога (см. onReceive switchRequest).
+    @State private var navPath = NavigationPath()
 
     // Схлопывание шапки при скролле: вниз — заголовок и Фильтры/Сортировка
     // прячутся, поиск занимает их место; вверх (хоть чуть-чуть) — всё возвращается.
@@ -21,7 +24,7 @@ struct MangaCatalogView: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navPath) {
             ZStack {
                 Theme.background.ignoresSafeArea()
 
@@ -94,9 +97,11 @@ struct MangaCatalogView: View {
         }
         .tint(Theme.accent)
         .onAppear {
-            // Пришли из меню «Тайтлы» с выбранным типом — применяем его фильтром
-            // (обычный каталог с фильтром), иначе обычная первичная загрузка.
-            if let typeId = CatalogNavigator.shared.pendingTypeId {
+            // Пришли из карточки (жанр/тег — готовый фильтр) или из меню «Тайтлы»
+            // (тип) — применяем фильтром; иначе обычная первичная загрузка.
+            if applyPendingFilter(popToRoot: false) {
+                // применили готовый фильтр (жанр/тег)
+            } else if let typeId = CatalogNavigator.shared.pendingTypeId {
                 CatalogNavigator.shared.pendingTypeId = nil
                 ConstantsStore.shared.loadIfNeeded()
                 var f = MangaFilter()
@@ -106,6 +111,25 @@ struct MangaCatalogView: View {
                 viewModel.loadInitialIfNeeded()
             }
         }
+        // Случай, когда карточка открыта из САМОГО Каталога: вкладка не
+        // пересоздаётся, поэтому onAppear не сработает — ловим сигнал и
+        // возвращаемся к корню каталога с применённым фильтром.
+        .onReceive(CatalogNavigator.shared.$switchRequest) { _ in
+            _ = applyPendingFilter(popToRoot: true)
+        }
+    }
+
+    /// Применяет отложенный фильтр из CatalogNavigator (жанр/тег из карточки),
+    /// если он есть. popToRoot — сперва вернуться к корню каталога (карточка
+    /// была открыта из самого каталога). true — фильтр применён.
+    @discardableResult
+    private func applyPendingFilter(popToRoot: Bool) -> Bool {
+        guard let f = CatalogNavigator.shared.pendingFilter else { return false }
+        CatalogNavigator.shared.pendingFilter = nil
+        ConstantsStore.shared.loadIfNeeded()
+        if popToRoot { navPath = NavigationPath() }
+        viewModel.apply(filter: f)
+        return true
     }
 
     // MARK: Шапка (без общей подложки)

@@ -735,19 +735,65 @@ struct MangaDetail: Decodable, Identifiable {
 
 // MARK: - Chapter
 
-/// Ветка перевода (сканлейт-команда) внутри главы.
+/// Команда перевода (сканлейт-тим) — ПОДТВЕРЖДЕНО перехватом ветки:
+/// `{id, slug, slug_url, model:"team", name:"May Days", cover:{thumbnail,default,md}}`.
+/// cover — аватар команды (у некоторых плейсхолдер user_avatar.png).
+struct ChapterTeam: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let cover: MangaCover?
+    var avatarURL: URL? { cover?.bestURL }
+    enum CodingKeys: String, CodingKey { case id, name, cover }
+}
+
+/// Кто залил ветку — `{username, id}`. Запасная подпись, если у ветки нет team.
+struct BranchUser: Decodable, Hashable {
+    let id: Int
+    let username: String
+}
+
+/// Ветка перевода (одна команда) внутри главы.
 struct ChapterBranch: Decodable, Identifiable, Hashable {
     let id: Int?
     let branchId: Int?
-    let teams: [NamedEntity]?
+    let teams: [ChapterTeam]?
+    let user: BranchUser?
+    /// Дата публикации ветки — ПОДТВЕРЖДЕНО перехватом: у главы даты нет, она
+    /// лежит здесь ("created_at":"2022-08-12T18:49:13.000000Z").
+    let createdAt: String?
 
     /// Стабильный идентификатор для SwiftUI (id может быть nil).
     var identity: Int { id ?? branchId ?? 0 }
     var idValue: Int { identity }
 
+    /// Подпись ветки: имя команды, иначе — ник заливавшего.
+    var teamName: String { teams?.first?.name ?? user?.username ?? "Неизвестно" }
+    var teamId: Int? { teams?.first?.id }
+    var teamAvatarURL: URL? { teams?.first?.avatarURL }
+
+    /// Дата ветки в формате «дд.мм.гггг».
+    var dateString: String? {
+        guard let createdAt, createdAt.count >= 10 else { return nil }
+        let d = String(createdAt.prefix(10))
+        let parts = d.split(separator: "-")
+        guard parts.count == 3 else { return nil }
+        return "\(parts[2]).\(parts[1]).\(parts[0])"
+    }
+
     enum CodingKeys: String, CodingKey {
-        case id, teams
+        case id, teams, user
         case branchId = "branch_id"
+        case createdAt = "created_at"
+    }
+
+    /// Локальная сборка (для оффлайна / реконструкции из manifest).
+    init(id: Int? = nil, branchId: Int?, teams: [ChapterTeam]? = nil,
+         user: BranchUser? = nil, createdAt: String? = nil) {
+        self.id = id
+        self.branchId = branchId
+        self.teams = teams
+        self.user = user
+        self.createdAt = createdAt
     }
 
     static func == (lhs: ChapterBranch, rhs: ChapterBranch) -> Bool { lhs.identity == rhs.identity }
@@ -775,13 +821,22 @@ struct ChapterItem: Decodable, Identifiable, Hashable {
     /// Название главы (или короткий заголовок, если пусто).
     var titleOrShort: String { (name?.isEmpty == false) ? name! : shortTitle }
 
-    /// Дата в формате «дд.мм.гггг» из created_at (ISO).
+    /// ISO-дата выпуска главы: сперва верхнеуровневый created_at (если вдруг
+    /// есть), иначе — САМАЯ РАННЯЯ ветка перевода (branches[].created_at). Строки
+    /// ISO8601 сортируются лексикографически = хронологически, поэтому min = самая
+    /// ранняя публикация. Подтверждено перехватом: у главы даты нет, она в ветках.
+    var releaseDateISO: String? {
+        if let createdAt, !createdAt.isEmpty { return createdAt }
+        return (branches ?? []).compactMap { $0.createdAt }.filter { !$0.isEmpty }.min()
+    }
+
+    /// Дата в формате «дд.мм.гггг».
     var dateString: String? {
-        guard let createdAt, createdAt.count >= 10 else { return nil }
-        let d = String(createdAt.prefix(10))         // 2017-12-14
+        guard let iso = releaseDateISO, iso.count >= 10 else { return nil }
+        let d = String(iso.prefix(10))               // 2022-08-12
         let parts = d.split(separator: "-")
         guard parts.count == 3 else { return nil }
-        return "\(parts[2]).\(parts[1]).\(parts[0])"  // 14.12.2017
+        return "\(parts[2]).\(parts[1]).\(parts[0])"  // 12.08.2022
     }
 
     /// Первый доступный branch_id (нужен для запроса страниц, если веток несколько).

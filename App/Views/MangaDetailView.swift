@@ -17,12 +17,7 @@ struct MangaDetailView: View {
     /// Показ sheet со всеми названиями тайтла (по тапу на название в шапке) —
     /// см. TitleNamesSheet.
     @State private var showTitleNames = false
-    /// Раскрыто ли меню "..." (три точки справа сверху в шапке) — своё
-    /// кастомное выпадающее меню, а не системное Menu: нужно, чтобы пункт
-    /// «Скачать тайтл» был ЗЕЛЁНЫМ (системное контекстное меню iOS не даёт
-    /// красить отдельные пункты в произвольный цвет).
-    @State private var showActionMenu = false
-    /// Sheet «Скачать тайтл» (заглушка) — см. DownloadTitleSheet.
+    /// Sheet «Скачать тайтл» — см. DownloadTitleSheet.
     @State private var showDownloadSheet = false
     /// URL тайтла для «Поделиться» (см. actionMenu) — обычная ссылка на
     /// страницу тайтла на активном сайте.
@@ -36,7 +31,14 @@ struct MangaDetailView: View {
     /// "Комментарии", а не гасит одно и зажигает другое.
     @Namespace private var tabIndicator
     @State private var showAddToFolder = false
-    @State private var readerChapter: ChapterItem?
+    /// Открытие ридера: глава + выбранная ветка (команда). branchId nil —
+    /// первая ветка главы.
+    private struct ReaderOpen: Identifiable {
+        let id = UUID()
+        let chapter: ChapterItem
+        let branchId: Int?
+    }
+    @State private var readerOpen: ReaderOpen?
     @State private var commentDraft = ""
     @State private var showLoginForComment = false
 
@@ -163,8 +165,8 @@ struct MangaDetailView: View {
                 rating: (viewModel.detail?.rating ?? listItem?.rating)?.value
             )
         }
-        .fullScreenCover(item: $readerChapter) { chapter in
-            readerView(for: chapter)
+        .fullScreenCover(item: $readerOpen) { open in
+            readerView(for: open.chapter, branchId: open.branchId)
         }
         .sheet(isPresented: $showLoginForComment) { LoginView() }
         .sheet(isPresented: $showLoginForSimilarVote) { LoginView() }
@@ -188,8 +190,6 @@ struct MangaDetailView: View {
             // Открывается сразу до верха.
             .presentationDetents([.large])
         }
-        // Кастомное меню "..." поверх всего экрана (см. actionMenuOverlay).
-        .overlay { actionMenuOverlay }
         // Жест «назад» свайпом из левой половины экрана (системный интерактивный
         // переход — во время свайпа виден предыдущий экран). См.
         // InteractivePopGesture. Только на карточке тайтла.
@@ -295,7 +295,6 @@ struct MangaDetailView: View {
                 .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
                 .overlay(alignment: .topLeading) { bookmarkStatusBadge }
                 .overlay(alignment: .topTrailing) { coverRatingBadge }
-                .overlay(alignment: .bottomLeading) { coverStatsBadge }
 
                 titleBlockOverlay
             }
@@ -393,10 +392,19 @@ struct MangaDetailView: View {
             .padding(.top, 54) // ниже статус-бара, баннер уходит под него целиком
         }
         .overlay(alignment: .topTrailing) {
-            // Кнопка "..." — зеркало кнопки "назад" слева, тот же стеклянный
-            // круг. Тап разворачивает кастомное меню действий (см. actionMenu).
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) { showActionMenu.toggle() }
+            // Кнопка "..." — стандартное системное Menu (стеклянный список iOS
+            // по умолчанию), как попросили. Стеклянный круг вокруг иконки — как
+            // у кнопки "назад" слева.
+            Menu {
+                if let shareURL {
+                    ShareLink(item: shareURL) {
+                        Label("Поделиться", systemImage: "square.and.arrow.up")
+                    }
+                }
+                Button { /* ЗАГЛУШКА */ } label: { Label("Редактирование глав", systemImage: "square.and.pencil") }
+                Button { /* ЗАГЛУШКА */ } label: { Label("Добавить главы", systemImage: "plus") }
+                Button { /* ЗАГЛУШКА */ } label: { Label("Редактирование тайтла", systemImage: "pencil") }
+                Button { showDownloadSheet = true } label: { Label("Скачать тайтл", systemImage: "arrow.down.circle") }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 17, weight: .semibold))
@@ -407,86 +415,6 @@ struct MangaDetailView: View {
             .padding(.trailing, 16)
             .padding(.top, 54)
         }
-    }
-
-    // MARK: Меню действий "..." (кастомное выпадающее)
-
-    /// Полупрозрачный слой на весь экран + сама карточка меню в правом верхнем
-    /// углу. Своё меню (а не системное Menu) — чтобы «Скачать тайтл» был
-    /// зелёным. Тап мимо карточки закрывает меню.
-    @ViewBuilder
-    private var actionMenuOverlay: some View {
-        if showActionMenu {
-            ZStack(alignment: .topTrailing) {
-                Color.black.opacity(0.001)
-                    .ignoresSafeArea()
-                    .onTapGesture { withAnimation(.easeInOut(duration: 0.18)) { showActionMenu = false } }
-
-                actionMenuCard
-                    .padding(.trailing, 16)
-                    .padding(.top, 96) // сразу под кнопкой "..."
-            }
-            .transition(.opacity)
-        }
-    }
-
-    private var actionMenuCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // «Поделиться» — системный share sheet (внутри есть «Скопировать»,
-            // т.е. копирование ссылки — тоже отсюда).
-            if let shareURL {
-                ShareLink(item: shareURL) {
-                    actionMenuRowLabel("Поделиться", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(.plain)
-                .simultaneousGesture(TapGesture().onEnded { showActionMenu = false })
-            }
-
-            actionMenuDivider
-            actionMenuButton("Редактирование глав", systemImage: "square.and.pencil") { /* ЗАГЛУШКА */ }
-            actionMenuDivider
-            actionMenuButton("Добавить главы", systemImage: "plus") { /* ЗАГЛУШКА */ }
-            actionMenuDivider
-            actionMenuButton("Редактирование тайтла", systemImage: "pencil") { /* ЗАГЛУШКА */ }
-            actionMenuDivider
-            // Зелёным (иконка + текст) — как попросили.
-            actionMenuButton("Скачать тайтл", systemImage: "arrow.down.circle", tint: .green) {
-                showDownloadSheet = true
-            }
-        }
-        .frame(width: 250)
-        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.separator, lineWidth: 1))
-        .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
-    }
-
-    private var actionMenuDivider: some View {
-        Divider().overlay(Theme.separator)
-    }
-
-    private func actionMenuButton(_ title: String, systemImage: String, tint: Color? = nil, action: @escaping () -> Void) -> some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.18)) { showActionMenu = false }
-            action()
-        } label: {
-            actionMenuRowLabel(title, systemImage: systemImage, tint: tint)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func actionMenuRowLabel(_ title: String, systemImage: String, tint: Color? = nil) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16))
-                .frame(width: 22)
-            Text(title)
-                .font(.subheadline)
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(tint ?? Theme.textPrimary)
-        .padding(.horizontal, 14)
-        .frame(height: 46)
-        .contentShape(Rectangle())
     }
 
     /// titleBlock с отступом справа — вынесено отдельно от heroHeader просто
@@ -523,36 +451,36 @@ struct MangaDetailView: View {
     /// Рейтинг поверх обложки тайтла — единый бэйдж (см. RatingChip), тот же
     /// стиль/цвет, что и на карточках каталога и в закладках. Сверху справа
     /// (было снизу справа) — как явно попросили.
-    private var coverRatingBadge: some View {
-        // Те же метрики, что у bookmarkStatusBadge (шрифт 9, h6/v3) — чтобы
-        // оценка справа была ОДИНАКОВОЙ высоты с бейджем статуса слева.
-        RatingChip(
-            rating: (viewModel.detail?.rating ?? listItem?.rating)?.value,
-            fontSize: 9, horizontalPadding: 6, verticalPadding: 3
-        )
-    }
-
-    /// Бейдж «оценка / просмотры» снизу слева обложки (напр. «6.2 / 2.43K»).
-    /// Верхний бейдж оценки при этом остаётся (по просьбе — оба).
+    /// Верхний правый бейдж обложки: ★ + оценка + просмотры (коротко, K/M).
+    /// Звёздочка перед оценкой, просмотры перенесены сюда (нижний-левый бейдж
+    /// удалён) — как попросили.
     @ViewBuilder
-    private var coverStatsBadge: some View {
+    private var coverRatingBadge: some View {
         let rating = (viewModel.detail?.rating ?? listItem?.rating)?.value
         let views = viewModel.detail?.views
-        let parts: [String] = {
-            var p: [String] = []
-            if let rating, rating > 0 { p.append(String(format: "%.1f", rating)) }
-            if let views, views > 0 { p.append(Self.shortCount(views)) }
-            return p
-        }()
-        if !parts.isEmpty {
-            Text(parts.joined(separator: " / "))
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(.black.opacity(0.55), in: Capsule())
-                .padding(6)
+        let hasRating = (rating ?? 0) > 0
+        let hasViews = (views ?? 0) > 0
+        if hasRating || hasViews {
+            HStack(spacing: 4) {
+                if hasRating, let rating {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.yellow)
+                    Text(String(format: "%.1f", rating))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                if hasViews, let views {
+                    Text(Self.shortCount(views))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(.black.opacity(0.55), in: Capsule())
+            .padding(6)
         }
     }
 
@@ -990,7 +918,7 @@ struct MangaDetailView: View {
 
     private func readerLink(chapter: ChapterItem, label: String) -> some View {
         Button {
-            readerChapter = chapter
+            readerOpen = ReaderOpen(chapter: chapter, branchId: nil)
         } label: {
             Text(label)
                 .frame(maxWidth: .infinity, minHeight: 44)
@@ -999,7 +927,7 @@ struct MangaDetailView: View {
         .tint(Theme.accent)
     }
 
-    private func readerView(for chapter: ChapterItem) -> some View {
+    private func readerView(for chapter: ChapterItem, branchId: Int?) -> some View {
         let chapters = displayChapters
         return MangaReaderView(
             slug: viewModel.slug,
@@ -1012,7 +940,8 @@ struct MangaDetailView: View {
             // Тип тайтла (Манга/Манхва/...) — определяет дефолт вписывания
             // страницы в читалке (см. MangaReaderView.defaultFitWidth).
             mangaTypeName: viewModel.detail?.type?.label ?? listItem?.type?.label,
-            coverURL: coverURL?.absoluteString ?? listItem?.coverURLString
+            coverURL: coverURL?.absoluteString ?? listItem?.coverURLString,
+            preferredBranchId: branchId
         )
     }
 
@@ -1104,10 +1033,21 @@ struct MangaDetailView: View {
             // чипами (без префикса), затем теги, каждый с "#" (как хештег) —
             // как попросили. Возрастной рейтинг (ageRatingChip) по-прежнему
             // самым первым, если это 18+/16+.
-            let genres = sortedNames(viewModel.detail?.genres)
-            let tags = sortedNames(viewModel.detail?.tags)
-            let genreItems = genres.map { CollapsibleChips.Item(text: $0) }
-            let tagItems = tags.map { CollapsibleChips.Item(text: "# \($0)") }
+            // Каждый жанр/тег кликабельный: тап открывает Каталог с фильтром по
+            // нему (см. CatalogNavigator). Сортируем сущности по имени, сохраняя
+            // их id для фильтра.
+            let genreEntities = (viewModel.detail?.genres ?? []).sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+            let tagEntities = (viewModel.detail?.tags ?? []).sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+            let genreItems = genreEntities.map { g in
+                CollapsibleChips.Item(text: g.name, onTap: {
+                    CatalogNavigator.shared.openCatalog(filter: CatalogNavigator.genreFilter(id: g.id))
+                })
+            }
+            let tagItems = tagEntities.map { t in
+                CollapsibleChips.Item(text: "# \(t.name)", onTap: {
+                    CatalogNavigator.shared.openCatalog(filter: CatalogNavigator.tagFilter(id: t.id))
+                })
+            }
             let chipItems = [ageRatingChip].compactMap { $0 } + genreItems + tagItems
             if !chipItems.isEmpty {
                 blockTitle("Жанры и теги")
@@ -1161,6 +1101,18 @@ struct MangaDetailView: View {
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         } else {
             VStack(alignment: .leading, spacing: 12) {
+                // Команды перевода тайтла — чипы сверху (аватар + имя + колокол).
+                let teams = allTeams
+                if !teams.isEmpty {
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 10) {
+                            ForEach(teams) { teamChip($0) }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+                    .scrollIndicators(.hidden)
+                }
+
                 // Пока идёт скачивание — показываем прогресс над списком.
                 if let p = activeDownloadProgress {
                     HStack(spacing: 10) {
@@ -1173,60 +1125,182 @@ struct MangaDetailView: View {
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
 
-            // Плоская подложка со всеми главами вместо стеклянной карточки.
-            VStack(spacing: 0) {
-                ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
-                    Button { readerChapter = chapter } label: {
-                        HStack(spacing: 10) {
-                            // Слева: глазок → отметить прочитанными ДО этой главы.
-                            // Если глава уже в прочитанном прогрессе — значок
-                            // закладки, иначе глазок.
-                            Button { markReadUpTo(chapter) } label: {
-                                Image(systemName: isRead(chapter) ? "bookmark.fill" : "eye")
-                                    .font(.system(size: 15))
-                                    .foregroundStyle(isRead(chapter) ? Theme.accent : Theme.textSecondary)
-                                    .frame(width: 26, height: 30)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-
-                            Text(chapter.displayTitle)
-                                // Уменьшено ×1.2 (19.5 → ~16.25). Одна строка,
-                                // длинное название обрезается «…». Серый — если
-                                // тайтл качается/скачан, а ЭТА глава ещё не
-                                // докачана; белый — когда скачана.
-                                .font(.system(size: 16.25))
-                                .foregroundStyle(chapterColor(chapter))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-
-                            Spacer(minLength: 8)
-
-                            // Дата выпуска главы (дд.мм.гггг), серым.
-                            if let date = chapter.dateString {
-                                Text(date)
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .lineLimit(1)
-                            }
-
-                            // Справа: значок скачивания → кружок прогресса → «…».
-                            chapterDownloadControl(chapter)
+                VStack(spacing: 0) {
+                    ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+                        chapterBlock(chapter)
+                        if index < chapters.count - 1 {
+                            Divider().overlay(Theme.separator).padding(.leading, 14)
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
-                    if index < chapters.count - 1 {
-                        Divider().overlay(Theme.separator).padding(.leading, 14)
                     }
                 }
-            }
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
+    }
+
+    /// Уникальные команды перевода по всем главам (для чипов сверху).
+    private var allTeams: [ChapterTeam] {
+        var seen = Set<Int>()
+        var result: [ChapterTeam] = []
+        for ch in displayChapters {
+            for b in ch.branches ?? [] {
+                for t in b.teams ?? [] where !seen.contains(t.id) {
+                    seen.insert(t.id)
+                    result.append(t)
+                }
+            }
+        }
+        return result
+    }
+
+    private func teamChip(_ team: ChapterTeam) -> some View {
+        HStack(spacing: 8) {
+            RemoteImage(url: team.avatarURL) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                Circle().fill(Theme.surface)
+            }
+            .frame(width: 28, height: 28)
+            .clipShape(Circle())
+
+            Text(team.name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+
+            // Колокольчик — подписка на уведомления команды (ЗАГЛУШКА, API позже).
+            Image(systemName: "bell")
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Theme.surfaceElevated, in: Capsule())
+    }
+
+    /// Блок одной главы: если у неё ≥2 веток (команд) — заголовок + под-строки
+    /// по каждой ветке (команда/дата/скачать), как на сайте; иначе компактная
+    /// строка (одна ветка/офлайн).
+    @ViewBuilder
+    private func chapterBlock(_ chapter: ChapterItem) -> some View {
+        let branches = chapter.branches ?? []
+        if branches.count >= 2 {
+            VStack(alignment: .leading, spacing: 0) {
+                chapterHeaderRow(chapter)
+                ForEach(branches) { branch in
+                    branchRow(chapter, branch)
+                }
+                Spacer().frame(height: 6)
+            }
+        } else {
+            compactChapterRow(chapter, branchId: branches.first?.branchId)
+        }
+    }
+
+    /// Заголовок главы (глазок + название) — без скачивания, оно у веток.
+    private func chapterHeaderRow(_ chapter: ChapterItem) -> some View {
+        HStack(spacing: 10) {
+            Button { markReadUpTo(chapter) } label: {
+                Image(systemName: isRead(chapter) ? "bookmark.fill" : "eye")
+                    .font(.system(size: 15))
+                    .foregroundStyle(isRead(chapter) ? Theme.accent : Theme.textSecondary)
+                    .frame(width: 26, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Text(chapter.displayTitle)
+                .font(.system(size: 14))
+                .foregroundStyle(chapterColor(chapter))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    /// Под-строка ветки (команды): отступ-«дерево» + аватар + имя + дата + скачать.
+    /// Тап читает именно эту ветку.
+    private func branchRow(_ chapter: ChapterItem, _ branch: ChapterBranch) -> some View {
+        Button {
+            readerOpen = ReaderOpen(chapter: chapter, branchId: branch.branchId)
+        } label: {
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Theme.separator)
+                    .frame(width: 2, height: 20)
+                    .padding(.leading, 22)
+
+                RemoteImage(url: branch.teamAvatarURL) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Circle().fill(Theme.surfaceElevated)
+                }
+                .frame(width: 22, height: 22)
+                .clipShape(Circle())
+
+                Text(branch.teamName)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                if let date = branch.dateString {
+                    Text(date)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
+
+                chapterDownloadControl(chapter, branchId: branch.branchId)
+            }
+            .padding(.trailing, 14)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Компактная строка главы (одна ветка/офлайн): глазок + название + дата + скачать.
+    private func compactChapterRow(_ chapter: ChapterItem, branchId: Int?) -> some View {
+        Button {
+            readerOpen = ReaderOpen(chapter: chapter, branchId: branchId)
+        } label: {
+            HStack(spacing: 10) {
+                Button { markReadUpTo(chapter) } label: {
+                    Image(systemName: isRead(chapter) ? "bookmark.fill" : "eye")
+                        .font(.system(size: 15))
+                        .foregroundStyle(isRead(chapter) ? Theme.accent : Theme.textSecondary)
+                        .frame(width: 26, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Text(chapter.displayTitle)
+                    .font(.system(size: 14))
+                    .foregroundStyle(chapterColor(chapter))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 8)
+
+                if let date = chapter.dateString {
+                    Text(date)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
+
+                chapterDownloadControl(chapter, branchId: branchId)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func isRead(_ chapter: ChapterItem) -> Bool {
@@ -1300,16 +1374,16 @@ struct MangaDetailView: View {
     /// прогресса (заливается зелёным по %) → «…» с меню (размер / скачать ещё
     /// раз / удалить).
     @ViewBuilder
-    private func chapterDownloadControl(_ chapter: ChapterItem) -> some View {
+    private func chapterDownloadControl(_ chapter: ChapterItem, branchId: Int?) -> some View {
         let slug = viewModel.slug
-        if downloads.isChapterDownloaded(slug: slug, chapterId: chapter.id) {
+        if downloads.isChapterDownloaded(slug: slug, chapterId: chapter.id, branchId: branchId) {
             Menu {
-                Section("Размер: \(downloads.chapterSizeString(slug: slug, chapterId: chapter.id))") {
-                    Button { redownloadChapter(chapter) } label: {
+                Section("Размер: \(downloads.chapterSizeString(slug: slug, chapterId: chapter.id, branchId: branchId))") {
+                    Button { redownloadChapter(chapter, branchId: branchId) } label: {
                         Label("Скачать ещё раз", systemImage: "arrow.clockwise")
                     }
                     Button(role: .destructive) {
-                        downloads.deleteChapter(slug: slug, chapterId: chapter.id)
+                        downloads.deleteChapter(slug: slug, chapterId: chapter.id, branchId: branchId)
                     } label: {
                         Label("Удалить", systemImage: "trash")
                     }
@@ -1321,7 +1395,7 @@ struct MangaDetailView: View {
                     .frame(width: 28, height: 30)
                     .contentShape(Rectangle())
             }
-        } else if let frac = downloads.chapterFraction(slug: slug, chapterId: chapter.id) {
+        } else if let frac = downloads.chapterFraction(slug: slug, chapterId: chapter.id, branchId: branchId) {
             ZStack {
                 Circle().stroke(Theme.separator, lineWidth: 2)
                 Circle().trim(from: 0, to: max(0.02, frac))
@@ -1331,7 +1405,7 @@ struct MangaDetailView: View {
             .frame(width: 20, height: 20)
             .animation(.linear(duration: 0.15), value: frac)
         } else {
-            Button { startChapterDownload(chapter) } label: {
+            Button { startChapterDownload(chapter, branchId: branchId) } label: {
                 Image(systemName: "arrow.down.to.line")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.textSecondary)
@@ -1342,19 +1416,20 @@ struct MangaDetailView: View {
         }
     }
 
-    private func startChapterDownload(_ chapter: ChapterItem) {
+    private func startChapterDownload(_ chapter: ChapterItem, branchId: Int?) {
         downloads.downloadChapter(
             slug: viewModel.slug,
             title: title,
             typeLabel: viewModel.detail?.type?.label ?? listItem?.type?.label,
             coverURLString: (viewModel.detail?.cover?.bestURL ?? coverURL ?? listItem?.cover?.bestURL)?.absoluteString,
-            chapter: chapter
+            chapter: chapter,
+            branchId: branchId
         )
     }
 
-    private func redownloadChapter(_ chapter: ChapterItem) {
-        downloads.deleteChapter(slug: viewModel.slug, chapterId: chapter.id)
-        startChapterDownload(chapter)
+    private func redownloadChapter(_ chapter: ChapterItem, branchId: Int?) {
+        downloads.deleteChapter(slug: viewModel.slug, chapterId: chapter.id, branchId: branchId)
+        startChapterDownload(chapter, branchId: branchId)
     }
 
     // MARK: Tab «Комментарии»

@@ -11,6 +11,9 @@ struct DownloadedChapter: Codable, Identifiable, Hashable {
     let number: String
     let name: String?
     var pageCount: Int
+    /// Ветка (команда), чьи страницы скачаны — у одной главы могут быть разные
+    /// переводы. nil у старых записей (до появления веток).
+    var branchId: Int?
 
     var displayTitle: String {
         var parts = ["Том \(volume)", "Глава \(number)"]
@@ -29,10 +32,18 @@ struct DownloadedTitle: Codable, Identifiable, Hashable {
     var chapters: [DownloadedChapter]
     var addedAt: Date
 
-    /// Скачанные главы в виде ChapterItem — для передачи в оффлайн-ридер
-    /// (branch_id не нужен: страницы читаются из локальных файлов по id главы).
+    /// Скачанные главы в виде ChapterItem — для оффлайн-ридера. Дедуп по id
+    /// (если одна глава скачана в нескольких ветках — берём первую). Ветку
+    /// прокидываем через branches, чтобы оффлайн-ридер нашёл нужную папку.
     var chapterItems: [ChapterItem] {
-        chapters.map { ChapterItem(id: $0.id, volume: $0.volume, number: $0.number, name: $0.name) }
+        var seen = Set<Int>()
+        var result: [ChapterItem] = []
+        for ch in chapters where !seen.contains(ch.id) {
+            seen.insert(ch.id)
+            let br = ch.branchId.map { [ChapterBranch(branchId: $0)] }
+            result.append(ChapterItem(id: ch.id, volume: ch.volume, number: ch.number, name: ch.name, branches: br))
+        }
+        return result
     }
 }
 
@@ -111,10 +122,15 @@ final class DownloadsManager: ObservableObject {
         return fm.fileExists(atPath: f.path) ? f : nil
     }
 
+    /// Папка страниц конкретной главы+ветки на диске.
+    private func chapterDir(_ slug: String, _ chapterId: Int, _ branchId: Int?) -> URL {
+        titleDir(slug).appendingPathComponent("\(chapterId)-b\(branchId ?? 0)", isDirectory: true)
+    }
+
     /// Локальные файлы страниц скачанной главы (отсортированы по имени: 000, 001…).
-    /// Пусто — глава не скачана, тогда ридер грузит из сети (см. ReaderViewModel).
-    func localPageFiles(slug: String, chapterId: Int) -> [URL] {
-        let dir = titleDir(slug).appendingPathComponent("\(chapterId)", isDirectory: true)
+    /// Пусто — глава/ветка не скачана, тогда ридер грузит из сети.
+    func localPageFiles(slug: String, chapterId: Int, branchId: Int?) -> [URL] {
+        let dir = chapterDir(slug, chapterId, branchId)
         guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return [] }
         let exts: Set<String> = ["jpg", "jpeg", "png", "webp", "gif", "avif"]
         return files
@@ -136,42 +152,42 @@ final class DownloadsManager: ObservableObject {
         tasks[slug] = task
     }
 
-    // MARK: По-главное скачивание (отдельная глава)
+    // MARK: По-главное скачивание (отдельная глава+ветка)
 
-    func chapterKey(_ slug: String, _ id: Int) -> String { "\(slug)#\(id)" }
+    func chapterKey(_ slug: String, _ id: Int, _ branchId: Int?) -> String { "\(slug)#\(id)#\(branchId ?? 0)" }
 
-    func isChapterDownloaded(slug: String, chapterId: Int) -> Bool {
-        titles.first(where: { $0.slug == slug })?.chapters.contains(where: { $0.id == chapterId }) ?? false
+    func isChapterDownloaded(slug: String, chapterId: Int, branchId: Int?) -> Bool {
+        titles.first(where: { $0.slug == slug })?.chapters.contains { $0.id == chapterId && ($0.branchId ?? 0) == (branchId ?? 0) } ?? false
     }
 
-    /// Прогресс скачивания главы 0…1, или nil если она сейчас не качается.
-    func chapterFraction(slug: String, chapterId: Int) -> Double? {
-        chapterProgress[chapterKey(slug, chapterId)]
+    /// Прогресс скачивания главы+ветки 0…1, или nil если она сейчас не качается.
+    func chapterFraction(slug: String, chapterId: Int, branchId: Int?) -> Double? {
+        chapterProgress[chapterKey(slug, chapterId, branchId)]
     }
 
-    /// Скачать ОДНУ главу (с прогрессом по %). Тайтл появляется/дополняется в
-    /// «Загрузках». Общая кнопка «Скачать тайтл» продолжает работать отдельно.
-    func downloadChapter(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapter: ChapterItem) {
-        let key = chapterKey(slug, chapter.id)
-        guard chapterProgress[key] == nil, !isChapterDownloaded(slug: slug, chapterId: chapter.id) else { return }
+    /// Скачать ОДНУ главу конкретной ветки (с прогрессом по %).
+    func downloadChapter(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapter: ChapterItem, branchId: Int?) {
+        let bid = branchId ?? chapter.primaryBranchId
+        let key = chapterKey(slug, chapter.id, bid)
+        guard chapterProgress[key] == nil, !isChapterDownloaded(slug: slug, chapterId: chapter.id, branchId: bid) else { return }
         chapterProgress[key] = 0
         let task = Task { [weak self] in
-            await self?.runChapter(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, chapter: chapter)
+            await self?.runChapter(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, chapter: chapter, branchId: bid)
             self?.chapterTasks[key] = nil
         }
         chapterTasks[key] = task
     }
 
-    /// Удалить одну скачанную главу (если у тайтла не осталось глав — убираем и
-    /// сам тайтл из «Загрузок»).
-    func deleteChapter(slug: String, chapterId: Int) {
-        let key = chapterKey(slug, chapterId)
+    /// Удалить одну скачанную главу+ветку (если у тайтла не осталось глав —
+    /// убираем и сам тайтл).
+    func deleteChapter(slug: String, chapterId: Int, branchId: Int?) {
+        let key = chapterKey(slug, chapterId, branchId)
         chapterTasks[key]?.cancel()
         chapterTasks[key] = nil
         chapterProgress[key] = nil
-        try? fm.removeItem(at: titleDir(slug).appendingPathComponent("\(chapterId)", isDirectory: true))
+        try? fm.removeItem(at: chapterDir(slug, chapterId, branchId))
         if let idx = titles.firstIndex(where: { $0.slug == slug }) {
-            titles[idx].chapters.removeAll { $0.id == chapterId }
+            titles[idx].chapters.removeAll { $0.id == chapterId && ($0.branchId ?? 0) == (branchId ?? 0) }
             if titles[idx].chapters.isEmpty {
                 titles.remove(at: idx)
                 try? fm.removeItem(at: titleDir(slug))
@@ -180,16 +196,16 @@ final class DownloadsManager: ObservableObject {
         }
     }
 
-    /// Человекочитаемый размер скачанной главы на диске (напр. «12,3 МБ»).
-    func chapterSizeString(slug: String, chapterId: Int) -> String {
-        let dir = titleDir(slug).appendingPathComponent("\(chapterId)", isDirectory: true)
+    /// Человекочитаемый размер скачанной главы+ветки на диске (напр. «12,3 МБ»).
+    func chapterSizeString(slug: String, chapterId: Int, branchId: Int?) -> String {
+        let dir = chapterDir(slug, chapterId, branchId)
         let bytes = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey]))?
             .reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) } ?? 0
         return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    private func runChapter(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapter: ChapterItem) async {
-        let key = chapterKey(slug, chapter.id)
+    private func runChapter(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapter: ChapterItem, branchId: Int?) async {
+        let key = chapterKey(slug, chapter.id, branchId)
         try? fm.createDirectory(at: titleDir(slug), withIntermediateDirectories: true)
 
         // Заводим запись тайтла, если её ещё нет (+ обложку для оффлайна).
@@ -202,11 +218,11 @@ final class DownloadsManager: ObservableObject {
             }
         }
 
-        let dir = titleDir(slug).appendingPathComponent("\(chapter.id)", isDirectory: true)
+        let dir = chapterDir(slug, chapter.id, branchId)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
 
         guard let result = try? await MangaNetworkService.shared.fetchPages(
-            slug: slug, volume: chapter.volume, number: chapter.number, branchId: chapter.primaryBranchId
+            slug: slug, volume: chapter.volume, number: chapter.number, branchId: branchId
         ), !result.pages.isEmpty else {
             chapterProgress[key] = nil
             return
@@ -228,7 +244,7 @@ final class DownloadsManager: ObservableObject {
         if saved > 0 {
             appendChapter(
                 DownloadedChapter(id: chapter.id, volume: chapter.volume,
-                                  number: chapter.number, name: chapter.name, pageCount: saved),
+                                  number: chapter.number, name: chapter.name, pageCount: saved, branchId: branchId),
                 toSlug: slug
             )
         }
@@ -279,15 +295,16 @@ final class DownloadsManager: ObservableObject {
         for chapter in chapters {
             if Task.isCancelled { return } // отменили — cancel()/delete() уже всё убрал
             progress[slug]?.currentTitle = "Том \(chapter.volume) Глава \(chapter.number)"
-            let dir = titleDir(slug).appendingPathComponent("\(chapter.id)", isDirectory: true)
+            let bid = chapter.primaryBranchId
+            let dir = chapterDir(slug, chapter.id, bid)
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
 
-            let pageCount = await Self.downloadChapter(slug: slug, chapter: chapter, into: dir)
+            let pageCount = await Self.downloadChapter(slug: slug, chapter: chapter, branchId: bid, into: dir)
             if Task.isCancelled { return }
             if pageCount > 0 {
                 appendChapter(
                     DownloadedChapter(id: chapter.id, volume: chapter.volume,
-                                      number: chapter.number, name: chapter.name, pageCount: pageCount),
+                                      number: chapter.number, name: chapter.name, pageCount: pageCount, branchId: bid),
                     toSlug: slug
                 )
             }
@@ -320,7 +337,9 @@ final class DownloadsManager: ObservableObject {
 
     private func appendChapter(_ chapter: DownloadedChapter, toSlug slug: String) {
         guard let idx = titles.firstIndex(where: { $0.slug == slug }) else { return }
-        if !titles[idx].chapters.contains(where: { $0.id == chapter.id }) {
+        // Уникальность по (id главы, ветка) — одна глава может быть скачана в
+        // разных переводах.
+        if !titles[idx].chapters.contains(where: { $0.id == chapter.id && ($0.branchId ?? 0) == (chapter.branchId ?? 0) }) {
             titles[idx].chapters.append(chapter)
             save()
         }
@@ -379,10 +398,11 @@ final class DownloadsManager: ObservableObject {
         return nil
     }
 
-    /// Скачивает страницы одной главы в папку dir, возвращает число сохранённых.
-    nonisolated private static func downloadChapter(slug: String, chapter: ChapterItem, into dir: URL) async -> Int {
+    /// Скачивает страницы одной главы (ветки branchId) в папку dir, возвращает
+    /// число сохранённых.
+    nonisolated private static func downloadChapter(slug: String, chapter: ChapterItem, branchId: Int?, into dir: URL) async -> Int {
         guard let result = try? await MangaNetworkService.shared.fetchPages(
-            slug: slug, volume: chapter.volume, number: chapter.number, branchId: chapter.primaryBranchId
+            slug: slug, volume: chapter.volume, number: chapter.number, branchId: branchId
         ) else { return 0 }
 
         var saved = 0

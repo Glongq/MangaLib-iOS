@@ -26,6 +26,8 @@ struct RootView: View {
 
     // Для всплывающего тоста «Загрузка начата» и т.п. (см. DownloadsManager.banner).
     @ObservedObject private var downloads = DownloadsManager.shared
+    // Запрос «открыть каталог по жанру/тегу» из карточки тайтла (см. CatalogNavigator).
+    @ObservedObject private var catalogNav = CatalogNavigator.shared
 
     // Высота панели + отступ от низа — те же числа, что уже "зашиты" в
     // .safeAreaInset(edge: .bottom) внутри MangaCatalogView/BookmarksView
@@ -71,6 +73,11 @@ struct RootView: View {
                 }
             }
             .animation(.spring(response: 0.42, dampingFraction: 0.82), value: downloads.banner)
+            // Тап по жанру/тегу в карточке → переключаемся на вкладку Каталог
+            // (сам фильтр применяется в MangaCatalogView.onAppear).
+            .onChange(of: catalogNav.switchRequest) { _, req in
+                if req != nil { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 1 } }
+            }
             .preferredColorScheme(.dark)
             .tint(Theme.accent)
             .sheet(isPresented: $showLogin) { LoginView() }

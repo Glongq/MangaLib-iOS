@@ -29,6 +29,10 @@ final class ReaderViewModel: ObservableObject {
     private let mangaTitle: String?
     private let coverURL: String?
     private let service: MangaNetworkService
+    /// Выбранная ветка перевода (команда). branch_id стабилен для команды по
+    /// всему тайтлу, поэтому применяется ко всем главам. nil — брать первую
+    /// ветку главы (primaryBranchId), как раньше.
+    private let preferredBranchId: Int?
 
     init(slug: String,
          chapters: [ChapterItem],
@@ -36,6 +40,7 @@ final class ReaderViewModel: ObservableObject {
          mangaId: Int? = nil,
          mangaTitle: String? = nil,
          coverURL: String? = nil,
+         preferredBranchId: Int? = nil,
          service: MangaNetworkService = .shared) {
         self.slug = slug
         self.chapters = chapters
@@ -43,7 +48,13 @@ final class ReaderViewModel: ObservableObject {
         self.mangaId = mangaId
         self.mangaTitle = mangaTitle
         self.coverURL = coverURL
+        self.preferredBranchId = preferredBranchId
         self.service = service
+    }
+
+    /// Ветка для текущей главы: выбранная команда, иначе первая ветка главы.
+    private func branchId(for chapter: ChapterItem) -> Int? {
+        preferredBranchId ?? chapter.primaryBranchId
     }
 
     var currentChapter: ChapterItem? {
@@ -73,7 +84,8 @@ final class ReaderViewModel: ObservableObject {
         // читаем их с диска, вообще не обращаясь к сети (см. DownloadsManager).
         // PageItem.url = file://… ; RemoteImage/MangaImageURL отдают такой URL
         // как есть, а RemoteImageLoader читает картинку прямо с диска.
-        let localFiles = DownloadsManager.shared.localPageFiles(slug: slug, chapterId: chapter.id)
+        let bid = branchId(for: chapter)
+        let localFiles = DownloadsManager.shared.localPageFiles(slug: slug, chapterId: chapter.id, branchId: bid)
         if !localFiles.isEmpty {
             pages = localFiles.enumerated().map { idx, url in
                 PageItem(id: idx, slug: nil, image: nil, url: url.absoluteString, width: nil, height: nil)
@@ -87,7 +99,7 @@ final class ReaderViewModel: ObservableObject {
                 slug: slug,
                 volume: chapter.volume,
                 number: chapter.number,
-                branchId: chapter.primaryBranchId
+                branchId: bid
             )
             pages = result.pages
             currentChapterAlreadyViewed = result.isViewed
