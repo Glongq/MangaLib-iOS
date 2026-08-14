@@ -1382,7 +1382,9 @@ struct MangaDetailView: View {
 
             Spacer()
 
-            if bookmarks.readingProgress(forSlug: viewModel.slug) != nil {
+            // «К главе» видна всегда, пока есть главы (раньше требовалась
+            // сохранённая закладка/прогресс — по просьбе убрал это условие).
+            if count > 0 {
                 Menu {
                     ForEach(jumpTargets(count: count), id: \.pos) { target in
                         Button(target.label) { chapterScrollTarget = chapterId(atPosition: target.pos) }

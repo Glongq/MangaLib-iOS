@@ -86,9 +86,9 @@ struct HistoryView: View {
                 // самостоятельный лист, так что "назад" точнее по смыслу, чем "закрыть".
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(Theme.textSecondary)
-                        .frame(width: 36, height: 36)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .frame(width: 44, height: 44)
                 }
                 .glassEffect(.regular.interactive(), in: Circle())
 

@@ -8,6 +8,10 @@ import SwiftUI
 struct ChapterCommentsSheet: View {
     let chapterId: Int
     let postPage: Int
+    /// Закрытие при инлайн-показе (не sheet): вызывается «хваталкой» сверху
+    /// (тап или свайп вниз). Панель встроена в читалку с тем же фоном, поэтому
+    /// собственного модального dismiss у неё нет.
+    var onClose: (() -> Void)? = nil
 
     @StateObject private var vm = ChapterCommentsViewModel()
     @Environment(\.dismiss) private var dismiss
@@ -32,6 +36,7 @@ struct ChapterCommentsSheet: View {
         ZStack {
             palette.background.ignoresSafeArea()
             VStack(spacing: 0) {
+                if onClose != nil { grabber }
                 header
                 if disabledInReader {
                     disabledState
@@ -52,12 +57,29 @@ struct ChapterCommentsSheet: View {
             CommentSettingsSheet(
                 disabledInReader: $disabledInReader,
                 disabledOnCard: $disabledOnCard,
-                collapseFromLevel: $collapseFromLevel
+                collapseFromLevel: $collapseFromLevel,
+                palette: palette
             )
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showLogin) { LoginView() }
+    }
+
+    /// «Хваталка» сверху для инлайн-панели: тап или свайп вниз — закрыть.
+    private var grabber: some View {
+        Image(systemName: "chevron.compact.down")
+            .font(.title2)
+            .foregroundStyle(palette.secondary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 26)
+            .contentShape(Rectangle())
+            .onTapGesture { onClose?() }
+            .gesture(
+                DragGesture(minimumDistance: 20)
+                    .onEnded { v in if v.translation.height > 40 { onClose?() } }
+            )
+            .padding(.top, 6)
     }
 
     // MARK: Шапка

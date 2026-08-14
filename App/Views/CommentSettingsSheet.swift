@@ -13,6 +13,9 @@ struct CommentSettingsSheet: View {
     @Binding var disabledInReader: Bool
     @Binding var disabledOnCard: Bool
     @Binding var collapseFromLevel: Double
+    /// Палитра — чтобы шит выглядел корректно и в светлой теме читалки
+    /// (по умолчанию тёмная, как на карточке тайтла).
+    var palette: ReaderPalette = ReaderPalette(isLight: false)
 
     @Environment(\.dismiss) private var dismiss
 
@@ -24,31 +27,31 @@ struct CommentSettingsSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.background.ignoresSafeArea()
+                palette.background.ignoresSafeArea()
 
                 VStack(alignment: .leading, spacing: 24) {
                     // Две опции работают сообща из обоих мест (читалка и карточка).
                     VStack(alignment: .leading, spacing: 14) {
                         Toggle(isOn: $disabledInReader) {
                             Text("Отключить комментарии в читалке")
-                                .foregroundStyle(Theme.textPrimary)
+                                .foregroundStyle(palette.foreground)
                         }
                         .tint(Theme.accent)
 
-                        Divider().overlay(Theme.separator)
+                        Divider().overlay(palette.separator)
 
                         Toggle(isOn: $disabledOnCard) {
                             Text("Отключить комментарии на карточке тайтла")
-                                .foregroundStyle(Theme.textPrimary)
+                                .foregroundStyle(palette.foreground)
                         }
                         .tint(Theme.accent)
                     }
                     .padding(14)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Сворачивать вложенные комментарии с уровня")
-                            .foregroundStyle(Theme.textPrimary)
+                            .foregroundStyle(palette.foreground)
 
                         // Живая подпись над слайдером — меняется сразу по
                         // ходу перетаскивания (не только по отпусканию),
@@ -70,13 +73,13 @@ struct CommentSettingsSheet: View {
                             .onAppear { haptic.prepare() }
 
                         HStack {
-                            Text("1").font(.caption2).foregroundStyle(Theme.textSecondary)
+                            Text("1").font(.caption2).foregroundStyle(palette.secondary)
                             Spacer()
-                            Text("10 (максимум)").font(.caption2).foregroundStyle(Theme.textSecondary)
+                            Text("10 (максимум)").font(.caption2).foregroundStyle(palette.secondary)
                         }
                     }
                     .padding(14)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                     Spacer(minLength: 0)
                 }
@@ -93,6 +96,8 @@ struct CommentSettingsSheet: View {
             }
         }
         .tint(Theme.accent)
+        // Навбар/заголовок/тумблеры тоже светлеют вместе с темой читалки.
+        .preferredColorScheme(palette.isLight ? .light : .dark)
     }
 }
 

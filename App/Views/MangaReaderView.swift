@@ -35,6 +35,9 @@ struct MangaReaderView: View {
     @State private var showChapters = false
     @State private var showSettings = false
     @State private var showComments = false
+    /// Высота области читалки — для распознавания свайпа снизу вверх (открытие
+    /// комментариев в горизонтальном режиме).
+    @State private var readerHeight: CGFloat = 0
     /// Залита ли кнопка-закладка белым (bookmark.fill). Локальное визуальное
     /// состояние: тап переключает, переход на след. главу сбрасывает.
     @State private var bookmarkFilled = false
@@ -158,7 +161,45 @@ struct MangaReaderView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .allowsHitTesting(false)
             }
+
+            // Инлайн-панель комментариев к текущей странице — НЕ sheet и не
+            // отдельная подложка: тот же фон читалки, выезжает снизу. В
+            // горизонтальном режиме открывается свайпом снизу вверх, в
+            // вертикальном — кнопкой. Закрытие — «хваталкой» сверху панели.
+            if showComments, let ch = viewModel.currentChapter {
+                let pageNo = pageMode == 1
+                    ? verticalPage
+                    : min(currentPage, max(viewModel.pages.count - 1, 0)) + 1
+                ChapterCommentsSheet(
+                    chapterId: ch.id,
+                    postPage: pageNo,
+                    onClose: { withAnimation(.easeInOut(duration: 0.25)) { showComments = false } }
+                )
+                .transition(.move(edge: .bottom))
+                .zIndex(30)
+            }
         }
+        // Замер высоты читалки — чтобы понять, что свайп начался у нижнего края.
+        .background(
+            GeometryReader { proxy in
+                Color.clear.onAppear { readerHeight = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, h in readerHeight = h }
+            }
+        )
+        // В ГОРИЗОНТАЛЬНОМ режиме комментарии открываются свайпом снизу вверх
+        // (как на сайте: листаешь вниз — снизу поднимается панель комментариев
+        // к текущей странице). В вертикальном для этого есть кнопка. Жест
+        // simultaneous, чтобы не мешать листанию/зуму: реагируем только на
+        // заметный свайп ВВЕРХ, начатый у самого низа экрана.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 40)
+                .onEnded { v in
+                    guard pageMode != 1, readerHeight > 0, !showComments else { return }
+                    if v.startLocation.y > readerHeight - 130, v.translation.height < -70 {
+                        withAnimation(.easeInOut(duration: 0.25)) { showComments = true }
+                    }
+                }
+        )
         .animation(.spring(response: 0.45, dampingFraction: 0.9), value: viewModel.bookmarkToast)
         // Только НИЖНЯЯ safe area игнорируется (как в RootView.swift) — низ
         // safe area на Face ID экранах даёт ~34pt от истинного края из-за
@@ -231,15 +272,6 @@ struct MangaReaderView: View {
                 smoothPaging: $smoothPaging,
                 verticalGap: $verticalGap
             )
-        }
-        .sheet(isPresented: $showComments) {
-            // Комментарии текущей страницы главы (post_type=chapter, post_page).
-            if let ch = viewModel.currentChapter {
-                let pageNo = pageMode == 1
-                    ? verticalPage
-                    : min(currentPage, max(viewModel.pages.count - 1, 0)) + 1
-                ChapterCommentsSheet(chapterId: ch.id, postPage: pageNo)
-            }
         }
         .preferredColorScheme(readerTheme == 2 ? nil : (readerIsLight ? .light : .dark))
     }
@@ -648,7 +680,7 @@ struct MangaReaderView: View {
             Spacer()
             // Комментарии показываем только в вертикальном режиме листания.
             if pageMode == 1 {
-                readerButton(icon: "text.bubble") { showComments = true }
+                readerButton(icon: "text.bubble") { withAnimation(.easeInOut(duration: 0.25)) { showComments = true } }
                 Spacer()
             }
             bookmarkButton
