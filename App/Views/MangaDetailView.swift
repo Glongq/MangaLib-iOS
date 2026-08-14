@@ -776,14 +776,6 @@ struct MangaDetailView: View {
         return String(format: "%.1f%%", p)
     }
 
-    private static func shortCount(_ n: Int) -> String {
-        switch n {
-        case 1_000_000...: return String(format: "%.1f M", Double(n) / 1_000_000)
-        case 1_000...:     return String(format: "%.1f K", Double(n) / 1_000)
-        default:           return "\(n)"
-        }
-    }
-
     // MARK: Персонажи (GET /character?media_id=)
 
     /// Карусель персонажей — та же идея, что «Похожее»/«Связанное»: строка
