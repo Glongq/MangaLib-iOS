@@ -76,6 +76,11 @@ struct MangaReaderView: View {
     /// обновляется, когда очередная картинка попадает в область просмотра.
     @State private var verticalPage = 1
 
+    /// Зум вертикальной ленты: `verticalZoom` — текущий масштаб, `zoomBase` —
+    /// зафиксированный на конце жеста (чтобы пинч продолжался с него).
+    @State private var verticalZoom: CGFloat = 1
+    @State private var zoomBase: CGFloat = 1
+
     /// Тап по левой/правой части листает, по центру — показывает интерфейс
     /// (по умолчанию вкл). Ширина краевых зон — доля экрана.
     @Environment(\.colorScheme) private var systemColorScheme
@@ -298,30 +303,48 @@ struct MangaReaderView: View {
     }
 
     private var verticalReader: some View {
-        ScrollView {
-            LazyVStack(spacing: CGFloat(verticalGap)) {
-                ForEach(viewModel.segments) { seg in
-                    ForEach(Array(seg.pages.enumerated()), id: \.offset) { pageIndex, page in
-                        VerticalPageImage(candidates: viewModel.imageURLs(for: page))
-                            .onAppear {
-                                viewModel.markCurrentChapter(seg.index)
-                                verticalPage = pageIndex + 1
-                            }
+        // Пинч-зум ленты: увеличиваем фактическую ширину колонки (не transform),
+        // поэтому при зуме включается и горизонтальная прокрутка — можно
+        // возить увеличенную страницу по горизонтали. Двойной тап — сброс.
+        GeometryReader { geo in
+            ScrollView([.vertical, .horizontal]) {
+                LazyVStack(spacing: CGFloat(verticalGap)) {
+                    ForEach(viewModel.segments) { seg in
+                        ForEach(Array(seg.pages.enumerated()), id: \.offset) { pageIndex, page in
+                            VerticalPageImage(candidates: viewModel.imageURLs(for: page))
+                                .onAppear {
+                                    viewModel.markCurrentChapter(seg.index)
+                                    verticalPage = pageIndex + 1
+                                }
+                        }
+                        // Футер конца главы — при его появлении догружаем следующую.
+                        chapterEndFooter(seg)
+                            .onAppear { Task { await viewModel.appendNext() } }
                     }
-                    // Футер конца главы — при его появлении догружаем следующую.
-                    chapterEndFooter(seg)
-                        .onAppear { Task { await viewModel.appendNext() } }
+                    if viewModel.isAppending {
+                        ProgressView().tint(fg)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 24)
+                    }
                 }
-                if viewModel.isAppending {
-                    ProgressView().tint(fg)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 24)
-                }
+                .frame(width: geo.size.width * verticalZoom)
+            }
+            .scrollIndicators(.hidden)
+            .gesture(
+                MagnifyGesture()
+                    .onChanged { v in
+                        verticalZoom = min(max(zoomBase * v.magnification, 1), 5)
+                    }
+                    .onEnded { _ in zoomBase = verticalZoom }
+            )
+            .onTapGesture(count: 2) {
+                withAnimation(.easeInOut(duration: 0.2)) { verticalZoom = 1; zoomBase = 1 }
+            }
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() }
             }
         }
-        .scrollIndicators(.hidden)
         .ignoresSafeArea()
-        .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
     }
 
     private func nextChapterAfter(_ index: Int) -> ChapterItem? {
@@ -877,14 +900,16 @@ struct ReaderSettingsSheet: View {
     /// сверху + короткая вибрация на каждый шаг.
     private var gapSlider: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Отступ между картинками")
-                .font(.system(size: 17)).foregroundStyle(palette.foreground)
+            HStack {
+                Text("Отступ между картинками")
+                    .font(.system(size: 17)).foregroundStyle(palette.foreground)
+                Spacer()
+                Text("\(Int(verticalGap)) px")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+            }
 
-            Text("\(Int(verticalGap)) px")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.accent)
-
-            Slider(value: $verticalGap, in: 0...24, step: 1)
+            Slider(value: $verticalGap, in: 0...50, step: 1)
                 .tint(Theme.accent)
                 .onChange(of: verticalGap) { _, _ in gapHaptic.impactOccurred() }
                 .onAppear { gapHaptic.prepare() }
@@ -892,7 +917,7 @@ struct ReaderSettingsSheet: View {
             HStack {
                 Text("0").font(.caption2).foregroundStyle(palette.secondary)
                 Spacer()
-                Text("24 px").font(.caption2).foregroundStyle(palette.secondary)
+                Text("50 px").font(.caption2).foregroundStyle(palette.secondary)
             }
         }
         .padding(14)
