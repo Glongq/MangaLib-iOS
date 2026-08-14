@@ -81,9 +81,13 @@ enum CharacterTitleSort: String, CaseIterable, Identifiable {
         }
     }
 
-    var sortBy: String {
+    /// `nil` = не слать sort_by (серверный порядок по умолчанию = по
+    /// популярности). Остальные значения — по известному поведению каталога;
+    /// если сервер отклонит какое-то (422), CharacterViewModel повторит запрос
+    /// без сортировки, чтобы грид всё равно наполнился.
+    var sortBy: String? {
         switch self {
-        case .popularity:  return "rating"
+        case .popularity:  return nil
         case .rating:      return "rate_avg"
         case .views:       return "views"
         case .releaseDate: return "releaseDate"

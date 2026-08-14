@@ -548,7 +548,14 @@ final class MangaNetworkService {
     /// Статистика тайтла (оценки + распределение по спискам) — ПОДТВЕРЖДЕНО
     /// перехватом: `GET /manga/{slug}/stats` → `{data:{bookmarks, rating}}`.
     func fetchMangaStats(slug: String) async throws -> MangaStats {
-        let request = try makeRequest(path: "/manga/\(encodePath(slug))/stats", queryItems: [])
+        // ОБЯЗАТЕЛЬНЫЕ query-параметры (подтверждено перехватом
+        // `/manga/{slug}/stats?bookmarks=true&rating=true`) — без них сервер
+        // не включает эти блоки в ответ.
+        let items = [
+            URLQueryItem(name: "bookmarks", value: "true"),
+            URLQueryItem(name: "rating", value: "true")
+        ]
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))/stats", queryItems: items)
         let response: APIObjectResponse<MangaStats> = try await perform(request)
         return response.data
     }

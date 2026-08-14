@@ -157,12 +157,22 @@ final class CharacterViewModel: ObservableObject {
     }
 
     private func fetchPage(_ page: Int) async throws -> CatalogPage {
+        do {
+            return try await request(page: page, sortBy: sort.sortBy)
+        } catch NetworkError.server(let status) where status == 422 {
+            // Сервер отклонил sort_by — повторяем без сортировки, чтобы грид
+            // всё равно наполнился (порядок по умолчанию).
+            return try await request(page: page, sortBy: nil)
+        }
+    }
+
+    private func request(page: Int, sortBy: String?) async throws -> CatalogPage {
         try await service.fetchCatalog(
             query: query,
             sort: .relevance,
             filter: filter,
             page: page,
-            sortByOverride: sort.sortBy,
+            sortByOverride: sortBy,
             sortType: sort.sortType,
             siteIds: [site.rawValue],
             targetId: characterId,
