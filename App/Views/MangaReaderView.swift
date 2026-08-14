@@ -1,6 +1,29 @@
 import SwiftUI
 import UIKit
 
+/// Палитра читалки под выбранную тему (0 тёмная / 1 светлая / 2 системная).
+/// Тексты и иконки читалки и её меню (главы/настройки) берут цвета отсюда,
+/// чтобы не сливаться с фоном при светлой теме.
+struct ReaderPalette {
+    let isLight: Bool
+    /// Фон под страницами: тёмный — чёрный, светлый — чуть серый (не чисто белый).
+    var pageBackground: Color { isLight ? Color(white: 0.93) : .black }
+    /// Фон меню (главы/настройки): светлый — белый.
+    var background: Color { isLight ? .white : Theme.background }
+    var foreground: Color { isLight ? Color(white: 0.12) : .white }
+    var secondary: Color { isLight ? Color(white: 0.45) : Theme.textSecondary }
+    var surface: Color { isLight ? Color(white: 0.94) : Theme.surfaceElevated }
+    var separator: Color { isLight ? Color.black.opacity(0.10) : Theme.separator }
+
+    static func make(theme: Int, system: ColorScheme) -> ReaderPalette {
+        switch theme {
+        case 1: return ReaderPalette(isLight: true)
+        case 2: return ReaderPalette(isLight: system == .light)
+        default: return ReaderPalette(isLight: false)
+        }
+    }
+}
+
 /// Полноэкранная читалка: горизонтальное листание страниц, тап переключает интерфейс.
 struct MangaReaderView: View {
 
@@ -50,19 +73,12 @@ struct MangaReaderView: View {
     /// (по умолчанию вкл). Ширина краевых зон — доля экрана.
     @Environment(\.colorScheme) private var systemColorScheme
 
-    /// Итоговая тема читалки (с учётом «системная»).
-    private var readerIsLight: Bool {
-        switch readerTheme {
-        case 1: return true
-        case 2: return systemColorScheme == .light
-        default: return false
-        }
-    }
-    /// Фон читалки под страницами: тёмный — чёрный, светлый — чуть серый (не
-    /// идеально белый, как попросили).
-    private var readerBackground: Color {
-        readerIsLight ? Color(white: 0.93) : .black
-    }
+    /// Палитра под выбранную тему — цвета фона/текста/иконок читалки и её меню.
+    private var palette: ReaderPalette { .make(theme: readerTheme, system: systemColorScheme) }
+    private var readerIsLight: Bool { palette.isLight }
+    private var readerBackground: Color { palette.pageBackground }
+    /// Цвет текста/иконок читалки (белый на тёмной, тёмный на светлой).
+    private var fg: Color { palette.foreground }
 
     init(slug: String,
          chapters: [ChapterItem],
@@ -148,7 +164,12 @@ struct MangaReaderView: View {
             // На новой главе заливка закладки возвращается «как была».
             withAnimation(.easeInOut(duration: 0.2)) { bookmarkFilled = false }
         }
-        .onChange(of: currentPage) { _, page in preloadUpcoming(from: page) }
+        .onChange(of: currentPage) { _, page in
+            preloadUpcoming(from: page)
+            // Долистали до страницы-триггера — открываем следующую главу
+            // (работает и в режиме «выключить перелистывание», где листаем тапом).
+            if page == viewModel.pages.count + 1 { openNext() }
+        }
         // Срабатывает и на первую загрузку страниц, и при переходе на
         // следующую главу (goTo → load() заново наполняет pages).
         .onChange(of: viewModel.pages.count) { _, count in
@@ -199,7 +220,7 @@ struct MangaReaderView: View {
     @ViewBuilder
     private var content: some View {
         if viewModel.isLoading && viewModel.pages.isEmpty {
-            ProgressView().tint(.white)
+            ProgressView().tint(fg)
         } else if let error = viewModel.errorMessage, viewModel.pages.isEmpty {
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)
@@ -207,12 +228,35 @@ struct MangaReaderView: View {
                 Button("Повторить") { Task { await viewModel.load() } }
                     .buttonStyle(.borderedProminent).tint(Theme.accent)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(fg)
             .padding(32)
         } else if viewModel.pages.isEmpty {
-            Text("Нет страниц").foregroundStyle(.white)
+            Text("Нет страниц").foregroundStyle(fg)
+        } else if disableSwipe {
+            // Свайп-листание выключено: показываем ТОЛЬКО текущую страницу
+            // (без TabView, поэтому свайпом не листается), листаем тапами по краям.
+            singlePageView
         } else {
             pager
+        }
+    }
+
+    /// Одна текущая страница без пейджера (режим «выключить перелистывание»).
+    @ViewBuilder
+    private var singlePageView: some View {
+        if currentPage < viewModel.pages.count {
+            ZoomableImageScrollView(
+                candidates: viewModel.imageURLs(for: viewModel.pages[currentPage]),
+                fitWidth: fitWidth,
+                doubleTapZoom: doubleTapZoom,
+                onTap: { xFraction in handleReaderTap(xFraction) }
+            )
+            .ignoresSafeArea()
+            .id(currentPage)
+        } else if currentPage == viewModel.pages.count {
+            endPage
+        } else {
+            nextTriggerPage
         }
     }
 
@@ -244,10 +288,6 @@ struct MangaReaderView: View {
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .ignoresSafeArea()
-        .onChange(of: currentPage) { _, page in
-            // Долистали до страницы-триггера — открываем следующую главу.
-            if page == viewModel.pages.count + 1 { openNext() }
-        }
     }
 
     /// Обработка тапа по странице: левая/правая небольшая зона — листание,
@@ -269,7 +309,8 @@ struct MangaReaderView: View {
         let clamped = min(max(target, 0), maxTag)
         guard clamped != currentPage else { return }
         if smoothPaging {
-            withAnimation(.easeInOut(duration: 0.25)) { currentPage = clamped }
+            // Ускорено ×1.5 (0.25 → ~0.167).
+            withAnimation(.easeInOut(duration: 0.167)) { currentPage = clamped }
         } else {
             var tx = Transaction()
             tx.disablesAnimations = true
@@ -279,8 +320,8 @@ struct MangaReaderView: View {
 
     // Невидимая страница-триггер (перехода к следующей главе).
     private var nextTriggerPage: some View {
-        Color.black
-            .overlay { ProgressView().tint(.white) }
+        readerBackground
+            .overlay { ProgressView().tint(fg) }
     }
 
     // Экран конца главы: сверху «Конец…», снизу «Следующая глава …».
@@ -288,7 +329,7 @@ struct MangaReaderView: View {
         VStack {
             Text("Конец · \(viewModel.currentChapter?.shortTitle ?? "главы")")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(fg.opacity(0.85))
                 // 60 → 95 (+35): опустили надпись ниже, как попросили.
                 .padding(.top, 95)
 
@@ -300,9 +341,9 @@ struct MangaReaderView: View {
                 } label: {
                     VStack(spacing: 8) {
                         Text("Следующая глава")
-                            .font(.caption).foregroundStyle(.white.opacity(0.6))
+                            .font(.caption).foregroundStyle(fg.opacity(0.6))
                         Text(next.titleOrShort)
-                            .font(.headline).foregroundStyle(.white)
+                            .font(.headline).foregroundStyle(fg)
                             .multilineTextAlignment(.center)
                         Label("Листните ещё раз", systemImage: "hand.draw")
                             .font(.caption2).foregroundStyle(Theme.accent)
@@ -314,13 +355,13 @@ struct MangaReaderView: View {
                 .buttonStyle(.plain)
             } else {
                 Text("Это последняя доступная глава")
-                    .font(.subheadline).foregroundStyle(.white.opacity(0.6))
+                    .font(.subheadline).foregroundStyle(fg.opacity(0.6))
             }
 
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(readerBackground)
         .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
     }
 
@@ -370,7 +411,7 @@ struct MangaReaderView: View {
                     // увеличить крестик.
                     Image(systemName: "xmark")
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(fg)
                         .frame(width: 48, height: 48)
                         .glassEffect(.regular.interactive(), in: Circle())
                 }
@@ -395,12 +436,12 @@ struct MangaReaderView: View {
         VStack(alignment: .center, spacing: 2) {
             Text(mangaTitle ?? viewModel.currentChapter?.name ?? "Глава")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(fg)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Text(viewModel.currentChapter?.shortTitle ?? "")
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(fg.opacity(0.7))
                 .lineLimit(1)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
@@ -414,7 +455,7 @@ struct MangaReaderView: View {
     private var pageBubble: some View {
         Text("\(currentPage + 1)/\(viewModel.pages.count)")
             .font(.footnote.weight(.semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(fg)
             .padding(.horizontal, 16).padding(.vertical, 8)
             .glassEffect(.regular, in: Capsule())
             .padding(.bottom, 12)
@@ -444,7 +485,7 @@ struct MangaReaderView: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 24, weight: .regular))
-                .foregroundStyle(.white)
+                .foregroundStyle(fg)
                 .frame(width: 56, height: 56)
                 .glassEffect(.regular, in: Circle())
                 .contentShape(Circle())
@@ -462,7 +503,7 @@ struct MangaReaderView: View {
         } label: {
             Image(systemName: bookmarkFilled ? "bookmark.fill" : "bookmark")
                 .font(.system(size: 24, weight: .regular))
-                .foregroundStyle(.white)
+                .foregroundStyle(fg)
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: 56, height: 56)
                 .glassEffect(.regular, in: Circle())
@@ -482,6 +523,11 @@ struct ChapterListSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var descending = true   // true = новые сверху
 
+    // Тема читалки — меню глав тоже светлеет при светлой теме.
+    @AppStorage("reader_theme") private var readerTheme = 0
+    @Environment(\.colorScheme) private var systemColorScheme
+    private var palette: ReaderPalette { .make(theme: readerTheme, system: systemColorScheme) }
+
     private struct IndexedChapter: Identifiable {
         let index: Int
         let chapter: ChapterItem
@@ -495,26 +541,20 @@ struct ChapterListSheet: View {
 
     var body: some View {
         ZStack {
-            // Сплошной непрозрачный фон (как в детальном экране тайтла, где это уже работает
-            // идеально). Лист открыт поверх ридера с чёрным фоном — "просвечивание" сквозь
-            // presentationBackground там просто показывает блюр чёрного, то есть остаётся
-            // чёрным. Поэтому здесь нужен свой видимый непрозрачный фон, а не прозрачность.
-            Theme.background.ignoresSafeArea()
+            palette.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 header
                 ScrollView {
-                    // Список на скруглённой подложке (как в настройках), с теми
-                    // же тонкими разделителями между строками.
                     LazyVStack(spacing: 0) {
                         ForEach(Array(ordered.enumerated()), id: \.element.id) { position, item in
                             row(item.index, item.chapter)
                             if position < ordered.count - 1 {
-                                Divider().overlay(Theme.separator)
+                                Divider().overlay(palette.separator)
                             }
                         }
                     }
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                     .padding(.bottom, 20)
@@ -522,35 +562,30 @@ struct ChapterListSheet: View {
                 .scrollIndicators(.hidden)
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(palette.isLight ? .light : .dark)
     }
 
-    // Кнопки шапки — отдельные стеклянные капсулы прямо на тёмном фоне
-    // (без сплошной подложки на всю ширину, которая «съедала» контраст).
+    // Шапка как в настройках читалки: заголовок по центру, стеклянные кнопки.
+    // Слева — сортировка, справа — крестик выхода (поменяны местами по просьбе).
     private var header: some View {
-        GlassEffectContainer(spacing: 8) {
+        ZStack {
+            Text("Главы").font(.headline).foregroundStyle(palette.foreground)
+                .frame(maxWidth: .infinity, alignment: .center)
             HStack {
-                // Крестик слева (не стрелка назад) — как на референсе.
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark").font(.headline).foregroundStyle(Theme.textPrimary)
-                        .frame(width: 40, height: 40)
-                }
-                .glassEffect(.regular.interactive(), in: Circle())
-
-                Spacer()
-                Text("Главы").font(.headline).foregroundStyle(Theme.textPrimary)
-                Spacer()
-
-                // Сортировка справа — цвет иконки белый (textPrimary), а не
-                // акцентный оранжевый, как просили.
                 Button {
                     withAnimation { descending.toggle() }
                 } label: {
                     Image(systemName: "arrow.up.arrow.down").font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
+                        .foregroundStyle(palette.foreground)
                         .frame(width: 40, height: 40)
+                        .glassEffect(.regular.interactive(), in: Circle())
                 }
-                .glassEffect(.regular.interactive(), in: Circle())
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").font(.headline).foregroundStyle(palette.foreground)
+                        .frame(width: 40, height: 40)
+                        .glassEffect(.regular.interactive(), in: Circle())
+                }
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
@@ -572,9 +607,9 @@ struct ChapterListSheet: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(rowTitle(chapter))
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
+                        .foregroundStyle(palette.foreground)
                     if let name = chapter.name, !name.isEmpty {
-                        Text(name).font(.subheadline).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                        Text(name).font(.subheadline).foregroundStyle(palette.secondary).lineLimit(1)
                     }
                 }
                 Spacer()
@@ -608,20 +643,28 @@ struct ReaderSettingsSheet: View {
 
     @AppStorage(ImageServerChoice.defaultsKey) private var serverChoice = 0
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var systemColorScheme
     @State private var showPaging = false
+
+    private var palette: ReaderPalette { .make(theme: readerTheme, system: systemColorScheme) }
 
     var body: some View {
         ZStack {
-            Theme.background.ignoresSafeArea()
+            palette.background.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     ZStack {
-                        Text("Настройки").font(.headline).foregroundStyle(Theme.textPrimary)
+                        Text("Настройки").font(.headline).foregroundStyle(palette.foreground)
                             .frame(maxWidth: .infinity, alignment: .center)
                         HStack {
                             Spacer()
+                            // Крестик — стеклянный, как попросили.
                             Button { dismiss() } label: {
-                                Image(systemName: "xmark").foregroundStyle(Theme.textSecondary)
+                                Image(systemName: "xmark")
+                                    .font(.headline)
+                                    .foregroundStyle(palette.foreground)
+                                    .frame(width: 40, height: 40)
+                                    .glassEffect(.regular.interactive(), in: Circle())
                             }
                         }
                     }
@@ -643,7 +686,6 @@ struct ReaderSettingsSheet: View {
                     Picker("", selection: $serverChoice) {
                         ForEach(ImageServerChoice.allCases) { Text($0.title).tag($0.rawValue) }
                     }.pickerStyle(.segmented)
-                    caption("Если страницы не грузятся — попробуйте другой сервер.")
 
                     // 4. Вместить изображение.
                     label("Вместить изображение")
@@ -660,12 +702,12 @@ struct ReaderSettingsSheet: View {
                     // 5. Переключение страниц — отдельная кнопка со стрелкой → под-лист.
                     Button { showPaging = true } label: {
                         HStack {
-                            Text("Переключение страниц").font(.system(size: 17)).foregroundStyle(Theme.textPrimary)
+                            Text("Переключение страниц").font(.system(size: 17)).foregroundStyle(palette.foreground)
                             Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(Theme.textSecondary)
+                            Image(systemName: "chevron.right").foregroundStyle(palette.secondary)
                         }
                         .padding(14)
-                        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -686,7 +728,7 @@ struct ReaderSettingsSheet: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .presentationBackground(.thinMaterial)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(palette.isLight ? .light : .dark)
         .tint(Theme.accent)
         .sheet(isPresented: $showPaging) {
             pagingSheet
@@ -694,34 +736,34 @@ struct ReaderSettingsSheet: View {
     }
 
     private func label(_ text: String) -> some View {
-        Text(text).font(.system(size: 22.5, weight: .semibold)).foregroundStyle(Theme.textSecondary)
+        Text(text).font(.system(size: 22.5, weight: .semibold)).foregroundStyle(palette.secondary)
     }
     private func caption(_ text: String) -> some View {
-        Text(text).font(.caption).foregroundStyle(Theme.textSecondary)
+        Text(text).font(.caption).foregroundStyle(palette.secondary)
     }
     private func toggleRow(_ text: String, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) {
-            Text(text).font(.system(size: 17)).foregroundStyle(Theme.textPrimary)
+            Text(text).font(.system(size: 17)).foregroundStyle(palette.foreground)
         }
         .tint(Theme.accent)
         .padding(14)
-        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     /// Под-лист «Переключение страниц».
     private var pagingSheet: some View {
         ZStack {
-            Theme.background.ignoresSafeArea()
+            palette.background.ignoresSafeArea()
             VStack(alignment: .leading, spacing: 16) {
-                Text("Переключение страниц").font(.headline).foregroundStyle(Theme.textPrimary)
+                Text("Переключение страниц").font(.headline).foregroundStyle(palette.foreground)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 8)
 
-                toggleRow("Выключить перелистывание (свайпами)", isOn: $disableSwipe)
+                toggleRow("Выключить перелистывание", isOn: $disableSwipe)
                 caption("Листать можно будет тапами по краям экрана.")
 
                 toggleRow("Плавное перелистывание", isOn: $smoothPaging)
-                caption("Вкл — с анимацией, выкл — мгновенно открывает следующую страницу.")
+                caption("Анимировать переключение страниц при нажатии.")
 
                 Spacer(minLength: 0)
             }
@@ -730,7 +772,7 @@ struct ReaderSettingsSheet: View {
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
         .presentationBackground(.thinMaterial)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(palette.isLight ? .light : .dark)
         .tint(Theme.accent)
     }
 }
