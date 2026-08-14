@@ -1823,12 +1823,33 @@ struct MangaDetailView: View {
                     }
                     .buttonStyle(.plain)
 
-                    HStack(spacing: 3) {
-                        Image(systemName: "arrowtriangle.up.fill").font(.system(size: 9))
-                        Text("\(comment.score)").font(.caption.weight(.bold))
-                        Image(systemName: "arrowtriangle.down.fill").font(.system(size: 9))
+                    // Реальное голосование (эндпоинт подтверждён). Плюс/минус —
+                    // кнопки; активный голос подсвечивается; без входа — предложить войти.
+                    HStack(spacing: 5) {
+                        Button {
+                            if AuthSession.shared.isLoggedIn { Task { await viewModel.voteComment(comment, isUp: true) } }
+                            else { showLoginForComment = true }
+                        } label: {
+                            Image(systemName: comment.userVote == 1 ? "arrowtriangle.up.fill" : "arrowtriangle.up")
+                                .font(.system(size: 11))
+                                .foregroundStyle(comment.userVote == 1 ? .green : Theme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+
+                        Text("\(comment.score)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(commentScoreColor(comment.score))
+
+                        Button {
+                            if AuthSession.shared.isLoggedIn { Task { await viewModel.voteComment(comment, isUp: false) } }
+                            else { showLoginForComment = true }
+                        } label: {
+                            Image(systemName: comment.userVote == 0 ? "arrowtriangle.down.fill" : "arrowtriangle.down")
+                                .font(.system(size: 11))
+                                .foregroundStyle(comment.userVote == 0 ? .red : Theme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .foregroundStyle(commentScoreColor(comment.score))
                 }
             }
         }

@@ -967,8 +967,12 @@ struct Comment: Decodable, Identifiable, Hashable {
     /// Миллисекунды с эпохи — подтверждено (13-значное число: 1785142817000).
     let createdAtTS: Double?
     let author: Author?
-    let votesUp: Int
-    let votesDown: Int
+    /// Счётчики голосов и голос текущего юзера — ИЗМЕНЯЕМЫЕ: после голосования
+    /// (см. MangaDetailViewModel.voteComment) обновляем прямо в модели, без
+    /// перезагрузки списка. userVote: 1 — плюс, 0 — минус, nil — не голосовал.
+    var votesUp: Int
+    var votesDown: Int
+    var userVote: Int?
 
     struct Author: Decodable, Hashable {
         let id: Int
@@ -998,7 +1002,7 @@ struct Comment: Decodable, Identifiable, Hashable {
         case commentHTML = "comment"
         case createdAtTS = "created_at_ts"
     }
-    private enum VotesKeys: String, CodingKey { case up, down }
+    private enum VotesKeys: String, CodingKey { case up, down, user }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1012,9 +1016,11 @@ struct Comment: Decodable, Identifiable, Hashable {
         if let votesC = try? c.nestedContainer(keyedBy: VotesKeys.self, forKey: .votes) {
             votesUp = (try? votesC.decodeIfPresent(Int.self, forKey: .up)) ?? 0
             votesDown = (try? votesC.decodeIfPresent(Int.self, forKey: .down)) ?? 0
+            userVote = (try? votesC.decodeIfPresent(Int.self, forKey: .user)) ?? nil
         } else {
             votesUp = 0
             votesDown = 0
+            userVote = nil
         }
     }
 

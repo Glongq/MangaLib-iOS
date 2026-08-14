@@ -352,14 +352,18 @@ final class MangaNetworkService {
     /// переворачиваем значение; сортировка "Популярные" — НЕ через сервер (не
     /// подтверждено, что сервер это умеет), считается на клиенте по score
     /// (см. MangaDetailViewModel.commentSort/MangaDetailView).
-    func fetchComments(postId: Int, postType: String = "manga", sortType: String = "desc", page: Int = 1) async throws -> (comments: [Comment], hasNextPage: Bool) {
-        let items: [URLQueryItem] = [
+    func fetchComments(postId: Int, postType: String = "manga", postPage: Int? = nil, sortType: String = "desc", page: Int = 1) async throws -> (comments: [Comment], hasNextPage: Bool) {
+        var items: [URLQueryItem] = [
             URLQueryItem(name: "post_id", value: String(postId)),
             URLQueryItem(name: "post_type", value: postType),
             URLQueryItem(name: "sort_by", value: "id"),
             URLQueryItem(name: "sort_type", value: sortType),
             URLQueryItem(name: "page", value: String(max(page, 1)))
         ]
+        // Комментарии в читалке привязаны к конкретной СТРАНИЦЕ главы (post_page).
+        if let postPage {
+            items.append(URLQueryItem(name: "post_page", value: String(postPage)))
+        }
         let request = try makeRequest(path: "/comments", queryItems: items)
         let response: CommentsListResponse = try await perform(request)
         return (response.comments, response.hasNextPage)
@@ -390,9 +394,9 @@ final class MangaNetworkService {
     /// скорее всего, ожидается в такой же форме. Это ОБОСНОВАННОЕ предположение
     /// по аналогии (не гадание с нуля) — если сервер всё ещё вернёт 422, тело
     /// снова будет видно в NetworkLogsView и можно поправить точнее.
-    func postComment(postId: Int, postType: String = "manga", text: String, commentLevel: Int, parentComment: Int? = nil) async throws -> Comment {
+    func postComment(postId: Int, postType: String = "manga", postPage: Int? = nil, text: String, commentLevel: Int, parentComment: Int? = nil) async throws -> Comment {
         let payload = CommentPayload(
-            post_id: postId, post_type: postType,
+            post_id: postId, post_type: postType, post_page: postPage,
             comment: ProseMirrorDoc(text: text),
             comment_level: commentLevel,
             parent_comment: parentComment
@@ -402,16 +406,17 @@ final class MangaNetworkService {
         return response.data
     }
 
-    /// Голосование за комментарий — эндпоинт НЕ подтверждён (в перехваченных
-    /// файлах нет ни одного примера отправки голоса, только уже посчитанные
-    /// votes.up/down в ответах). Best-effort предположение по REST-конвенции.
-    /// НЕ вызывается из UI сейчас (см. MangaDetailView.commentRow — счётчик
-    /// голосов только отображается, кнопки неактивны) — оставлено на будущее,
-    /// когда появится подтверждённый перехват реального голосования.
-    func voteComment(id: Int, direction: Int) async throws {
+    /// Голосование за комментарий — ПОДТВЕРЖДЕНО реальным перехватом:
+    /// `POST /comments/{id}/vote`, тело `{"vote":1}` (плюс), ответ
+    /// `{"data":{"up":8,"down":0,"user":1}}` — актуальные счётчики + голос юзера
+    /// (1 = плюс, 0 = минус, null = не голосовал), как и у «Похожего». Возвращаем
+    /// их, чтобы сразу обновить UI без перезагрузки списка.
+    @discardableResult
+    func voteComment(id: Int, direction: Int) async throws -> SimilarVotes {
         let payload = CommentVotePayload(vote: direction)
         let request = try makeJSONRequest(path: "/comments/\(id)/vote", method: "POST", body: payload)
-        try await performVoid(request)
+        let response: APIObjectResponse<SimilarVotes> = try await perform(request)
+        return response.data
     }
 
     /// Справочники фильтров (жанры, теги, типы и т.д.) с реальными id.
@@ -801,6 +806,9 @@ private struct CreateFolderPayload: Encodable {
 private struct CommentPayload: Encodable {
     let post_id: Int
     let post_type: String
+    /// Страница главы для комментариев в читалке (nil у комментариев тайтла —
+    /// синтезированный Encodable опускает nil-поля, так что для manga его нет).
+    let post_page: Int?
     let comment: ProseMirrorDoc
     let comment_level: Int
     let parent_comment: Int?

@@ -283,4 +283,22 @@ final class MangaDetailViewModel: ObservableObject {
             return false
         }
     }
+
+    /// Голос за/против комментария — РЕАЛЬНЫЙ (эндпоинт подтверждён перехватом,
+    /// см. MangaNetworkService.voteComment). Обновляет счётчики и голос юзера
+    /// прямо в модели, без перезагрузки списка. Требует авторизации.
+    @discardableResult
+    func voteComment(_ comment: Comment, isUp: Bool) async -> Bool {
+        guard AuthSession.shared.isLoggedIn,
+              let idx = comments.firstIndex(where: { $0.id == comment.id }) else { return false }
+        do {
+            let votes = try await service.voteComment(id: comment.id, direction: isUp ? 1 : 0)
+            comments[idx].votesUp = votes.up
+            comments[idx].votesDown = votes.down
+            comments[idx].userVote = votes.user
+            return true
+        } catch {
+            return false
+        }
+    }
 }
