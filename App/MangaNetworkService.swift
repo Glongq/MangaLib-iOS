@@ -500,7 +500,7 @@ final class MangaNetworkService {
     /// ответ реально содержал ключ "background": {"filename":...,"url":...}) —
     /// см. MangaDetail.background/MangaBackgroundImage. Без явного fields[]
     /// сервер это поле не присылает вообще, так же как summary/genres/etc.
-    func fetchMangaDetail(slug: String) async throws -> MangaDetail {
+    func fetchMangaDetail(slug: String, siteId: Int? = nil) async throws -> MangaDetail {
         let items: [URLQueryItem] = [
             URLQueryItem(name: "fields[]", value: "summary"),
             URLQueryItem(name: "fields[]", value: "genres"),
@@ -520,15 +520,15 @@ final class MangaNetworkService {
             // требованию правообладателя/РКН, либо тайтл на проверке".
             URLQueryItem(name: "fields[]", value: "moderated")
         ]
-        let request = try makeRequest(path: "/manga/\(encodePath(slug))", queryItems: items)
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))", queryItems: items, siteId: siteId)
         let response: APIObjectResponse<MangaDetail> = try await perform(request)
         return response.data
     }
 
     /// Список глав манги.
     /// `GET /manga/{slug}/chapters`
-    func fetchChapters(slug: String) async throws -> [ChapterItem] {
-        let request = try makeRequest(path: "/manga/\(encodePath(slug))/chapters", queryItems: [])
+    func fetchChapters(slug: String, siteId: Int? = nil) async throws -> [ChapterItem] {
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))/chapters", queryItems: [], siteId: siteId)
         let response: APIListResponse<ChapterItem> = try await perform(request)
         return response.data
     }
@@ -539,15 +539,15 @@ final class MangaNetworkService {
     /// "votes":{"up","down","user"}}]}`. LossyListResponse — один "битый"
     /// элемент (например, у похожего тайтла media другой формы) не должен
     /// ронять всю карусель.
-    func fetchSimilar(slug: String) async throws -> [SimilarItem] {
-        let request = try makeRequest(path: "/manga/\(encodePath(slug))/similar", queryItems: [])
+    func fetchSimilar(slug: String, siteId: Int? = nil) async throws -> [SimilarItem] {
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))/similar", queryItems: [], siteId: siteId)
         let response: LossyListResponse<SimilarItem> = try await perform(request)
         return response.data
     }
 
     /// Статистика тайтла (оценки + распределение по спискам) — ПОДТВЕРЖДЕНО
     /// перехватом: `GET /manga/{slug}/stats` → `{data:{bookmarks, rating}}`.
-    func fetchMangaStats(slug: String) async throws -> MangaStats {
+    func fetchMangaStats(slug: String, siteId: Int? = nil) async throws -> MangaStats {
         // ОБЯЗАТЕЛЬНЫЕ query-параметры (подтверждено перехватом
         // `/manga/{slug}/stats?bookmarks=true&rating=true`) — без них сервер
         // не включает эти блоки в ответ.
@@ -555,7 +555,7 @@ final class MangaNetworkService {
             URLQueryItem(name: "bookmarks", value: "true"),
             URLQueryItem(name: "rating", value: "true")
         ]
-        let request = try makeRequest(path: "/manga/\(encodePath(slug))/stats", queryItems: items)
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))/stats", queryItems: items, siteId: siteId)
         let response: APIObjectResponse<MangaStats> = try await perform(request)
         return response.data
     }
@@ -564,13 +564,13 @@ final class MangaNetworkService {
     /// `GET /character?media_id={mangaId}&media_type=manga&limit=0` →
     /// `{data:[{id, slug_url, cover, name, rus_name, details:{position}}]}`.
     /// LossyListResponse — один «битый» персонаж не должен ронять всю строку.
-    func fetchCharacters(mangaId: Int) async throws -> [Character] {
+    func fetchCharacters(mangaId: Int, siteId: Int? = nil) async throws -> [Character] {
         let items: [URLQueryItem] = [
             URLQueryItem(name: "media_id", value: String(mangaId)),
             URLQueryItem(name: "media_type", value: "manga"),
             URLQueryItem(name: "limit", value: "0")
         ]
-        let request = try makeRequest(path: "/character", queryItems: items)
+        let request = try makeRequest(path: "/character", queryItems: items, siteId: siteId)
         let response: LossyListResponse<Character> = try await perform(request)
         return response.data
     }
@@ -605,8 +605,8 @@ final class MangaNetworkService {
     /// В отличие от "Похожего" — без голосов, без своего "id" у элемента (см.
     /// RelatedItem). Может быть пустым (у большинства тайтлов связей нет) —
     /// UI просто скрывает блок, см. MangaDetailView.relatedSection.
-    func fetchRelated(slug: String) async throws -> [RelatedItem] {
-        let request = try makeRequest(path: "/manga/\(encodePath(slug))/relations", queryItems: [])
+    func fetchRelated(slug: String, siteId: Int? = nil) async throws -> [RelatedItem] {
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))/relations", queryItems: [], siteId: siteId)
         let response: LossyListResponse<RelatedItem> = try await perform(request)
         return response.data
     }
@@ -645,7 +645,7 @@ final class MangaNetworkService {
     /// ChapterPagesData.isViewed — не подтверждено перехватом, декодируется
     /// защитно, по умолчанию false).
     /// `GET /manga/{slug}/chapter?number={number}&volume={volume}[&branch_id={id}]`
-    func fetchPages(slug: String, volume: String, number: String, branchId: Int? = nil) async throws -> ChapterPagesResult {
+    func fetchPages(slug: String, volume: String, number: String, branchId: Int? = nil, siteId: Int? = nil) async throws -> ChapterPagesResult {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "number", value: number),
             URLQueryItem(name: "volume", value: volume)
@@ -653,14 +653,18 @@ final class MangaNetworkService {
         if let branchId {
             items.append(URLQueryItem(name: "branch_id", value: String(branchId)))
         }
-        let request = try makeRequest(path: "/manga/\(encodePath(slug))/chapter", queryItems: items)
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))/chapter", queryItems: items, siteId: siteId)
         let response: ChapterPagesResponse = try await perform(request)
         return ChapterPagesResult(pages: response.data.pages, isViewed: response.data.isViewed ?? false)
     }
 
     // MARK: - Request building
 
-    private func makeRequest(path: String, queryItems: [URLQueryItem]) throws -> URLRequest {
+    /// `siteId` — переопределяет заголовок `Site-Id` для этого запроса (по
+    /// умолчанию активный сайт). Нужно для тайтлов с ДРУГОГО сайта (напр. из
+    /// «Похожего»/«Связанного»/«Персонажей»): их карточку/главы надо запрашивать
+    /// с их собственным Site-Id, иначе сервер отвечает 404.
+    private func makeRequest(path: String, queryItems: [URLQueryItem], siteId: Int? = nil) throws -> URLRequest {
         // Собираем URL из строки, чтобы избежать percent-encoding разделителей пути
         // (appendingPathComponent мог кодировать «/» и ломать путь → 404).
         let normalizedPath = path.hasPrefix("/") ? path : "/" + path
@@ -676,6 +680,9 @@ final class MangaNetworkService {
         request.httpMethod = "GET"
         for (field, value) in defaultHeaders {
             request.setValue(value, forHTTPHeaderField: field)
+        }
+        if let siteId {
+            request.setValue(String(siteId), forHTTPHeaderField: "Site-Id")
         }
         return request
     }

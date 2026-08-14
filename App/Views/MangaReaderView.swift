@@ -102,11 +102,12 @@ struct MangaReaderView: View {
          mangaTitle: String? = nil,
          mangaTypeName: String? = nil,
          coverURL: String? = nil,
-         preferredBranchId: Int? = nil) {
+         preferredBranchId: Int? = nil,
+         siteId: Int? = nil) {
         _viewModel = StateObject(wrappedValue: ReaderViewModel(
             slug: slug, chapters: chapters, startIndex: startIndex,
             mangaId: mangaId, mangaTitle: mangaTitle, coverURL: coverURL,
-            preferredBranchId: preferredBranchId
+            preferredBranchId: preferredBranchId, siteId: siteId
         ))
         self.mangaTitle = mangaTitle
         _fitWidth = AppStorage(wrappedValue: Self.defaultFitWidth(forType: mangaTypeName), Self.fitWidthKey(forType: mangaTypeName))

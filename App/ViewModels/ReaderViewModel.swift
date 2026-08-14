@@ -33,6 +33,9 @@ final class ReaderViewModel: ObservableObject {
     /// всему тайтлу, поэтому применяется ко всем главам. nil — брать первую
     /// ветку главы (primaryBranchId), как раньше.
     private let preferredBranchId: Int?
+    /// Сайт тайтла (site_id) — страницы главы у тайтла с другого сайта надо
+    /// запрашивать с его Site-Id, иначе 404 (см. MangaDetailViewModel.siteId).
+    private let siteId: Int?
 
     init(slug: String,
          chapters: [ChapterItem],
@@ -41,6 +44,7 @@ final class ReaderViewModel: ObservableObject {
          mangaTitle: String? = nil,
          coverURL: String? = nil,
          preferredBranchId: Int? = nil,
+         siteId: Int? = nil,
          service: MangaNetworkService = .shared) {
         self.slug = slug
         self.chapters = chapters
@@ -49,6 +53,7 @@ final class ReaderViewModel: ObservableObject {
         self.mangaTitle = mangaTitle
         self.coverURL = coverURL
         self.preferredBranchId = preferredBranchId
+        self.siteId = siteId
         self.service = service
     }
 
@@ -99,7 +104,8 @@ final class ReaderViewModel: ObservableObject {
                 slug: slug,
                 volume: chapter.volume,
                 number: chapter.number,
-                branchId: bid
+                branchId: bid,
+                siteId: siteId
             )
             pages = result.pages
             currentChapterAlreadyViewed = result.isViewed
@@ -186,7 +192,7 @@ final class ReaderViewModel: ObservableObject {
         }
         do {
             let result = try await service.fetchPages(
-                slug: slug, volume: chapter.volume, number: chapter.number, branchId: bid
+                slug: slug, volume: chapter.volume, number: chapter.number, branchId: bid, siteId: siteId
             )
             return ReaderSegment(index: index, chapter: chapter, pages: result.pages)
         } catch NetworkError.cancelled {

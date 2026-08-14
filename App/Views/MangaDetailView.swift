@@ -93,7 +93,10 @@ struct MangaDetailView: View {
     enum Tab: Hashable { case about, chapters, comments }
 
     init(slug: String, fallbackTitle: String = "", coverURL: URL? = nil, item: MangaItem? = nil) {
-        _viewModel = StateObject(wrappedValue: MangaDetailViewModel(slug: slug))
+        // siteId берём из элемента (каталог/поиск/похожее/связанное/персонаж) —
+        // тайтл может жить на другом сайте, чем активный, и без правильного
+        // Site-Id карточка отдаёт 404 (пропадает описание).
+        _viewModel = StateObject(wrappedValue: MangaDetailViewModel(slug: slug, siteId: item?.site))
         self.fallbackTitle = fallbackTitle
         self.coverURL = coverURL
         self.listItem = item
@@ -1151,7 +1154,10 @@ struct MangaDetailView: View {
             // страницы в читалке (см. MangaReaderView.defaultFitWidth).
             mangaTypeName: viewModel.detail?.type?.label ?? listItem?.type?.label,
             coverURL: coverURL?.absoluteString ?? listItem?.coverURLString,
-            preferredBranchId: branchId
+            preferredBranchId: branchId,
+            // Сайт тайтла — страницы главы с другого сайта тоже нужно грузить
+            // с его Site-Id (см. ReaderViewModel.siteId).
+            siteId: viewModel.resolvedSiteId
         )
     }
 

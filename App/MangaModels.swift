@@ -306,6 +306,10 @@ struct MangaItem: Decodable, Identifiable, Hashable {
     let status: MangaStatus?
     let type: MangaStatus?
     let ageRestriction: MangaStatus?
+    /// Сайт тайтла (site_id: 1=манга, 3=новеллы, 4=хентай, …) — приходит в
+    /// каталоге/поиске/похожем/связанном. Нужен, чтобы карточку с ДРУГОГО сайта
+    /// (напр. из «Похожего») запрашивать с правильным Site-Id, иначе 404.
+    let site: Int?
 
     /// Название для отображения: русское, если есть, иначе оригинальное.
     var displayTitle: String { rusName?.isEmpty == false ? rusName! : name }
@@ -317,7 +321,7 @@ struct MangaItem: Decodable, Identifiable, Hashable {
     var coverURLString: String? { cover?.bestURL?.absoluteString }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, cover, rating, status, type
+        case id, name, slug, cover, rating, status, type, site
         case rusName = "rus_name"
         case engName = "eng_name"
         case slugURL = "slug_url"
@@ -553,6 +557,9 @@ struct MangaDetail: Decodable, Identifiable {
     /// MangaDetailView.ageRatingChip — 18+/16+ показываются цветным чипом
     /// первыми в списке жанров/тегов, 12+/6+/"Нет" не показываются вовсе.
     let ageRestriction: MangaStatus?
+    /// Сайт тайтла (site_id) — приходит в ответе карточки, используем как
+    /// «истинный» сайт для последующих запросов (главы/страницы читалки).
+    let site: Int?
     let summary: String?
     let genres: [NamedEntity]?
     let tags: [NamedEntity]?
@@ -628,7 +635,7 @@ struct MangaDetail: Decodable, Identifiable {
     var backgroundURL: URL? { background?.bestURL ?? cover?.bestURL }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, cover, background, rating, status, type, summary, genres, tags, authors, views, format, moderated
+        case id, name, slug, cover, background, rating, status, type, site, summary, genres, tags, authors, views, format, moderated
         case otherNames = "otherNames"
         case otherNamesSnake = "other_names"
         case ageRestriction = "ageRestriction"
@@ -659,6 +666,7 @@ struct MangaDetail: Decodable, Identifiable {
         status = try? c.decodeIfPresent(MangaStatus.self, forKey: .status) ?? nil
         type = try? c.decodeIfPresent(MangaStatus.self, forKey: .type) ?? nil
         ageRestriction = try? c.decodeIfPresent(MangaStatus.self, forKey: .ageRestriction) ?? nil
+        site = (try? c.decodeIfPresent(Int.self, forKey: .site)) ?? nil
         isLicensed = (try? c.decodeIfPresent(Bool.self, forKey: .isLicensed)) ?? false
         moderated = try? c.decodeIfPresent(MangaStatus.self, forKey: .moderated) ?? nil
         // "summary"/"description" — оба ключа пробуем, ПЛЮС на случай, если

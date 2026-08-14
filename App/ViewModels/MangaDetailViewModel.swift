@@ -66,12 +66,25 @@ final class MangaDetailViewModel: ObservableObject {
     @Published private(set) var stats: MangaStats?
 
     let slug: String
+    /// Сайт тайтла (site_id). Нужен, чтобы карточку/главы/похожее с ДРУГОГО
+    /// сайта (напр. открытую из «Похожего»/«Связанного») запрашивать с их
+    /// собственным Site-Id, иначе сервер отдаёт 404 и карточка пустеет.
+    let siteId: Int?
     private let service: MangaNetworkService
 
-    init(slug: String, service: MangaNetworkService = .shared) {
+    init(slug: String, siteId: Int? = nil, service: MangaNetworkService = .shared) {
         self.slug = slug
+        self.siteId = siteId
         self.service = service
     }
+
+    /// Сайт, на котором карточка реально нашлась (см. loadDetailResolvingSite) —
+    /// используется для всех дочерних запросов (главы/похожее/статы/страницы).
+    private var effectiveSite: Int?
+
+    /// «Истинный» сайт тайтла для дочерних запросов: пришедший в карточке →
+    /// найденный перебором → переданный при навигации.
+    var resolvedSiteId: Int? { detail?.site ?? effectiveSite ?? siteId }
 
     var totalChapters: Int { chapters.count }
 
@@ -95,22 +108,19 @@ final class MangaDetailViewModel: ObservableObject {
         errorMessage = nil
         detailErrorMessage = nil
 
-        // "Похожее" грузится ПАРАЛЛЕЛЬНО с detail/chapters, но независимо от
-        // них — это опциональный, вспомогательный блок карточки, поэтому его
-        // ошибка НЕ участвует в errorMessage/detailErrorMessage ниже (не
-        // должна показывать общий экран ошибки, если сам тайтл загрузился
-        // нормально, а только "Похожее" — нет).
-        async let detailResult = loadDetail()
+        // СНАЧАЛА карточка: она же определяет рабочий site_id (тайтл из
+        // «Похожего»/«Связанного» может жить на другом сайте, и у его media
+        // поля site может не быть — поэтому при 404 перебираем сайты). Как
+        // только сайт найден, остальные блоки грузятся уже с ним.
+        let detailError = await loadDetailResolvingSite()
+        detailErrorMessage = detailError
+
+        // Остальное — параллельно, с уже известным сайтом.
         async let chaptersResult = loadChapters()
         async let similarResult: Void = loadSimilar()
         async let relatedResult: Void = loadRelated()
         async let statsResult: Void = loadStats()
-        let (detailError, chaptersError, _, _, _) = await (detailResult, chaptersResult, similarResult, relatedResult, statsResult)
-
-        // detailErrorMessage — ВСЕГДА реальная причина провала detail, не
-        // завязана на то, загрузились ли главы (см. комментарий у объявления
-        // detailErrorMessage выше).
-        detailErrorMessage = detailError
+        let (chaptersError, _, _, _) = await (chaptersResult, similarResult, relatedResult, statsResult)
 
         // Показываем общую ошибку только если ничего не удалось загрузить.
         if detail == nil, chapters.isEmpty {
@@ -119,33 +129,52 @@ final class MangaDetailViewModel: ObservableObject {
         isLoading = false
     }
 
-    private func loadDetail() async -> String? {
-        do {
-            detail = try await service.fetchMangaDetail(slug: slug)
-            // Персонажи требуют числовой media_id — грузим сразу после detail,
-            // тихо (это опциональная карусель).
-            if let id = detail?.id { await loadCharacters(mangaId: id) }
-            return nil
-        } catch NetworkError.cancelled {
-            return nil
-        } catch {
-            return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    /// Грузит карточку, подбирая рабочий site_id: сначала переданный при
+    /// навигации, затем активный, затем остальные сайты — до первого, где
+    /// тайтл найдётся (сервер отвечает 404, если Site-Id не тот). Найденный
+    /// сайт запоминается в effectiveSite для дочерних запросов.
+    private func loadDetailResolvingSite() async -> String? {
+        var candidates: [Int?] = []
+        var seen = Set<Int>()
+        if let siteId { candidates.append(siteId); seen.insert(siteId) }
+        candidates.append(nil)                     // активный сайт (заголовок по умолчанию)
+        for s in LibSite.allCases.map(\.rawValue) where !seen.contains(s) { candidates.append(s) }
+
+        var lastNotFound: String? = nil
+        for candidate in candidates {
+            do {
+                let d = try await service.fetchMangaDetail(slug: slug, siteId: candidate)
+                detail = d
+                effectiveSite = d.site ?? candidate ?? siteId
+                await loadCharacters(mangaId: d.id)
+                return nil
+            } catch NetworkError.cancelled {
+                return nil
+            } catch NetworkError.notFound {
+                // Не тот сайт — пробуем следующий.
+                lastNotFound = "Тайтл не найден на доступных сайтах."
+                continue
+            } catch {
+                // Сеть/декодирование — это не про сайт, перебор не поможет.
+                return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
+        return lastNotFound
     }
 
     private func loadCharacters(mangaId: Int) async {
-        do { characters = try await service.fetchCharacters(mangaId: mangaId) }
+        do { characters = try await service.fetchCharacters(mangaId: mangaId, siteId: resolvedSiteId) }
         catch { characters = [] }
     }
 
     private func loadStats() async {
-        do { stats = try await service.fetchMangaStats(slug: slug) }
+        do { stats = try await service.fetchMangaStats(slug: slug, siteId: resolvedSiteId) }
         catch { stats = nil }
     }
 
     private func loadChapters() async -> String? {
         do {
-            chapters = sortChapters(try await service.fetchChapters(slug: slug))
+            chapters = sortChapters(try await service.fetchChapters(slug: slug, siteId: resolvedSiteId))
             return nil
         } catch NetworkError.cancelled {
             return nil
@@ -156,7 +185,7 @@ final class MangaDetailViewModel: ObservableObject {
 
     private func loadSimilar() async {
         do {
-            similar = try await service.fetchSimilar(slug: slug)
+            similar = try await service.fetchSimilar(slug: slug, siteId: resolvedSiteId)
         } catch {
             // Тихо игнорируем — "Похожее" опциональный блок карточки, не
             // должен ломать/затенять основной экран при ошибке загрузки
@@ -167,7 +196,7 @@ final class MangaDetailViewModel: ObservableObject {
 
     private func loadRelated() async {
         do {
-            related = try await service.fetchRelated(slug: slug)
+            related = try await service.fetchRelated(slug: slug, siteId: resolvedSiteId)
         } catch {
             // Тихо игнорируем — по той же причине, что и loadSimilar выше:
             // "Связанное" опциональный блок, у большинства тайтлов его вообще
