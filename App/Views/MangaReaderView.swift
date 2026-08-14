@@ -140,8 +140,27 @@ struct MangaReaderView: View {
                 // сбросились и загрузились с ВЫБРАННОГО сервера.
                 .id(serverChoice)
 
-            if showUI {
-                overlayUI.transition(.opacity)
+            // Интерфейс читалки — плавное появление/затухание с блюром (а не
+            // резкое вкл/выкл). Всегда в дереве, управляется opacity/blur.
+            overlayUI
+                .opacity(showUI ? 1 : 0)
+                .blur(radius: showUI ? 0 : 12)
+                .allowsHitTesting(showUI)
+                .animation(.easeInOut(duration: 0.32), value: showUI)
+
+            // Индикатор текущей страницы — виден ВСЕГДА (даже при скрытом
+            // интерфейсе). При скрытии интерфейса плавно опускается ниже, при
+            // показе — поднимается над нижней панелью. Только горизонтальный
+            // режим (в вертикальном нет постраничного номера).
+            if pageMode != 1, !hidePageNumber, !viewModel.pages.isEmpty,
+               currentPage < viewModel.pages.count {
+                VStack {
+                    Spacer()
+                    pageBubble
+                }
+                .padding(.bottom, showUI ? 96 : 34)
+                .allowsHitTesting(false)
+                .animation(.easeInOut(duration: 0.32), value: showUI)
             }
 
             // Тост закладки — отдельным слоем поверх всего, ВНЕ
@@ -593,15 +612,12 @@ struct MangaReaderView: View {
     // MARK: Оверлей интерфейса
 
     private var overlayUI: some View {
+        // Индикатор страницы вынесен отдельным всегда-видимым слоем (см. body),
+        // поэтому здесь только верхняя и нижняя панели.
         GlassEffectContainer(spacing: 16) {
             VStack(spacing: 0) {
                 topBar
                 Spacer()
-                // currentPage < pages.count — реальная страница; на "Конец
-                // главы"/переходной странице (currentPage == pages.count или
-                // pages.count+1) индикатор просто пропадает, а не показывает
-                // некорректное значение вроде "3/2".
-                if !hidePageNumber && !viewModel.pages.isEmpty && currentPage < viewModel.pages.count { pageBubble }
                 bottomBar
             }
         }
@@ -678,7 +694,6 @@ struct MangaReaderView: View {
             .foregroundStyle(fg)
             .padding(.horizontal, 16).padding(.vertical, 8)
             .glassEffect(.regular, in: Capsule())
-            .padding(.bottom, 12)
     }
 
     // Нижняя матовая подложка с тремя кнопками — эту НЕ трогаем, уже
