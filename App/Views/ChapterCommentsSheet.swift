@@ -12,6 +12,10 @@ struct ChapterCommentsSheet: View {
     /// (тап или свайп вниз). Панель встроена в читалку с тем же фоном, поэтому
     /// собственного модального dismiss у неё нет.
     var onClose: (() -> Void)? = nil
+    /// Встроенный режим: без своего фона и без внутреннего ScrollView —
+    /// комментарии текут ПРОДОЛЖЕНИЕМ страницы в общей вертикальной прокрутке
+    /// читалки (горизонтальный режим). Пагинация — по мере долистывания.
+    var embedded: Bool = false
 
     @StateObject private var vm = ChapterCommentsViewModel()
     @Environment(\.dismiss) private var dismiss
@@ -33,23 +37,40 @@ struct ChapterCommentsSheet: View {
     @ObservedObject private var auth = AuthSession.shared
 
     var body: some View {
-        ZStack {
-            palette.background.ignoresSafeArea()
-            VStack(spacing: 0) {
-                if onClose != nil { grabber }
-                header
-                if disabledInReader {
-                    disabledState
-                } else {
-                    content
+        Group {
+            if embedded {
+                // Продолжение страницы: без фона (просвечивает фон читалки) и
+                // без своего ScrollView — список течёт в общей прокрутке.
+                VStack(spacing: 0) {
+                    header
+                    if disabledInReader {
+                        Text("Вы отключили комментарии")
+                            .font(.subheadline).foregroundStyle(palette.secondary)
+                            .frame(maxWidth: .infinity).padding(.vertical, 30)
+                    } else {
+                        embeddedContent
+                    }
                 }
+            } else {
+                ZStack {
+                    palette.background.ignoresSafeArea()
+                    VStack(spacing: 0) {
+                        if onClose != nil { grabber }
+                        header
+                        if disabledInReader {
+                            disabledState
+                        } else {
+                            content
+                        }
+                    }
+                }
+                .presentationDetents([.large, .medium])
+                .presentationDragIndicator(.visible)
+                .preferredColorScheme(palette.isLight ? .light : .dark)
             }
         }
-        .presentationDetents([.large, .medium])
-        .presentationDragIndicator(.visible)
-        .preferredColorScheme(palette.isLight ? .light : .dark)
         .tint(Theme.accent)
-        .task {
+        .task(id: postPage) {
             vm.configure(chapterId: chapterId, postPage: postPage)
             if !disabledInReader { await vm.loadIfNeeded() }
         }
@@ -165,6 +186,37 @@ struct ChapterCommentsSheet: View {
                 }
             }
             .scrollIndicators(.hidden)
+        }
+    }
+
+    /// Встроенный контент (без ScrollView) — течёт в общей прокрутке читалки.
+    private var embeddedContent: some View {
+        VStack(spacing: 0) {
+            composeBar
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
+            Divider().overlay(palette.separator)
+
+            if vm.isLoading && vm.comments.isEmpty {
+                ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, minHeight: 140)
+            } else if let error = vm.error, vm.comments.isEmpty {
+                VStack(spacing: 10) {
+                    Text(error).font(.footnote).foregroundStyle(palette.secondary)
+                    Button("Повторить") { Task { await vm.load() } }
+                        .font(.subheadline.weight(.medium)).foregroundStyle(Theme.accent)
+                }
+                .frame(maxWidth: .infinity, minHeight: 140)
+            } else if vm.comments.isEmpty && vm.hasLoaded {
+                VStack(spacing: 8) {
+                    Image(systemName: "text.bubble").font(.largeTitle).foregroundStyle(palette.secondary)
+                    Text("Пока нет комментариев к этой странице")
+                        .font(.subheadline).foregroundStyle(palette.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 160)
+            } else {
+                list
+            }
         }
     }
 

@@ -35,9 +35,9 @@ struct MangaReaderView: View {
     @State private var showChapters = false
     @State private var showSettings = false
     @State private var showComments = false
-    /// Высота области читалки — для распознавания свайпа снизу вверх (открытие
-    /// комментариев в горизонтальном режиме).
-    @State private var readerHeight: CGFloat = 0
+    /// Отключены ли комментарии в читалке (общая настройка) — тогда не
+    /// показываем их продолжением на экране конца главы.
+    @AppStorage("comments_disabled_in_reader") private var commentsDisabledInReader = false
     /// Залита ли кнопка-закладка белым (bookmark.fill). Локальное визуальное
     /// состояние: тап переключает, переход на след. главу сбрасывает.
     @State private var bookmarkFilled = false
@@ -179,27 +179,6 @@ struct MangaReaderView: View {
                 .zIndex(30)
             }
         }
-        // Замер высоты читалки — чтобы понять, что свайп начался у нижнего края.
-        .background(
-            GeometryReader { proxy in
-                Color.clear.onAppear { readerHeight = proxy.size.height }
-                    .onChange(of: proxy.size.height) { _, h in readerHeight = h }
-            }
-        )
-        // В ГОРИЗОНТАЛЬНОМ режиме комментарии открываются свайпом снизу вверх
-        // (как на сайте: листаешь вниз — снизу поднимается панель комментариев
-        // к текущей странице). В вертикальном для этого есть кнопка. Жест
-        // simultaneous, чтобы не мешать листанию/зуму: реагируем только на
-        // заметный свайп ВВЕРХ, начатый у самого низа экрана.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 40)
-                .onEnded { v in
-                    guard pageMode != 1, readerHeight > 0, !showComments else { return }
-                    if v.startLocation.y > readerHeight - 130, v.translation.height < -70 {
-                        withAnimation(.easeInOut(duration: 0.25)) { showComments = true }
-                    }
-                }
-        )
         .animation(.spring(response: 0.45, dampingFraction: 0.9), value: viewModel.bookmarkToast)
         // Только НИЖНЯЯ safe area игнорируется (как в RootView.swift) — низ
         // safe area на Face ID экранах даёт ~34pt от истинного края из-за
@@ -529,16 +508,48 @@ struct MangaReaderView: View {
             .overlay { ProgressView().tint(fg) }
     }
 
-    // Экран конца главы: сверху «Конец…», снизу «Следующая глава …».
+    // Экран конца главы: сверху «Конец…»/«Следующая глава», а НИЖЕ —
+    // продолжением идут комментарии к последней странице (долистал главу до
+    // конца → и ещё чуть вниз → бесконечная лента комментов). Всё в одной
+    // вертикальной прокрутке, без отдельного меню/жеста.
     private var endPage: some View {
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 0) {
+                    endHeader
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: geo.size.height)
+                        .contentShape(Rectangle())
+                        .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
+
+                    if !commentsDisabledInReader,
+                       let ch = viewModel.currentChapter,
+                       !viewModel.pages.isEmpty {
+                        Divider().overlay(fg.opacity(0.15))
+                        ChapterCommentsSheet(
+                            chapterId: ch.id,
+                            postPage: viewModel.pages.count,
+                            embedded: true
+                        )
+                        .padding(.bottom, 40)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+        .background(readerBackground)
+        .ignoresSafeArea()
+    }
+
+    /// Верхняя «шапка» экрана конца — «Конец · …» и кнопка следующей главы.
+    private var endHeader: some View {
         VStack {
             Text("Конец · \(viewModel.currentChapter?.shortTitle ?? "главы")")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(fg.opacity(0.85))
-                // 60 → 95 (+35): опустили надпись ниже, как попросили.
                 .padding(.top, 95)
 
-            Spacer()
+            Spacer(minLength: 40)
 
             if let next = nextChapter {
                 Button {
@@ -563,11 +574,15 @@ struct MangaReaderView: View {
                     .font(.subheadline).foregroundStyle(fg.opacity(0.6))
             }
 
-            Spacer()
+            Spacer(minLength: 40)
+
+            // Подсказка, что ниже комментарии.
+            if !commentsDisabledInReader {
+                Label("Комментарии ниже", systemImage: "chevron.down")
+                    .font(.caption2).foregroundStyle(fg.opacity(0.5))
+                    .padding(.bottom, 24)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(readerBackground)
-        .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
     }
 
     private func openNext() {

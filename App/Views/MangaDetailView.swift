@@ -1487,26 +1487,26 @@ struct MangaDetailView: View {
 
     /// Заголовок главы (глазок + название) — без скачивания, оно у веток.
     private func chapterHeaderRow(_ chapter: ChapterItem) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 5) {
             Button { markReadUpTo(chapter) } label: {
                 Image(systemName: isRead(chapter) ? "bookmark.fill" : "eye")
-                    .font(.system(size: 15))
+                    .font(.system(size: 14))
                     .foregroundStyle(isRead(chapter) ? Theme.accent : Theme.textSecondary)
-                    .frame(width: 26, height: 30)
+                    .frame(width: 20, height: 26)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             Text(chapter.displayTitle)
-                .font(.system(size: 14))
+                .font(.system(size: 12))
                 .foregroundStyle(chapterColor(chapter))
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 4)
+        .padding(.top, 8)
+        .padding(.bottom, 3)
     }
 
     /// Под-строка ветки (команды): отступ-«дерево» + аватар + имя + дата + скачать.
@@ -1532,7 +1532,7 @@ struct MangaDetailView: View {
                 .clipShape(Circle())
 
                 Text(branch.teamName)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
 
@@ -1540,7 +1540,7 @@ struct MangaDetailView: View {
 
                 if let date = branch.dateString {
                     Text(date)
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
                 }
@@ -1549,7 +1549,7 @@ struct MangaDetailView: View {
             }
             .padding(.leading, 14)
             .padding(.trailing, 14)
-            .padding(.vertical, 5)
+            .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1560,18 +1560,18 @@ struct MangaDetailView: View {
         Button {
             readerOpen = ReaderOpen(chapter: chapter, branchId: branchId)
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 5) {
                 Button { markReadUpTo(chapter) } label: {
                     Image(systemName: isRead(chapter) ? "bookmark.fill" : "eye")
-                        .font(.system(size: 15))
+                        .font(.system(size: 14))
                         .foregroundStyle(isRead(chapter) ? Theme.accent : Theme.textSecondary)
-                        .frame(width: 26, height: 30)
+                        .frame(width: 20, height: 26)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
                 Text(chapter.displayTitle)
-                    .font(.system(size: 14))
+                    .font(.system(size: 12))
                     .foregroundStyle(chapterColor(chapter))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -1580,7 +1580,7 @@ struct MangaDetailView: View {
 
                 if let date = chapter.dateString {
                     Text(date)
-                        .font(.system(size: 13))
+                        .font(.system(size: 11))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
                 }
@@ -1588,7 +1588,7 @@ struct MangaDetailView: View {
                 chapterDownloadControl(chapter, branchId: branchId)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
