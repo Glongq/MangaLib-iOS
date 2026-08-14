@@ -79,13 +79,13 @@ struct MangaReaderView: View {
     /// обновляется, когда очередная картинка попадает в область просмотра.
     @State private var verticalPage = 1
 
-    /// Простой зум всей вертикальной ленты (приближается весь вид, а не
-    /// отдельная картинка). `scale` — текущий масштаб, `offset` — сдвиг при
-    /// увеличении; `last*` фиксируются на конце жеста.
+    /// Зум вертикальной ленты через РЕАЛЬНУЮ ширину колонки (не transform):
+    /// колонка становится шире экрана → включается нативная горизонтальная
+    /// прокрутка, и панорама увеличенной ленты идёт нативным скроллом (плавно,
+    /// без ручного offset и без дёрганья). `vScale` — текущий масштаб,
+    /// `vScaleBase` — зафиксированный на конце пинча.
     @State private var vScale: CGFloat = 1
-    @State private var vLastScale: CGFloat = 1
-    @State private var vOffset: CGSize = .zero
-    @State private var vLastOffset: CGSize = .zero
+    @State private var vScaleBase: CGFloat = 1
 
     /// Тап по левой/правой части листает, по центру — показывает интерфейс
     /// (по умолчанию вкл). Ширина краевых зон — доля экрана.
@@ -146,7 +146,7 @@ struct MangaReaderView: View {
                 .opacity(showUI ? 1 : 0)
                 .blur(radius: showUI ? 0 : 12)
                 .allowsHitTesting(showUI)
-                .animation(.easeInOut(duration: 0.32), value: showUI)
+                .animation(.easeInOut(duration: 0.16), value: showUI)
 
             // Индикатор текущей страницы — виден ВСЕГДА (даже при скрытом
             // интерфейсе). При скрытии интерфейса плавно опускается ниже, при
@@ -160,7 +160,7 @@ struct MangaReaderView: View {
                 }
                 .padding(.bottom, showUI ? 96 : 34)
                 .allowsHitTesting(false)
-                .animation(.easeInOut(duration: 0.32), value: showUI)
+                .animation(.easeInOut(duration: 0.16), value: showUI)
             }
 
             // Тост закладки — отдельным слоем поверх всего, ВНЕ
@@ -338,7 +338,12 @@ struct MangaReaderView: View {
 
     private var verticalReader: some View {
         GeometryReader { geo in
-            ScrollView {
+            // Двухосевой нативный скролл: вертикаль — листание ленты, горизонталь
+            // включается только при зуме (когда колонка шире экрана). Панорама
+            // увеличенной ленты — нативным скроллом, поэтому плавно, без дёрганья.
+            // .scrollBounceBehavior(.basedOnSize) убирает боковой дрейф на 1×,
+            // когда контент по ширине ровно равен экрану.
+            ScrollView([.vertical, .horizontal]) {
                 LazyVStack(spacing: CGFloat(verticalGap)) {
                     ForEach(viewModel.segments) { seg in
                         ForEach(Array(seg.pages.enumerated()), id: \.offset) { pageIndex, page in
@@ -358,64 +363,30 @@ struct MangaReaderView: View {
                             .padding(.vertical, 24)
                     }
                 }
+                .frame(width: geo.size.width * vScale)
             }
             .scrollIndicators(.hidden)
-            // При зуме отключаем собственную прокрутку ленты — иначе её
-            // scroll-жест конфликтует с нашим перетаскиванием (панорамой), и
-            // свайпы по увеличенной картинке лагают/дёргаются. На 1× прокрутка
-            // снова включена.
-            .scrollDisabled(vScale > 1)
-            // Приближаем весь вид целиком. Пока масштаб 1× — жесты не
-            // перехватываются, лента листается как обычно; при зуме включается
-            // перетаскивание (панорама), а листание возобновляется после
-            // возврата к 1× (пинч обратно).
-            .scaleEffect(vScale)
-            .offset(vOffset)
-            .simultaneousGesture(zoomGesture(in: geo.size))
-            .highPriorityGesture(panGesture(in: geo.size), including: vScale > 1 ? .all : .none)
+            .scrollBounceBehavior(.basedOnSize)
+            .simultaneousGesture(
+                MagnifyGesture()
+                    .onChanged { v in vScale = min(max(vScaleBase * v.magnification, 1), 4) }
+                    .onEnded { _ in
+                        if vScale < 1.02 {
+                            withAnimation(.easeOut(duration: 0.15)) { vScale = 1 }
+                            vScaleBase = 1
+                        } else {
+                            vScaleBase = vScale
+                        }
+                    }
+            )
+            .onTapGesture(count: 2) {
+                let target: CGFloat = vScale > 1 ? 1 : 2
+                withAnimation(.easeOut(duration: 0.2)) { vScale = target }
+                vScaleBase = target
+            }
             .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
         }
         .ignoresSafeArea()
-    }
-
-    private func zoomGesture(in size: CGSize) -> some Gesture {
-        MagnifyGesture()
-            .onChanged { v in
-                vScale = min(max(vLastScale * v.magnification, 1), 5)
-                vOffset = clampVertical(vOffset, scale: vScale, size: size)
-            }
-            .onEnded { _ in
-                if vScale <= 1.01 {
-                    withAnimation(.easeOut(duration: 0.2)) { vScale = 1; vOffset = .zero }
-                    vLastScale = 1; vLastOffset = .zero
-                } else {
-                    vLastScale = vScale
-                    vOffset = clampVertical(vOffset, scale: vScale, size: size)
-                    vLastOffset = vOffset
-                }
-            }
-    }
-
-    private func panGesture(in size: CGSize) -> some Gesture {
-        DragGesture()
-            .onChanged { v in
-                let proposed = CGSize(
-                    width: vLastOffset.width + v.translation.width,
-                    height: vLastOffset.height + v.translation.height
-                )
-                vOffset = clampVertical(proposed, scale: vScale, size: size)
-            }
-            .onEnded { _ in vLastOffset = vOffset }
-    }
-
-    /// Не даём увезти вид за края при панораме увеличенной ленты.
-    private func clampVertical(_ o: CGSize, scale: CGFloat, size: CGSize) -> CGSize {
-        let maxX = max(size.width * (scale - 1) / 2, 0)
-        let maxY = max(size.height * (scale - 1) / 2, 0)
-        return CGSize(
-            width: min(max(o.width, -maxX), maxX),
-            height: min(max(o.height, -maxY), maxY)
-        )
     }
 
     private func nextChapterAfter(_ index: Int) -> ChapterItem? {
@@ -532,49 +503,45 @@ struct MangaReaderView: View {
     // конца → и ещё чуть вниз → бесконечная лента комментов). Всё в одной
     // вертикальной прокрутке, без отдельного меню/жеста.
     private var endPage: some View {
-        GeometryReader { geo in
-            ScrollView {
-                VStack(spacing: 0) {
-                    endHeader
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: geo.size.height)
-                        .contentShape(Rectangle())
-                        .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
+        ScrollView {
+            VStack(spacing: 0) {
+                endHeader
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
 
-                    if !commentsDisabledInReader,
-                       let ch = viewModel.currentChapter,
-                       !viewModel.pages.isEmpty {
-                        Divider().overlay(fg.opacity(0.15))
-                        ChapterCommentsSheet(
-                            chapterId: ch.id,
-                            postPage: viewModel.pages.count,
-                            embedded: true
-                        )
-                        .padding(.bottom, 40)
-                    }
+                if !commentsDisabledInReader,
+                   let ch = viewModel.currentChapter,
+                   !viewModel.pages.isEmpty {
+                    Divider().overlay(fg.opacity(0.15))
+                    ChapterCommentsSheet(
+                        chapterId: ch.id,
+                        postPage: viewModel.pages.count,
+                        embedded: true
+                    )
+                    .padding(.bottom, 40)
                 }
             }
-            .scrollIndicators(.hidden)
         }
+        .scrollIndicators(.hidden)
         .background(readerBackground)
         .ignoresSafeArea()
     }
 
     /// Верхняя «шапка» экрана конца — «Конец · …» и кнопка следующей главы.
+    /// Компактная (не на весь экран), чтобы комментарии были видны сразу.
     private var endHeader: some View {
-        VStack {
+        VStack(spacing: 14) {
             Text("Конец · \(viewModel.currentChapter?.shortTitle ?? "главы")")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(fg.opacity(0.85))
-                .padding(.top, 95)
-
-            Spacer(minLength: 40)
+                .padding(.top, 60)
 
             if let next = nextChapter {
                 Button {
                     openNext()
                 } label: {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 6) {
                         Text("Следующая глава")
                             .font(.caption).foregroundStyle(fg.opacity(0.6))
                         Text(next.titleOrShort)
@@ -582,26 +549,19 @@ struct MangaReaderView: View {
                             .multilineTextAlignment(.center)
                         Label("Листните ещё раз", systemImage: "hand.draw")
                             .font(.caption2).foregroundStyle(Theme.accent)
-                            .padding(.top, 4)
+                            .padding(.top, 2)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(24)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 14)
                 }
                 .buttonStyle(.plain)
             } else {
                 Text("Это последняя доступная глава")
                     .font(.subheadline).foregroundStyle(fg.opacity(0.6))
             }
-
-            Spacer(minLength: 40)
-
-            // Подсказка, что ниже комментарии.
-            if !commentsDisabledInReader {
-                Label("Комментарии ниже", systemImage: "chevron.down")
-                    .font(.caption2).foregroundStyle(fg.opacity(0.5))
-                    .padding(.bottom, 24)
-            }
         }
+        .padding(.bottom, 18)
     }
 
     private func openNext() {
