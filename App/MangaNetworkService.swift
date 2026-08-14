@@ -109,7 +109,16 @@ final class MangaNetworkService {
     /// Базовые параметры совпадают с поиском; неизвестные серверу параметры он игнорирует.
     /// Тот же экран используется и для поиска по каталогу — поэтому здесь тоже
     /// несколько site_id[] из effectiveSearchSites (активный сайт + галочки).
-    func fetchCatalog(query: String, sort: SortOption, filter: MangaFilter, page: Int = 1) async throws -> CatalogPage {
+    /// `sortByOverride`/`sortType` — для страниц с расширенным набором
+    /// сортировок (напр. персонаж), где нужны значения вне каталожной
+    /// SortOption. `siteIds` — явный набор сайтов вместо effectiveSearchSites
+    /// (страница персонажа фильтрует по одному типу контента). `targetId`+
+    /// `targetModel` — фильтр «тайтлы, где есть эта сущность» (персонаж и т.п.),
+    /// ПОДТВЕРЖДЕНО перехватом `?target_id=1221&target_model=character`.
+    func fetchCatalog(query: String, sort: SortOption, filter: MangaFilter, page: Int = 1,
+                      sortByOverride: String? = nil, sortType: String = "desc",
+                      siteIds: [Int]? = nil,
+                      targetId: Int? = nil, targetModel: String? = nil) async throws -> CatalogPage {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "fields[]", value: "rate"),
             URLQueryItem(name: "fields[]", value: "rate_avg"),
@@ -117,8 +126,9 @@ final class MangaNetworkService {
             URLQueryItem(name: "fields[]", value: "releaseDate"),
             URLQueryItem(name: "page", value: String(max(page, 1)))
         ]
-        for site in SiteSession.shared.effectiveSearchSites {
-            items.append(URLQueryItem(name: "site_id[]", value: String(site.rawValue)))
+        let sites = siteIds ?? SiteSession.shared.effectiveSearchSites.map(\.rawValue)
+        for site in sites {
+            items.append(URLQueryItem(name: "site_id[]", value: String(site)))
         }
 
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -126,9 +136,16 @@ final class MangaNetworkService {
             items.append(URLQueryItem(name: "q", value: trimmed))
         }
 
-        if let sortBy = sort.apiSortBy {
+        if let targetId {
+            items.append(URLQueryItem(name: "target_id", value: String(targetId)))
+        }
+        if let targetModel {
+            items.append(URLQueryItem(name: "target_model", value: targetModel))
+        }
+
+        if let sortBy = sortByOverride ?? sort.apiSortBy {
             items.append(URLQueryItem(name: "sort_by", value: sortBy))
-            items.append(URLQueryItem(name: "sort_type", value: "desc"))
+            items.append(URLQueryItem(name: "sort_type", value: sortType))
         }
 
         // Числовые диапазоны.
@@ -525,6 +542,38 @@ final class MangaNetworkService {
     func fetchSimilar(slug: String) async throws -> [SimilarItem] {
         let request = try makeRequest(path: "/manga/\(encodePath(slug))/similar", queryItems: [])
         let response: LossyListResponse<SimilarItem> = try await perform(request)
+        return response.data
+    }
+
+    /// Статистика тайтла (оценки + распределение по спискам) — ПОДТВЕРЖДЕНО
+    /// перехватом: `GET /manga/{slug}/stats` → `{data:{bookmarks, rating}}`.
+    func fetchMangaStats(slug: String) async throws -> MangaStats {
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))/stats", queryItems: [])
+        let response: APIObjectResponse<MangaStats> = try await perform(request)
+        return response.data
+    }
+
+    /// Персонажи тайтла — ПОДТВЕРЖДЕНО перехватом:
+    /// `GET /character?media_id={mangaId}&media_type=manga&limit=0` →
+    /// `{data:[{id, slug_url, cover, name, rus_name, details:{position}}]}`.
+    /// LossyListResponse — один «битый» персонаж не должен ронять всю строку.
+    func fetchCharacters(mangaId: Int) async throws -> [Character] {
+        let items: [URLQueryItem] = [
+            URLQueryItem(name: "media_id", value: String(mangaId)),
+            URLQueryItem(name: "media_type", value: "manga"),
+            URLQueryItem(name: "limit", value: "0")
+        ]
+        let request = try makeRequest(path: "/character", queryItems: items)
+        let response: LossyListResponse<Character> = try await perform(request)
+        return response.data
+    }
+
+    /// Детальная страница персонажа — ПОДТВЕРЖДЕНО перехватом:
+    /// `GET /character/{slug_url}` → `{data:{..., alt_name, dsc, stats,
+    /// titles_count_details}}`.
+    func fetchCharacterDetail(slugURL: String) async throws -> CharacterDetail {
+        let request = try makeRequest(path: "/character/\(encodePath(slugURL))", queryItems: [])
+        let response: APIObjectResponse<CharacterDetail> = try await perform(request)
         return response.data
     }
 

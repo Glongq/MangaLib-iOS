@@ -48,6 +48,54 @@ enum SortOption: String, CaseIterable, Identifiable {
     }
 }
 
+/// Сортировки для грида тайтлов на странице персонажа (шире, чем каталожная
+/// SortOption). Значения sort_by — по известному поведению каталога MangaLib;
+/// неизвестные серверу параметры он игнорирует (см. fetchCatalog).
+enum CharacterTitleSort: String, CaseIterable, Identifiable {
+    case popularity, rating, views, releaseDate, createdAt, updatedAt, nameAsc, nameDesc
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .popularity: return "По популярности"
+        case .rating:     return "По рейтингу"
+        case .views:      return "По просмотрам"
+        case .releaseDate: return "По дате релиза"
+        case .createdAt:  return "По дате добавления"
+        case .updatedAt:  return "По дате обновления"
+        case .nameAsc:    return "По названию A-Z"
+        case .nameDesc:   return "По названию Z-A"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .popularity: return "flame"
+        case .rating:     return "star"
+        case .views:      return "eye"
+        case .releaseDate: return "calendar"
+        case .createdAt:  return "plus.circle"
+        case .updatedAt:  return "clock"
+        case .nameAsc, .nameDesc: return "textformat.abc"
+        }
+    }
+
+    var sortBy: String {
+        switch self {
+        case .popularity:  return "rating"
+        case .rating:      return "rate_avg"
+        case .views:       return "views"
+        case .releaseDate: return "releaseDate"
+        case .createdAt:   return "created_at"
+        case .updatedAt:   return "last_chapter_at"
+        case .nameAsc, .nameDesc: return "name"
+        }
+    }
+
+    var sortType: String { self == .nameAsc ? "asc" : "desc" }
+}
+
 // MARK: - Filter option
 
 /// Пункт фильтра: отображаемое имя + id для API.

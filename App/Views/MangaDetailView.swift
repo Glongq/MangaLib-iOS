@@ -643,6 +643,204 @@ struct MangaDetailView: View {
         }
     }
 
+    // MARK: Статистика (GET /manga/{slug}/stats)
+
+    /// Виджет «Оценки пользователей» (распределение 10→1) + «В списках у N
+    /// человек» (распределение по папкам). Скрыт, если статистики нет.
+    @ViewBuilder
+    private var statsSection: some View {
+        if let stats = viewModel.stats,
+           (stats.rating?.stats?.isEmpty == false) || (stats.bookmarks?.stats?.isEmpty == false) {
+            VStack(alignment: .leading, spacing: 24) {
+                ratingStatsBlock(stats.rating)
+                bookmarkStatsBlock(stats.bookmarks)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func ratingStatsBlock(_ group: StatGroup?) -> some View {
+        if let entries = group?.stats, !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    blockTitle("Оценки пользователей")
+                    Spacer(minLength: 0)
+                    if let r = viewModel.detail?.rating {
+                        HStack(spacing: 6) {
+                            Image(systemName: "star.fill").font(.subheadline).foregroundStyle(Theme.accent)
+                            Text(r.average ?? r.averageFormated ?? "—")
+                                .font(.headline).foregroundStyle(Theme.textPrimary)
+                            if let v = r.votes {
+                                Text(Self.shortCount(v)).font(.footnote).foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                    }
+                }
+                VStack(spacing: 9) {
+                    ForEach(entries) { e in
+                        statRow(leading: { ratingLeading(e.label) },
+                                leadingWidth: 40,
+                                percent: e.percent,
+                                color: Self.ratingColor(for: e.label),
+                                value: e.value)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bookmarkStatsBlock(_ group: StatGroup?) -> some View {
+        if let entries = group?.stats, !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                blockTitle("В списках у \(group?.count ?? 0) человек")
+                VStack(spacing: 9) {
+                    ForEach(entries) { e in
+                        statRow(leading: {
+                            Text(e.label)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(1)
+                        },
+                                leadingWidth: 96,
+                                percent: e.percent,
+                                color: Theme.accent,
+                                value: e.value)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Одна строка распределения: слева подпись (номер+звезда / название),
+    /// далее полоса, справа процент и абсолютное число.
+    private func statRow<Leading: View>(@ViewBuilder leading: () -> Leading,
+                                        leadingWidth: CGFloat,
+                                        percent: Double,
+                                        color: Color,
+                                        value: Int) -> some View {
+        HStack(spacing: 10) {
+            leading().frame(width: leadingWidth, alignment: .leading)
+            statBar(percent: percent, color: color)
+            Text(Self.percentString(percent))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: 52, alignment: .trailing)
+            Text("\(value)")
+                .font(.subheadline)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 62, alignment: .trailing)
+        }
+    }
+
+    private func ratingLeading(_ label: String) -> some View {
+        HStack(spacing: 5) {
+            Text(label)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.textPrimary)
+            Image(systemName: "star.fill")
+                .font(.caption2)
+                .foregroundStyle(Theme.textSecondary)
+        }
+    }
+
+    private func statBar(percent: Double, color: Color) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.surfaceElevated)
+                Capsule().fill(color)
+                    .frame(width: barWidth(total: geo.size.width, percent: percent))
+            }
+        }
+        .frame(height: 7)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func barWidth(total: CGFloat, percent: Double) -> CGFloat {
+        let p = min(max(percent, 0), 100) / 100
+        let w = total * CGFloat(p)
+        // Ненулевой процент показываем хотя бы тонкой полоской (как на сайте).
+        return percent > 0 ? max(w, 5) : 0
+    }
+
+    private static func ratingColor(for label: String) -> Color {
+        guard let score = Int(label) else { return Theme.accent }
+        // 1 → оранжевый, 10 → зелёный (плавный переход по hue).
+        let t = Double(min(max(score, 1), 10) - 1) / 9.0
+        let hue = 0.03 + t * (0.33 - 0.03)
+        return Color(hue: hue, saturation: 0.75, brightness: 0.85)
+    }
+
+    private static func percentString(_ p: Double) -> String {
+        if p == p.rounded() { return "\(Int(p))%" }
+        return String(format: "%.1f%%", p)
+    }
+
+    private static func shortCount(_ n: Int) -> String {
+        switch n {
+        case 1_000_000...: return String(format: "%.1f M", Double(n) / 1_000_000)
+        case 1_000...:     return String(format: "%.1f K", Double(n) / 1_000)
+        default:           return "\(n)"
+        }
+    }
+
+    // MARK: Персонажи (GET /character?media_id=)
+
+    /// Карусель персонажей — та же идея, что «Похожее»/«Связанное»: строка
+    /// снизу, тап открывает экран персонажа. Скрыта, если персонажей нет.
+    @ViewBuilder
+    private var charactersSection: some View {
+        if !viewModel.characters.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                blockTitle("Персонажи")
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(viewModel.characters) { ch in
+                            characterCard(ch)
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+    }
+
+    private func characterCard(_ ch: Character) -> some View {
+        NavigationLink {
+            CharacterView(slugURL: ch.slugURL, fallbackName: ch.displayName, coverURL: ch.cover?.bestURL)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                RemoteImage(url: ch.cover?.bestURL) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    SkeletonBox()
+                } failure: {
+                    ZStack { Theme.surfaceElevated; Image(systemName: "person.fill").foregroundStyle(Theme.textSecondary) }
+                }
+                .frame(width: 104, height: 140)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                Text(ch.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(width: 104, alignment: .leading)
+
+                if let pos = ch.positionLabel, !pos.isEmpty {
+                    Text(pos)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                        .frame(width: 104, alignment: .leading)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     /// Высота карточек "Похожее"/"Связанное" — обложка теперь занимает ВСЮ
     /// эту высоту, вплотную к левому/верхнему/нижнему краю подложки (как
     /// явно попросили: "увеличь обложку до размеров подложки, чтобы левый
@@ -1079,6 +1277,8 @@ struct MangaDetailView: View {
             // relatedSection/similarSection), если списки пустые.
             relatedSection
             similarSection
+            charactersSection
+            statsSection
 
             if viewModel.detail == nil && !viewModel.isLoading {
                 VStack(alignment: .leading, spacing: 10) {

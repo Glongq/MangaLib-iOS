@@ -227,6 +227,47 @@ struct MangaRating: Decodable {
     }
 }
 
+// MARK: - Stats (оценки пользователей + распределение по спискам)
+
+/// Статистика тайтла — ПОДТВЕРЖДЕНО перехватом `GET /manga/{slug}/stats`:
+/// `{data:{bookmarks:{count, stats:[{label,value,percent,meta}]},
+/// rating:{count, stats:[{label,value,percent,meta}]}}}`. У рейтинга `label` —
+/// число (10…1), у закладок — строка ("Читаю"/"Прочитано"/…).
+struct MangaStats: Decodable {
+    let bookmarks: StatGroup?
+    let rating: StatGroup?
+}
+
+struct StatGroup: Decodable {
+    let count: Int?
+    let stats: [StatEntry]?
+}
+
+struct StatEntry: Decodable, Identifiable {
+    let label: String
+    let value: Int
+    let percent: Double
+    var id: String { label }
+
+    private enum CodingKeys: String, CodingKey { case label, value, percent }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // label бывает строкой ("Читаю") или числом (10) — берём оба.
+        if let s = try? c.decode(String.self, forKey: .label) { label = s }
+        else if let i = try? c.decode(Int.self, forKey: .label) { label = String(i) }
+        else { label = "" }
+
+        if let i = try? c.decode(Int.self, forKey: .value) { value = i }
+        else if let d = try? c.decode(Double.self, forKey: .value) { value = Int(d) }
+        else { value = 0 }
+
+        if let d = try? c.decode(Double.self, forKey: .percent) { percent = d }
+        else if let i = try? c.decode(Int.self, forKey: .percent) { percent = Double(i) }
+        else { percent = 0 }
+    }
+}
+
 // MARK: - Named entity (жанр, тег, автор)
 
 /// Универсальная сущность со `id` и `name` (жанры, теги, авторы).
@@ -730,6 +771,111 @@ struct MangaDetail: Decodable, Identifiable {
             if !text.isEmpty { return text }
         }
         return nil
+    }
+}
+
+// MARK: - Character
+
+/// Персонаж в списке персонажей тайтла — ПОДТВЕРЖДЕНО перехватом
+/// `GET /character?media_id=&media_type=manga`: `{id, slug, slug_url,
+/// model:"character", cover, name (англ), rus_name, details:{order,
+/// position:{id:"Main", label:"Главный"}}}`.
+struct Character: Decodable, Identifiable {
+    let id: Int
+    let slugURL: String
+    let name: String
+    let rusName: String?
+    let cover: MangaCover?
+    let positionLabel: String?
+
+    var displayName: String { rusName?.isEmpty == false ? rusName! : name }
+
+    private struct Details: Decodable {
+        struct Position: Decodable { let label: String? }
+        let position: Position?
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, slug, name, cover, details
+        case slugURL = "slug_url"
+        case rusName = "rus_name"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        let su = (try? c.decodeIfPresent(String.self, forKey: .slugURL)) ?? nil
+        slugURL = (su?.isEmpty == false ? su : nil) ?? ((try? c.decode(String.self, forKey: .slug)) ?? String(id))
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        rusName = (try? c.decodeIfPresent(String.self, forKey: .rusName)) ?? nil
+        cover = (try? c.decodeIfPresent(MangaCover.self, forKey: .cover)) ?? nil
+        let details = (try? c.decodeIfPresent(Details.self, forKey: .details)) ?? nil
+        positionLabel = details?.position?.label
+    }
+}
+
+/// Детальная страница персонажа — ПОДТВЕРЖДЕНО перехватом
+/// `GET /character/{slug_url}`: помимо полей списка есть `alt_name` (оригинал),
+/// `dsc` (ProseMirror-описание), `stats[]` (`{value, label, tag:"titles"}`,
+/// `{..., tag:"subscribes"}`) и `titles_count_details {site_id: count}`.
+struct CharacterDetail: Decodable, Identifiable {
+    let id: Int
+    let slugURL: String
+    let name: String
+    let rusName: String?
+    let altName: String?
+    let cover: MangaCover?
+    let description: String?
+    let titlesCount: Int?
+    let subscribersCount: Int?
+    /// site_id → число тайтлов (1=манга, 3=новеллы, 4=хентай, 5=аниме).
+    let titlesCountBySite: [Int: Int]
+
+    var displayName: String { rusName?.isEmpty == false ? rusName! : name }
+
+    private struct Stat: Decodable { let value: Int?; let tag: String? }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, cover, dsc, stats
+        case slugURL = "slug_url"
+        case rusName = "rus_name"
+        case altName = "alt_name"
+        case titlesCountDetails = "titles_count_details"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        slugURL = ((try? c.decodeIfPresent(String.self, forKey: .slugURL)) ?? nil) ?? String(id)
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        rusName = (try? c.decodeIfPresent(String.self, forKey: .rusName)) ?? nil
+        altName = (try? c.decodeIfPresent(String.self, forKey: .altName)) ?? nil
+        cover = (try? c.decodeIfPresent(MangaCover.self, forKey: .cover)) ?? nil
+
+        // dsc — тот же ProseMirror/TipTap, что и summary тайтла: сначала
+        // SummaryDoc, затем универсальный AnyJSON как запасной вариант.
+        var desc: String? = nil
+        if let doc = (try? c.decodeIfPresent(SummaryDoc.self, forKey: .dsc)) ?? nil {
+            let t = doc.plainText
+            if !t.isEmpty { desc = t }
+        }
+        if desc == nil, let generic = (try? c.decodeIfPresent(AnyJSON.self, forKey: .dsc)) ?? nil {
+            let t = generic.extractReadableText()
+            if !t.isEmpty { desc = t }
+        }
+        description = desc
+
+        let stats = ((try? c.decodeIfPresent([Stat].self, forKey: .stats)) ?? nil) ?? []
+        titlesCount = stats.first { $0.tag == "titles" }?.value
+        subscribersCount = stats.first { $0.tag == "subscribes" }?.value
+
+        if let raw = ((try? c.decodeIfPresent([String: Int].self, forKey: .titlesCountDetails)) ?? nil) {
+            var m: [Int: Int] = [:]
+            for (k, v) in raw { if let ik = Int(k) { m[ik] = v } }
+            titlesCountBySite = m
+        } else {
+            titlesCountBySite = [:]
+        }
     }
 }
 

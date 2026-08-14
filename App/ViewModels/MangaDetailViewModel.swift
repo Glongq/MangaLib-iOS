@@ -55,6 +55,16 @@ final class MangaDetailViewModel: ObservableObject {
     // "Похожее" выше — своего errorMessage нет, пустой список просто прячет UI.
     @Published private(set) var related: [RelatedItem] = []
 
+    // MARK: Персонажи (GET /character?media_id= — ПОДТВЕРЖДЕНО перехватом).
+    /// Опциональный блок-карусель, как «Похожее»/«Связанное»: ошибка не
+    /// показывается, пустой список просто прячет строку.
+    @Published private(set) var characters: [Character] = []
+
+    // MARK: Статистика (GET /manga/{slug}/stats — ПОДТВЕРЖДЕНО перехватом).
+    /// Оценки пользователей + распределение по спискам. Опциональный блок:
+    /// ошибка не показывается, при nil блок скрыт.
+    @Published private(set) var stats: MangaStats?
+
     let slug: String
     private let service: MangaNetworkService
 
@@ -94,7 +104,8 @@ final class MangaDetailViewModel: ObservableObject {
         async let chaptersResult = loadChapters()
         async let similarResult: Void = loadSimilar()
         async let relatedResult: Void = loadRelated()
-        let (detailError, chaptersError, _, _) = await (detailResult, chaptersResult, similarResult, relatedResult)
+        async let statsResult: Void = loadStats()
+        let (detailError, chaptersError, _, _, _) = await (detailResult, chaptersResult, similarResult, relatedResult, statsResult)
 
         // detailErrorMessage — ВСЕГДА реальная причина провала detail, не
         // завязана на то, загрузились ли главы (см. комментарий у объявления
@@ -111,12 +122,25 @@ final class MangaDetailViewModel: ObservableObject {
     private func loadDetail() async -> String? {
         do {
             detail = try await service.fetchMangaDetail(slug: slug)
+            // Персонажи требуют числовой media_id — грузим сразу после detail,
+            // тихо (это опциональная карусель).
+            if let id = detail?.id { await loadCharacters(mangaId: id) }
             return nil
         } catch NetworkError.cancelled {
             return nil
         } catch {
             return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+    }
+
+    private func loadCharacters(mangaId: Int) async {
+        do { characters = try await service.fetchCharacters(mangaId: mangaId) }
+        catch { characters = [] }
+    }
+
+    private func loadStats() async {
+        do { stats = try await service.fetchMangaStats(slug: slug) }
+        catch { stats = nil }
     }
 
     private func loadChapters() async -> String? {
