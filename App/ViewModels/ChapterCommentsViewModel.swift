@@ -92,7 +92,7 @@ final class ChapterCommentsViewModel: ObservableObject {
             isPosting = false
             return true
         } catch {
-            error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             isPosting = false
             return false
         }

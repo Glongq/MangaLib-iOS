@@ -488,10 +488,10 @@ struct MangaReaderView: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 20)
-        // Свайп вверх по нижней панели тоже открывает комментарии.
+        // Свайп вниз по нижней панели открывает комментарии.
         .gesture(
             DragGesture(minimumDistance: 20)
-                .onEnded { v in if v.translation.height < -40 { showComments = true } }
+                .onEnded { v in if v.translation.height > 40 { showComments = true } }
         )
     }
 
