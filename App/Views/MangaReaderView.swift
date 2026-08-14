@@ -34,6 +34,7 @@ struct MangaReaderView: View {
     @State private var showUI = true
     @State private var showChapters = false
     @State private var showSettings = false
+    @State private var showComments = false
     /// Залита ли кнопка-закладка белым (bookmark.fill). Локальное визуальное
     /// состояние: тап переключает, переход на след. главу сбрасывает.
     @State private var bookmarkFilled = false
@@ -196,6 +197,12 @@ struct MangaReaderView: View {
                 disableSwipe: $disableSwipe,
                 smoothPaging: $smoothPaging
             )
+        }
+        .sheet(isPresented: $showComments) {
+            // Комментарии текущей страницы главы (post_type=chapter, post_page).
+            if let ch = viewModel.currentChapter {
+                ChapterCommentsSheet(chapterId: ch.id, postPage: min(currentPage, viewModel.pages.count - 1) + 1)
+            }
         }
         .preferredColorScheme(readerTheme == 2 ? nil : (readerIsLight ? .light : .dark))
     }
@@ -473,12 +480,19 @@ struct MangaReaderView: View {
         HStack {
             readerButton(icon: "line.3.horizontal") { showChapters = true }
             Spacer()
+            readerButton(icon: "text.bubble") { showComments = true }
+            Spacer()
             bookmarkButton
             Spacer()
             readerButton(icon: "gearshape") { showSettings = true }
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 20)
+        // Свайп вверх по нижней панели тоже открывает комментарии.
+        .gesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { v in if v.translation.height < -40 { showComments = true } }
+        )
     }
 
     private func readerButton(icon: String, action: @escaping () -> Void) -> some View {
