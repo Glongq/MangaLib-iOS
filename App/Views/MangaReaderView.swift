@@ -29,6 +29,41 @@ struct MangaReaderView: View {
     /// количество страниц (1/3/5), всегда включена (нет варианта "выкл").
     @AppStorage("reader_preload_count") private var preloadCount = 3
 
+    /// Сервер картинок — при смене страница сбрасывается и грузится с нового
+    /// сервера (см. .id(serverChoice) у content).
+    @AppStorage(ImageServerChoice.defaultsKey) private var serverChoice = 0
+    /// Тип листания (пока просто селектор, поведение не меняется): 0 — свайпами
+    /// влево, 1 — вверх, 2 — вправо.
+    @AppStorage("reader_page_mode") private var pageMode = 0
+    /// Тема читалки: 0 — тёмная, 1 — светлая, 2 — системная.
+    @AppStorage("reader_theme") private var readerTheme = 0
+    /// Зум двойным нажатием (тумблер).
+    @AppStorage("reader_double_tap_zoom") private var doubleTapZoom = true
+    /// Скрыть номер страницы (тумблер).
+    @AppStorage("reader_hide_page_number") private var hidePageNumber = false
+    /// «Переключение страниц» — выключить листание свайпом.
+    @AppStorage("reader_disable_swipe") private var disableSwipe = false
+    /// «Переключение страниц» — плавное (с анимацией) листание; выкл = мгновенно.
+    @AppStorage("reader_smooth_paging") private var smoothPaging = true
+
+    /// Тап по левой/правой части листает, по центру — показывает интерфейс
+    /// (по умолчанию вкл). Ширина краевых зон — доля экрана.
+    @Environment(\.colorScheme) private var systemColorScheme
+
+    /// Итоговая тема читалки (с учётом «системная»).
+    private var readerIsLight: Bool {
+        switch readerTheme {
+        case 1: return true
+        case 2: return systemColorScheme == .light
+        default: return false
+        }
+    }
+    /// Фон читалки под страницами: тёмный — чёрный, светлый — чуть серый (не
+    /// идеально белый, как попросили).
+    private var readerBackground: Color {
+        readerIsLight ? Color(white: 0.93) : .black
+    }
+
     init(slug: String,
          chapters: [ChapterItem],
          startIndex: Int,
