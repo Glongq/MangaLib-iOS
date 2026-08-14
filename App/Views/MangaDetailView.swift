@@ -1478,7 +1478,7 @@ struct MangaDetailView: View {
                 ForEach(branches) { branch in
                     branchRow(chapter, branch)
                 }
-                Spacer().frame(height: 6)
+                Spacer().frame(height: 3)
             }
         } else {
             compactChapterRow(chapter, branchId: branches.first?.branchId)
@@ -1505,8 +1505,8 @@ struct MangaDetailView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 3)
+        .padding(.top, 5)
+        .padding(.bottom, 2)
     }
 
     /// Под-строка ветки (команды): отступ-«дерево» + аватар + имя + дата + скачать.
@@ -1549,7 +1549,7 @@ struct MangaDetailView: View {
             }
             .padding(.leading, 14)
             .padding(.trailing, 14)
-            .padding(.vertical, 4)
+            .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1588,7 +1588,7 @@ struct MangaDetailView: View {
                 chapterDownloadControl(chapter, branchId: branchId)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.vertical, 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
