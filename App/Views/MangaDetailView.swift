@@ -479,9 +479,12 @@ struct MangaDetailView: View {
     /// удалён) — как попросили.
     @ViewBuilder
     private var coverRatingBadge: some View {
-        let rating = (viewModel.detail?.rating ?? listItem?.rating)?.value
+        let ratingObj = viewModel.detail?.rating ?? listItem?.rating
+        let rating = ratingObj?.value
+        let votes = ratingObj?.votes
         let views = viewModel.detail?.views
         let hasRating = (rating ?? 0) > 0
+        let hasVotes = (votes ?? 0) > 0
         let hasViews = (views ?? 0) > 0
         if hasRating || hasViews {
             HStack(spacing: 4) {
@@ -492,6 +495,12 @@ struct MangaDetailView: View {
                     Text(String(format: "%.1f", rating))
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
+                    // Сколько людей поставило оценку — в коротком формате (762k).
+                    if hasVotes, let votes {
+                        Text(Self.shortCount(votes).lowercased())
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
                 }
                 if hasViews, let views {
                     Text(Self.shortCount(views))

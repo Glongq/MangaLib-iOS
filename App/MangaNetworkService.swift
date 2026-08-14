@@ -502,6 +502,12 @@ final class MangaNetworkService {
     /// сервер это поле не присылает вообще, так же как summary/genres/etc.
     func fetchMangaDetail(slug: String, siteId: Int? = nil) async throws -> MangaDetail {
         let items: [URLQueryItem] = [
+            // Оценка тайтла: без явных rate/rate_avg сервер НЕ кладёт объект
+            // `rating` в ответ, и на карточке (обложка/виджет) оценка пропадала
+            // при входе из закладок/«Похожего», где у элемента её нет. Оба поля
+            // подтверждены рабочим каталогом (fields[]=rate&fields[]=rate_avg).
+            URLQueryItem(name: "fields[]", value: "rate"),
+            URLQueryItem(name: "fields[]", value: "rate_avg"),
             URLQueryItem(name: "fields[]", value: "summary"),
             URLQueryItem(name: "fields[]", value: "genres"),
             URLQueryItem(name: "fields[]", value: "tags"),

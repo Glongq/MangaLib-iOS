@@ -23,16 +23,17 @@ struct FilterView: View {
                 Theme.background.opacity(0.72).ignoresSafeArea()
 
                 ScrollView {
+                    // Порядок секций перевёрнут (задом наперёд), как попросили.
                     VStack(alignment: .leading, spacing: 24) {
-                        rangesSection
-                        multiSelectSection
-                        checkboxSection("Возрастной рейтинг", constants.ageRatings, keyPath: \.ageRatings)
-                        checkboxSection("Тип", constants.types, keyPath: \.types)
-                        checkboxSection("Формат выпуска", constants.formats, keyPath: \.formats)
-                        checkboxSection("Статус тайтла", constants.titleStatuses, keyPath: \.titleStatuses)
-                        checkboxSection("Статус перевода", constants.translationStatuses, keyPath: \.translationStatuses)
-                        checkboxSection("Другое", FilterCatalog.other, keyPath: \.other)
                         checkboxSection("Мои списки", FilterCatalog.myLists, keyPath: \.myLists)
+                        checkboxSection("Другое", FilterCatalog.other, keyPath: \.other)
+                        checkboxSection("Статус перевода", constants.translationStatuses, keyPath: \.translationStatuses)
+                        checkboxSection("Статус тайтла", constants.titleStatuses, keyPath: \.titleStatuses)
+                        checkboxSection("Формат выпуска", constants.formats, keyPath: \.formats)
+                        checkboxSection("Тип", constants.types, keyPath: \.types)
+                        checkboxSection("Возрастной рейтинг", constants.ageRatings, keyPath: \.ageRatings)
+                        multiSelectSection
+                        rangesSection
                     }
                     .padding(16)
                     .padding(.bottom, 90)
