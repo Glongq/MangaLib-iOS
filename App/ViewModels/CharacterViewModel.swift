@@ -169,7 +169,7 @@ final class CharacterViewModel: ObservableObject {
     private func request(page: Int, sortBy: String?) async throws -> CatalogPage {
         try await service.fetchCatalog(
             query: query,
-            sort: .relevance,
+            sort: .popularity,   // apiSortBy == nil; реальный порядок задаёт sortByOverride
             filter: filter,
             page: page,
             sortByOverride: sortBy,

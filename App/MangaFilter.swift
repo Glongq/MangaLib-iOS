@@ -4,46 +4,62 @@ import Foundation
 
 /// Варианты сортировки каталога.
 enum SortOption: String, CaseIterable, Identifiable {
-    case relevance
     case popularity
     case rating
-    case fresh
-    case name
+    case views
     case chapters
+    case releaseDate
+    case updated
+    case added
+    case nameLatin
+    case nameCyrillic
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .relevance:  return "По релевантности"
-        case .popularity: return "По популярности"
-        case .rating:     return "По рейтингу"
-        case .fresh:      return "По новизне"
-        case .name:       return "По названию"
-        case .chapters:   return "По числу глав"
+        case .popularity:   return "По популярности"
+        case .rating:       return "По рейтингу"
+        case .views:        return "По просмотрам"
+        case .chapters:     return "По количеству глав"
+        case .releaseDate:  return "По дате релиза"
+        case .updated:      return "По дате обновления"
+        case .added:        return "По дате добавления"
+        case .nameLatin:    return "По названию A-Z"
+        case .nameCyrillic: return "По названию А-Я"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .relevance:  return "sparkles"
-        case .popularity: return "flame"
-        case .rating:     return "star"
-        case .fresh:      return "clock"
-        case .name:       return "textformat.abc"
-        case .chapters:   return "books.vertical"
+        case .popularity:   return "flame"
+        case .rating:       return "star"
+        case .views:        return "eye"
+        case .chapters:     return "books.vertical"
+        case .releaseDate:  return "calendar"
+        case .updated:      return "clock"
+        case .added:        return "plus.circle"
+        case .nameLatin:    return "textformat"
+        case .nameCyrillic: return "textformat.abc"
         }
     }
 
-    /// Значение параметра `sort_by` для API (nil = сортировка по умолчанию).
+    /// Значение параметра `sort_by` для API. `nil` (популярность) = не слать
+    /// sort_by: серверный порядок по умолчанию как раз по популярности (и это
+    /// заведомо валидно, в отличие от угаданного «rating», который сервер
+    /// отклонял 422). Прочие значения — по известному поведению каталога; если
+    /// какое-то сервер не примет, CatalogViewModel повторит запрос без него.
     var apiSortBy: String? {
         switch self {
-        case .relevance:  return nil
-        case .popularity: return "views"
-        case .rating:     return "rate_avg"
-        case .fresh:      return "last_chapter_at"
-        case .name:       return "name"
-        case .chapters:   return "chap_count"
+        case .popularity:   return nil
+        case .rating:       return "rate_avg"
+        case .views:        return "views"
+        case .chapters:     return "chap_count"
+        case .releaseDate:  return "releaseDate"
+        case .updated:      return "last_chapter_at"
+        case .added:        return "created_at"
+        case .nameLatin:    return "name"
+        case .nameCyrillic: return "rus_name"
         }
     }
 }

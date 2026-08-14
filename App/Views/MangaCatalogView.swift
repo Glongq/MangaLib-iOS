@@ -189,6 +189,12 @@ struct MangaCatalogView: View {
                         Label(option.title, systemImage: option.systemImage).tag(option)
                     }
                 }
+                Divider()
+                // Направление — отдельной секцией внизу меню.
+                Picker("Направление", selection: $viewModel.sortDescending) {
+                    Label("По убыванию", systemImage: "arrow.down").tag(true)
+                    Label("По возрастанию", systemImage: "arrow.up").tag(false)
+                }
             } label: {
                 controlLabel(icon: "arrow.up.arrow.down", text: viewModel.sort.title, badge: 0)
             }

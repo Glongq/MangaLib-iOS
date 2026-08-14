@@ -8,8 +8,12 @@ final class CatalogViewModel: ObservableObject {
     @Published var query: String = "" {
         didSet { if oldValue != query { scheduleReload(debounced: true) } }
     }
-    @Published var sort: SortOption = .relevance {
+    @Published var sort: SortOption = .popularity {
         didSet { if oldValue != sort { reloadNow() } }
+    }
+    /// Направление сортировки: true — по убыванию (desc), false — по возрастанию (asc).
+    @Published var sortDescending: Bool = true {
+        didSet { if oldValue != sortDescending { reloadNow() } }
     }
     @Published private(set) var filter = MangaFilter()
 
@@ -100,7 +104,7 @@ final class CatalogViewModel: ObservableObject {
         page = 1
         hasNextPage = true
         do {
-            let result = try await service.fetchCatalog(query: query, sort: sort, filter: filter, page: 1)
+            let result = try await fetchPage(1)
             guard !Task.isCancelled else { return }
             results = result.items
             hasNextPage = result.hasNextPage
@@ -126,11 +130,24 @@ final class CatalogViewModel: ObservableObject {
         }
     }
 
+    /// Запрос страницы с текущими сортировкой/направлением. Если сервер
+    /// отклонит sort_by (422 «Выбранное значение для sort by ошибочно»),
+    /// повторяем без сортировки (порядок по умолчанию), чтобы каталог не
+    /// оказался пустым.
+    private func fetchPage(_ page: Int) async throws -> CatalogPage {
+        let type = sortDescending ? "desc" : "asc"
+        do {
+            return try await service.fetchCatalog(query: query, sort: sort, filter: filter, page: page, sortType: type)
+        } catch NetworkError.server(let status) where status == 422 {
+            return try await service.fetchCatalog(query: query, sort: .popularity, filter: filter, page: page, sortType: type)
+        }
+    }
+
     private func fetchNextPage() async {
         isLoadingMore = true
         let next = page + 1
         do {
-            let result = try await service.fetchCatalog(query: query, sort: sort, filter: filter, page: next)
+            let result = try await fetchPage(next)
             guard !Task.isCancelled else { isLoadingMore = false; return }
             // Добавляем только новые (защита от дублей).
             let existing = Set(results.map(\.id))
