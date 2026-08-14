@@ -11,6 +11,7 @@ import UIKit
 ///     плюс короткая вибрация на каждый шаг (см. .onChange ниже).
 struct CommentSettingsSheet: View {
     @Binding var disabledInReader: Bool
+    @Binding var disabledOnCard: Bool
     @Binding var collapseFromLevel: Double
 
     @Environment(\.dismiss) private var dismiss
@@ -26,15 +27,19 @@ struct CommentSettingsSheet: View {
                 Theme.background.ignoresSafeArea()
 
                 VStack(alignment: .leading, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 4) {
+                    // Две опции работают сообща из обоих мест (читалка и карточка).
+                    VStack(alignment: .leading, spacing: 14) {
                         Toggle(isOn: $disabledInReader) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Отключить комментарии в читалке")
-                                    .foregroundStyle(Theme.textPrimary)
-                                Text("Пока не реализовано — переключатель ни на что не влияет")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
+                            Text("Отключить комментарии в читалке")
+                                .foregroundStyle(Theme.textPrimary)
+                        }
+                        .tint(Theme.accent)
+
+                        Divider().overlay(Theme.separator)
+
+                        Toggle(isOn: $disabledOnCard) {
+                            Text("Отключить комментарии на карточке тайтла")
+                                .foregroundStyle(Theme.textPrimary)
                         }
                         .tint(Theme.accent)
                     }
@@ -92,6 +97,6 @@ struct CommentSettingsSheet: View {
 }
 
 #Preview {
-    CommentSettingsSheet(disabledInReader: .constant(false), collapseFromLevel: .constant(3))
+    CommentSettingsSheet(disabledInReader: .constant(false), disabledOnCard: .constant(false), collapseFromLevel: .constant(3))
         .preferredColorScheme(.dark)
 }

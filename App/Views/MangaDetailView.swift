@@ -68,6 +68,10 @@ struct MangaDetailView: View {
     /// вообще (ни при true, ни при false) — реальная реализация комментариев
     /// В САМОЙ ЧИТАЛКЕ не входит в этот раунд.
     @AppStorage("comments_disabled_in_reader") private var commentsDisabledInReader = false
+    /// Отключить комментарии на карточке тайтла — общая настройка с читалкой
+    /// (см. CommentSettingsSheet). При true вкладка «Комментарии» вместо списка
+    /// показывает «Вы отключили комментарии» + кнопку «Настроить».
+    @AppStorage("comments_disabled_on_card") private var commentsDisabledOnCard = false
     /// С какого уровня вложенности сворачивать ответы по умолчанию (см.
     /// commentNode) — реальная, рабочая настройка (в отличие от переключателя выше).
     @AppStorage("comments_collapse_level") private var collapseFromLevel: Double = 3
@@ -1522,27 +1526,49 @@ struct MangaDetailView: View {
 
     private var commentsTab: some View {
         VStack(alignment: .leading, spacing: 14) {
-            commentsHeader
-            composeBar
-
-            if viewModel.isLoadingComments && viewModel.comments.isEmpty {
-                ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, minHeight: 100)
-            } else if let error = viewModel.commentsError, viewModel.comments.isEmpty {
-                commentsErrorState(error)
-            } else if viewModel.comments.isEmpty && viewModel.hasLoadedComments {
-                VStack(spacing: 8) {
-                    Image(systemName: "text.bubble").font(.largeTitle).foregroundStyle(Theme.textSecondary)
-                    Text("Пока нет комментариев").font(.subheadline).foregroundStyle(Theme.textSecondary)
+            if commentsDisabledOnCard {
+                // Комментарии отключены на карточке — акцентный текст + «Настроить».
+                HStack(spacing: 12) {
+                    Text("Вы отключили комментарии")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.accent)
+                    Spacer(minLength: 8)
+                    Button { showCommentSettings = true } label: {
+                        Text("Настроить")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 36)
+                            .background(Theme.surfaceElevated, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .frame(maxWidth: .infinity, minHeight: 120)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 24)
             } else {
-                commentsList
+                commentsHeader
+                composeBar
+
+                if viewModel.isLoadingComments && viewModel.comments.isEmpty {
+                    ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, minHeight: 100)
+                } else if let error = viewModel.commentsError, viewModel.comments.isEmpty {
+                    commentsErrorState(error)
+                } else if viewModel.comments.isEmpty && viewModel.hasLoadedComments {
+                    VStack(spacing: 8) {
+                        Image(systemName: "text.bubble").font(.largeTitle).foregroundStyle(Theme.textSecondary)
+                        Text("Пока нет комментариев").font(.subheadline).foregroundStyle(Theme.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    commentsList
+                }
             }
         }
-        .task { await viewModel.loadCommentsIfNeeded() }
+        .task { if !commentsDisabledOnCard { await viewModel.loadCommentsIfNeeded() } }
         .sheet(isPresented: $showCommentSettings) {
             CommentSettingsSheet(
                 disabledInReader: $commentsDisabledInReader,
+                disabledOnCard: $commentsDisabledOnCard,
                 collapseFromLevel: $collapseFromLevel
             )
             .presentationDetents([.medium])
@@ -1655,10 +1681,9 @@ struct MangaDetailView: View {
     /// популярности не подтверждён что умеет, см. MangaDetailViewModel).
     private var commentsList: some View {
         let grouped = viewModel.comments.groupedByParent()
-        var roots = grouped[0] ?? []
-        if viewModel.commentSort == .popular {
-            roots.sort { $0.score > $1.score }
-        }
+        // Порядок корней теперь задаёт СЕРВЕР (Новые/Старые/Популярные —
+        // votes_up/desc), клиентская пересортировка больше не нужна.
+        let roots = grouped[0] ?? []
         return LazyVStack(alignment: .leading, spacing: 14) {
             ForEach(roots) { root in
                 // Один блок (карточка) на КОРНЕВОЙ комментарий целиком, вместе

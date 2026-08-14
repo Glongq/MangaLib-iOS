@@ -352,11 +352,13 @@ final class MangaNetworkService {
     /// переворачиваем значение; сортировка "Популярные" — НЕ через сервер (не
     /// подтверждено, что сервер это умеет), считается на клиенте по score
     /// (см. MangaDetailViewModel.commentSort/MangaDetailView).
-    func fetchComments(postId: Int, postType: String = "manga", postPage: Int? = nil, sortType: String = "desc", page: Int = 1) async throws -> (comments: [Comment], hasNextPage: Bool) {
+    func fetchComments(postId: Int, postType: String = "manga", postPage: Int? = nil, sortBy: String = "id", sortType: String = "desc", page: Int = 1) async throws -> (comments: [Comment], hasNextPage: Bool) {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "post_id", value: String(postId)),
             URLQueryItem(name: "post_type", value: postType),
-            URLQueryItem(name: "sort_by", value: "id"),
+            // ПОДТВЕРЖДЕНО перехватом: Новые — id/desc, Старые — id/asc,
+            // Популярные — votes_up/desc (серверная сортировка по популярности).
+            URLQueryItem(name: "sort_by", value: sortBy),
             URLQueryItem(name: "sort_type", value: sortType),
             URLQueryItem(name: "page", value: String(max(page, 1)))
         ]

@@ -188,10 +188,11 @@ final class MangaDetailViewModel: ObservableObject {
         await loadComments()
     }
 
-    /// sort_type для сервера — только Старые/Новые реально сортируются на
-    /// сервере (см. MangaNetworkService.fetchComments); Популярные грузятся
-    /// как Новые, а пересортировка по score — на клиенте (см. MangaDetailView).
+    /// Серверная сортировка (подтверждена перехватом): Новые — id/desc,
+    /// Старые — id/asc, Популярные — votes_up/desc. Теперь «Популярные» тоже
+    /// серверные (клиентская пересортировка по score больше не нужна).
     private var sortTypeParam: String { commentSort == .old ? "asc" : "desc" }
+    private var sortByParam: String { commentSort == .popular ? "votes_up" : "id" }
 
     func loadComments() async {
         guard let mangaId = detail?.id else {
@@ -205,7 +206,7 @@ final class MangaDetailViewModel: ObservableObject {
         commentsError = nil
         commentsPage = 1
         do {
-            let result = try await service.fetchComments(postId: mangaId, sortType: sortTypeParam, page: 1)
+            let result = try await service.fetchComments(postId: mangaId, sortBy: sortByParam, sortType: sortTypeParam, page: 1)
             comments = result.comments
             hasMoreComments = result.hasNextPage
             hasLoadedComments = true
@@ -235,7 +236,7 @@ final class MangaDetailViewModel: ObservableObject {
         isLoadingComments = true
         let nextPage = commentsPage + 1
         do {
-            let result = try await service.fetchComments(postId: mangaId, sortType: sortTypeParam, page: nextPage)
+            let result = try await service.fetchComments(postId: mangaId, sortBy: sortByParam, sortType: sortTypeParam, page: nextPage)
             comments.append(contentsOf: result.comments)
             hasMoreComments = result.hasNextPage
             commentsPage = nextPage
