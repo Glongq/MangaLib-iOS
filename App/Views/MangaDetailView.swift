@@ -80,6 +80,12 @@ struct MangaDetailView: View {
     @State private var heroURL: URL?
     @State private var heroIsRealBackground = false
 
+    /// Сортировка глав: true — новые сверху (по умолчанию), false — старые
+    /// (Глава 1) сверху. Переключается кнопкой «Сортировать».
+    @State private var chaptersNewestFirst = true
+    /// id главы, к которой нужно прокрутить список (кнопка «К главе»).
+    @State private var chapterScrollTarget: Int?
+
     enum Tab: Hashable { case about, chapters, comments }
 
     init(slug: String, fallbackTitle: String = "", coverURL: URL? = nil, item: MangaItem? = nil) {
@@ -93,6 +99,7 @@ struct MangaDetailView: View {
 
     var body: some View {
         ScrollView {
+          ScrollViewReader { scrollProxy in
             VStack(alignment: .leading, spacing: 0) {
                 heroHeader
                 VStack(alignment: .leading, spacing: 18) {
@@ -123,6 +130,14 @@ struct MangaDetailView: View {
                 // длиннее/ниже, чипов больше).
                 .padding(.bottom, 100)
             }
+            // Прокрутка к выбранной главе (кнопка «К главе»).
+            .onChange(of: chapterScrollTarget) { _, target in
+                if let target {
+                    withAnimation(.easeInOut(duration: 0.3)) { scrollProxy.scrollTo(target, anchor: .top) }
+                    chapterScrollTarget = nil
+                }
+            }
+          }
         }
         // Убрали видимый вертикальный скроллбар-слайдер справа экрана — как
         // попросили ("убери видимый слайдер вверх-вниз перемотки").
@@ -294,7 +309,7 @@ struct MangaDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
                 .overlay(alignment: .topLeading) { bookmarkStatusBadge }
-                .overlay(alignment: .topTrailing) { coverRatingBadge }
+                .overlay(alignment: .bottomLeading) { coverRatingBadge }
 
                 titleBlockOverlay
             }
@@ -1113,6 +1128,9 @@ struct MangaDetailView: View {
                     .scrollIndicators(.hidden)
                 }
 
+                // Строка «Сортировать» (слева) + «К главе» (справа, если есть закладка).
+                sortAndJumpRow(count: chapters.count)
+
                 // Пока идёт скачивание — показываем прогресс над списком.
                 if let p = activeDownloadProgress {
                     HStack(spacing: 10) {
@@ -1125,10 +1143,13 @@ struct MangaDetailView: View {
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
 
+                // Порядок: по умолчанию новые сверху; «Сортировать» переключает.
+                let sorted = chaptersNewestFirst ? Array(chapters.reversed()) : chapters
                 VStack(spacing: 0) {
-                    ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+                    ForEach(Array(sorted.enumerated()), id: \.element.id) { index, chapter in
                         chapterBlock(chapter)
-                        if index < chapters.count - 1 {
+                            .id(chapter.id) // для прокрутки по «К главе»
+                        if index < sorted.count - 1 {
                             Divider().overlay(Theme.separator).padding(.leading, 14)
                         }
                     }
@@ -1136,6 +1157,60 @@ struct MangaDetailView: View {
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
+    }
+
+    /// Строка с кнопками «Сортировать» (⇅) и «К главе» (↓, только при закладке).
+    private func sortAndJumpRow(count: Int) -> some View {
+        HStack {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { chaptersNewestFirst.toggle() }
+            } label: {
+                chipLabel("Сортировать", systemImage: "arrow.up.arrow.down")
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            if bookmarks.readingProgress(forSlug: viewModel.slug) != nil {
+                Menu {
+                    ForEach(jumpTargets(count: count), id: \.pos) { target in
+                        Button(target.label) { chapterScrollTarget = chapterId(atPosition: target.pos) }
+                    }
+                } label: {
+                    chipLabel("К главе", systemImage: "arrow.down")
+                }
+            }
+        }
+    }
+
+    private func chipLabel(_ text: String, systemImage: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+            Text(text)
+        }
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(Theme.textPrimary)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 34)
+        .background(Theme.surfaceElevated, in: Capsule())
+    }
+
+    /// Точки прыжка «К главе»: 1, 50, 100, дальше +100, и «Конец» (ответ 1а).
+    private func jumpTargets(count: Int) -> [(label: String, pos: Int)] {
+        guard count > 0 else { return [] }
+        var result: [(String, Int)] = []
+        for base in [1, 50, 100] where base <= count { result.append(("Глава \(base)", base)) }
+        var v = 200
+        while v <= count { result.append(("Глава \(v)", v)); v += 100 }
+        result.append(("Конец", count))
+        return result
+    }
+
+    /// id главы на позиции pos (1-based, в порядке чтения: Глава 1 = позиция 1).
+    private func chapterId(atPosition pos: Int) -> Int? {
+        let chapters = displayChapters
+        let idx = min(max(pos - 1, 0), max(chapters.count - 1, 0))
+        return chapters.indices.contains(idx) ? chapters[idx].id : nil
     }
 
     /// Уникальные команды перевода по всем главам (для чипов сверху).
