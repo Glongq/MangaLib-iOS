@@ -117,6 +117,102 @@ final class ReaderViewModel: ObservableObject {
         await load()
     }
 
+    // MARK: - Вертикальный (непрерывный) режим
+
+    /// Сегмент ленты = страницы одной главы. В вертикальном режиме лента
+    /// склеивается из нескольких сегментов подряд, следующий догружается
+    /// по мере долистывания (см. appendNext).
+    struct ReaderSegment: Identifiable {
+        let index: Int
+        let chapter: ChapterItem
+        var pages: [PageItem]
+        var id: Int { chapter.id }
+    }
+
+    @Published private(set) var segments: [ReaderSegment] = []
+    @Published private(set) var isAppending = false
+
+    /// Старт вертикального режима: грузим текущую главу первым сегментом.
+    func startVertical() async {
+        if !segments.isEmpty, segments.first?.index == currentIndex { return }
+        await loadSegments(from: currentIndex)
+    }
+
+    /// Перейти к конкретной главе в вертикальном режиме (сброс ленты).
+    func goToVertical(index: Int) async {
+        guard chapters.indices.contains(index) else { return }
+        currentIndex = index
+        await loadSegments(from: index)
+    }
+
+    private func loadSegments(from index: Int) async {
+        guard chapters.indices.contains(index) else { return }
+        currentChapterAlreadyViewed = false
+        recordProgress()
+        isLoading = true
+        errorMessage = nil
+        segments = []
+        if let seg = await fetchSegment(for: index) {
+            segments = [seg]
+            preloadAll(seg.pages)
+        }
+        isLoading = false
+    }
+
+    /// Догрузить следующую главу в конец ленты (вызывается, когда виден
+    /// футер конца последнего сегмента).
+    func appendNext() async {
+        guard !isAppending, let last = segments.last else { return }
+        let next = last.index + 1
+        guard chapters.indices.contains(next),
+              !segments.contains(where: { $0.index == next }) else { return }
+        isAppending = true
+        if let seg = await fetchSegment(for: next) {
+            segments.append(seg)
+            preloadAll(seg.pages)
+        }
+        isAppending = false
+    }
+
+    private func fetchSegment(for index: Int) async -> ReaderSegment? {
+        let chapter = chapters[index]
+        let bid = branchId(for: chapter)
+        let localFiles = DownloadsManager.shared.localPageFiles(slug: slug, chapterId: chapter.id, branchId: bid)
+        if !localFiles.isEmpty {
+            let pages = localFiles.enumerated().map { idx, url in
+                PageItem(id: idx, slug: nil, image: nil, url: url.absoluteString, width: nil, height: nil)
+            }
+            return ReaderSegment(index: index, chapter: chapter, pages: pages)
+        }
+        do {
+            let result = try await service.fetchPages(
+                slug: slug, volume: chapter.volume, number: chapter.number, branchId: bid
+            )
+            return ReaderSegment(index: index, chapter: chapter, pages: result.pages)
+        } catch NetworkError.cancelled {
+            return nil
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Предзагрузка ВСЕХ страниц сегмента (в вертикальном режиме тянем всё
+    /// заранее, чтобы лента листалась без подгрузок).
+    private func preloadAll(_ pages: [PageItem]) {
+        for p in pages {
+            RemoteImageLoader.preload(candidates: imageURLs(for: p))
+        }
+    }
+
+    /// Пользователь долистал до главы index — обновляем заголовок/прогресс.
+    func markCurrentChapter(_ index: Int) {
+        guard chapters.indices.contains(index), index != currentIndex else { return }
+        currentIndex = index
+        currentChapterAlreadyViewed = false
+        recordProgress()
+    }
+
     /// Отметить текущую главу как последнюю прочитанную.
     func markProgress() { recordProgress() }
 

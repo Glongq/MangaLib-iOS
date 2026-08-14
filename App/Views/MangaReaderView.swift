@@ -69,6 +69,12 @@ struct MangaReaderView: View {
     @AppStorage("reader_disable_swipe") private var disableSwipe = false
     /// «Переключение страниц» — плавное (с анимацией) листание; выкл = мгновенно.
     @AppStorage("reader_smooth_paging") private var smoothPaging = true
+    /// Отступ между картинками в вертикальном (непрерывном) режиме, px.
+    @AppStorage("reader_vertical_gap") private var verticalGap: Double = 0
+
+    /// Текущая страница в вертикальном режиме (для номера/комментариев) —
+    /// обновляется, когда очередная картинка попадает в область просмотра.
+    @State private var verticalPage = 1
 
     /// Тап по левой/правой части листает, по центру — показывает интерфейс
     /// (по умолчанию вкл). Ширина краевых зон — доля экрана.
@@ -157,8 +163,23 @@ struct MangaReaderView: View {
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .task {
-            if viewModel.pages.isEmpty { await viewModel.load() }
-            preloadUpcoming(from: currentPage)
+            if pageMode == 1 {
+                await viewModel.startVertical()
+            } else {
+                if viewModel.pages.isEmpty { await viewModel.load() }
+                preloadUpcoming(from: currentPage)
+            }
+        }
+        // Живое переключение режима листания.
+        .onChange(of: pageMode) { _, mode in
+            Task {
+                if mode == 1 {
+                    await viewModel.startVertical()
+                } else {
+                    currentPage = 0
+                    await viewModel.load()
+                }
+            }
         }
         .onChange(of: viewModel.currentIndex) { _, _ in
             currentPage = 0
@@ -182,7 +203,10 @@ struct MangaReaderView: View {
                 currentIndex: viewModel.currentIndex,
                 onSelect: { index in
                     showChapters = false
-                    Task { await viewModel.goTo(index: index) }
+                    Task {
+                        if pageMode == 1 { await viewModel.goToVertical(index: index) }
+                        else { await viewModel.goTo(index: index) }
+                    }
                 }
             )
         }
@@ -195,13 +219,17 @@ struct MangaReaderView: View {
                 doubleTapZoom: $doubleTapZoom,
                 hidePageNumber: $hidePageNumber,
                 disableSwipe: $disableSwipe,
-                smoothPaging: $smoothPaging
+                smoothPaging: $smoothPaging,
+                verticalGap: $verticalGap
             )
         }
         .sheet(isPresented: $showComments) {
             // Комментарии текущей страницы главы (post_type=chapter, post_page).
             if let ch = viewModel.currentChapter {
-                ChapterCommentsSheet(chapterId: ch.id, postPage: min(currentPage, viewModel.pages.count - 1) + 1)
+                let pageNo = pageMode == 1
+                    ? verticalPage
+                    : min(currentPage, max(viewModel.pages.count - 1, 0)) + 1
+                ChapterCommentsSheet(chapterId: ch.id, postPage: pageNo)
             }
         }
         .preferredColorScheme(readerTheme == 2 ? nil : (readerIsLight ? .light : .dark))
@@ -226,17 +254,12 @@ struct MangaReaderView: View {
 
     @ViewBuilder
     private var content: some View {
-        if viewModel.isLoading && viewModel.pages.isEmpty {
+        if pageMode == 1 {
+            verticalContent
+        } else if viewModel.isLoading && viewModel.pages.isEmpty {
             ProgressView().tint(fg)
         } else if let error = viewModel.errorMessage, viewModel.pages.isEmpty {
-            VStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle").font(.largeTitle)
-                Text(error).multilineTextAlignment(.center).font(.footnote)
-                Button("Повторить") { Task { await viewModel.load() } }
-                    .buttonStyle(.borderedProminent).tint(Theme.accent)
-            }
-            .foregroundStyle(fg)
-            .padding(32)
+            errorView(error) { Task { await viewModel.load() } }
         } else if viewModel.pages.isEmpty {
             Text("Нет страниц").foregroundStyle(fg)
         } else if disableSwipe {
@@ -246,6 +269,85 @@ struct MangaReaderView: View {
         } else {
             pager
         }
+    }
+
+    private func errorView(_ message: String, retry: @escaping () -> Void) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle").font(.largeTitle)
+            Text(message).multilineTextAlignment(.center).font(.footnote)
+            Button("Повторить", action: retry)
+                .buttonStyle(.borderedProminent).tint(Theme.accent)
+        }
+        .foregroundStyle(fg)
+        .padding(32)
+    }
+
+    // MARK: Вертикальный (непрерывный) режим
+
+    @ViewBuilder
+    private var verticalContent: some View {
+        if viewModel.isLoading && viewModel.segments.isEmpty {
+            ProgressView().tint(fg)
+        } else if let error = viewModel.errorMessage, viewModel.segments.isEmpty {
+            errorView(error) { Task { await viewModel.startVertical() } }
+        } else if viewModel.segments.isEmpty {
+            Text("Нет страниц").foregroundStyle(fg)
+        } else {
+            verticalReader
+        }
+    }
+
+    private var verticalReader: some View {
+        ScrollView {
+            LazyVStack(spacing: CGFloat(verticalGap)) {
+                ForEach(viewModel.segments) { seg in
+                    ForEach(Array(seg.pages.enumerated()), id: \.offset) { pageIndex, page in
+                        VerticalPageImage(candidates: viewModel.imageURLs(for: page))
+                            .onAppear {
+                                viewModel.markCurrentChapter(seg.index)
+                                verticalPage = pageIndex + 1
+                            }
+                    }
+                    // Футер конца главы — при его появлении догружаем следующую.
+                    chapterEndFooter(seg)
+                        .onAppear { Task { await viewModel.appendNext() } }
+                }
+                if viewModel.isAppending {
+                    ProgressView().tint(fg)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+        .ignoresSafeArea()
+        .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
+    }
+
+    private func nextChapterAfter(_ index: Int) -> ChapterItem? {
+        let n = index + 1
+        return viewModel.chapters.indices.contains(n) ? viewModel.chapters[n] : nil
+    }
+
+    // Разделитель конца главы в ленте: «Конец · …», ниже — что дальше.
+    private func chapterEndFooter(_ seg: ReaderViewModel.ReaderSegment) -> some View {
+        VStack(spacing: 6) {
+            Text("Конец · \(seg.chapter.shortTitle)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(fg.opacity(0.85))
+            if let next = nextChapterAfter(seg.index) {
+                Text("Далее: \(next.titleOrShort)")
+                    .font(.caption).foregroundStyle(fg.opacity(0.6))
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("Это последняя доступная глава")
+                    .font(.caption).foregroundStyle(fg.opacity(0.6))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .padding(.horizontal, 24)
+        .background(readerBackground)
     }
 
     /// Одна текущая страница без пейджера (режим «выключить перелистывание»).
@@ -480,19 +582,17 @@ struct MangaReaderView: View {
         HStack {
             readerButton(icon: "line.3.horizontal") { showChapters = true }
             Spacer()
-            readerButton(icon: "text.bubble") { showComments = true }
-            Spacer()
+            // Комментарии показываем только в вертикальном режиме листания.
+            if pageMode == 1 {
+                readerButton(icon: "text.bubble") { showComments = true }
+                Spacer()
+            }
             bookmarkButton
             Spacer()
             readerButton(icon: "gearshape") { showSettings = true }
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 20)
-        // Свайп вниз по нижней панели открывает комментарии.
-        .gesture(
-            DragGesture(minimumDistance: 20)
-                .onEnded { v in if v.translation.height > 40 { showComments = true } }
-        )
     }
 
     private func readerButton(icon: String, action: @escaping () -> Void) -> some View {
@@ -654,11 +754,14 @@ struct ReaderSettingsSheet: View {
     @Binding var hidePageNumber: Bool
     @Binding var disableSwipe: Bool
     @Binding var smoothPaging: Bool
+    @Binding var verticalGap: Double
 
     @AppStorage(ImageServerChoice.defaultsKey) private var serverChoice = 0
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme
     @State private var showPaging = false
+    /// Прогретый генератор вибрации для шага ползунка отступа.
+    private let gapHaptic = UIImpactFeedbackGenerator(style: .light)
 
     private var palette: ReaderPalette { .make(theme: readerTheme, system: systemColorScheme) }
 
@@ -713,18 +816,23 @@ struct ReaderSettingsSheet: View {
                         Text("1").tag(1); Text("3").tag(3); Text("5").tag(5)
                     }.pickerStyle(.segmented)
 
-                    // 5. Переключение страниц — отдельная кнопка со стрелкой → под-лист.
-                    Button { showPaging = true } label: {
-                        HStack {
-                            Text("Переключение страниц").font(.system(size: 17)).foregroundStyle(palette.foreground)
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(palette.secondary)
+                    // 5. В вертикальном режиме здесь ползунок «Отступ между
+                    //    картинками», иначе — строка «Переключение страниц».
+                    if pageMode == 1 {
+                        gapSlider
+                    } else {
+                        Button { showPaging = true } label: {
+                            HStack {
+                                Text("Переключение страниц").font(.system(size: 17)).foregroundStyle(palette.foreground)
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(palette.secondary)
+                            }
+                            .padding(14)
+                            .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .contentShape(Rectangle())
                         }
-                        .padding(14)
-                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
 
                     // 6. Зум двойным нажатием (тумблер, своя подложка).
                     toggleRow("Увеличить двойным нажатием", isOn: $doubleTapZoom)
@@ -760,6 +868,33 @@ struct ReaderSettingsSheet: View {
             Text(text).font(.system(size: 17)).foregroundStyle(palette.foreground)
         }
         .tint(Theme.accent)
+        .padding(14)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// Ползунок «Отступ между картинками» (только вертикальный режим) —
+    /// оформление как у слайдера сворачивания комментариев: живая подпись
+    /// сверху + короткая вибрация на каждый шаг.
+    private var gapSlider: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Отступ между картинками")
+                .font(.system(size: 17)).foregroundStyle(palette.foreground)
+
+            Text("\(Int(verticalGap)) px")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+
+            Slider(value: $verticalGap, in: 0...24, step: 1)
+                .tint(Theme.accent)
+                .onChange(of: verticalGap) { _, _ in gapHaptic.impactOccurred() }
+                .onAppear { gapHaptic.prepare() }
+
+            HStack {
+                Text("0").font(.caption2).foregroundStyle(palette.secondary)
+                Spacer()
+                Text("24 px").font(.caption2).foregroundStyle(palette.secondary)
+            }
+        }
         .padding(14)
         .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -981,6 +1116,34 @@ final class LayoutCallbackScrollView: UIScrollView {
     override func layoutSubviews() {
         super.layoutSubviews()
         onLayout?()
+    }
+}
+
+/// Одна страница в вертикальной (непрерывной) ленте: грузится через общий
+/// кэш (RemoteImageLoader), вписывается по ширине, высота — по соотношению
+/// сторон, чтобы LazyVStack корректно раскладывал ленту. Пока грузится —
+/// плейсхолдер фиксированной высоты со спиннером.
+struct VerticalPageImage: View {
+    let candidates: [URL]
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+            } else {
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(height: 480)
+                    .overlay { ProgressView().tint(.white) }
+            }
+        }
+        .task(id: candidates.first) {
+            image = await RemoteImageLoader.fetchImage(candidates: candidates)
+        }
     }
 }
 
