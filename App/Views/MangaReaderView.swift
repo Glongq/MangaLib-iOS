@@ -76,11 +76,6 @@ struct MangaReaderView: View {
     /// обновляется, когда очередная картинка попадает в область просмотра.
     @State private var verticalPage = 1
 
-    /// Зум вертикальной ленты: `verticalZoom` — текущий масштаб, `zoomBase` —
-    /// зафиксированный на конце жеста (чтобы пинч продолжался с него).
-    @State private var verticalZoom: CGFloat = 1
-    @State private var zoomBase: CGFloat = 1
-
     /// Тап по левой/правой части листает, по центру — показывает интерфейс
     /// (по умолчанию вкл). Ширина краевых зон — доля экрана.
     @Environment(\.colorScheme) private var systemColorScheme
@@ -303,48 +298,33 @@ struct MangaReaderView: View {
     }
 
     private var verticalReader: some View {
-        // Пинч-зум ленты: увеличиваем фактическую ширину колонки (не transform),
-        // поэтому при зуме включается и горизонтальная прокрутка — можно
-        // возить увеличенную страницу по горизонтали. Двойной тап — сброс.
-        GeometryReader { geo in
-            ScrollView([.vertical, .horizontal]) {
-                LazyVStack(spacing: CGFloat(verticalGap)) {
-                    ForEach(viewModel.segments) { seg in
-                        ForEach(Array(seg.pages.enumerated()), id: \.offset) { pageIndex, page in
-                            VerticalPageImage(candidates: viewModel.imageURLs(for: page))
-                                .onAppear {
-                                    viewModel.markCurrentChapter(seg.index)
-                                    verticalPage = pageIndex + 1
-                                }
-                        }
-                        // Футер конца главы — при его появлении догружаем следующую.
-                        chapterEndFooter(seg)
-                            .onAppear { Task { await viewModel.appendNext() } }
+        // Прокрутка — только вертикальная (без бокового дрейфа в покое). Зум
+        // делает каждая страница сама (пинч + панорама внутри своих границ),
+        // см. VerticalPageImage.
+        ScrollView {
+            LazyVStack(spacing: CGFloat(verticalGap)) {
+                ForEach(viewModel.segments) { seg in
+                    ForEach(Array(seg.pages.enumerated()), id: \.offset) { pageIndex, page in
+                        VerticalPageImage(candidates: viewModel.imageURLs(for: page))
+                            .onAppear {
+                                viewModel.markCurrentChapter(seg.index)
+                                verticalPage = pageIndex + 1
+                            }
                     }
-                    if viewModel.isAppending {
-                        ProgressView().tint(fg)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 24)
-                    }
+                    // Футер конца главы — при его появлении догружаем следующую.
+                    chapterEndFooter(seg)
+                        .onAppear { Task { await viewModel.appendNext() } }
                 }
-                .frame(width: geo.size.width * verticalZoom)
-            }
-            .scrollIndicators(.hidden)
-            .gesture(
-                MagnifyGesture()
-                    .onChanged { v in
-                        verticalZoom = min(max(zoomBase * v.magnification, 1), 5)
-                    }
-                    .onEnded { _ in zoomBase = verticalZoom }
-            )
-            .onTapGesture(count: 2) {
-                withAnimation(.easeInOut(duration: 0.2)) { verticalZoom = 1; zoomBase = 1 }
-            }
-            .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() }
+                if viewModel.isAppending {
+                    ProgressView().tint(fg)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                }
             }
         }
+        .scrollIndicators(.hidden)
         .ignoresSafeArea()
+        .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
     }
 
     private func nextChapterAfter(_ index: Int) -> ChapterItem? {
@@ -827,11 +807,14 @@ struct ReaderSettingsSheet: View {
                         ForEach(ImageServerChoice.allCases) { Text($0.title).tag($0.rawValue) }
                     }.pickerStyle(.segmented)
 
-                    // 4. Вместить изображение.
-                    label("Вместить изображение")
-                    Picker("", selection: $fitWidth) {
-                        Text("По высоте").tag(false); Text("По ширине").tag(true)
-                    }.pickerStyle(.segmented)
+                    // 4. Вместить изображение — не нужно в вертикальном режиме
+                    //    (там картинки всегда по ширине).
+                    if pageMode != 1 {
+                        label("Вместить изображение")
+                        Picker("", selection: $fitWidth) {
+                            Text("По высоте").tag(false); Text("По ширине").tag(true)
+                        }.pickerStyle(.segmented)
+                    }
 
                     // Предзагрузка (оставил).
                     label("Предзагрузка страниц")
@@ -1152,23 +1135,91 @@ struct VerticalPageImage: View {
     let candidates: [URL]
     @State private var image: UIImage?
 
+    // Постоянный зум страницы: пинч масштабирует (1…5×), при масштабе >1
+    // можно возить пальцем внутри страницы (панорама с зажимом по краям).
+    // Пока масштаб == 1 — жесты не перехватываются, вертикальная лента
+    // листается как обычно.
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    /// Соотношение сторон загруженной картинки (ширина/высота) — задаёт высоту
+    /// страницы в ленте. До загрузки — вертикальный плейсхолдер.
+    private var aspect: CGFloat {
+        guard let s = image?.size, s.width > 0, s.height > 0 else { return 0.7 }
+        return s.width / s.height
+    }
+
     var body: some View {
-        Group {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity)
-            } else {
-                Rectangle()
-                    .fill(Color.clear)
-                    .frame(height: 480)
-                    .overlay { ProgressView().tint(.white) }
+        Color.clear
+            .aspectRatio(aspect, contentMode: .fit)
+            .overlay {
+                GeometryReader { geo in
+                    ZStack {
+                        if let image {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .scaleEffect(scale)
+                                .offset(offset)
+                        } else {
+                            ProgressView().tint(.white)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                    .contentShape(Rectangle())
+                    // Пинч работает всегда; панорама — только когда есть зум
+                    // (иначе отдаём жест вертикальной ленте).
+                    .simultaneousGesture(magnify(in: geo.size))
+                    .highPriorityGesture(drag(in: geo.size), including: scale > 1 ? .all : .none)
+                }
             }
-        }
-        .task(id: candidates.first) {
-            image = await RemoteImageLoader.fetchImage(candidates: candidates)
-        }
+            .task(id: candidates.first) {
+                image = await RemoteImageLoader.fetchImage(candidates: candidates)
+            }
+    }
+
+    private func magnify(in size: CGSize) -> some Gesture {
+        MagnifyGesture()
+            .onChanged { v in
+                scale = min(max(lastScale * v.magnification, 1), 5)
+                offset = clamp(offset, scale: scale, size: size)
+            }
+            .onEnded { _ in
+                if scale <= 1.01 {
+                    withAnimation(.easeOut(duration: 0.2)) { scale = 1; offset = .zero }
+                    lastScale = 1; lastOffset = .zero
+                } else {
+                    lastScale = scale
+                    offset = clamp(offset, scale: scale, size: size)
+                    lastOffset = offset
+                }
+            }
+    }
+
+    private func drag(in size: CGSize) -> some Gesture {
+        DragGesture()
+            .onChanged { v in
+                let proposed = CGSize(
+                    width: lastOffset.width + v.translation.width,
+                    height: lastOffset.height + v.translation.height
+                )
+                offset = clamp(proposed, scale: scale, size: size)
+            }
+            .onEnded { _ in lastOffset = offset }
+    }
+
+    /// Не даём увезти картинку за её края при панораме.
+    private func clamp(_ o: CGSize, scale: CGFloat, size: CGSize) -> CGSize {
+        let maxX = max(size.width * (scale - 1) / 2, 0)
+        let maxY = max(size.height * (scale - 1) / 2, 0)
+        return CGSize(
+            width: min(max(o.width, -maxX), maxX),
+            height: min(max(o.height, -maxY), maxY)
+        )
     }
 }
 
