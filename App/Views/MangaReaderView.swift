@@ -98,9 +98,12 @@ struct MangaReaderView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            readerBackground.ignoresSafeArea()
 
             content
+                // Смена сервера картинок → пересоздаём страницы, чтобы они
+                // сбросились и загрузились с ВЫБРАННОГО сервера.
+                .id(serverChoice)
 
             if showUI {
                 overlayUI.transition(.opacity)
@@ -162,8 +165,18 @@ struct MangaReaderView: View {
             )
         }
         .sheet(isPresented: $showSettings) {
-            ReaderSettingsSheet(fitWidth: $fitWidth, preloadCount: $preloadCount)
+            ReaderSettingsSheet(
+                fitWidth: $fitWidth,
+                preloadCount: $preloadCount,
+                pageMode: $pageMode,
+                readerTheme: $readerTheme,
+                doubleTapZoom: $doubleTapZoom,
+                hidePageNumber: $hidePageNumber,
+                disableSwipe: $disableSwipe,
+                smoothPaging: $smoothPaging
+            )
         }
+        .preferredColorScheme(readerTheme == 2 ? nil : (readerIsLight ? .light : .dark))
     }
 
     // MARK: Предзагрузка страниц
@@ -214,7 +227,8 @@ struct MangaReaderView: View {
                 ZoomableImageScrollView(
                     candidates: viewModel.imageURLs(for: page),
                     fitWidth: fitWidth,
-                    onSingleTap: { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
+                    doubleTapZoom: doubleTapZoom,
+                    onTap: { xFraction in handleReaderTap(xFraction) }
                 )
                 .ignoresSafeArea()
                 .tag(index)
@@ -233,6 +247,33 @@ struct MangaReaderView: View {
         .onChange(of: currentPage) { _, page in
             // Долистали до страницы-триггера — открываем следующую главу.
             if page == viewModel.pages.count + 1 { openNext() }
+        }
+    }
+
+    /// Обработка тапа по странице: левая/правая небольшая зона — листание,
+    /// центр — показать/скрыть интерфейс (ответ 2а).
+    private func handleReaderTap(_ xFraction: CGFloat) {
+        if xFraction < 0.2 {
+            goToPage(currentPage - 1)
+        } else if xFraction > 0.8 {
+            goToPage(currentPage + 1)
+        } else {
+            withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() }
+        }
+    }
+
+    /// Перейти к странице по тапу: плавно (анимация) или мгновенно —
+    /// по настройке «Плавное перелистывание».
+    private func goToPage(_ target: Int) {
+        let maxTag = viewModel.pages.count + (nextChapter != nil ? 1 : 0)
+        let clamped = min(max(target, 0), maxTag)
+        guard clamped != currentPage else { return }
+        if smoothPaging {
+            withAnimation(.easeInOut(duration: 0.25)) { currentPage = clamped }
+        } else {
+            var tx = Transaction()
+            tx.disablesAnimations = true
+            withTransaction(tx) { currentPage = clamped }
         }
     }
 
@@ -299,7 +340,7 @@ struct MangaReaderView: View {
                 // главы"/переходной странице (currentPage == pages.count или
                 // pages.count+1) индикатор просто пропадает, а не показывает
                 // некорректное значение вроде "3/2".
-                if !viewModel.pages.isEmpty && currentPage < viewModel.pages.count { pageBubble }
+                if !hidePageNumber && !viewModel.pages.isEmpty && currentPage < viewModel.pages.count { pageBubble }
                 bottomBar
             }
         }
@@ -553,86 +594,140 @@ struct ChapterListSheet: View {
     }
 }
 
-/// Настройки читалки: режим вписывания изображения + предзагрузка страниц.
+/// Настройки читалки. Порядок: тип листания → тема → сервер → вписывание →
+/// предзагрузка → переключение страниц (под-лист) → зум двойным → скрыть номер.
 struct ReaderSettingsSheet: View {
     @Binding var fitWidth: Bool
     @Binding var preloadCount: Int
-    /// Сервер картинок (Первый/Второй/Сжатия) — общий с окном скачивания, см.
-    /// ImageServerChoice. Влияет на то, откуда грузятся/качаются страницы.
+    @Binding var pageMode: Int
+    @Binding var readerTheme: Int
+    @Binding var doubleTapZoom: Bool
+    @Binding var hidePageNumber: Bool
+    @Binding var disableSwipe: Bool
+    @Binding var smoothPaging: Bool
+
     @AppStorage(ImageServerChoice.defaultsKey) private var serverChoice = 0
     @Environment(\.dismiss) private var dismiss
+    @State private var showPaging = false
 
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 16) {
-                ZStack {
-                    // Заголовок по центру, крестик — у правого края.
-                    Text("Настройки").font(.headline).foregroundStyle(Theme.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    HStack {
-                        Spacer()
-                        Button { dismiss() } label: {
-                            Image(systemName: "xmark").foregroundStyle(Theme.textSecondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ZStack {
+                        Text("Настройки").font(.headline).foregroundStyle(Theme.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        HStack {
+                            Spacer()
+                            Button { dismiss() } label: {
+                                Image(systemName: "xmark").foregroundStyle(Theme.textSecondary)
+                            }
                         }
                     }
+
+                    // 1. Тип листания (пока просто селектор — ответ 3а).
+                    label("Тип листания")
+                    Picker("", selection: $pageMode) {
+                        Text("Влево").tag(0); Text("Вверх").tag(1); Text("Вправо").tag(2)
+                    }.pickerStyle(.segmented)
+
+                    // 2. Тема читалки.
+                    label("Тема читалки")
+                    Picker("", selection: $readerTheme) {
+                        Text("Светлая").tag(1); Text("Тёмная").tag(0); Text("Системная").tag(2)
+                    }.pickerStyle(.segmented)
+
+                    // 3. Сервер картинок.
+                    label("Сервер картинок")
+                    Picker("", selection: $serverChoice) {
+                        ForEach(ImageServerChoice.allCases) { Text($0.title).tag($0.rawValue) }
+                    }.pickerStyle(.segmented)
+                    caption("Если страницы не грузятся — попробуйте другой сервер.")
+
+                    // 4. Вместить изображение.
+                    label("Вместить изображение")
+                    Picker("", selection: $fitWidth) {
+                        Text("По высоте").tag(false); Text("По ширине").tag(true)
+                    }.pickerStyle(.segmented)
+
+                    // Предзагрузка (оставил).
+                    label("Предзагрузка страниц")
+                    Picker("", selection: $preloadCount) {
+                        Text("1").tag(1); Text("3").tag(3); Text("5").tag(5)
+                    }.pickerStyle(.segmented)
+
+                    // 5. Переключение страниц — отдельная кнопка со стрелкой → под-лист.
+                    Button { showPaging = true } label: {
+                        HStack {
+                            Text("Переключение страниц").font(.system(size: 17)).foregroundStyle(Theme.textPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(Theme.textSecondary)
+                        }
+                        .padding(14)
+                        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    // 6. Зум двойным нажатием (тумблер, своя подложка).
+                    toggleRow("Увеличить двойным нажатием", isOn: $doubleTapZoom)
+
+                    // 7. Скрыть номер страниц (тумблер, своя подложка).
+                    toggleRow("Скрыть номер страниц", isOn: $hidePageNumber)
+
+                    Spacer(minLength: 0)
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 40)
+                .padding(.bottom, 24)
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(.thinMaterial)
+        .preferredColorScheme(.dark)
+        .tint(Theme.accent)
+        .sheet(isPresented: $showPaging) {
+            pagingSheet
+        }
+    }
 
-                // Подписи разделов крупнее (×1.5 от subheadline 15 → ~22.5).
-                Text("Вписывать изображение")
-                    .font(.system(size: 22.5, weight: .semibold)).foregroundStyle(Theme.textSecondary)
+    private func label(_ text: String) -> some View {
+        Text(text).font(.system(size: 22.5, weight: .semibold)).foregroundStyle(Theme.textSecondary)
+    }
+    private func caption(_ text: String) -> some View {
+        Text(text).font(.caption).foregroundStyle(Theme.textSecondary)
+    }
+    private func toggleRow(_ text: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            Text(text).font(.system(size: 17)).foregroundStyle(Theme.textPrimary)
+        }
+        .tint(Theme.accent)
+        .padding(14)
+        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
 
-                // «Слайдер» между режимами: сегментированный переключатель.
-                Picker("", selection: $fitWidth) {
-                    Text("По высоте").tag(false)
-                    Text("По ширине").tag(true)
-                }
-                .pickerStyle(.segmented)
+    /// Под-лист «Переключение страниц».
+    private var pagingSheet: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Переключение страниц").font(.headline).foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 8)
 
-                Text(fitWidth
-                     ? "Страница заполняет ширину экрана, длинные страницы прокручиваются вниз."
-                     : "Вся страница видна целиком по высоте экрана.")
-                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                toggleRow("Выключить перелистывание (свайпами)", isOn: $disableSwipe)
+                caption("Листать можно будет тапами по краям экрана.")
 
-                // Предзагрузка страниц вперёд — всегда включена (варианта
-                // "выкл" нет), регулируется только количество: тот же
-                // сегментированный стиль, что и у режима вписывания выше.
-                Text("Предзагрузка страниц")
-                    .font(.system(size: 22.5, weight: .semibold)).foregroundStyle(Theme.textSecondary)
-
-                Picker("", selection: $preloadCount) {
-                    Text("1").tag(1)
-                    Text("3").tag(3)
-                    Text("5").tag(5)
-                }
-                .pickerStyle(.segmented)
-
-                Text("Следующие \(preloadCount) стр. будут скачиваться заранее, пока вы читаете текущую.")
-                    .font(.caption).foregroundStyle(Theme.textSecondary)
-
-                // Сервер картинок — тот же сегментированный «слайдер», что и
-                // предзагрузка. Выбранный сервер пробуется первым и в читалке,
-                // и при скачивании (см. MangaImageURL.pageURLs).
-                Text("Сервер картинок")
-                    .font(.system(size: 22.5, weight: .semibold)).foregroundStyle(Theme.textSecondary)
-
-                Picker("", selection: $serverChoice) {
-                    ForEach(ImageServerChoice.allCases) { Text($0.title).tag($0.rawValue) }
-                }
-                .pickerStyle(.segmented)
-
-                Text("Если страницы не грузятся — попробуйте другой сервер.")
-                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                toggleRow("Плавное перелистывание", isOn: $smoothPaging)
+                caption("Вкл — с анимацией, выкл — мгновенно открывает следующую страницу.")
 
                 Spacer(minLength: 0)
             }
-            // Больше отступ сверху (от «шапки» листа).
-            .padding(.horizontal, 20)
-            .padding(.top, 40)
-            .padding(.bottom, 20)
+            .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 20)
         }
-        // Открывается сразу до верха.
-        .presentationDetents([.large])
+        .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
         .presentationBackground(.thinMaterial)
         .preferredColorScheme(.dark)
@@ -656,9 +751,12 @@ struct ReaderSettingsSheet: View {
 struct ZoomableImageScrollView: UIViewRepresentable {
     let candidates: [URL]
     let fitWidth: Bool
-    let onSingleTap: () -> Void
+    let doubleTapZoom: Bool
+    /// Одиночный тап: передаёт долю по X (0…1) — читалка сама решает
+    /// листать/показать интерфейс (см. handleReaderTap).
+    let onTap: (CGFloat) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(onSingleTap: onSingleTap, fitWidth: fitWidth) }
+    func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap, fitWidth: fitWidth, doubleTapZoom: doubleTapZoom) }
 
     func makeUIView(context: Context) -> UIScrollView {
         let scroll = LayoutCallbackScrollView()
@@ -688,7 +786,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         context.coordinator.imageView = imageView
         context.coordinator.spinner = spinner
 
-        let single = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap))
+        let single = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
         single.numberOfTapsRequired = 1
         let double = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
         double.numberOfTapsRequired = 2
@@ -703,7 +801,8 @@ struct ZoomableImageScrollView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIScrollView, context: Context) {
-        context.coordinator.onSingleTap = onSingleTap
+        context.coordinator.onTap = onTap
+        context.coordinator.doubleTapZoom = doubleTapZoom
         if context.coordinator.fitWidth != fitWidth {
             context.coordinator.fitWidth = fitWidth
             context.coordinator.layoutImage(resetZoom: true)
@@ -717,15 +816,17 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         weak var scrollView: UIScrollView?
         weak var imageView: UIImageView?
         weak var spinner: UIActivityIndicatorView?
-        var onSingleTap: () -> Void
+        var onTap: (CGFloat) -> Void
         var fitWidth: Bool
+        var doubleTapZoom: Bool
         var currentKey: URL?
         private var loadTask: Task<Void, Never>?
         private var lastBounds: CGSize = .zero
 
-        init(onSingleTap: @escaping () -> Void, fitWidth: Bool) {
-            self.onSingleTap = onSingleTap
+        init(onTap: @escaping (CGFloat) -> Void, fitWidth: Bool, doubleTapZoom: Bool) {
+            self.onTap = onTap
             self.fitWidth = fitWidth
+            self.doubleTapZoom = doubleTapZoom
         }
 
         func load(candidates: [URL]) {
@@ -748,9 +849,14 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
         func scrollViewDidZoom(_ scrollView: UIScrollView) { centerImage() }
 
-        @objc func handleSingleTap() { onSingleTap() }
+        @objc func handleSingleTap(_ g: UITapGestureRecognizer) {
+            guard let scroll = scrollView, scroll.bounds.width > 0 else { onTap(0.5); return }
+            let x = g.location(in: scroll).x / scroll.bounds.width
+            onTap(min(max(x, 0), 1))
+        }
 
         @objc func handleDoubleTap(_ g: UITapGestureRecognizer) {
+            guard doubleTapZoom else { return } // зум двойным нажатием отключён
             guard let scroll = scrollView, let imageView, imageView.image != nil else { return }
             if scroll.zoomScale > scroll.minimumZoomScale + 0.01 {
                 scroll.setZoomScale(scroll.minimumZoomScale, animated: true)

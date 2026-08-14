@@ -133,7 +133,8 @@ struct MangaDetailView: View {
             // Прокрутка к выбранной главе (кнопка «К главе»).
             .onChange(of: chapterScrollTarget) { _, target in
                 if let target {
-                    withAnimation(.easeInOut(duration: 0.3)) { scrollProxy.scrollTo(target, anchor: .top) }
+                    // Центрируем выбранную главу, а не ставим её в самый верх.
+                    withAnimation(.easeInOut(duration: 0.3)) { scrollProxy.scrollTo(target, anchor: .center) }
                     chapterScrollTarget = nil
                 }
             }
@@ -1123,7 +1124,6 @@ struct MangaDetailView: View {
                         HStack(spacing: 10) {
                             ForEach(teams) { teamChip($0) }
                         }
-                        .padding(.horizontal, 2)
                     }
                     .scrollIndicators(.hidden)
                 }
@@ -1303,10 +1303,12 @@ struct MangaDetailView: View {
             readerOpen = ReaderOpen(chapter: chapter, branchId: branch.branchId)
         } label: {
             HStack(spacing: 10) {
+                // «Дерево»: вертикальная линия в фиксированной зоне-отступе, чтобы
+                // имя команды вставало под названием главы, а края строк совпадали.
                 RoundedRectangle(cornerRadius: 1)
                     .fill(Theme.separator)
                     .frame(width: 2, height: 20)
-                    .padding(.leading, 22)
+                    .frame(width: 26, alignment: .center)
 
                 RemoteImage(url: branch.teamAvatarURL) { img in
                     img.resizable().scaledToFill()
@@ -1332,6 +1334,7 @@ struct MangaDetailView: View {
 
                 chapterDownloadControl(chapter, branchId: branch.branchId)
             }
+            .padding(.leading, 14)
             .padding(.trailing, 14)
             .padding(.vertical, 5)
             .contentShape(Rectangle())
