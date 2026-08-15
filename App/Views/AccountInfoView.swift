@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Обёртка над id пользователя для `.sheet(item:)` (открытие чужого профиля).
 struct ProfileUserId: Identifiable { let id: Int }
@@ -19,6 +20,9 @@ struct ProfileView: View {
     @State private var profile: UserProfile?
     @State private var stats: UserStats?
     @State private var loadingProfile = false
+    /// Светлый ли верх баннера — если да, надписи «Профиль»/«Готово» делаем
+    /// чёрными (и не затемняем верх), чтобы читались на светлом фоне.
+    @State private var bannerTopLight = false
 
     init(userId: Int? = nil) { self.userId = userId }
 
@@ -61,7 +65,47 @@ struct ProfileView: View {
         }
         .task(id: resolvedId) { await loadProfile() }
         .task(id: statsKey) { await loadStats() }
+        .task(id: profile?.backgroundURL) { await computeBannerBrightness() }
     }
+
+    /// Замер средней яркости верхней части баннера → выбор цвета надписей.
+    private func computeBannerBrightness() async {
+        guard let url = profile?.backgroundURL,
+              let img = await RemoteImageLoader.fetchImage(candidates: [url]),
+              let b = Self.topBrightness(img) else {
+            bannerTopLight = false
+            return
+        }
+        bannerTopLight = b > 0.68
+    }
+
+    /// Средняя яркость (luma) верхней трети картинки: рисуем регион в 1×1 и
+    /// читаем усреднённый пиксель.
+    private static func topBrightness(_ image: UIImage) -> CGFloat? {
+        guard let cg = image.cgImage else { return nil }
+        let topH = max(1, cg.height / 3)
+        guard let cropped = cg.cropping(to: CGRect(x: 0, y: 0, width: cg.width, height: topH)) else { return nil }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8,
+                                  bytesPerRow: 4, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .medium
+        ctx.draw(cropped, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let r = CGFloat(pixel[0]) / 255, g = CGFloat(pixel[1]) / 255, b = CGFloat(pixel[2]) / 255
+        return 0.299 * r + 0.587 * g + 0.114 * b
+    }
+
+    /// Затемнение баннера: на светлом верхе почти не затемняем сверху (чтобы
+    /// читались чёрные надписи), на тёмном — сильнее (для белых).
+    private var bannerGradient: LinearGradient {
+        let top = bannerTopLight ? 0.06 : 0.55
+        let mid = bannerTopLight ? 0.14 : 0.28
+        return LinearGradient(colors: [.black.opacity(top), .black.opacity(mid), .black.opacity(0.62)],
+                              startPoint: .top, endPoint: .bottom)
+    }
+
+    private var topTextColor: Color { bannerTopLight ? .black : .white }
 
     // MARK: Закрытый профиль
 
@@ -87,23 +131,22 @@ struct ProfileView: View {
                 } placeholder: { Theme.surfaceElevated } failure: { Theme.surfaceElevated }
                 .frame(width: geo.size.width, height: 230)
                 .clipped()
-                // Небольшое затемнение как у hero-фона на карточке тайтла:
-                // темнее сверху (под «Готово»/заголовок/плашки) и снизу.
-                .overlay(LinearGradient(
-                    colors: [.black.opacity(0.38), .black.opacity(0.08), .black.opacity(0.48)],
-                    startPoint: .top, endPoint: .bottom))
+                // Затемнение как у hero-фона на карточке (адаптивное: на
+                // светлом верхе почти не затемняем, чтобы читался чёрный текст).
+                .overlay(bannerGradient)
 
                 VStack(spacing: 0) {
                     // Верхняя строка: «Готово» слева, заголовок по центру.
                     ZStack {
                         Text("Профиль")
                             .font(.headline)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(topTextColor)
+                            .shadow(color: (bannerTopLight ? Color.white : Color.black).opacity(0.4), radius: 2)
                         HStack {
                             Button { dismiss() } label: {
                                 Text("Готово")
                                     .font(.body.weight(.semibold))
-                                    .foregroundStyle(Theme.textPrimary)
+                                    .foregroundStyle(topTextColor)
                                     .padding(.horizontal, 18).frame(height: 46)
                                     .glassEffect(.regular.interactive(), in: Capsule())
                             }
@@ -136,7 +179,9 @@ struct ProfileView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .padding(.horizontal, 16)
-                .padding(.top, 48)
+                // Это sheet — статус-бара над контентом нет, поэтому «Готово»
+                // прижата к самому верху баннера (без запаса под статус-бар).
+                .padding(.top, 14)
                 .padding(.bottom, 12)
             }
         }
