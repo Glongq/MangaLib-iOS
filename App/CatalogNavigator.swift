@@ -22,6 +22,17 @@ final class CatalogNavigator: ObservableObject {
     /// вкладку. UUID, чтобы каждый запрос был новым событием.
     @Published var switchRequest: UUID?
 
+    /// Папка, которую надо выбрать при следующем показе Закладок (nil — «Все»).
+    var pendingBookmarksFolder: String?
+    /// Сигнал «переключись на вкладку Закладки» (из профиля «Списки тайтлов»).
+    @Published var openBookmarksRequest: UUID?
+
+    /// Открыть Закладки на конкретной папке (по умолчанию «Читаю»).
+    func openBookmarks(folderId: String?) {
+        pendingBookmarksFolder = folderId
+        openBookmarksRequest = UUID()
+    }
+
     /// Открыть каталог с готовым фильтром (жанр/тег из карточки).
     func openCatalog(filter: MangaFilter) {
         pendingFilter = filter

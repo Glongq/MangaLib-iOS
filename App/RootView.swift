@@ -78,6 +78,12 @@ struct RootView: View {
             .onChange(of: catalogNav.switchRequest) { _, req in
                 if req != nil { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 1 } }
             }
+            .onChange(of: catalogNav.openBookmarksRequest) { _, req in
+                if req != nil {
+                    showAccount = false
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 0 }
+                }
+            }
             .preferredColorScheme(.dark)
             .tint(Theme.accent)
             .sheet(isPresented: $showLogin) { LoginView() }

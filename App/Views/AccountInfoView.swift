@@ -29,7 +29,7 @@ struct ProfileView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 Theme.background.ignoresSafeArea()
 
                 if let profile, !profile.canViewProfile {
@@ -52,15 +52,24 @@ struct ProfileView: View {
                         .padding(.bottom, 40)
                     }
                     .scrollIndicators(.hidden)
+                    // Баннер уходит в самый верх (под статус-бар), как hero на
+                    // карточке тайтла.
+                    .ignoresSafeArea(edges: .top)
                 }
-            }
-            .navigationTitle("Профиль")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Готово") { dismiss() }.tint(Theme.accent)
+
+                // Своя кнопка «Готово» поверх баннера (навбар скрыт) —
+                // остаётся в safe area, не заезжает под статус-бар.
+                Button { dismiss() } label: {
+                    Text("Готово")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, 14).frame(height: 36)
+                        .glassEffect(.regular.interactive(), in: Capsule())
                 }
+                .padding(.leading, 16)
+                .padding(.top, 4)
             }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .task(id: resolvedId) { await loadProfile() }
         .task(id: statsKey) { await loadStats() }
@@ -97,7 +106,11 @@ struct ProfileView: View {
                     statLine("Загружено глав", stats?.chaptersUploaded)
                     statLine("Кол-во комментариев", stats?.comments)
                 }
-                .padding(.top, 14).padding(.trailing, 14)
+                .padding(10)
+                // Матовая подложка — чтобы статистика читалась поверх баннера.
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.trailing, 12)
+                .padding(.top, 54)
             }
 
             RemoteImage(url: profile?.avatarURL ?? (isSelf ? auth.avatarURL : nil)) { img in
@@ -107,7 +120,7 @@ struct ProfileView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
             .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
-            .padding(.leading, 16).padding(.top, 16)
+            .padding(.leading, 16).padding(.top, 50)
         }
     }
 
@@ -193,9 +206,20 @@ struct ProfileView: View {
 
     private var quickButtons: some View {
         VStack(spacing: 10) {
-            NavigationLink { StubListView(title: "Списки тайтлов") } label: {
-                quickRow("Списки тайтлов", "square.stack.3d.up")
-            }.buttonStyle(.plain)
+            // «Списки тайтлов» — переход на вкладку Закладки, папка «Читаю»
+            // (только для своего профиля; чужие списки недоступны).
+            if isSelf {
+                Button {
+                    CatalogNavigator.shared.openBookmarks(folderId: BookmarkFolder.reading.id)
+                    dismiss()
+                } label: {
+                    quickRow("Списки тайтлов", "square.stack.3d.up")
+                }.buttonStyle(.plain)
+            } else {
+                NavigationLink { StubListView(title: "Списки тайтлов") } label: {
+                    quickRow("Списки тайтлов", "square.stack.3d.up")
+                }.buttonStyle(.plain)
+            }
 
             NavigationLink { MyCommentsView(userId: resolvedId) } label: {
                 quickRow("Комментарии", "text.bubble")

@@ -134,11 +134,14 @@ struct UserStatEntry: Decodable, Identifiable, Hashable {
     let percent: Double
     var id: String { label }
 
-    private enum CodingKeys: String, CodingKey { case label, value, percent }
+    private enum CodingKeys: String, CodingKey { case label, name, value, percent }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        label = (try? c.decode(String.self, forKey: .label)) ?? ""
+        // У жанров ключ label, у тегов может быть name — берём оба.
+        let byLabel = ((try? c.decodeIfPresent(String.self, forKey: .label)) ?? nil) ?? ""
+        let byName = ((try? c.decodeIfPresent(String.self, forKey: .name)) ?? nil) ?? ""
+        label = !byLabel.isEmpty ? byLabel : byName
         value = ((try? c.decodeIfPresent(Int.self, forKey: .value)) ?? nil) ?? 0
         if let d = try? c.decodeIfPresent(Double.self, forKey: .percent) { percent = d ?? 0 }
         else { percent = 0 }

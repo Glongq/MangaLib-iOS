@@ -5,6 +5,7 @@ import SwiftUI
 struct BookmarksView: View {
 
     @ObservedObject private var store = BookmarksStore.shared
+    @ObservedObject private var catalogNav = CatalogNavigator.shared
     @State private var selectedFolderId: String? = nil   // nil = «Все»
     @State private var showNewFolder = false
     @State private var newFolderName = ""
@@ -30,6 +31,13 @@ struct BookmarksView: View {
     /// что и на странице тайтла (сменить папку/убрать из закладок).
     @State private var editingBookmark: BookmarkedTitle?
 
+    /// Применить папку, запрошенную извне (профиль «Списки тайтлов» → «Читаю»).
+    private func applyPendingFolder() {
+        guard let folder = catalogNav.pendingBookmarksFolder else { return }
+        catalogNav.pendingBookmarksFolder = nil
+        selectedFolderId = folder
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -47,6 +55,8 @@ struct BookmarksView: View {
                     }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .onAppear { applyPendingFolder() }
+            .onChange(of: catalogNav.openBookmarksRequest) { _, _ in applyPendingFolder() }
             .navigationDestination(for: BookmarkedTitle.self) { bm in
                 MangaDetailView(slug: bm.slug, fallbackTitle: bm.title,
                                 coverURL: bm.coverURL.flatMap(URL.init(string:)))
