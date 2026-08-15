@@ -178,9 +178,14 @@ struct ProfileView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(profile?.username ?? (isSelf ? auth.username : nil) ?? "Профиль")
                 .font(.title2.weight(.bold)).foregroundStyle(Theme.textPrimary)
-            HStack(spacing: 10) {
-                if let lvl = profile?.level { Text("Уровень \(lvl)").font(.subheadline).foregroundStyle(Theme.textSecondary) }
-                if let g = profile?.genderLabel, !g.isEmpty { Text("· \(g)").font(.subheadline).foregroundStyle(Theme.textSecondary) }
+            // Уровень и пол одной строкой с ровным разделителем « · ».
+            let metaParts = [profile?.level.map { "Уровень \($0)" }, profile?.genderLabel]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+            if !metaParts.isEmpty {
+                Text(metaParts.joined(separator: " · "))
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textSecondary)
             }
             if let about = profile?.about, !about.isEmpty {
                 Text(about).font(.subheadline).foregroundStyle(Theme.textPrimary).padding(.top, 6)
