@@ -87,26 +87,34 @@ struct ProfileView: View {
                 } placeholder: { Theme.surfaceElevated } failure: { Theme.surfaceElevated }
                 .frame(width: geo.size.width, height: 230)
                 .clipped()
-                .overlay(LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.55)],
-                                        startPoint: .top, endPoint: .bottom))
+                // Небольшое затемнение как у hero-фона на карточке тайтла:
+                // темнее сверху (под «Готово»/заголовок/плашки) и снизу.
+                .overlay(LinearGradient(
+                    colors: [.black.opacity(0.38), .black.opacity(0.08), .black.opacity(0.48)],
+                    startPoint: .top, endPoint: .bottom))
 
-                VStack(alignment: .leading, spacing: 8) {
-                    // «Готово» — часть шапки, сверху слева; размер как у кнопки
-                    // «Применить» в других местах (semibold, высокая).
-                    HStack {
-                        Button { dismiss() } label: {
-                            Text("Готово")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(Theme.textPrimary)
-                                .padding(.horizontal, 18).frame(height: 46)
-                                .glassEffect(.regular.interactive(), in: Capsule())
+                VStack(spacing: 0) {
+                    // Верхняя строка: «Готово» слева, заголовок по центру.
+                    ZStack {
+                        Text("Профиль")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                        HStack {
+                            Button { dismiss() } label: {
+                                Text("Готово")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(Theme.textPrimary)
+                                    .padding(.horizontal, 18).frame(height: 46)
+                                    .glassEffect(.regular.interactive(), in: Capsule())
+                            }
+                            Spacer(minLength: 0)
                         }
-                        Spacer(minLength: 0)
                     }
 
-                    // Аватар (слева) + статистика (справа). Плашки прижаты вправо,
-                    // ширина ограничена доступным местом, интерфейс не растягивается.
-                    HStack(alignment: .top, spacing: 12) {
+                    Spacer(minLength: 8)
+
+                    // Аватар (слева) + статистика (справа), по центру баннера.
+                    HStack(alignment: .center, spacing: 12) {
                         RemoteImage(url: profile?.avatarURL ?? (isSelf ? auth.avatarURL : nil)) { img in
                             img.resizable().scaledToFill()
                         } placeholder: { avatarPlaceholder } failure: { avatarPlaceholder }
@@ -123,9 +131,12 @@ struct ProfileView: View {
                             statCard("Кол-во комментариев", stats?.comments, width: statsW)
                         }
                     }
+
+                    Spacer(minLength: 8)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .padding(.horizontal, 16)
-                .padding(.top, 52)
+                .padding(.top, 48)
                 .padding(.bottom, 12)
             }
         }
