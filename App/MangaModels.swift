@@ -84,6 +84,10 @@ struct UserProfile: Decodable {
     let genderLabel: String?
     let level: Int?
     let totalPoints: Int?
+    /// Закрытый профиль/статистика — сервер отдаёт эти флаги; если профиль
+    /// закрыт, показываем заглушку вместо содержимого.
+    let canViewProfile: Bool
+    let canViewStatistics: Bool
 
     private struct ImageRef: Decodable { let url: String?; let filename: String? }
     private struct Labeled: Decodable { let label: String? }
@@ -92,6 +96,8 @@ struct UserProfile: Decodable {
     private enum CodingKeys: String, CodingKey {
         case id, username, avatar, background, about, gender
         case pointsInfo = "points_info"
+        case canViewProfile = "can_view_profile"
+        case canViewStatistics = "can_view_statistics"
     }
 
     init(from decoder: Decoder) throws {
@@ -105,6 +111,8 @@ struct UserProfile: Decodable {
         let p = (try? c.decodeIfPresent(PointsInfo.self, forKey: .pointsInfo)) ?? nil
         level = p?.level
         totalPoints = p?.total_points
+        canViewProfile = ((try? c.decodeIfPresent(Bool.self, forKey: .canViewProfile)) ?? nil) ?? true
+        canViewStatistics = ((try? c.decodeIfPresent(Bool.self, forKey: .canViewStatistics)) ?? nil) ?? true
     }
 
     /// Относительные пути (плейсхолдер `/static/…` или кастомный) дополняем
@@ -119,14 +127,34 @@ struct UserProfile: Decodable {
 /// Статистика профиля — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}/stats`:
 /// `{manga_added{value,label:"Создано тайтлов"}, chapters_added{value,
 /// label:"Загружено глав"}, comments{value,label}, genres[], tags[], …}`.
+/// Один пункт статистики жанров/тегов профиля: `{label, value, percent}`.
+struct UserStatEntry: Decodable, Identifiable, Hashable {
+    let label: String
+    let value: Int
+    let percent: Double
+    var id: String { label }
+
+    private enum CodingKeys: String, CodingKey { case label, value, percent }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = (try? c.decode(String.self, forKey: .label)) ?? ""
+        value = ((try? c.decodeIfPresent(Int.self, forKey: .value)) ?? nil) ?? 0
+        if let d = try? c.decodeIfPresent(Double.self, forKey: .percent) { percent = d ?? 0 }
+        else { percent = 0 }
+    }
+}
+
 struct UserStats: Decodable {
     let mangaCreated: Int
     let chaptersUploaded: Int
     let comments: Int
+    let genres: [UserStatEntry]
+    let tags: [UserStatEntry]
 
     private struct Stat: Decodable { let value: Int? }
     private enum CodingKeys: String, CodingKey {
-        case manga_added, chapters_added, comments
+        case manga_added, chapters_added, comments, genres, tags
     }
 
     init(from decoder: Decoder) throws {
@@ -134,6 +162,97 @@ struct UserStats: Decodable {
         mangaCreated = (((try? c.decodeIfPresent(Stat.self, forKey: .manga_added)) ?? nil)?.value) ?? 0
         chaptersUploaded = (((try? c.decodeIfPresent(Stat.self, forKey: .chapters_added)) ?? nil)?.value) ?? 0
         comments = (((try? c.decodeIfPresent(Stat.self, forKey: .comments)) ?? nil)?.value) ?? 0
+        genres = ((try? c.decodeIfPresent([UserStatEntry].self, forKey: .genres)) ?? nil) ?? []
+        tags = ((try? c.decodeIfPresent([UserStatEntry].self, forKey: .tags)) ?? nil) ?? []
+    }
+}
+
+/// Комментарий пользователя из списка «Мои комментарии» — ПОДТВЕРЖДЕНО
+/// перехватом `GET /user/{id}/comments?page=&sort_by=id&sort_type=desc`. Тело
+/// `comment` приходит как HTML (`<p>…</p>`), а не ProseMirror. `relation`/`media`
+/// описывают, к чему комментарий (глава/тайтл/обсуждение).
+struct UserComment: Decodable, Identifiable {
+    let id: Int
+    let html: String
+    let createdAt: Date?
+    let up: Int
+    let down: Int
+    let relationType: String
+    let title: String?
+    let coverURL: URL?
+    let slugURL: String?
+    let subtitle: String?
+
+    /// Грубая очистка HTML в читаемый текст (теги/сущности).
+    var plainText: String {
+        html.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private struct MangaRef: Decodable {
+        let name: String?; let rusName: String?; let slugURL: String?; let cover: MangaCover?
+        enum CodingKeys: String, CodingKey { case name; case rusName = "rus_name"; case slugURL = "slug_url"; case cover }
+    }
+    private struct Relation: Decodable {
+        let volume: String?; let number: String?; let manga: MangaRef?
+        let name: String?; let rusName: String?; let slugURL: String?; let cover: MangaCover?
+        enum CodingKeys: String, CodingKey {
+            case volume, number, manga, name, cover
+            case rusName = "rus_name"; case slugURL = "slug_url"
+        }
+    }
+    private struct Votes: Decodable { let up: Int?; let down: Int? }
+
+    enum CodingKeys: String, CodingKey {
+        case id, comment, votes, media, relation
+        case createdAt = "created_at"
+        case relationType = "relation_type"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        html = (try? c.decode(String.self, forKey: .comment)) ?? ""
+
+        if let raw = ((try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? nil), !raw.isEmpty {
+            let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            createdAt = f.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+        } else { createdAt = nil }
+
+        let v = (try? c.decodeIfPresent(Votes.self, forKey: .votes)) ?? nil
+        up = v?.up ?? 0
+        down = v?.down ?? 0
+        relationType = ((try? c.decodeIfPresent(String.self, forKey: .relationType)) ?? nil) ?? ""
+
+        let media = (try? c.decodeIfPresent(MangaRef.self, forKey: .media)) ?? nil
+        let rel = (try? c.decodeIfPresent(Relation.self, forKey: .relation)) ?? nil
+        let mangaRef = media ?? rel?.manga
+
+        if let m = mangaRef {
+            title = (m.rusName?.isEmpty == false ? m.rusName : m.name)
+            coverURL = m.cover?.bestURL
+            slugURL = m.slugURL
+        } else if let rel, (rel.slugURL != nil || rel.name != nil) {
+            title = (rel.rusName?.isEmpty == false ? rel.rusName : rel.name)
+            coverURL = rel.cover?.bestURL
+            slugURL = rel.slugURL
+        } else {
+            title = nil; coverURL = nil; slugURL = nil
+        }
+
+        if relationType == "chapter", let rel {
+            let parts = [rel.volume.map { "Том \($0)" }, rel.number.map { "Гл. \($0)" }].compactMap { $0 }
+            subtitle = parts.isEmpty ? nil : parts.joined(separator: " · ")
+        } else {
+            subtitle = nil
+        }
     }
 }
 

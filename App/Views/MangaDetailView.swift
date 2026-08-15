@@ -62,6 +62,8 @@ struct MangaDetailView: View {
     /// требует авторизации так же, как и комментарии; отдельный флаг вместо
     /// переиспользования showLoginForComment, т.к. источник действия другой.
     @State private var showLoginForSimilarVote = false
+    /// Открытый профиль автора комментария (тап по нику/аватарке).
+    @State private var profileUser: ProfileUserId?
 
     /// Отключить комментарии в читалке — ПОКА ЗАГЛУШКА, как явно попросили:
     /// переключатель есть и сохраняется, но ридер комментарии не показывает
@@ -193,6 +195,7 @@ struct MangaDetailView: View {
         }
         .sheet(isPresented: $showLoginForComment) { LoginView() }
         .sheet(isPresented: $showLoginForSimilarVote) { LoginView() }
+        .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
         .sheet(isPresented: $showTitleNames) {
             TitleNamesSheet(
                 rusName: viewModel.detail?.rusName ?? listItem?.rusName,
@@ -2008,35 +2011,40 @@ struct MangaDetailView: View {
                 // (раньше был справа от аватарки, в одной колонке с ником),
                 // а отдельным блоком НИЖЕ, во всю ширину, начинающимся от
                 // того же левого края, что и аватарка (см. ниже).
-                HStack(alignment: .center, spacing: 10) {
-                    RemoteImage(url: comment.author?.avatarURL.flatMap(URL.init(string:))) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        Circle().fill(Theme.surfaceElevated)
-                    } failure: {
-                        Circle().fill(Theme.surfaceElevated).overlay(
-                            Image(systemName: "person.fill").font(.footnote).foregroundStyle(Theme.textSecondary)
-                        )
-                    }
-                    .frame(width: 36, height: 36)
-                    .clipShape(Circle())
+                Button {
+                    if let uid = comment.author?.id, uid > 0 { profileUser = ProfileUserId(id: uid) }
+                } label: {
+                    HStack(alignment: .center, spacing: 10) {
+                        RemoteImage(url: comment.author?.avatarURL.flatMap(URL.init(string:))) { image in
+                            image.resizable().scaledToFill()
+                        } placeholder: {
+                            Circle().fill(Theme.surfaceElevated)
+                        } failure: {
+                            Circle().fill(Theme.surfaceElevated).overlay(
+                                Image(systemName: "person.fill").font(.footnote).foregroundStyle(Theme.textSecondary)
+                            )
+                        }
+                        .frame(width: 36, height: 36)
+                        .clipShape(Circle())
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(comment.author?.username ?? "Аноним")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                        if let date = comment.date {
-                            // Русский относительный формат ОДНОЙ единицей
-                            // ("5 дней назад", "7 часов назад") вместо
-                            // системного Text(date, style: .relative)
-                            // (показывал по-английски и/или комбинировал
-                            // единицы вроде "3 дня 17 часов") — как попросили.
-                            Text(date.relativeRussianString)
-                                .font(.caption2)
-                                .foregroundStyle(Theme.textSecondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(comment.author?.username ?? "Аноним")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.textPrimary)
+                            if let date = comment.date {
+                                // Русский относительный формат ОДНОЙ единицей
+                                // ("5 дней назад", "7 часов назад") вместо
+                                // системного Text(date, style: .relative)
+                                // (показывал по-английски и/или комбинировал
+                                // единицы вроде "3 дня 17 часов") — как попросили.
+                                Text(date.relativeRussianString)
+                                    .font(.caption2)
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
                         }
                     }
                 }
+                .buttonStyle(.plain)
 
                 if !comment.text.isEmpty {
                     Text(comment.text).font(.subheadline).foregroundStyle(Theme.textPrimary)

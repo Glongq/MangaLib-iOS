@@ -47,7 +47,7 @@ struct SideMenuView: View {
     // профиля её не касается, поэтому не нужно поднимать выше в RootView.
     // История/Настройки/Загрузки теперь не sheet, а обычные PUSH-переходы внутри
     // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
-    private enum MenuRoute: Hashable { case history, settings, downloads }
+    private enum MenuRoute: Hashable { case history, settings, downloads, comments }
     @State private var path: [MenuRoute] = []
 
     // Какие сворачиваемые разделы сейчас развёрнуты (Профиль/Каталог/Другое) —
@@ -94,6 +94,7 @@ struct SideMenuView: View {
                 case .history:   HistoryView(embedded: true)
                 case .settings:  AppSettingsView(embedded: true)
                 case .downloads: DownloadsView(embedded: true)
+                case .comments:  MyCommentsView(embedded: true)
                 }
             }
         }
@@ -212,7 +213,7 @@ struct SideMenuView: View {
     // Сворачиваемый раздел «Профиль» — все пункты пока заглушки (StubView).
     private var profileSection: some View {
         collapsibleCard("Профиль") {
-            row("Комментарии", icon: "text.bubble")
+            row("Комментарии", icon: "text.bubble", action: { path.append(.comments) })
             row("Список друзей", icon: "person.2")
             row("Избранное", icon: "heart")
             row("Коллекции", icon: "square.stack")

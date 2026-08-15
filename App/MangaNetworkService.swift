@@ -190,6 +190,26 @@ final class MangaNetworkService {
         return response.data
     }
 
+    /// Комментарии пользователя — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /user/{id}/comments?page=&sort_by=id&sort_type=desc`.
+    func fetchUserComments(userId: Int, page: Int, sortType: String) async throws -> (comments: [UserComment], hasNextPage: Bool) {
+        let items = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "sort_by", value: "id"),
+            URLQueryItem(name: "sort_type", value: sortType)
+        ]
+        let request = try makeRequest(path: "/user/\(userId)/comments", queryItems: items)
+        let response: LossyListResponse<UserComment> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// Удаление своего комментария — ПОДТВЕРЖДЕНО перехватом
+    /// `DELETE /comments/{id}` → 200 `{data:{toast:{message:"Комментарий был удалён"}}}`.
+    func deleteComment(id: Int) async throws {
+        let request = try makeRequest(path: "/comments/\(id)", queryItems: [], method: "DELETE")
+        try await performVoid(request)
+    }
+
     /// Профиль пользователя — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}?fields[]=…`.
     func fetchUserProfile(id: Int) async throws -> UserProfile {
         let items = ["about", "gender", "background", "avatar_frame_id", "premium_background_id", "points"]
@@ -686,7 +706,7 @@ final class MangaNetworkService {
     /// умолчанию активный сайт). Нужно для тайтлов с ДРУГОГО сайта (напр. из
     /// «Похожего»/«Связанного»/«Персонажей»): их карточку/главы надо запрашивать
     /// с их собственным Site-Id, иначе сервер отвечает 404.
-    private func makeRequest(path: String, queryItems: [URLQueryItem], siteId: Int? = nil) throws -> URLRequest {
+    private func makeRequest(path: String, queryItems: [URLQueryItem], siteId: Int? = nil, method: String = "GET") throws -> URLRequest {
         // Собираем URL из строки, чтобы избежать percent-encoding разделителей пути
         // (appendingPathComponent мог кодировать «/» и ломать путь → 404).
         let normalizedPath = path.hasPrefix("/") ? path : "/" + path
@@ -699,7 +719,7 @@ final class MangaNetworkService {
         guard let url = components.url else { throw NetworkError.invalidURL }
 
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        request.httpMethod = method
         for (field, value) in defaultHeaders {
             request.setValue(value, forHTTPHeaderField: field)
         }
