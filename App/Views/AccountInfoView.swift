@@ -53,22 +53,9 @@ struct ProfileView: View {
                     }
                     .scrollIndicators(.hidden)
                     // Баннер уходит в самый верх (под статус-бар), как hero на
-                    // карточке тайтла.
+                    // карточке тайтла. «Готово», аватар и плашки — часть шапки.
                     .ignoresSafeArea(edges: .top)
                 }
-
-                // Своя кнопка «Готово» поверх баннера (навбар скрыт) —
-                // остаётся в safe area, не заезжает под статус-бар.
-                Button { dismiss() } label: {
-                    Text("Готово")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .padding(.horizontal, 14).frame(height: 36)
-                        .glassEffect(.regular.interactive(), in: Capsule())
-                }
-                .padding(.leading, 12)
-                .padding(.top, 0)
-                .zIndex(2)
             }
             .toolbar(.hidden, for: .navigationBar)
         }
@@ -90,39 +77,59 @@ struct ProfileView: View {
     // MARK: Шапка (баннер + аватар + топ-статистика)
 
     private var header: some View {
-        ZStack(alignment: .topLeading) {
-            RemoteImage(url: profile?.backgroundURL) { img in
-                img.resizable().scaledToFill()
-            } placeholder: { Theme.surfaceElevated } failure: { Theme.surfaceElevated }
-            .frame(height: 184)
-            .frame(maxWidth: .infinity)
-            .clipped()
-            .overlay(LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.55)],
-                                    startPoint: .top, endPoint: .bottom))
+        GeometryReader { geo in
+            // Доступная ширина под плашки = экран − боковые поля − аватар − зазор.
+            let statsW = statsWidth(available: geo.size.width - 32 - 104 - 12)
 
-            // Статистика: каждая величина — своей матовой подложкой, текст
-            // слева, число справа (одинаковая ширина, так что числа выровнены).
-            HStack {
-                Spacer(minLength: 0)
-                VStack(alignment: .trailing, spacing: 7) {
-                    statCard("Создано тайтлов", stats?.mangaCreated, width: statCardWidth)
-                    statCard("Загружено глав", stats?.chaptersUploaded, width: statCardWidth)
-                    statCard("Кол-во комментариев", stats?.comments, width: statCardWidth)
+            ZStack(alignment: .topLeading) {
+                RemoteImage(url: profile?.backgroundURL) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: { Theme.surfaceElevated } failure: { Theme.surfaceElevated }
+                .frame(width: geo.size.width, height: 230)
+                .clipped()
+                .overlay(LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.55)],
+                                        startPoint: .top, endPoint: .bottom))
+
+                VStack(alignment: .leading, spacing: 14) {
+                    // «Готово» — часть шапки, просто сверху слева (не оверлей).
+                    HStack {
+                        Button { dismiss() } label: {
+                            Text("Готово")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.textPrimary)
+                                .padding(.horizontal, 14).frame(height: 34)
+                                .glassEffect(.regular.interactive(), in: Capsule())
+                        }
+                        Spacer(minLength: 0)
+                    }
+
+                    // Аватар (слева) + статистика (справа). Плашки прижаты вправо
+                    // и растут ВЛЕВО при большом числе, но их ширина ограничена
+                    // доступным местом (statsW), поэтому интерфейс не растягивается.
+                    HStack(alignment: .top, spacing: 12) {
+                        RemoteImage(url: profile?.avatarURL ?? (isSelf ? auth.avatarURL : nil)) { img in
+                            img.resizable().scaledToFill()
+                        } placeholder: { avatarPlaceholder } failure: { avatarPlaceholder }
+                        .frame(width: 104, height: 104)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+
+                        Spacer(minLength: 0)
+
+                        VStack(alignment: .trailing, spacing: 7) {
+                            statCard("Создано тайтлов", stats?.mangaCreated, width: statsW)
+                            statCard("Загружено глав", stats?.chaptersUploaded, width: statsW)
+                            statCard("Кол-во комментариев", stats?.comments, width: statsW)
+                        }
+                    }
                 }
-                .padding(.trailing, 12)
-                .padding(.top, 54)
+                .padding(.horizontal, 16)
+                .padding(.top, 56)
+                .padding(.bottom, 16)
             }
-
-            // Аватар — квадрат по центру (center-crop), небольшой.
-            RemoteImage(url: profile?.avatarURL ?? (isSelf ? auth.avatarURL : nil)) { img in
-                img.resizable().scaledToFill()
-            } placeholder: { avatarPlaceholder } failure: { avatarPlaceholder }
-            .frame(width: 76, height: 76)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
-            .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
-            .padding(.leading, 16).padding(.top, 54)
         }
+        .frame(height: 230)
     }
 
     private var avatarPlaceholder: some View {
@@ -132,13 +139,21 @@ struct ProfileView: View {
         }
     }
 
-    /// Единая ширина карточек статистики: базовая + запас на «длинные» числа
-    /// (чем больше цифр, тем шире), чтобы при большом числе комментариев/глав
-    /// карточки росли ВЛЕВО (они прижаты вправо), а подпись не съезжала.
-    private var statCardWidth: CGFloat {
-        let vals = [stats?.mangaCreated ?? 0, stats?.chaptersUploaded ?? 0, stats?.comments ?? 0]
-        let maxDigits = vals.map { String($0).count }.max() ?? 1
-        return 176 + CGFloat(max(0, maxDigits - 2)) * 8
+    /// Ширина плашек статистики — фиксированная (числа сокращаются, так что
+    /// всегда влезают); на всякий случай ограничена доступным местом, чтобы
+    /// интерфейс не растягивался в бока на узких экранах.
+    private func statsWidth(available: CGFloat) -> CGFloat {
+        min(190, max(140, available))
+    }
+
+    /// Короткий формат числа: 1.4k, 10.2k, 100.9k, 1.2m — чтобы длинные
+    /// значения не ужимались и не растягивали плашки.
+    private static func shortNum(_ n: Int) -> String {
+        switch n {
+        case 1_000_000...: return String(format: "%.1fm", Double(n) / 1_000_000)
+        case 1_000...:     return String(format: "%.1fk", Double(n) / 1_000)
+        default:           return "\(n)"
+        }
     }
 
     private func statCard(_ label: String, _ value: Int?, width: CGFloat) -> some View {
@@ -148,9 +163,10 @@ struct ProfileView: View {
                 .foregroundStyle(.white.opacity(0.9))
                 .lineLimit(1)
             Spacer(minLength: 6)
-            Text(value.map { "\($0)" } ?? "—")
+            Text(value.map { Self.shortNum($0) } ?? "—")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.white)
+                .lineLimit(1)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)

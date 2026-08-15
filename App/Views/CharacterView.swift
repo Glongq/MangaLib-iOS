@@ -139,13 +139,13 @@ struct CharacterView: View {
 
     private var siteMenu: some View {
         Menu {
-            Picker("Тип", selection: $vm.site) {
-                ForEach(vm.availableSites) { s in
-                    Text(Self.siteLabel(s)).tag(s)
+            Picker("Тип", selection: $vm.siteFilter) {
+                ForEach(vm.availableFilters) { f in
+                    Text(Self.filterLabel(f)).tag(f)
                 }
             }
         } label: {
-            pill(icon: "square.grid.2x2", text: Self.siteLabel(vm.site))
+            pill(icon: "square.grid.2x2", text: Self.filterLabel(vm.siteFilter))
         }
     }
 
@@ -193,6 +193,13 @@ struct CharacterView: View {
         case .ranobelib: return "Новеллы"
         case .hentailib: return "Хентай"
         case .slashlib:  return "Слэш"
+        }
+    }
+
+    private static func filterLabel(_ f: CharacterViewModel.SiteFilter) -> String {
+        switch f {
+        case .all: return "Все"
+        case .site(let s): return siteLabel(s)
         }
     }
 

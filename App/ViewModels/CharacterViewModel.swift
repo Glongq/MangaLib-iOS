@@ -21,8 +21,16 @@ final class CharacterViewModel: ObservableObject {
     @Published var sort: CharacterTitleSort = .popularity {
         didSet { if oldValue != sort { reloadNow() } }
     }
-    @Published var site: LibSite = .mangalib {
-        didSet { if oldValue != site { reloadNow() } }
+
+    /// Тип контента для грида: конкретный сайт или «Все» (все поддерживаемые
+    /// сайты сразу).
+    enum SiteFilter: Hashable, Identifiable {
+        case all
+        case site(LibSite)
+        var id: String { switch self { case .all: return "all"; case .site(let s): return "s\(s.rawValue)" } }
+    }
+    @Published var siteFilter: SiteFilter = .all {
+        didSet { if oldValue != siteFilter { reloadNow() } }
     }
     @Published private(set) var filter = MangaFilter()
 
@@ -63,6 +71,17 @@ final class CharacterViewModel: ObservableObject {
 
     func titlesCount(for site: LibSite) -> Int? { detail?.titlesCountBySite[site.rawValue] }
 
+    /// Варианты для переключателя: конкретные сайты, затем «Все» внизу.
+    var availableFilters: [SiteFilter] { availableSites.map { .site($0) } + [.all] }
+
+    /// site_id[], которые уходят в запрос для текущего фильтра.
+    private var selectedSiteIds: [Int] {
+        switch siteFilter {
+        case .all: return availableSites.map(\.rawValue)
+        case .site(let s): return [s.rawValue]
+        }
+    }
+
     // MARK: Загрузка
 
     func loadIfNeeded() async {
@@ -71,7 +90,8 @@ final class CharacterViewModel: ObservableObject {
         // Дефолтный тип контента — где больше всего тайтлов среди поддерживаемых.
         if let best = availableSites.max(by: { (titlesCount(for: $0) ?? 0) < (titlesCount(for: $1) ?? 0) }) {
             // Обход didSet-reload: выставляем напрямую, затем один reload ниже.
-            if best != site { site = best; return } // didSet сам перезагрузит
+            let target = SiteFilter.site(best)
+            if siteFilter != target { siteFilter = target; return } // didSet сам перезагрузит
         }
         reloadNow()
     }
@@ -174,7 +194,7 @@ final class CharacterViewModel: ObservableObject {
             page: page,
             sortByOverride: sortBy,
             sortType: sort.sortType,
-            siteIds: [site.rawValue],
+            siteIds: selectedSiteIds,
             targetId: characterId,
             targetModel: "character"
         )
