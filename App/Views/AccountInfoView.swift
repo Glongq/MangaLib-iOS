@@ -66,8 +66,9 @@ struct ProfileView: View {
                         .padding(.horizontal, 14).frame(height: 36)
                         .glassEffect(.regular.interactive(), in: Capsule())
                 }
-                .padding(.leading, 16)
-                .padding(.top, 4)
+                .padding(.leading, 12)
+                .padding(.top, 0)
+                .zIndex(2)
             }
             .toolbar(.hidden, for: .navigationBar)
         }
@@ -99,28 +100,28 @@ struct ProfileView: View {
             .overlay(LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.55)],
                                     startPoint: .top, endPoint: .bottom))
 
+            // Статистика: каждая величина — своей матовой подложкой, текст
+            // слева, число справа (одинаковая ширина, так что числа выровнены).
             HStack {
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 7) {
-                    statLine("Создано тайтлов", stats?.mangaCreated)
-                    statLine("Загружено глав", stats?.chaptersUploaded)
-                    statLine("Кол-во комментариев", stats?.comments)
+                    statCard("Создано тайтлов", stats?.mangaCreated, width: statCardWidth)
+                    statCard("Загружено глав", stats?.chaptersUploaded, width: statCardWidth)
+                    statCard("Кол-во комментариев", stats?.comments, width: statCardWidth)
                 }
-                .padding(10)
-                // Матовая подложка — чтобы статистика читалась поверх баннера.
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .padding(.trailing, 12)
                 .padding(.top, 54)
             }
 
+            // Аватар — квадрат по центру (center-crop), небольшой.
             RemoteImage(url: profile?.avatarURL ?? (isSelf ? auth.avatarURL : nil)) { img in
                 img.resizable().scaledToFill()
             } placeholder: { avatarPlaceholder } failure: { avatarPlaceholder }
-            .frame(width: 92, height: 122)
+            .frame(width: 76, height: 76)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
             .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
-            .padding(.leading, 16).padding(.top, 50)
+            .padding(.leading, 16).padding(.top, 54)
         }
     }
 
@@ -131,13 +132,30 @@ struct ProfileView: View {
         }
     }
 
-    private func statLine(_ label: String, _ value: Int?) -> some View {
-        HStack(spacing: 6) {
-            Text(label).font(.caption).foregroundStyle(.white.opacity(0.85))
-            Text(value.map { "\($0)" } ?? "—").font(.caption.weight(.bold)).foregroundStyle(.white)
+    /// Единая ширина карточек статистики: базовая + запас на «длинные» числа
+    /// (чем больше цифр, тем шире), чтобы при большом числе комментариев/глав
+    /// карточки росли ВЛЕВО (они прижаты вправо), а подпись не съезжала.
+    private var statCardWidth: CGFloat {
+        let vals = [stats?.mangaCreated ?? 0, stats?.chaptersUploaded ?? 0, stats?.comments ?? 0]
+        let maxDigits = vals.map { String($0).count }.max() ?? 1
+        return 176 + CGFloat(max(0, maxDigits - 2)) * 8
+    }
+
+    private func statCard(_ label: String, _ value: Int?, width: CGFloat) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            Text(value.map { "\($0)" } ?? "—")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
         }
-        .lineLimit(1)
-        .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(width: width)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var infoBlock: some View {
