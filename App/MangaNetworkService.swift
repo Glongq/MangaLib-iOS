@@ -190,6 +190,22 @@ final class MangaNetworkService {
         return response.data
     }
 
+    /// Профиль пользователя — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}?fields[]=…`.
+    func fetchUserProfile(id: Int) async throws -> UserProfile {
+        let items = ["about", "gender", "background", "avatar_frame_id", "premium_background_id", "points"]
+            .map { URLQueryItem(name: "fields[]", value: $0) }
+        let request = try makeRequest(path: "/user/\(id)", queryItems: items)
+        let response: APIObjectResponse<UserProfile> = try await perform(request)
+        return response.data
+    }
+
+    /// Статистика профиля — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}/stats`.
+    func fetchUserStats(id: Int) async throws -> UserStats {
+        let request = try makeRequest(path: "/user/\(id)/stats", queryItems: [])
+        let response: APIObjectResponse<UserStats> = try await perform(request)
+        return response.data
+    }
+
     /// Тайтлы из закладок АККАУНТА на сервере — отдельного эндпоинта "мои
     /// закладки" в API нет (подтверждено по нескольким открытым клиентам —
     /// Kotatsu, Tachiyomi-расширение mangalib и др.): это тот же каталожный

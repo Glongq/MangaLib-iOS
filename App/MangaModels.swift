@@ -70,6 +70,73 @@ struct CurrentUser: Decodable {
     }
 }
 
+// MARK: - Профиль пользователя
+
+/// Профиль — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}?fields[]=about&gender&
+/// background&points…`: `{id, username, avatar{url}, background{url,filename},
+/// about, gender{label}, points_info{level,total_points,…}, …}`.
+struct UserProfile: Decodable {
+    let id: Int
+    let username: String
+    let avatarURL: URL?
+    let backgroundURL: URL?
+    let about: String?
+    let genderLabel: String?
+    let level: Int?
+    let totalPoints: Int?
+
+    private struct ImageRef: Decodable { let url: String?; let filename: String? }
+    private struct Labeled: Decodable { let label: String? }
+    private struct PointsInfo: Decodable { let total_points: Int?; let level: Int? }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, username, avatar, background, about, gender
+        case pointsInfo = "points_info"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        username = (try? c.decode(String.self, forKey: .username)) ?? ""
+        avatarURL = Self.absoluteURL(((try? c.decodeIfPresent(ImageRef.self, forKey: .avatar)) ?? nil)?.url)
+        backgroundURL = Self.absoluteURL(((try? c.decodeIfPresent(ImageRef.self, forKey: .background)) ?? nil)?.url)
+        about = (try? c.decodeIfPresent(String.self, forKey: .about)) ?? nil
+        genderLabel = ((try? c.decodeIfPresent(Labeled.self, forKey: .gender)) ?? nil)?.label
+        let p = (try? c.decodeIfPresent(PointsInfo.self, forKey: .pointsInfo)) ?? nil
+        level = p?.level
+        totalPoints = p?.total_points
+    }
+
+    /// Относительные пути (плейсхолдер `/static/…` или кастомный) дополняем
+    /// хостом обложек; абсолютные — как есть.
+    static func absoluteURL(_ s: String?) -> URL? {
+        guard let s, !s.isEmpty else { return nil }
+        if s.hasPrefix("http") { return URL(string: s) }
+        return URL(string: "https://cover.cdnlibs.org" + (s.hasPrefix("/") ? s : "/" + s))
+    }
+}
+
+/// Статистика профиля — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}/stats`:
+/// `{manga_added{value,label:"Создано тайтлов"}, chapters_added{value,
+/// label:"Загружено глав"}, comments{value,label}, genres[], tags[], …}`.
+struct UserStats: Decodable {
+    let mangaCreated: Int
+    let chaptersUploaded: Int
+    let comments: Int
+
+    private struct Stat: Decodable { let value: Int? }
+    private enum CodingKeys: String, CodingKey {
+        case manga_added, chapters_added, comments
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mangaCreated = (((try? c.decodeIfPresent(Stat.self, forKey: .manga_added)) ?? nil)?.value) ?? 0
+        chaptersUploaded = (((try? c.decodeIfPresent(Stat.self, forKey: .chapters_added)) ?? nil)?.value) ?? 0
+        comments = (((try? c.decodeIfPresent(Stat.self, forKey: .comments)) ?? nil)?.value) ?? 0
+    }
+}
+
 // MARK: - История чтения (реальный аккаунт)
 
 /// Одна запись реальной истории просмотров аккаунта —
