@@ -90,34 +90,34 @@ struct ProfileView: View {
                 .overlay(LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.55)],
                                         startPoint: .top, endPoint: .bottom))
 
-                VStack(alignment: .leading, spacing: 14) {
-                    // «Готово» — часть шапки, просто сверху слева (не оверлей).
+                VStack(alignment: .leading, spacing: 8) {
+                    // «Готово» — часть шапки, сверху слева; размер как у кнопки
+                    // «Применить» в других местах (semibold, высокая).
                     HStack {
                         Button { dismiss() } label: {
                             Text("Готово")
-                                .font(.subheadline.weight(.semibold))
+                                .font(.body.weight(.semibold))
                                 .foregroundStyle(Theme.textPrimary)
-                                .padding(.horizontal, 14).frame(height: 34)
+                                .padding(.horizontal, 18).frame(height: 46)
                                 .glassEffect(.regular.interactive(), in: Capsule())
                         }
                         Spacer(minLength: 0)
                     }
 
-                    // Аватар (слева) + статистика (справа). Плашки прижаты вправо
-                    // и растут ВЛЕВО при большом числе, но их ширина ограничена
-                    // доступным местом (statsW), поэтому интерфейс не растягивается.
+                    // Аватар (слева) + статистика (справа). Плашки прижаты вправо,
+                    // ширина ограничена доступным местом, интерфейс не растягивается.
                     HStack(alignment: .top, spacing: 12) {
                         RemoteImage(url: profile?.avatarURL ?? (isSelf ? auth.avatarURL : nil)) { img in
                             img.resizable().scaledToFill()
                         } placeholder: { avatarPlaceholder } failure: { avatarPlaceholder }
-                        .frame(width: 104, height: 104)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
+                        .frame(width: 108, height: 108)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
                         .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
 
                         Spacer(minLength: 0)
 
-                        VStack(alignment: .trailing, spacing: 7) {
+                        VStack(alignment: .trailing, spacing: 8) {
                             statCard("Создано тайтлов", stats?.mangaCreated, width: statsW)
                             statCard("Загружено глав", stats?.chaptersUploaded, width: statsW)
                             statCard("Кол-во комментариев", stats?.comments, width: statsW)
@@ -125,8 +125,8 @@ struct ProfileView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 56)
-                .padding(.bottom, 16)
+                .padding(.top, 52)
+                .padding(.bottom, 12)
             }
         }
         .frame(height: 230)
@@ -169,7 +169,7 @@ struct ProfileView: View {
                 .lineLimit(1)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 8)
         .frame(width: width)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
