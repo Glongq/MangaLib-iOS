@@ -1855,7 +1855,7 @@ struct MangaDetailView: View {
                         .lineLimit(1...4)
                         .foregroundStyle(Theme.textPrimary)
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
+                        .frame(minHeight: 34)
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                     let trimmed = commentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1881,7 +1881,7 @@ struct MangaDetailView: View {
                 Label("Войдите, чтобы оставить комментарий", systemImage: "person.crop.circle.badge.plus")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 34)
                     .background(Theme.surfaceElevated, in: Capsule())
             }
         }
