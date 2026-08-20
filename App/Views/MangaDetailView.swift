@@ -1501,7 +1501,7 @@ struct MangaDetailView: View {
             .buttonStyle(.plain)
 
             Text(chapter.displayTitle)
-                .font(.system(size: 12))
+                .font(.subheadline)
                 .foregroundStyle(chapterColor(chapter))
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -1574,7 +1574,7 @@ struct MangaDetailView: View {
                 .buttonStyle(.plain)
 
                 Text(chapter.displayTitle)
-                    .font(.system(size: 12))
+                    .font(.subheadline)
                     .foregroundStyle(chapterColor(chapter))
                     .lineLimit(1)
                     .truncationMode(.tail)
