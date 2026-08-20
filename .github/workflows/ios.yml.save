@@ -11,6 +11,7 @@ jobs:
   build:
     runs-on: macos-26
     steps:
+
       - uses: actions/checkout@v4
 
       - name: Select Xcode 26
@@ -67,23 +68,19 @@ jobs:
           echo "=== ls -R build/DerivedData/Build/Products ==="
           ls -R build/DerivedData/Build/Products
 
-      - name: Create MangaLib.ipa
+      - name: Create MangaLib.app.zip
         run: |
           set -euo pipefail
           APP_PATH="build/DerivedData/Build/Products/Debug-iphoneos/MangaLib.app"
           test -d "$APP_PATH"
-          mkdir -p build/Payload
-          cp -r "$APP_PATH" build/Payload/
-          cd build
-          zip -r MangaLib.ipa Payload
-          cd ..
-          ls -la build/MangaLib.ipa
-          du -sh build/MangaLib.ipa
-          unzip -l build/MangaLib.ipa | head -20
+          ditto -c -k --keepParent "$APP_PATH" build/MangaLib.app.zip
+          ls -la build/MangaLib.app.zip
+          du -sh build/MangaLib.app.zip
+          unzip -l build/MangaLib.app.zip | head -20
 
-      - name: Upload MangaLib.ipa
+      - name: Upload MangaLib.app.zip
         uses: actions/upload-artifact@v4
         with:
-          name: MangaLib-ipa
-          path: build/MangaLib.ipa
-          if-no-files-found: error
+          name: MangaLib-Debug-iphoneos
+          path: build/MangaLib.app.zip
+          if-no-files-found: erro
