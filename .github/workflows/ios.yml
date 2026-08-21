@@ -44,6 +44,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
             ONLY_ACTIVE_ARCH=NO \
+            ENABLE_DEBUG_DYLIB=NO \
             build \
             | tee build/xcodebuild.log
 
@@ -66,6 +67,23 @@ jobs:
           du -sh build/DerivedData
           echo "=== ls -R build/DerivedData/Build/Products ==="
           ls -R build/DerivedData/Build/Products
+
+      - name: Verify self-contained executable (no debug dylib split)
+        run: |
+          set -euo pipefail
+          APP_PATH="build/DerivedData/Build/Products/Debug-iphoneos/MangaLib.app"
+          if [ -f "$APP_PATH/MangaLib.debug.dylib" ]; then
+            echo "ERROR: MangaLib.debug.dylib is present — Xcode built a debug-dylib-split executable."
+            echo "This binary dlopens @rpath/MangaLib.debug.dylib, which only resolves inside an Xcode debug session"
+            echo "and fails to launch when sideloaded (e.g. via LiveContainer)."
+            echo "Fix: ensure ENABLE_DEBUG_DYLIB=NO is passed to xcodebuild."
+            exit 1
+          fi
+          if otool -L "$APP_PATH/MangaLib" 2>/dev/null | grep -q "debug.dylib"; then
+            echo "ERROR: main executable still links against a debug dylib."
+            exit 1
+          fi
+          echo "OK: MangaLib is a self-contained executable."
 
       - name: Create MangaLib.ipa
         run: |
