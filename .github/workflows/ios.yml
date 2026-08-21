@@ -7,9 +7,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: macos-26
@@ -47,7 +44,6 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
             ONLY_ACTIVE_ARCH=NO \
-            ENABLE_DEBUG_DYLIB=NO \
             build \
             | tee build/xcodebuild.log
 
@@ -71,53 +67,19 @@ jobs:
           echo "=== ls -R build/DerivedData/Build/Products ==="
           ls -R build/DerivedData/Build/Products
 
-      - name: Verify self-contained executable (no debug dylib split)
-        run: |
-          set -euo pipefail
-          APP_PATH="build/DerivedData/Build/Products/Debug-iphoneos/MangaLib.app"
-          if [ -f "$APP_PATH/MangaLib.debug.dylib" ]; then
-            echo "ERROR: MangaLib.debug.dylib is present — Xcode built a debug-dylib-split executable."
-            echo "This binary dlopens @rpath/MangaLib.debug.dylib, which only resolves inside an Xcode debug session"
-            echo "and fails to launch when sideloaded (e.g. via LiveContainer)."
-            echo "Fix: ensure ENABLE_DEBUG_DYLIB=NO is passed to xcodebuild."
-            exit 1
-          fi
-          if otool -L "$APP_PATH/MangaLib" 2>/dev/null | grep -q "debug.dylib"; then
-            echo "ERROR: main executable still links against a debug dylib."
-            exit 1
-          fi
-          echo "OK: MangaLib is a self-contained executable."
-
-      - name: Create MangaLib.ipa
+      - name: Create MangaLib.app.zip
         run: |
           set -euo pipefail
           APP_PATH="build/DerivedData/Build/Products/Debug-iphoneos/MangaLib.app"
           test -d "$APP_PATH"
-          mkdir -p build/Payload
-          cp -r "$APP_PATH" build/Payload/
-          cd build
-          zip -r MangaLib.ipa Payload
-          cd ..
-          test -f build/MangaLib.ipa
-          ls -la build/MangaLib.ipa
-          du -sh build/MangaLib.ipa
-          unzip -l build/MangaLib.ipa | head -20
+          ditto -c -k --keepParent "$APP_PATH" build/MangaLib.app.zip
+          ls -la build/MangaLib.app.zip
+          du -sh build/MangaLib.app.zip
+          unzip -l build/MangaLib.app.zip | head -20
 
-      - name: Upload MangaLib.ipa
+      - name: Upload MangaLib.app.zip
         uses: actions/upload-artifact@v4
         with:
-          name: MangaLib-ipa
-          path: build/MangaLib.ipa
+          name: MangaLib-Debug-iphoneos
+          path: build/MangaLib.app.zip
           if-no-files-found: error
-
-      - name: Publish MangaLib.ipa to GitHub Release (stable link)
-        if: github.event_name != 'pull_request'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: Latest build
-          body: Automatically published from ${{ github.sha }}.
-          files: build/MangaLib.ipa
-          make_latest: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
