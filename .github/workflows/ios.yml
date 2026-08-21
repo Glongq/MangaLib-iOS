@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-26
@@ -95,6 +98,7 @@ jobs:
           cd build
           zip -r MangaLib.ipa Payload
           cd ..
+          test -f build/MangaLib.ipa
           ls -la build/MangaLib.ipa
           du -sh build/MangaLib.ipa
           unzip -l build/MangaLib.ipa | head -20
@@ -105,3 +109,15 @@ jobs:
           name: MangaLib-ipa
           path: build/MangaLib.ipa
           if-no-files-found: error
+
+      - name: Publish MangaLib.ipa to GitHub Release (stable link)
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build
+          body: Automatically published from ${{ github.sha }}.
+          files: build/MangaLib.ipa
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
