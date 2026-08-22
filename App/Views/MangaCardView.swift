@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Карточка тайтла в сетке каталога.
 /// Строгая структура: обложка с фиксированным соотношением 3:4 + заголовок в 2 строки,
@@ -25,23 +26,22 @@ struct MangaCardView: View {
     private var titleFont: Font { .caption.weight(.medium) }
     private var typeFont: Font { .caption2 }
 
-    // ИСПРАВЛЕНО: раньше строка типа ("Манга"/"Манхва"/...) поджималась к
-    // названию через эвристику "похоже, уместилось в одну строку" (по длине
-    // строки в символах) и отрицательный отступ -14 — реальную высоту
-    // названия эта эвристика не измеряла, поэтому часто ошибалась: то тип
-    // наезжал на вторую (реально занятую) строку названия, то наоборот
-    // повисал с лишним зазором. Отсюда и ощущение "карточки постоянно
-    // съезжают" — на самом деле съезжал не блок с обложкой (у неё
-    // фиксированное соотношение сторон, см. комментарий выше), а именно
-    // строка типа под названием.
-    //
-    // Теперь никакой эвристики: у названия ВСЕГДА зарезервировано ровно 2
-    // строки (lineLimit(2, reservesSpace: true)), у строки типа ВСЕГДА
-    // зарезервирована ровно 1 строка (та же reservesSpace, плюс " " вместо
-    // пустой строки, если типа нет вовсе, чтобы блок не схлопывался в нуль).
-    // Значит высота названия+типа у ЛЮБОЙ карточки одна и та же, независимо
-    // от длины конкретного текста — обложки следующего ряда стоят строго на
-    // одной линии, а строка типа всегда на одном и том же месте под названием.
+    // ИСПРАВЛЕНО: `lineLimit(_:reservesSpace:)` в теории резервирует
+    // одинаковую высоту под 2/1 строки на всех карточках, но по факту всё
+    // равно "гуляло" по факту рендера (близко к системному округлению
+    // строк/шрифта) — визуально сетка продолжала казаться неровной. Вместо
+    // резервирования через lineLimit теперь у блока названия и у блока типа
+    // явный ЧИСЛОВОЙ .frame(height:) в поинтах, посчитанный один раз из
+    // реальной высоты строки шрифта (UIFont.lineHeight) — это уже не
+    // эвристика и не резервирование, а буквально фиксированный прямоугольник
+    // одного и того же размера на КАЖДОЙ карточке, вне зависимости от текста.
+    private var titleBlockHeight: CGFloat {
+        ceil(UIFont.preferredFont(forTextStyle: .caption1).lineHeight * 2)
+    }
+    private var typeBlockHeight: CGFloat {
+        ceil(UIFont.preferredFont(forTextStyle: .caption2).lineHeight)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             cover
@@ -51,21 +51,25 @@ struct MangaCardView: View {
                 .overlay(alignment: .topLeading) { statusBadge }
                 .overlay(alignment: .topTrailing) { ratingBadge }
 
-            // Заголовок всегда резервирует 2 строки → ряды сетки выровнены (аналог line-clamp: 2).
+            // Название — фиксированный прямоугольник высотой ровно в 2
+            // строки шрифта, на ВСЕХ карточках одинаковый (см. комментарий выше).
             Text(item.displayTitle)
                 .font(titleFont)
                 .foregroundStyle(Theme.textPrimary)
-                .lineLimit(2, reservesSpace: true)
+                .lineLimit(2)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: titleBlockHeight, alignment: .top)
 
-            // Тип тайтла под названием — фиксированная 1 строка на ВСЕХ
-            // карточках (см. комментарий выше), просто невидимая, если типа нет.
+            // Тип тайтла под названием — фиксированный прямоугольник высотой
+            // ровно в 1 строку шрифта на ВСЕХ карточках, просто невидимый,
+            // если типа нет (место всё равно остаётся).
             Text(typeLabel ?? " ")
                 .font(typeFont)
                 .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1, reservesSpace: true)
+                .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: typeBlockHeight, alignment: .top)
                 .opacity(typeLabel == nil ? 0 : 1)
         }
         .frame(maxWidth: .infinity, alignment: .top)
