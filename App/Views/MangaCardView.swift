@@ -92,7 +92,12 @@ struct MangaCardView: View {
     /// высота у карточек с более коротким названием уходит пустым местом
     /// НИЖЕ жанра, а не между названием и жанром.
     private static func textBlockHeight(twoLineTitle: Bool) -> CGFloat {
+        // Между строками названия (см. .lineSpacing(titleTypeSpacing) в body)
+        // и между названием и жанром используется ОДИН и тот же зазор
+        // titleTypeSpacing — поэтому при переносе название добавляет его
+        // ещё раз, как один лишний межстрочный промежуток.
         let titleHeight = titleUIFont.lineHeight * (twoLineTitle ? 2 : 1)
+            + (twoLineTitle ? titleTypeSpacing : 0)
         let typeHeight = typeUIFont.lineHeight
         return (titleHeight + titleTypeSpacing + typeHeight).rounded(.up)
     }
@@ -136,6 +141,12 @@ struct MangaCardView: View {
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
+                    // Тот же зазор, что и ниже между названием и жанром
+                    // (Self.titleTypeSpacing) — иначе перенос строки внутри
+                    // названия использует дефолтный (меньший) межстрочный
+                    // интервал шрифта, и расстояние строка-строка визуально
+                    // отличается от расстояния название-жанр.
+                    .lineSpacing(Self.titleTypeSpacing)
                     .frame(width: width, alignment: .topLeading)
 
                 // Тип тайтла — строка всегда занимает место, даже когда его
