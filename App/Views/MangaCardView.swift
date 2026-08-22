@@ -2,8 +2,9 @@ import SwiftUI
 import UIKit
 
 /// Карточка тайтла в сетке каталога.
-/// Строгая структура: обложка с фиксированным соотношением 3:4 + заголовок в 2 строки,
-/// чтобы разные картинки и длинные названия не ломали сетку.
+/// Строгая структура: обложка с фиксированным соотношением 2:3 (как в карточке
+/// тайтла на детальном экране) + заголовок в 2 строки, чтобы разные картинки
+/// и длинные названия не ломали сетку.
 struct MangaCardView: View {
     let item: MangaItem
     /// Ширина карточки в поинтах — ЯВНО считается один раз родительской
@@ -41,13 +42,14 @@ struct MangaCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             cover
-                // Явные width/height (а не .aspectRatio — тот сам решал
-                // высоту от ПРЕДЛОЖЕННОЙ ширины, что зависело от текущего
-                // layout-прохода) — здесь высота прямое арифметическое
-                // следствие того же width, что и у всех остальных карточек
-                // ряда. База 3:4, +10% высоты — как попросили, чтобы обложка
-                // была повыше.
-                .frame(width: width, height: (width * 4 / 3 * 1.1).rounded())
+                // Явные width/height (2:3 от width — тот же формат, что и у
+                // обложки в карточке тайтла на детальном экране, см.
+                // MangaDetailView.heroCoverSize), а не .aspectRatio — тот сам
+                // решал высоту от ПРЕДЛОЖЕННОЙ ширины, что зависело от
+                // текущего layout-прохода; здесь высота — прямое
+                // арифметическое следствие того же числа width, что и у
+                // всех остальных карточек ряда.
+                .frame(width: width, height: (width * 3 / 2).rounded())
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .topLeading) { statusBadge }
                 .overlay(alignment: .topTrailing) { ratingBadge }
