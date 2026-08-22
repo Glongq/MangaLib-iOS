@@ -23,17 +23,16 @@ struct FilterView: View {
                 Theme.background.opacity(0.72).ignoresSafeArea()
 
                 ScrollView {
-                    // Порядок секций перевёрнут (задом наперёд), как попросили.
                     VStack(alignment: .leading, spacing: 24) {
-                        checkboxSection("Мои списки", FilterCatalog.myLists, keyPath: \.myLists)
-                        checkboxSection("Другое", FilterCatalog.other, keyPath: \.other)
-                        checkboxSection("Статус перевода", constants.translationStatuses, keyPath: \.translationStatuses)
-                        checkboxSection("Статус тайтла", constants.titleStatuses, keyPath: \.titleStatuses)
-                        checkboxSection("Формат выпуска", constants.formats, keyPath: \.formats)
-                        checkboxSection("Тип", constants.types, keyPath: \.types)
-                        checkboxSection("Возрастной рейтинг", constants.ageRatings, keyPath: \.ageRatings)
                         multiSelectSection
                         rangesSection
+                        checkboxSection("Возрастной рейтинг", constants.ageRatings, keyPath: \.ageRatings)
+                        checkboxSection("Тип", constants.types, keyPath: \.types)
+                        checkboxSection("Формат выпуска", constants.formats, keyPath: \.formats)
+                        checkboxSection("Статус тайтла", constants.titleStatuses, keyPath: \.titleStatuses)
+                        checkboxSection("Статус перевода", constants.translationStatuses, keyPath: \.translationStatuses)
+                        checkboxSection("Другое", FilterCatalog.other, keyPath: \.other)
+                        checkboxSection("Мои списки", FilterCatalog.myLists, keyPath: \.myLists)
                     }
                     .padding(16)
                     .padding(.bottom, 90)
@@ -102,29 +101,24 @@ struct FilterView: View {
     // MARK: 2. Жанры и теги (трёхпозиционные)
 
     private var multiSelectSection: some View {
-        section("Жанры и теги") {
-            // Одна общая стеклянная панель на секцию, строки внутри — обычные,
-            // разделены тонким разделителем (как в списке глав).
-            VStack(spacing: 0) {
-                NavigationLink {
-                    TriStateFilterView(title: "Жанры", options: constants.genres,
-                                       selection: $filter.genres, strict: $filter.genresStrict)
-                } label: {
-                    selectRow(title: "Жанры", selection: filter.genres)
-                }
-                .buttonStyle(.plain)
-
-                Divider().overlay(Theme.separator).padding(.leading, 16)
-
-                NavigationLink {
-                    TriStateFilterView(title: "Теги", options: constants.tags,
-                                       selection: $filter.tags, strict: $filter.tagsStrict)
-                } label: {
-                    selectRow(title: "Теги", selection: filter.tags)
-                }
-                .buttonStyle(.plain)
+        VStack(spacing: 0) {
+            NavigationLink {
+                TriStateFilterView(title: "Жанры", options: constants.genres,
+                                   selection: $filter.genres, strict: $filter.genresStrict)
+            } label: {
+                selectRow(title: "Жанры", selection: filter.genres)
             }
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .buttonStyle(.plain)
+
+            Divider().overlay(Theme.separator)
+
+            NavigationLink {
+                TriStateFilterView(title: "Теги", options: constants.tags,
+                                   selection: $filter.tags, strict: $filter.tagsStrict)
+            } label: {
+                selectRow(title: "Теги", selection: filter.tags)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -161,10 +155,6 @@ struct FilterView: View {
 
     // MARK: 3. Трёхпозиционные чекбоксы в две колонки
 
-    // Одна общая стеклянная панель на всю секцию ("соединённая подложка"),
-    // а не своё стекло на каждую кнопку. Внутри — обычная сетка ячеек,
-    // состояние (включено/исключено) показывается лёгкой цветной заливкой,
-    // а не отдельным материалом.
     private func checkboxSection(_ title: String,
                                  _ options: [FilterOption],
                                  keyPath: WritableKeyPath<MangaFilter, TriStateSelection>) -> some View {
@@ -174,8 +164,6 @@ struct FilterView: View {
                     triCell(option, keyPath: keyPath)
                 }
             }
-            .padding(10)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
     }
 

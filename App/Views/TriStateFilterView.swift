@@ -11,8 +11,6 @@ struct TriStateFilterView: View {
     @Binding var strict: Bool
 
     @Environment(\.dismiss) private var dismiss
-    @State private var draft: TriStateSelection
-    @State private var draftStrict: Bool
     @State private var search = ""
 
     init(title: String, options: [FilterOption], selection: Binding<TriStateSelection>, strict: Binding<Bool>) {
@@ -20,8 +18,6 @@ struct TriStateFilterView: View {
         self.options = options
         _selection = selection
         _strict = strict
-        _draft = State(initialValue: selection.wrappedValue)
-        _draftStrict = State(initialValue: strict.wrappedValue)
     }
 
     private var filtered: [FilterOption] {
@@ -67,7 +63,7 @@ struct TriStateFilterView: View {
             .glassEffect(.regular.interactive(), in: Capsule())
 
             HStack {
-                Toggle(isOn: $draftStrict) {
+                Toggle(isOn: $strict) {
                     Text("Строгое совпадение")
                         .font(.subheadline)
                         .foregroundStyle(Theme.textPrimary)
@@ -77,7 +73,7 @@ struct TriStateFilterView: View {
                 Spacer(minLength: 16)
 
                 Button {
-                    draft.clear()
+                    selection.clear()
                 } label: {
                     Text("Сбросить")
                         .font(.subheadline.weight(.medium))
@@ -99,7 +95,7 @@ struct TriStateFilterView: View {
             VStack(spacing: 0) {
                 ForEach(Array(filtered.enumerated()), id: \.element.id) { index, option in
                     Button {
-                        draft.cycle(option.id)
+                        selection.cycle(option.id)
                     } label: {
                         row(option)
                     }
@@ -119,7 +115,7 @@ struct TriStateFilterView: View {
     }
 
     private func row(_ option: FilterOption) -> some View {
-        let state = draft.state(of: option.id)
+        let state = selection.state(of: option.id)
         return HStack(spacing: 12) {
             triBox(state)
             Text(option.title)
@@ -168,8 +164,6 @@ struct TriStateFilterView: View {
             legend(color: .red, text: "Исключить")
             Spacer()
             Button {
-                selection = draft
-                strict = draftStrict
                 dismiss()
             } label: {
                 Text("Выбрать")

@@ -45,7 +45,7 @@ struct AddToFolderSheet: View {
                                     .frame(maxWidth: .infinity, minHeight: 46)
                             }
                             .foregroundStyle(.red)
-                            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .background(Color.red.opacity(0.16), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                             .padding(.top, 8)
                         }
 
@@ -109,7 +109,7 @@ struct AddToFolderSheet: View {
             }
             .padding(.horizontal, 14)
             .frame(minHeight: 48)
-            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(selected ? Theme.accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -123,7 +123,7 @@ struct AddToFolderSheet: View {
                           prompt: Text("Создать новую папку").foregroundColor(Theme.textSecondary))
                     .foregroundStyle(Theme.textPrimary)
                     .padding(.horizontal, 12).frame(minHeight: 44)
-                    .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(Theme.surfaceElevated.opacity(0.6), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                 let isEmpty = newFolderName.trimmingCharacters(in: .whitespaces).isEmpty
                 Button {
@@ -137,8 +137,8 @@ struct AddToFolderSheet: View {
                     Image(systemName: "paperplane.fill")
                         .foregroundStyle(isEmpty ? Theme.textSecondary : Theme.background)
                         .frame(width: 44, height: 44)
-                        .glassEffect(isEmpty ? .regular : .regular.tint(Theme.accent).interactive(),
-                                     in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(isEmpty ? Theme.surfaceElevated.opacity(0.6) : Theme.accent,
+                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 .disabled(isEmpty)
             }
