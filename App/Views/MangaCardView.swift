@@ -3,7 +3,7 @@ import UIKit
 
 /// Карточка тайтла в сетке каталога.
 /// Обложка с фиксированным соотношением 2:3 (как в карточке тайтла на
-/// детальном экране) + заголовок в 1 или 2 строки (см. titleLineLimit) —
+/// детальном экране) + заголовок в 1 или 2 строки (см. rowNeedsTwoLines) —
 /// решает не сама карточка, а родительский ряд целиком, чтобы разные
 /// картинки и длинные названия не ломали сетку.
 struct MangaCardView: View {
@@ -20,22 +20,24 @@ struct MangaCardView: View {
     /// и текст под обложками сдвигался. Теперь и сетка (GridItem.fixed), и
     /// каждая карточка получают ОДНО И ТО ЖЕ число — расхождению неоткуда взяться.
     let width: CGFloat
-    /// Сколько строк места резервировать под название — считается РОДИТЕЛЬСКОЙ
+    /// Нужно ли ряду место под 2-строчное название — считается РОДИТЕЛЬСКОЙ
     /// сеткой один раз на весь ряд (см. MangaCatalogView.grid), а не самой
     /// карточкой: если хотя бы у одного соседа в ряду название в 2 строки —
-    /// весь ряд резервирует 2 строки (жанр у всех съезжает на одну и ту же
-    /// позицию, короткие названия просто оставляют пустую строку сверху от
-    /// жанра). Если у ВСЕХ карточек ряда название в 1 строку — резерв 1
-    /// строка, жанр прижат вплотную без пустого зазора.
-    let titleLineLimit: Int
-    /// Дефолт 2 — прежнее поведение для мест, которым не важна ужимка ряда
-    /// по факту (см. CharacterView.grid: там сетка маленькая, отдельная
+    /// у всех карточек ряда блок «название+жанр» одной минимальной высоты
+    /// (под 2 строки), но САМИ название и жанр внутри каждой карточки всегда
+    /// стоят вплотную друг к другу (без резерва пустой строки между ними) —
+    /// недостающая высота у карточек с более коротким названием уходит
+    /// пустым местом НИЖЕ жанра. Если у ВСЕХ карточек ряда название в 1
+    /// строку — минимальная высота блока под 1 строку, пустого места нет.
+    let rowNeedsTwoLines: Bool
+    /// Дефолт true — прежнее поведение для мест, которым не важна ужимка
+    /// ряда по факту (см. CharacterView.grid: там сетка маленькая, отдельная
     /// row-логика ей не нужна). Каталог (MangaCatalogView) передаёт значение
     /// явно, посчитанное на весь ряд.
-    init(item: MangaItem, width: CGFloat, titleLineLimit: Int = 2) {
+    init(item: MangaItem, width: CGFloat, rowNeedsTwoLines: Bool = true) {
         self.item = item
         self.width = width
-        self.titleLineLimit = titleLineLimit
+        self.rowNeedsTwoLines = rowNeedsTwoLines
     }
 
     // Для бэйджа статуса закладки (см. statusBadge) — реактивно, чтобы
@@ -49,13 +51,20 @@ struct MangaCardView: View {
         let base = UIFont.preferredFont(forTextStyle: .caption1)
         return UIFont.systemFont(ofSize: base.pointSize, weight: .medium)
     }
+    private static var typeUIFont: UIFont {
+        UIFont.preferredFont(forTextStyle: .caption2)
+    }
+    /// Тот же spacing, что у VStack(название, жанр) ниже — вынесен в
+    /// константу, т.к. используется и в body, и в textBlockHeight(_:) для
+    /// расчёта итоговой высоты блока по тем же цифрам.
+    private static let titleTypeSpacing: CGFloat = 6
 
     /// Сколько строк реально займёт название при данной ширине карточки —
     /// точный расчёт через UIKit (boundingRect), а не догадка по длине
     /// строки: шрифт и перенос слов зависят от конкретных символов, только
     /// система знает точную раскладку. Используется родительской сеткой,
-    /// чтобы решить, нужно ли ряду резервировать 2 строки под название
-    /// (см. titleLineLimit выше).
+    /// чтобы решить, нужно ли ряду резервировать высоту под 2-строчное
+    /// название (см. rowNeedsTwoLines / textBlockHeight ниже).
     static func titleLineCount(_ text: String, width: CGFloat) -> Int {
         guard width > 0 else { return 1 }
         let constraint = CGSize(width: width, height: .greatestFiniteMagnitude)
@@ -67,6 +76,19 @@ struct MangaCardView: View {
         )
         let lines = Int((box.height / titleUIFont.lineHeight).rounded(.up))
         return min(max(lines, 1), 2)
+    }
+
+    /// Минимальная высота блока «название + жанр» под данное число строк
+    /// названия — считается ОДИНАКОВО для всех карточек ряда (см.
+    /// rowNeedsTwoLines), но применяется как minHeight СНАРУЖИ блока, а не
+    /// как резерв строк ВНУТРИ самого названия: название и жанр внутри
+    /// всегда стоят вплотную (никакого зазора между ними), а недостающая
+    /// высота у карточек с более коротким названием уходит пустым местом
+    /// НИЖЕ жанра, а не между названием и жанром.
+    private static func textBlockHeight(twoLineTitle: Bool) -> CGFloat {
+        let titleHeight = titleUIFont.lineHeight * (twoLineTitle ? 2 : 1)
+        let typeHeight = typeUIFont.lineHeight
+        return (titleHeight + titleTypeSpacing + typeHeight).rounded(.up)
     }
 
     /// Ширина одной карточки в сетке из `columns` равных колонок: общая
@@ -95,30 +117,32 @@ struct MangaCardView: View {
                 .overlay(alignment: .topLeading) { statusBadge }
                 .overlay(alignment: .topTrailing) { ratingBadge }
 
-            // Название — резерв в titleLineLimit строк (1 или 2, решает
-            // ряд целиком, см. комментарий у titleLineLimit): если у соседа
-            // в ряду название длиннее — эта карточка тоже резервирует 2
-            // строки (даже если своё название короче, реальный текст
-            // остаётся сверху, а жанр съезжает на позицию под резервом).
-            // Если весь ряд с короткими названиями — резерв 1 строка, жанр
-            // без зазора.
-            Text(item.displayTitle)
-                .font(titleFont)
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(titleLineLimit, reservesSpace: true)
-                .multilineTextAlignment(.leading)
-                .frame(width: width, alignment: .topLeading)
+            // Название + жанр — ВСЕГДА вплотную друг к другу (никакого
+            // резерва пустой строки между ними, никакого reservesSpace):
+            // название рендерится ровно в свою фактическую высоту (1 или 2
+            // строки), жанр идёт сразу под ним. Вся пара обёрнута снаружи в
+            // minHeight = textBlockHeight(rowNeedsTwoLines) — если у соседа
+            // по ряду название длиннее, недостающая высота уходит пустым
+            // местом НИЖЕ жанра (alignment: .top), а не зазором сверху него.
+            VStack(alignment: .leading, spacing: Self.titleTypeSpacing) {
+                Text(item.displayTitle)
+                    .font(titleFont)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(width: width, alignment: .topLeading)
 
-            // Тип тайтла — строка всегда занимает место, даже когда его нет
-            // у конкретного тайтла (opacity 0 вместо условного исчезновения
-            // View), по той же причине: высота карточки должна быть одной
-            // и той же у всех, а не зависеть от того, есть тип или нет.
-            Text(typeLabel ?? " ")
-                .font(typeFont)
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
-                .frame(width: width, alignment: .leading)
-                .opacity(typeLabel == nil ? 0 : 1)
+                // Тип тайтла — строка всегда занимает место, даже когда его
+                // нет у конкретного тайтла (opacity 0 вместо условного
+                // исчезновения View), чтобы не съезжал следующий контент.
+                Text(typeLabel ?? " ")
+                    .font(typeFont)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .frame(width: width, alignment: .leading)
+                    .opacity(typeLabel == nil ? 0 : 1)
+            }
+            .frame(width: width, minHeight: Self.textBlockHeight(twoLineTitle: rowNeedsTwoLines), alignment: .top)
         }
         .frame(width: width, alignment: .top)
     }

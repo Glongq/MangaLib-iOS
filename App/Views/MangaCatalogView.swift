@@ -255,11 +255,12 @@ struct MangaCatalogView: View {
                 spacing: gridSpacing,
                 containerPadding: gridHorizontalPadding
             )
-            // Ряды считаем явно (а не LazyVGrid с плоским ForEach): сколько
-            // строк резервировать под название — решение НА ВЕСЬ РЯД (если
-            // хоть у одной карточки название в 2 строки, весь ряд резервирует
-            // 2, иначе все карточки ряда жмутся к 1 строке без зазора перед
-            // жанром), а для этого нужно видеть все 3 карточки ряда сразу.
+            // Ряды считаем явно (а не LazyVGrid с плоским ForEach): нужна ли
+            // ряду высота под 2-строчное название — решение НА ВЕСЬ РЯД (см.
+            // MangaCardView.rowNeedsTwoLines: название и жанр внутри каждой
+            // карточки всегда вплотную друг к другу, а недостающая высота у
+            // карточек с более коротким названием уходит пустым местом НИЖЕ
+            // жанра), а для этого нужно видеть все 3 карточки ряда сразу.
             let rows = stride(from: 0, to: viewModel.results.count, by: gridColumnsCount).map { start in
                 Array(viewModel.results[start..<min(start + gridColumnsCount, viewModel.results.count)])
             }
@@ -267,14 +268,14 @@ struct MangaCatalogView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, rowItems in
-                        let rowTitleLineLimit = rowItems.contains {
+                        let rowNeedsTwoLines = rowItems.contains {
                             MangaCardView.titleLineCount($0.displayTitle, width: cardWidth) > 1
-                        } ? 2 : 1
+                        }
 
                         HStack(alignment: .top, spacing: gridSpacing) {
                             ForEach(rowItems) { item in
                                 NavigationLink(value: item) {
-                                    MangaCardView(item: item, width: cardWidth, titleLineLimit: rowTitleLineLimit)
+                                    MangaCardView(item: item, width: cardWidth, rowNeedsTwoLines: rowNeedsTwoLines)
                                 }
                                 .buttonStyle(.plain)
                                 .onAppear { viewModel.loadMoreIfNeeded(currentItem: item) }
