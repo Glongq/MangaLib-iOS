@@ -40,6 +40,16 @@ struct MangaReaderView: View {
     @State private var showChapters = false
     @State private var showSettings = false
     @State private var showComments = false
+    /// Индексы страниц (горизонтальный режим), для которых пользователь уже
+    /// докрутил вниз до блока комментариев — сам блок ChapterCommentsSheet
+    /// рендерится (и начинает грузить данные) только для них, а не для всех
+    /// страниц главы сразу. Сбрасывается при смене главы (см. onChange
+    /// currentIndex) — индексы считаются от pages ТЕКУЩЕЙ главы.
+    @State private var revealedCommentPages: Set<Int> = []
+    /// Зумит ли пользователь текущую страницу сейчас — пока да, внешний
+    /// вертикальный ScrollView страницы (см. horizontalPage) отключён, чтобы
+    /// не конкурировать с панорамой зума за один и тот же вертикальный драг.
+    @State private var isCurrentPageZoomed = false
     /// Отключены ли комментарии в читалке (общая настройка) — тогда не
     /// показываем их продолжением на экране конца главы.
     @AppStorage("comments_disabled_in_reader") private var commentsDisabledInReader = false
@@ -187,9 +197,11 @@ struct MangaReaderView: View {
             }
 
             // Инлайн-панель комментариев к текущей странице — НЕ sheet и не
-            // отдельная подложка: тот же фон читалки, выезжает снизу. В
-            // горизонтальном режиме открывается свайпом снизу вверх, в
-            // вертикальном — кнопкой. Закрытие — «хваталкой» сверху панели.
+            // отдельная подложка: тот же фон читалки, выезжает снизу. Только
+            // вертикальный режим (кнопка "text.bubble" в bottomBar) — в
+            // горизонтальном комментарии открываются иначе, продолжением
+            // страницы вниз обычным скроллом (см. horizontalPage). Закрытие —
+            // «хваталкой» сверху панели.
             if showComments, let ch = viewModel.currentChapter {
                 let pageNo = pageMode == 1
                     ? verticalPage
@@ -238,9 +250,13 @@ struct MangaReaderView: View {
             currentPage = 0
             // На новой главе заливка закладки возвращается «как была».
             withAnimation(.easeInOut(duration: 0.2)) { bookmarkFilled = false }
+            // Индексы revealedCommentPages относились к pages ПРЕДЫДУЩЕЙ главы.
+            revealedCommentPages.removeAll()
+            isCurrentPageZoomed = false
         }
         .onChange(of: currentPage) { _, page in
             preloadUpcoming(from: page)
+            isCurrentPageZoomed = false
             // Долистали до страницы-триггера — открываем следующую главу
             // (работает и в режиме «выключить перелистывание», где листаем тапом).
             if page == viewModel.pages.count + 1 { openNext() }
@@ -428,14 +444,8 @@ struct MangaReaderView: View {
     @ViewBuilder
     private var singlePageView: some View {
         if currentPage < viewModel.pages.count {
-            ZoomableImageScrollView(
-                candidates: viewModel.imageURLs(for: viewModel.pages[currentPage]),
-                fitWidth: fitWidth,
-                doubleTapZoom: doubleTapZoom,
-                onTap: { xFraction in handleReaderTap(xFraction) }
-            )
-            .ignoresSafeArea()
-            .id(currentPage)
+            horizontalPage(index: currentPage, page: viewModel.pages[currentPage])
+                .id(currentPage)
         } else if currentPage == viewModel.pages.count {
             endPage
         } else {
@@ -451,14 +461,8 @@ struct MangaReaderView: View {
     private var pager: some View {
         TabView(selection: $currentPage) {
             ForEach(Array(viewModel.pages.enumerated()), id: \.offset) { index, page in
-                ZoomableImageScrollView(
-                    candidates: viewModel.imageURLs(for: page),
-                    fitWidth: fitWidth,
-                    doubleTapZoom: doubleTapZoom,
-                    onTap: { xFraction in handleReaderTap(xFraction) }
-                )
-                .ignoresSafeArea()
-                .tag(index)
+                horizontalPage(index: index, page: page)
+                    .tag(index)
             }
 
             // Страница-перелистывание в конце главы.
@@ -470,6 +474,46 @@ struct MangaReaderView: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        .ignoresSafeArea()
+    }
+
+    /// Одна страница горизонтального режима — картинка на весь экран, а НИЖЕ,
+    /// продолжением той же страницы, обычным вертикальным скроллом (не
+    /// свайпом-жестом и не отдельной панелью) — комментарии к главе. Ровно
+    /// тот же принцип, что и на экране конца главы (см. endPage): просто
+    /// ScrollView, где комментарии — следующий блок контента. Блок
+    /// ChapterCommentsSheet появляется в дереве (и начинает грузить данные,
+    /// см. её .task(id: postPage)) только когда докрутили ДО него — метка-
+    /// маркер ниже картинки ловит .onAppear лишь при реальной прокрутке вниз,
+    /// а не сразу при показе страницы.
+    private func horizontalPage(index: Int, page: PageItem) -> some View {
+        GeometryReader { geo in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    ZoomableImageScrollView(
+                        candidates: viewModel.imageURLs(for: page),
+                        fitWidth: fitWidth,
+                        doubleTapZoom: doubleTapZoom,
+                        onTap: { xFraction in handleReaderTap(xFraction) },
+                        onZoomChanged: { zoomed in isCurrentPageZoomed = zoomed }
+                    )
+                    .frame(width: geo.size.width, height: geo.size.height)
+
+                    if !commentsDisabledInReader, let ch = viewModel.currentChapter {
+                        Color.clear.frame(height: 1)
+                            .onAppear { revealedCommentPages.insert(index) }
+
+                        if revealedCommentPages.contains(index) {
+                            Divider().overlay(fg.opacity(0.15))
+                            ChapterCommentsSheet(chapterId: ch.id, postPage: index + 1, embedded: true)
+                                .padding(.bottom, 40)
+                        }
+                    }
+                }
+            }
+            .scrollDisabled(isCurrentPageZoomed)
+            .scrollBounceBehavior(.basedOnSize)
+        }
         .ignoresSafeArea()
     }
 
@@ -1157,8 +1201,13 @@ struct ZoomableImageScrollView: UIViewRepresentable {
     /// Одиночный тап: передаёт долю по X (0…1) — читалка сама решает
     /// листать/показать интерфейс (см. handleReaderTap).
     let onTap: (CGFloat) -> Void
+    /// Есть ли сейчас зум (масштаб > 1) — читалка использует это, чтобы
+    /// отключить внешний вертикальный ScrollView (продолжение страницы вниз,
+    /// см. MangaReaderView.horizontalPage), пока идёт панорама зума, и они не
+    /// конкурировали за один и тот же вертикальный драг.
+    var onZoomChanged: ((Bool) -> Void)? = nil
 
-    func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap, fitWidth: fitWidth, doubleTapZoom: doubleTapZoom) }
+    func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap, fitWidth: fitWidth, doubleTapZoom: doubleTapZoom, onZoomChanged: onZoomChanged) }
 
     func makeUIView(context: Context) -> UIScrollView {
         let scroll = LayoutCallbackScrollView()
@@ -1204,6 +1253,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIScrollView, context: Context) {
         context.coordinator.onTap = onTap
+        context.coordinator.onZoomChanged = onZoomChanged
         context.coordinator.doubleTapZoom = doubleTapZoom
         if context.coordinator.fitWidth != fitWidth {
             context.coordinator.fitWidth = fitWidth
@@ -1219,16 +1269,19 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         weak var imageView: UIImageView?
         weak var spinner: UIActivityIndicatorView?
         var onTap: (CGFloat) -> Void
+        var onZoomChanged: ((Bool) -> Void)?
         var fitWidth: Bool
         var doubleTapZoom: Bool
         var currentKey: URL?
         private var loadTask: Task<Void, Never>?
         private var lastBounds: CGSize = .zero
+        private var lastReportedZoomed = false
 
-        init(onTap: @escaping (CGFloat) -> Void, fitWidth: Bool, doubleTapZoom: Bool) {
+        init(onTap: @escaping (CGFloat) -> Void, fitWidth: Bool, doubleTapZoom: Bool, onZoomChanged: ((Bool) -> Void)? = nil) {
             self.onTap = onTap
             self.fitWidth = fitWidth
             self.doubleTapZoom = doubleTapZoom
+            self.onZoomChanged = onZoomChanged
         }
 
         func load(candidates: [URL]) {
@@ -1249,7 +1302,14 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
-        func scrollViewDidZoom(_ scrollView: UIScrollView) { centerImage() }
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            centerImage()
+            let zoomed = scrollView.zoomScale > scrollView.minimumZoomScale + 0.01
+            if zoomed != lastReportedZoomed {
+                lastReportedZoomed = zoomed
+                onZoomChanged?(zoomed)
+            }
+        }
 
         @objc func handleSingleTap(_ g: UITapGestureRecognizer) {
             guard let scroll = scrollView, scroll.bounds.width > 0 else { onTap(0.5); return }

@@ -623,10 +623,9 @@ struct MangaDetailView: View {
             Text(value).font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 18)
         .frame(height: Self.metaChipHeight)
         .background(Theme.surfaceElevated, in: Capsule())
-        .overlay(Capsule().stroke(Theme.separator, lineWidth: 1))
     }
 
     // MARK: Похожее (GET /manga/{slug}/similar, POST /similar/{id}/vote)
