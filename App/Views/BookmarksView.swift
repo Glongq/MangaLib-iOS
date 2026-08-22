@@ -112,7 +112,7 @@ struct BookmarksView: View {
                     .font(.system(size: 29, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.opacity)
+                    .transition(.blurFade)
             }
             searchField
         }

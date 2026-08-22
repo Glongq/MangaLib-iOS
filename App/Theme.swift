@@ -24,3 +24,26 @@ enum Theme {
     /// экранами.
     static let pillControlHeight: CGFloat = 44
 }
+
+extension AnyTransition {
+    /// Тот же приём, что и скрытие интерфейса в читалке (см. MangaReaderView:
+    /// .opacity + .blur(radius: 12) на easeInOut) — здесь применяется к
+    /// элементам, которые ВХОДЯТ/ВЫХОДЯТ из дерева (шапки "Каталог"/
+    /// "Закладки"/"Уведомления", панели Фильтры/Сортировка), а не просто
+    /// переключают модификатор на уже присутствующей вьюхе, поэтому нужен
+    /// настоящий AnyTransition, а не .blur() напрямую.
+    static var blurFade: AnyTransition {
+        .modifier(
+            active: BlurFadeModifier(blur: 12, opacity: 0),
+            identity: BlurFadeModifier(blur: 0, opacity: 1)
+        )
+    }
+}
+
+private struct BlurFadeModifier: ViewModifier {
+    let blur: CGFloat
+    let opacity: Double
+    func body(content: Content) -> some View {
+        content.blur(radius: blur).opacity(opacity)
+    }
+}

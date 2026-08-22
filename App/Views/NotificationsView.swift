@@ -13,6 +13,13 @@ struct NotificationsView: View {
     @StateObject private var viewModel = NotificationsViewModel()
     @Environment(\.scenePhase) private var scenePhase
 
+    // Схлопывание шапки при скролле — тот же механизм, что в Каталоге/
+    // Закладках: вниз — заголовок "Уведомления" и кнопка сортировки прячутся;
+    // вверх (хоть чуть-чуть) — возвращаются.
+    @State private var headerCollapsed = false
+    @State private var lastScrollOffset: CGFloat = 0
+    @State private var isHeaderAnimating = false
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -33,12 +40,15 @@ struct NotificationsView: View {
             // потому что технически была бы соседом стека, а не частью его
             // корневого экрана.
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                HStack {
-                    filterButton
-                    Spacer(minLength: 0)
+                if !headerCollapsed {
+                    HStack {
+                        filterButton
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+                    .transition(.blurFade)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
             }
         }
         .tint(Theme.accent)
@@ -52,15 +62,26 @@ struct NotificationsView: View {
 
     // MARK: Шапка
 
+    @ViewBuilder
     private var header: some View {
         // Заголовок крупнее (title3 20 → ×1.2 → ×1.2 ≈ 29pt) и прижат влево-вверх.
-        Text("Уведомления")
-            .font(.system(size: 29, weight: .bold))
-            .foregroundStyle(Theme.textPrimary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
+        if !headerCollapsed {
+            Text("Уведомления")
+                .font(.system(size: 29, weight: .bold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+                .transition(.blurFade)
+        }
+    }
+
+    private func setHeaderCollapsed(_ value: Bool) {
+        guard headerCollapsed != value else { return }
+        isHeaderAnimating = true
+        withAnimation(.easeInOut(duration: 0.22)) { headerCollapsed = value }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isHeaderAnimating = false }
     }
 
     /// Круглая кнопка сортировки/фильтра — раньше открывала
@@ -137,6 +158,22 @@ struct NotificationsView: View {
             // кнопкой сортировки/главной панелью (тот же приём, что и в
             // Закладках, см. комментарий там: 90→120).
             .padding(.bottom, 120)
+        }
+        // Тот же механизм схлопывания шапки, что в Каталоге/Закладках — см.
+        // комментарии там же (в т.ч. про защиту isHeaderAnimating от дребезга).
+        .onScrollGeometryChange(for: CGFloat.self) { geo in
+            geo.contentOffset.y
+        } action: { _, newOffset in
+            defer { lastScrollOffset = newOffset }
+            guard !isHeaderAnimating else { return }
+            let delta = newOffset - lastScrollOffset
+            if newOffset <= 0 {
+                setHeaderCollapsed(false)
+            } else if delta > 6 {
+                setHeaderCollapsed(true)
+            } else if delta < -6 {
+                setHeaderCollapsed(false)
+            }
         }
         .scrollIndicators(.hidden)
         .refreshable { await viewModel.refresh() }

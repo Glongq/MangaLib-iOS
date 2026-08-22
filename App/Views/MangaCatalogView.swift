@@ -83,7 +83,7 @@ struct MangaCatalogView: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 4)
                         .padding(.bottom, 20)
-                        .transition(.opacity)
+                        .transition(.blurFade)
                 }
             }
         }
@@ -133,7 +133,7 @@ struct MangaCatalogView: View {
                     .font(.system(size: 29, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.opacity)
+                    .transition(.blurFade)
             }
 
             searchField
