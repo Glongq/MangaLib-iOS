@@ -80,24 +80,21 @@ struct BookmarksView: View {
                 AddToFolderSheet(slug: bm.slug, title: bm.title, coverURL: bm.coverURL, rating: bm.rating)
                     .preferredColorScheme(.dark)
             }
-        }
-        // Полоска подкатегорий — снизу, над главной панелью. safeAreaInset
-        // здесь применён СНАРУЖИ NavigationStack (не внутри него) — вложенный
-        // внутрь NavigationStack safeAreaInset не всегда корректно складывается
-        // с ВНЕШНИМ инсетом BottomBar из RootView.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            categoryMenu
-                // 20 — та же ширина/выравнивание, что и у главной панели
-                // (BottomBar тоже использует padding.horizontal 20), чтобы
-                // полоска была строго той же ширины и по тем же краям.
-                .padding(.horizontal, 20)
-                // Этот .safeAreaInset вложен ВНУТРИ "screen" (BookmarksView),
-                // а RootView применяет свой .safeAreaInset(bottom){Color.clear
-                // height: 84} СНАРУЖИ, поверх этого — то есть зона под
-                // categoryMenu заканчивается РОВНО там, где начинается зона
-                // главной панели. Поэтому это число — и есть ТОЧНЫЙ зазор между
-                // низом плашки категорий и верхом главной панели: 20 = 20.
-                .padding(.bottom, 20)
+            // Полоска подкатегорий — снизу, над главной панелью. ВНУТРИ
+            // NavigationStack (на корневом контенте), а не снаружи него: раньше
+            // висела снаружи, чтобы обойти баг совместного расчёта с ВНЕШНИМ
+            // инсетом самодельного BottomBar из старого RootView — но RootView
+            // стал настоящим системным TabView, та причина отпала. А снаружи
+            // NavigationStack полоска оставалась на экране ПОВЕРХ любого пуша
+            // (карточки тайтла и т.д.), т.к. технически была соседом стека, а
+            // не частью его корневого экрана — отсюда баг "подкатегории не
+            // пропадают на карточке тайтла".
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                categoryMenu
+                    // 20 — та же ширина/выравнивание, что и у главной панели.
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+            }
         }
         .tint(Theme.accent)
         // Подтягивает реальные закладки аккаунта (5 стандартных папок) при

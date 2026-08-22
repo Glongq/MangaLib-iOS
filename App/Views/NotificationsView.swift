@@ -27,19 +27,19 @@ struct NotificationsView: View {
                     coverURL: item.cover?.bestURL, item: item
                 )
             }
-        }
-        // Кнопка сортировки — снизу СЛЕВА, над главной панелью. Тот же приём,
-        // что и у Фильтры/Сортировка в Каталоге/полоски подкатегорий в
-        // Закладках: safeAreaInset СНАРУЖИ NavigationStack, чтобы корректно
-        // сложиться с внешним инсетом главной панели из RootView (см.
-        // комментарии там же).
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack {
-                filterButton
-                Spacer(minLength: 0)
+            // Кнопка сортировки — снизу слева, над главной панелью. ВНУТРИ
+            // NavigationStack (на корневом контенте) — иначе она остаётся на
+            // экране поверх любого пуша (карточки тайтла из уведомления),
+            // потому что технически была бы соседом стека, а не частью его
+            // корневого экрана.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack {
+                    filterButton
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 20)
         }
         .tint(Theme.accent)
         .task { await viewModel.refresh() }
