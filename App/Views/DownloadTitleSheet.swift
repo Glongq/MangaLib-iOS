@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// Sheet «Скачать тайтл» — открывается из меню "..." в шапке карточки (см.
-/// MangaDetailView). Выбор сервера/сжатия и переводчика — пока ЗАГЛУШКА (на
-/// эти параметры реальная загрузка не завязана), но сама загрузка настоящая:
-/// кнопка «Скачать» ставит ВСЕ главы тайтла в очередь DownloadsManager, который
+/// MangaDetailView). Сервер картинок реально влияет на загрузку (см.
+/// serverChoice), переводчик и объём («Все»/«Непрочитанное») — тоже реальные
+/// фильтры (см. chaptersToDownload/activeTranslator), а не заглушки: кнопка
+/// «Скачать» ставит отфильтрованные главы в очередь DownloadsManager, который
 /// реально качает страницы и складывает их структурировано на устройство.
 /// Прогресс и список скачанного видно в разделе «Загрузки» (см. DownloadsView).
 struct DownloadTitleSheet: View {
@@ -13,6 +14,10 @@ struct DownloadTitleSheet: View {
     let title: String
     let typeLabel: String?
     let chapters: [ChapterItem]
+    /// Сколько глав уже прочитано (позиция, см. MangaDetailView.isRead) — нужно
+    /// для фильтра «Непрочитанное»: глава на позиции i (1-based) считается
+    /// прочитанной, если i <= readCount.
+    let readCount: Int
 
     @Environment(\.dismiss) private var dismiss
 
@@ -34,22 +39,69 @@ struct DownloadTitleSheet: View {
     @State private var chapterScope: ChapterScope = .all
     @State private var chapterScopeExpanded = false
 
-    /// Заглушка списка переводчиков: пара «команд» + ВСЕГДА «Неизвестный» с 0
-    /// глав в самом низу (как попросили).
+    /// Главы, отфильтрованные по chapterScope (без учёта переводчика).
+    private var scopedChapters: [ChapterItem] {
+        switch chapterScope {
+        case .all: return chapters
+        case .unread:
+            return chapters.enumerated().filter { $0.offset + 1 > readCount }.map(\.element)
+        }
+    }
+
+    /// Один переводчик тайтла: id — id команды (nil — «Все переводчики»,
+    /// т.е. без фильтра по команде, качаем каждую главу её первой веткой),
+    /// branchId — стабильный branch_id этой команды (см. ChapterListSheet.
+    /// branchId(forTeam:) в MangaReaderView — тот же приём).
     private struct Translator: Identifiable, Hashable {
-        let id = UUID()
+        let id: Int?
         let name: String
         let chapters: Int
+        let branchId: Int?
     }
-    private let translators: [Translator] = [
-        .init(name: "Команда перевода", chapters: 34),
-        .init(name: "Solo Scans", chapters: 12),
-        .init(name: "Неизвестный", chapters: 0)
-    ]
+
+    /// Реальный список переводчиков тайтла — из branches/teams всех глав (та
+    /// же информация, что использует читалка для смены переводчика, см.
+    /// MangaReaderView.ChapterListSheet.allTeams), а НЕ отдельный API-запрос.
+    /// Первый элемент — всегда «Все переводчики».
+    private var translators: [Translator] {
+        var seen = Set<Int>()
+        var teams: [(team: ChapterTeam, branchId: Int?)] = []
+        for chapter in chapters {
+            for branch in chapter.branches ?? [] {
+                for team in branch.teams ?? [] where !seen.contains(team.id) {
+                    seen.insert(team.id)
+                    teams.append((team, branch.branchId))
+                }
+            }
+        }
+        let all = Translator(id: nil, name: "Все переводчики", chapters: chaptersCount, branchId: nil)
+        let named = teams.map { pair -> Translator in
+            let count = chapters.filter { ch in
+                (ch.branches ?? []).contains { b in (b.teams ?? []).contains { $0.id == pair.team.id } }
+            }.count
+            return Translator(id: pair.team.id, name: pair.team.name, chapters: count, branchId: pair.branchId)
+        }
+        return [all] + named
+    }
+
+    /// Показывать выбор переводчика только когда их реально ≥2 — при одном
+    /// (или отсутствии данных о ветках) выбирать нечего, поле скрываем целиком.
+    private var hasMultipleTranslators: Bool { translators.count > 2 }
+
     @State private var selectedTranslator: Translator?
     @State private var translatorListExpanded = false
 
     private var activeTranslator: Translator { selectedTranslator ?? translators.first! }
+
+    /// Итоговый список глав к скачиванию: скоуп («Все»/«Непрочитанное») +
+    /// фильтр по выбранному переводчику (если не «Все переводчики» — только
+    /// главы, где реально есть его ветка).
+    private var chaptersToDownload: [ChapterItem] {
+        guard let teamId = activeTranslator.id else { return scopedChapters }
+        return scopedChapters.filter { ch in
+            (ch.branches ?? []).contains { b in (b.teams ?? []).contains { $0.id == teamId } }
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -58,7 +110,9 @@ struct DownloadTitleSheet: View {
                 Divider().overlay(Theme.separator)
                 serverSection
                 chapterScopeSection
-                translatorSection
+                if hasMultipleTranslators {
+                    translatorSection
+                }
                 downloadButton
             }
             // Больше отступ сверху (от «шапки» листа).
@@ -212,14 +266,15 @@ struct DownloadTitleSheet: View {
 
     private var downloadButton: some View {
         Button {
-            // Ставим ВСЕ главы тайтла в реальную очередь загрузки. Параметры
-            // сервера/переводчика/объёма — пока не влияют (заглушка), качаем всё.
+            // Ставим отфильтрованные (скоуп + переводчик) главы в реальную
+            // очередь загрузки, все — выбранной веткой переводчика.
             DownloadsManager.shared.download(
                 slug: slug,
                 title: title,
                 typeLabel: typeLabel,
                 coverURLString: coverURL?.absoluteString,
-                chapters: chapters
+                chapters: chaptersToDownload,
+                branchId: activeTranslator.branchId
             )
             dismiss()
         } label: {
@@ -232,7 +287,7 @@ struct DownloadTitleSheet: View {
                 HStack {
                     Spacer()
                     // Чип чуть светлее самой кнопки — как попросили.
-                    countChip("\(chaptersCount)", background: .white.opacity(0.25), foreground: .white)
+                    countChip("\(chaptersToDownload.count)", background: .white.opacity(0.25), foreground: .white)
                 }
                 .padding(.trailing, 6)
             }
@@ -240,8 +295,8 @@ struct DownloadTitleSheet: View {
             .background(Theme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(chapters.isEmpty)
-        .opacity(chapters.isEmpty ? 0.5 : 1)
+        .disabled(chaptersToDownload.isEmpty)
+        .opacity(chaptersToDownload.isEmpty ? 0.5 : 1)
         .padding(.top, 4)
     }
 

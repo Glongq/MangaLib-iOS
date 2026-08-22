@@ -211,7 +211,8 @@ struct MangaDetailView: View {
                 coverURL: viewModel.detail?.cover?.bestURL ?? coverURL ?? listItem?.cover?.bestURL,
                 title: title,
                 typeLabel: viewModel.detail?.type?.label ?? listItem?.type?.label,
-                chapters: viewModel.chapters
+                chapters: viewModel.chapters,
+                readCount: bookmarks.readingProgress(forSlug: viewModel.slug)?.readCount ?? 0
             )
             // Открывается сразу до верха.
             .presentationDetents([.large])

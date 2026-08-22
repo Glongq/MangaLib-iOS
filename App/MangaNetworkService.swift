@@ -537,6 +537,20 @@ final class MangaNetworkService {
     /// см. MangaDetail.background/MangaBackgroundImage. Без явного fields[]
     /// сервер это поле не присылает вообще, так же как summary/genres/etc.
     func fetchMangaDetail(slug: String, siteId: Int? = nil) async throws -> MangaDetail {
+        let data = try await fetchMangaDetailRawData(slug: slug, siteId: siteId)
+        do {
+            return try decoder.decode(APIObjectResponse<MangaDetail>.self, from: data).data
+        } catch {
+            throw NetworkError.decoding(error)
+        }
+    }
+
+    /// Сырое тело ответа карточки тайтла — используется как fetchMangaDetail
+    /// (то же самое HTTP-декодирование/статус-коды), но без разбора в модель.
+    /// Нужно DownloadsManager, чтобы сохранить JSON на диск и открыть
+    /// скачанный тайтл офлайн с тем же описанием/оценкой, что и онлайн (см.
+    /// DownloadsManager.cachedDetail).
+    func fetchMangaDetailRawData(slug: String, siteId: Int? = nil) async throws -> Data {
         let items: [URLQueryItem] = [
             // Оценка тайтла: без явных rate/rate_avg сервер НЕ кладёт объект
             // `rating` в ответ, и на карточке (обложка/виджет) оценка пропадала
@@ -563,8 +577,7 @@ final class MangaNetworkService {
             URLQueryItem(name: "fields[]", value: "moderated")
         ]
         let request = try makeRequest(path: "/manga/\(encodePath(slug))", queryItems: items, siteId: siteId)
-        let response: APIObjectResponse<MangaDetail> = try await perform(request)
-        return response.data
+        return try await performOptionalData(request)
     }
 
     /// Список глав манги.
@@ -590,6 +603,17 @@ final class MangaNetworkService {
     /// Статистика тайтла (оценки + распределение по спискам) — ПОДТВЕРЖДЕНО
     /// перехватом: `GET /manga/{slug}/stats` → `{data:{bookmarks, rating}}`.
     func fetchMangaStats(slug: String, siteId: Int? = nil) async throws -> MangaStats {
+        let data = try await fetchMangaStatsRawData(slug: slug, siteId: siteId)
+        do {
+            return try decoder.decode(APIObjectResponse<MangaStats>.self, from: data).data
+        } catch {
+            throw NetworkError.decoding(error)
+        }
+    }
+
+    /// Сырое тело ответа статистики — см. fetchMangaDetailRawData, тот же смысл
+    /// (кэш для DownloadsManager.cachedStats).
+    func fetchMangaStatsRawData(slug: String, siteId: Int? = nil) async throws -> Data {
         // ОБЯЗАТЕЛЬНЫЕ query-параметры (подтверждено перехватом
         // `/manga/{slug}/stats?bookmarks=true&rating=true`) — без них сервер
         // не включает эти блоки в ответ.
@@ -598,8 +622,7 @@ final class MangaNetworkService {
             URLQueryItem(name: "rating", value: "true")
         ]
         let request = try makeRequest(path: "/manga/\(encodePath(slug))/stats", queryItems: items, siteId: siteId)
-        let response: APIObjectResponse<MangaStats> = try await perform(request)
-        return response.data
+        return try await performOptionalData(request)
     }
 
     /// Персонажи тайтла — ПОДТВЕРЖДЕНО перехватом:

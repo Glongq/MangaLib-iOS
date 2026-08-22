@@ -138,18 +138,51 @@ final class DownloadsManager: ObservableObject {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    /// Поставить ВСЕ переданные главы тайтла в очередь и начать загрузку.
-    func download(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapters: [ChapterItem]) {
+    /// Поставить переданные главы тайтла в очередь и начать загрузку.
+    /// branchId — явно выбранная ветка перевода (см. DownloadTitleSheet):
+    /// nil качает каждую главу её собственной первой веткой (как раньше),
+    /// значение — качает ВСЕ переданные главы именно этой веткой/переводчиком.
+    func download(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapters: [ChapterItem], branchId: Int? = nil) {
         guard !chapters.isEmpty else { return }
         guard progress[slug]?.finished != false else { return } // уже качается
 
         progress[slug] = Progress(total: chapters.count, completed: 0, currentTitle: "", finished: false, failed: false)
         showBanner("Загрузка начата")
         let task = Task { [weak self] in
-            await self?.run(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, chapters: chapters)
+            await self?.run(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, chapters: chapters, branchId: branchId)
             self?.tasks[slug] = nil
         }
         tasks[slug] = task
+    }
+
+    // MARK: Офлайн-кэш карточки тайтла (описание/оценки)
+
+    /// Карточка тайтла, сохранённая на диск при скачивании (см. cacheDetailAndStats
+    /// ниже) — читает MangaDetailViewModel, когда сеть недоступна, чтобы у
+    /// скачанного тайтла описание/жанры/рейтинг показывались и офлайн, а не
+    /// текстом "нет сети".
+    func cachedDetail(slug: String) -> MangaDetail? {
+        guard let data = try? Data(contentsOf: titleDir(slug).appendingPathComponent("detail.json")) else { return nil }
+        return try? JSONDecoder().decode(APIObjectResponse<MangaDetail>.self, from: data).data
+    }
+
+    /// Статистика (виджет оценок), сохранённая на диск при скачивании — как cachedDetail.
+    func cachedStats(slug: String) -> MangaStats? {
+        guard let data = try? Data(contentsOf: titleDir(slug).appendingPathComponent("stats.json")) else { return nil }
+        return try? JSONDecoder().decode(APIObjectResponse<MangaStats>.self, from: data).data
+    }
+
+    /// Скачивает и сохраняет сырой JSON карточки+статистики тайтла на диск —
+    /// вызывается при первом появлении записи тайтла в загрузках (whole-title
+    /// и по-главная загрузка), чтобы офлайн-открытие карточки (см. cachedDetail/
+    /// cachedStats выше) не зависело от сети.
+    private func cacheDetailAndStats(slug: String) async {
+        if let data = try? await MangaNetworkService.shared.fetchMangaDetailRawData(slug: slug) {
+            try? data.write(to: titleDir(slug).appendingPathComponent("detail.json"))
+        }
+        if let data = try? await MangaNetworkService.shared.fetchMangaStatsRawData(slug: slug) {
+            try? data.write(to: titleDir(slug).appendingPathComponent("stats.json"))
+        }
     }
 
     // MARK: По-главное скачивание (отдельная глава+ветка)
@@ -208,7 +241,7 @@ final class DownloadsManager: ObservableObject {
         let key = chapterKey(slug, chapter.id, branchId)
         try? fm.createDirectory(at: titleDir(slug), withIntermediateDirectories: true)
 
-        // Заводим запись тайтла, если её ещё нет (+ обложку для оффлайна).
+        // Заводим запись тайтла, если её ещё нет (+ обложку и карточку для оффлайна).
         if !titles.contains(where: { $0.slug == slug }) {
             upsertTitle(DownloadedTitle(slug: slug, title: title, typeLabel: typeLabel,
                                         coverURLString: coverURLString, chapters: [], addedAt: Date()))
@@ -216,6 +249,7 @@ final class DownloadsManager: ObservableObject {
                let data = await Self.fetchData([url]) {
                 try? data.write(to: titleDir(slug).appendingPathComponent("cover.jpg"))
             }
+            await cacheDetailAndStats(slug: slug)
         }
 
         let dir = chapterDir(slug, chapter.id, branchId)
@@ -278,7 +312,7 @@ final class DownloadsManager: ObservableObject {
 
     // MARK: Процесс загрузки
 
-    private func run(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapters: [ChapterItem]) async {
+    private func run(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapters: [ChapterItem], branchId: Int?) async {
         try? fm.createDirectory(at: titleDir(slug), withIntermediateDirectories: true)
 
         // Сразу заводим запись (с пустым списком глав) — чтобы тайтл появился в
@@ -286,16 +320,18 @@ final class DownloadsManager: ObservableObject {
         upsertTitle(DownloadedTitle(slug: slug, title: title, typeLabel: typeLabel,
                                     coverURLString: coverURLString, chapters: [], addedAt: Date()))
 
-        // Обложка — для оффлайн-показа.
+        // Обложка и карточка тайтла (описание/жанры/оценки) — для оффлайн-показа
+        // (см. cachedDetail/cachedStats и MangaDetailViewModel).
         if let coverURLString, let url = URL(string: coverURLString),
            let data = await Self.fetchData([url]) {
             try? data.write(to: titleDir(slug).appendingPathComponent("cover.jpg"))
         }
+        await cacheDetailAndStats(slug: slug)
 
         for chapter in chapters {
             if Task.isCancelled { return } // отменили — cancel()/delete() уже всё убрал
             progress[slug]?.currentTitle = "Том \(chapter.volume) Глава \(chapter.number)"
-            let bid = chapter.primaryBranchId
+            let bid = branchId ?? chapter.primaryBranchId
             let dir = chapterDir(slug, chapter.id, bid)
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
 

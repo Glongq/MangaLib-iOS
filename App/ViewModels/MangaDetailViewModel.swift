@@ -140,7 +140,7 @@ final class MangaDetailViewModel: ObservableObject {
         candidates.append(nil)                     // активный сайт (заголовок по умолчанию)
         for s in LibSite.allCases.map(\.rawValue) where !seen.contains(s) { candidates.append(s) }
 
-        var lastNotFound: String? = nil
+        var lastError: String? = nil
         for candidate in candidates {
             do {
                 let d = try await service.fetchMangaDetail(slug: slug, siteId: candidate)
@@ -152,14 +152,25 @@ final class MangaDetailViewModel: ObservableObject {
                 return nil
             } catch NetworkError.notFound {
                 // Не тот сайт — пробуем следующий.
-                lastNotFound = "Тайтл не найден на доступных сайтах."
+                lastError = "Тайтл не найден на доступных сайтах."
                 continue
             } catch {
-                // Сеть/декодирование — это не про сайт, перебор не поможет.
-                return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                // Сеть/декодирование — это не про сайт, перебор других сайтов
+                // не поможет (нет соединения останется нет соединения).
+                lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                break
             }
         }
-        return lastNotFound
+
+        // Сеть недоступна (или тайтл не нашёлся) — если он скачан, у него есть
+        // офлайн-кэш карточки (см. DownloadsManager.cacheDetailAndStats),
+        // показываем его вместо "нет сети"/пустого экрана.
+        if let cached = DownloadsManager.shared.cachedDetail(slug: slug) {
+            detail = cached
+            effectiveSite = cached.site ?? siteId
+            return nil
+        }
+        return lastError
     }
 
     private func loadCharacters(mangaId: Int) async {
@@ -169,7 +180,7 @@ final class MangaDetailViewModel: ObservableObject {
 
     private func loadStats() async {
         do { stats = try await service.fetchMangaStats(slug: slug, siteId: resolvedSiteId) }
-        catch { stats = nil }
+        catch { stats = DownloadsManager.shared.cachedStats(slug: slug) }
     }
 
     private func loadChapters() async -> String? {
