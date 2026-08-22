@@ -184,17 +184,22 @@ struct MangaCatalogView: View {
             }
 
             Menu {
+                // .inline на ОБОИХ Picker — иначе Picker внутри Menu по
+                // умолчанию сворачивается в подменю (доп. тап, чтобы
+                // раскрыть), а нужен один плоский список: сначала поля
+                // сортировки, направление — отдельной секцией строго внизу.
                 Picker("Сортировка", selection: $viewModel.sort) {
                     ForEach(SortOption.allCases) { option in
                         Label(option.title, systemImage: option.systemImage).tag(option)
                     }
                 }
+                .pickerStyle(.inline)
                 Divider()
-                // Направление — отдельной секцией внизу меню.
                 Picker("Направление", selection: $viewModel.sortDescending) {
-                    Label("По убыванию", systemImage: "arrow.down").tag(true)
                     Label("По возрастанию", systemImage: "arrow.up").tag(false)
+                    Label("По убыванию", systemImage: "arrow.down").tag(true)
                 }
+                .pickerStyle(.inline)
             } label: {
                 controlLabel(icon: "arrow.up.arrow.down", text: viewModel.sort.title, badge: 0)
             }

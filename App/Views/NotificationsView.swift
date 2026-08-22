@@ -12,7 +12,6 @@ import SwiftUI
 struct NotificationsView: View {
     @StateObject private var viewModel = NotificationsViewModel()
     @Environment(\.scenePhase) private var scenePhase
-    @State private var showFilterSheet = false
 
     var body: some View {
         NavigationStack {
@@ -27,11 +26,6 @@ struct NotificationsView: View {
                     slug: item.apiSlug, fallbackTitle: item.displayTitle,
                     coverURL: item.cover?.bestURL, item: item
                 )
-            }
-            .sheet(isPresented: $showFilterSheet) {
-                NotificationFilterSheet(readFilter: $viewModel.readFilter, sortOrder: $viewModel.sortOrder)
-                    .presentationDetents([.medium])
-                    .presentationDragIndicator(.visible)
             }
         }
         // Кнопка сортировки — снизу СЛЕВА, над главной панелью. Тот же приём,
@@ -69,11 +63,28 @@ struct NotificationsView: View {
             .padding(.bottom, 10)
     }
 
-    /// Круглая кнопка сортировки/фильтра — открывает NotificationFilterSheet.
+    /// Круглая кнопка сортировки/фильтра — раньше открывала
+    /// NotificationFilterSheet (шторка снизу), теперь обычное системное
+    /// глассовое `Menu` (тот же приём, что и Сортировка в Каталоге/
+    /// Комментариях) — не отдельный экран, а нативный поповер.
     /// Бейдж — реальное число из GET /notifications/count (unread.all), не
     /// посчитано на клиенте.
     private var filterButton: some View {
-        Button { showFilterSheet = true } label: {
+        Menu {
+            Picker("Прочитанность", selection: $viewModel.readFilter) {
+                ForEach(NotificationReadFilter.allCases) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+            Divider()
+            Picker("Порядок", selection: $viewModel.sortOrder) {
+                ForEach(NotificationSortOrder.allCases) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .font(.system(size: 20, weight: .semibold))
