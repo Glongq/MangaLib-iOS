@@ -142,7 +142,11 @@ struct MangaCardView: View {
                     .frame(width: width, alignment: .leading)
                     .opacity(typeLabel == nil ? 0 : 1)
             }
-            .frame(width: width, minHeight: Self.textBlockHeight(twoLineTitle: rowNeedsTwoLines), alignment: .top)
+            // Раздельные .frame(width:) + .frame(minHeight:) — не одна
+            // перегрузка: SwiftUI не даёт смешать фиксированный width с
+            // гибким minHeight в одном вызове .frame(...).
+            .frame(width: width, alignment: .top)
+            .frame(minHeight: Self.textBlockHeight(twoLineTitle: rowNeedsTwoLines), alignment: .top)
         }
         .frame(width: width, alignment: .top)
     }
