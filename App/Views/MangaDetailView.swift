@@ -604,21 +604,29 @@ struct MangaDetailView: View {
         return labels.isEmpty ? nil : labels.joined(separator: ", ")
     }
 
+    // Высота чипа teamChip (см. ниже, раздел "Главы") — аватар 28pt +
+    // вертикальный паддинг 8×2 = 44. Общая константа, чтобы чипы метаданных
+    // и переводчиков совпадали по высоте пиксель в пиксель, а не примерно —
+    // как попросили выровнять.
+    private static let metaChipHeight: CGFloat = 44
+
     @ViewBuilder
     private func infoBlock(_ heading: String, value: String) -> some View {
-        // Чип с подложкой — размер и паддинги 1в1 как у teamChip в разделе
-        // "Главы" (колонка с переводчиками, см. teamChip ниже) по высоте —
-        // тот же .padding(.vertical, 8), тот же .subheadline.weight(.medium)
-        // для основного текста. По ширине чип шире (18 вместо 10 — как
-        // попросили увеличить), т.к. у teamChip ширину и так задаёт аватар.
+        // Формат чипа — тот же, что у чипов "Жанры и теги" (см.
+        // CollapsibleChips.chipView): .padding(.horizontal, 12), Capsule +
+        // Theme.surfaceElevated + обводка Theme.separator. Высота — явно
+        // Self.metaChipHeight (см. выше), а не паддинг по вертикали, чтобы
+        // ровно совпадать с teamChip независимо от разницы в содержимом
+        // (там одна строка + аватар, тут заголовок+значение в два ряда).
         VStack(alignment: .leading, spacing: 4) {
             Text(heading).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1)
             Text(value).font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .frame(height: Self.metaChipHeight)
         .background(Theme.surfaceElevated, in: Capsule())
+        .overlay(Capsule().stroke(Theme.separator, lineWidth: 1))
     }
 
     // MARK: Похожее (GET /manga/{slug}/similar, POST /similar/{id}/vote)
@@ -1494,7 +1502,7 @@ struct MangaDetailView: View {
                 .foregroundStyle(Theme.textSecondary)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .frame(height: Self.metaChipHeight)
         .background(Theme.surfaceElevated, in: Capsule())
     }
 
