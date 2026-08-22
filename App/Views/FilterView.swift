@@ -43,8 +43,6 @@ struct FilterView: View {
             }
             .navigationTitle("Фильтры")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Theme.background, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { dismiss() } label: {
@@ -62,12 +60,15 @@ struct FilterView: View {
     // MARK: 1. Диапазоны
 
     private var rangesSection: some View {
-        section("Диапазоны") {
+        VStack(alignment: .leading, spacing: 16) {
             rangeRow("Количество глав", from: $filter.chaptersFrom, to: $filter.chaptersTo)
             rangeRow("Год релиза", from: $filter.yearFrom, to: $filter.yearTo)
             rangeRow("Оценка", from: $filter.ratingFrom, to: $filter.ratingTo)
             rangeRow("Количество оценок", from: $filter.votesFrom, to: $filter.votesTo)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func rangeRow(_ title: String, from: Binding<String>, to: Binding<String>) -> some View {
@@ -131,7 +132,7 @@ struct FilterView: View {
                 Text("Любые").font(.subheadline).foregroundStyle(Theme.textSecondary)
             } else {
                 if !selection.included.isEmpty {
-                    countBadge(selection.included.count, color: Theme.accent, icon: "plus")
+                    countBadge(selection.included.count, color: .green, icon: "plus")
                 }
                 if !selection.excluded.isEmpty {
                     countBadge(selection.excluded.count, color: .red, icon: "minus")
@@ -159,7 +160,7 @@ struct FilterView: View {
     private func checkboxSection(_ title: String,
                                  _ options: [FilterOption],
                                  keyPath: WritableKeyPath<MangaFilter, TriStateSelection>) -> some View {
-        section(title) {
+        section(title, titleInset: 10) {
             LazyVGrid(columns: twoColumns, alignment: .leading, spacing: 4) {
                 ForEach(options) { option in
                     triCell(option, keyPath: keyPath)
@@ -196,7 +197,7 @@ struct FilterView: View {
     private func fillColor(for state: TriState) -> Color {
         switch state {
         case .neutral: return .clear
-        case .include: return Theme.accent.opacity(0.18)
+        case .include: return Color.green.opacity(0.18)
         case .exclude: return Color.red.opacity(0.16)
         }
     }
@@ -207,7 +208,7 @@ struct FilterView: View {
         case .neutral:
             Image(systemName: "square").font(.title3).foregroundStyle(Theme.textSecondary)
         case .include:
-            Image(systemName: "checkmark.square.fill").font(.title3).foregroundStyle(Theme.accent)
+            Image(systemName: "plus.square.fill").font(.title3).foregroundStyle(.green)
         case .exclude:
             Image(systemName: "minus.square.fill").font(.title3).foregroundStyle(.red)
         }
@@ -215,7 +216,7 @@ struct FilterView: View {
 
     // MARK: Подвал
 
-    // Одна общая сплошная капсула на весь подвал; "Применить" выделяется
+    // Одна общая стеклянная капсула на весь подвал; "Применить" выделяется
     // акцентной заливкой поверх неё.
     private var bottomBar: some View {
         HStack(spacing: 4) {
@@ -240,16 +241,17 @@ struct FilterView: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 6)
-        .background(Theme.surface, in: Capsule())
+        .glassEffect(.regular, in: Capsule())
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
     }
 
     // MARK: Хелпер секции
 
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func section<Content: View>(_ title: String, titleInset: CGFloat = 0, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.headline).foregroundStyle(Theme.textPrimary)
+                .padding(.leading, titleInset)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)

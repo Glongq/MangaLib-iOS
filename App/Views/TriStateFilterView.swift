@@ -133,7 +133,7 @@ struct TriStateFilterView: View {
     private func fillColor(for state: TriState) -> Color {
         switch state {
         case .neutral: return .clear
-        case .include: return Theme.accent.opacity(0.18)
+        case .include: return Color.green.opacity(0.18)
         case .exclude: return Color.red.opacity(0.16)
         }
     }
@@ -146,9 +146,9 @@ struct TriStateFilterView: View {
                 .font(.title3)
                 .foregroundStyle(Theme.textSecondary)
         case .include:
-            Image(systemName: "checkmark.square.fill")
+            Image(systemName: "plus.square.fill")
                 .font(.title3)
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(.green)
         case .exclude:
             Image(systemName: "minus.square.fill")
                 .font(.title3)
@@ -160,7 +160,7 @@ struct TriStateFilterView: View {
 
     private var footer: some View {
         HStack {
-            legend(color: Theme.accent, text: "Включить")
+            legend(color: .green, text: "Включить")
             legend(color: .red, text: "Исключить")
             Spacer()
             Button {

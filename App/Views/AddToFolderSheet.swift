@@ -32,8 +32,11 @@ struct AddToFolderSheet: View {
 
                 ScrollView {
                     VStack(spacing: 8) {
-                        ForEach(store.allFolders) { folder in
+                        ForEach(Array(store.allFolders.enumerated()), id: \.element.id) { index, folder in
                             folderRow(folder)
+                            if index < store.allFolders.count - 1 {
+                                Divider().overlay(Theme.separator)
+                            }
                         }
 
                         if store.isBookmarked(slug: slug) {
@@ -102,10 +105,10 @@ struct AddToFolderSheet: View {
             HStack {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
-                Text(folder.name).foregroundStyle(Theme.textPrimary)
+                Text(folder.name)
+                    .font(.system(size: 17 * 1.2))
+                    .foregroundStyle(Theme.textPrimary)
                 Spacer()
-                Text("\(store.titlesCount(in: folder.id))")
-                    .font(.caption).foregroundStyle(Theme.textSecondary)
             }
             .padding(.horizontal, 14)
             .frame(minHeight: 48)
