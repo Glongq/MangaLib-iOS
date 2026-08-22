@@ -117,7 +117,6 @@ struct MangaDetailView: View {
                     // overlay поверх фоновой картинки, а не отдельный блок
                     // здесь, чтобы фон мог тянуться ровно до его низа.
                     actionButtons
-                    infoRow
                     tabBar
                     tabContent
                 }
@@ -607,7 +606,7 @@ struct MangaDetailView: View {
                         if index > 0 {
                             Rectangle()
                                 .fill(Theme.separator)
-                                .frame(width: 1, height: Self.infoBlockHeight - 16)
+                                .frame(width: 1, height: Self.infoBlockHeight - 20.8)
                         }
                         infoBlock(item.heading, value: item.value)
                     }
@@ -1231,7 +1230,7 @@ struct MangaDetailView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity)
-                .padding(.bottom, 10)
+                .padding(.bottom, 13)
                 .overlay(alignment: .bottom) {
                     // Подчёркивание рисуется ТОЛЬКО у активной вкладки, но с
                     // общим matchedGeometryEffect(id:) — поэтому при смене
@@ -1262,6 +1261,10 @@ struct MangaDetailView: View {
 
     private var aboutTab: some View {
         VStack(alignment: .leading, spacing: 18) {
+            // Тип/Статус/Год/Просмотры/Формат — раньше висели над вкладками
+            // на ВСЕХ вкладках, теперь показываются только здесь, в «О тайтле».
+            infoRow
+
             if viewModel.detail == nil && viewModel.isLoading {
                 ProgressView().tint(Theme.accent).frame(maxWidth: .infinity)
             }
