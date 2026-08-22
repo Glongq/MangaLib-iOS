@@ -54,33 +54,29 @@ struct MangaCardView: View {
                 .overlay(alignment: .topLeading) { statusBadge }
                 .overlay(alignment: .topTrailing) { ratingBadge }
 
-            // Название — максимум 2 строки, но БЕЗ фиксированной высоты: в
-            // одну строку название занимает одну строку, в две — две, а тип
-            // тайтла ниже всегда вплотную под последней реальной строкой
-            // названия (а не отдельным "3-м слотом" с пустым местом над ним,
-            // как было раньше при жёстком резерве под 2 строки). На
-            // выравнивание сетки это не влияет: обложки у всех карточек
-            // всё равно одной высоты и идут первыми в VStack — если у
-            // соседних карточек в ряду название разной длины (1 и 2 строки),
-            // просто сами карточки/ряд станут чуть выше по самой длинной, а
-            // обложки останутся строго на одном уровне сверху.
+            // Название — СТРОГО 2 строки места всегда, даже если реальный
+            // текст умещается в одну: reservesSpace резервирует высоту под
+            // 2 строки независимо от фактической длины названия. Иначе
+            // однострочные названия делают свою карточку короче соседних —
+            // и не только тип тайтла под ней, а вся карточка/ряд целиком
+            // "плывёт" относительно карточек с двухстрочным названием.
             Text(item.displayTitle)
                 .font(titleFont)
                 .foregroundStyle(Theme.textPrimary)
-                .lineLimit(2)
+                .lineLimit(2, reservesSpace: true)
                 .multilineTextAlignment(.leading)
-                .frame(width: width, alignment: .leading)
+                .frame(width: width, alignment: .topLeading)
 
-            // Тип тайтла — сразу под названием, только если он реально есть
-            // (раньше строка держалась всегда, невидимой, ради фиксированной
-            // высоты — это больше не нужно).
-            if let typeLabel {
-                Text(typeLabel)
-                    .font(typeFont)
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1)
-                    .frame(width: width, alignment: .leading)
-            }
+            // Тип тайтла — строка всегда занимает место, даже когда его нет
+            // у конкретного тайтла (opacity 0 вместо условного исчезновения
+            // View), по той же причине: высота карточки должна быть одной
+            // и той же у всех, а не зависеть от того, есть тип или нет.
+            Text(typeLabel ?? " ")
+                .font(typeFont)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .frame(width: width, alignment: .leading)
+                .opacity(typeLabel == nil ? 0 : 1)
         }
         .frame(width: width, alignment: .top)
     }
