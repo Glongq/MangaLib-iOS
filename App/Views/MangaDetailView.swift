@@ -572,15 +572,35 @@ struct MangaDetailView: View {
     // закладках (см. BookmarksView.categoryMenu): ScrollView(.horizontal) +
     // .scrollIndicators(.hidden), там это привычный, понятный пользователю
     // паттерн ("листай пальцем вбок").
+    // Стиль App Store (страница приложения: Возраст/Категория/Разработчик/…) —
+    // никакой подложки под блоками, только тонкие вертикальные разделители
+    // между ними, текст по центру. Разделители — только МЕЖДУ реально
+    // присутствующими блоками (отфильтровываем пустые заранее), чтобы не
+    // словить "осиротевший" разделитель, если сервер не прислал какое-то поле.
     private var infoRow: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 10) {
-                infoBlock("Тип", value: (viewModel.detail?.type ?? listItem?.type)?.label)
-                infoBlock("Статус", value: (viewModel.detail?.status ?? listItem?.status)?.label)
-                infoBlock("Год выпуска", value: viewModel.detail?.yearString)
-                // Просмотры — теперь 4-е место (сразу после года), как попросили.
-                infoBlock("Просмотры", value: viewModel.detail?.viewsString)
-                infoBlock("Формат", value: formatValue)
+        let rawItems: [(heading: String, value: String?)] = [
+            (heading: "Тип", value: (viewModel.detail?.type ?? listItem?.type)?.label),
+            (heading: "Статус", value: (viewModel.detail?.status ?? listItem?.status)?.label),
+            (heading: "Год выпуска", value: viewModel.detail?.yearString),
+            // Просмотры — 4-е место (сразу после года), как попросили.
+            (heading: "Просмотры", value: viewModel.detail?.viewsString),
+            (heading: "Формат", value: formatValue),
+        ]
+        let items: [(heading: String, value: String)] = rawItems.compactMap { item in
+            guard let value = item.value, !value.isEmpty else { return nil }
+            return (heading: item.heading, value: value)
+        }
+
+        return ScrollView(.horizontal) {
+            HStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    if index > 0 {
+                        Rectangle()
+                            .fill(Theme.separator)
+                            .frame(width: 1, height: Self.infoBlockHeight - 16)
+                    }
+                    infoBlock(item.heading, value: item.value)
+                }
             }
         }
         .scrollIndicators(.hidden)
@@ -596,27 +616,18 @@ struct MangaDetailView: View {
     private static let infoBlockHeight: CGFloat = 50
 
     @ViewBuilder
-    private func infoBlock(_ heading: String, value: String?) -> some View {
-        if let value, !value.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(heading).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1)
-                Text(value).font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-            }
-            // Было 12, потом 16 — с Capsule() скруглённые торцы "съедали"
-            // пространство у коротких значений (16+, Манга и т.п.), из-за
-            // чего внутренний текст выглядел прижатым к краю/неровным.
-            // 20 — ещё шире и ровнее, как попросили "чуть увеличить".
-            .padding(.horizontal, 20)
-            .frame(height: Self.infoBlockHeight, alignment: .leading)
-            // Capsule вместо RoundedRectangle(10) — чтобы скругление совпадало
-            // с остальными кнопками карточки (actionButtons ниже используют
-            // системные .bordered/.borderedProminent, которые в этом
-            // приложении везде рендерятся как полностью скруглённые пилюли —
-            // тот же Capsule-стиль уже используется по всему приложению для
-            // подобных чипов/бэйджей). Высоту (Self.infoBlockHeight) НЕ трогаю.
-            .background(Theme.surfaceElevated, in: Capsule())
+    private func infoBlock(_ heading: String, value: String) -> some View {
+        // Без подложки (Capsule/фон убраны) и текст по центру — как в блоке
+        // "Возраст/Категория/Разработчик" на странице приложения в App Store.
+        // Разделяют блоки тонкие вертикальные линии (см. infoRow), а не фон.
+        VStack(alignment: .center, spacing: 4) {
+            Text(heading).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1)
+            Text(value).font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
         }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 16)
+        .frame(height: Self.infoBlockHeight)
     }
 
     // MARK: Похожее (GET /manga/{slug}/similar, POST /similar/{id}/vote)
@@ -1244,19 +1255,26 @@ struct MangaDetailView: View {
                 // "Нет глав" + подтверждённые маркеры (is_licensed/moderated,
                 // см. MangaDetail.isBlockedByLicenseOrModeration) — вместо
                 // обычного описания объясняем ПОЧЕМУ глав нет, как попросили.
-                blockTitle("Описание")
-                Label(
-                    "Главы удалены по требованию правообладателя или роскомнадзора, либо тайтл находится на проверке.",
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.subheadline)
-                .foregroundStyle(.orange)
+                // Отступ заголовок→контент — 10pt, как у similarSection/
+                // relatedSection (единый отступ во всех подсекциях), а не
+                // унаследованный spacing:18 внешнего VStack.
+                VStack(alignment: .leading, spacing: 10) {
+                    blockTitle("Описание")
+                    Label(
+                        "Главы удалены по требованию правообладателя или роскомнадзора, либо тайтл находится на проверке.",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(.orange)
+                }
             } else if let summary = viewModel.detail?.summary, !summary.isEmpty {
-                blockTitle("Описание")
-                // Максимум 4 строки + оранжевая "Подробнее.../Свернуть" —
-                // см. ExpandableDescription (показывается только если текст
-                // реально длиннее 4 строк).
-                ExpandableDescription(text: summary)
+                VStack(alignment: .leading, spacing: 10) {
+                    blockTitle("Описание")
+                    // Максимум 4 строки + оранжевая "Подробнее.../Свернуть" —
+                    // см. ExpandableDescription (показывается только если текст
+                    // реально длиннее 4 строк).
+                    ExpandableDescription(text: summary)
+                }
             }
 
             // Жанры и теги объединены в один блок чипов (сначала жанры, потом
@@ -1284,8 +1302,12 @@ struct MangaDetailView: View {
             }
             let chipItems = [ageRatingChip].compactMap { $0 } + genreItems + tagItems
             if !chipItems.isEmpty {
-                blockTitle("Жанры и теги")
-                CollapsibleChips(items: chipItems)
+                // Тот же единый отступ 10pt заголовок→контент, что у
+                // Описания/Похожего/Связанного.
+                VStack(alignment: .leading, spacing: 10) {
+                    blockTitle("Жанры и теги")
+                    CollapsibleChips(items: chipItems)
+                }
             }
 
             // Порядок ниже — как явно попросили: Связанное ВСЕГДА выше
