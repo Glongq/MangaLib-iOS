@@ -29,6 +29,23 @@ struct ReaderPalette {
     }
 }
 
+/// Позиция одной страницы вертикальной ленты (её midY в координатах скролла)
+/// — используется, чтобы определить, какая страница сейчас по ЦЕНТРУ экрана
+/// (см. VerticalPagePositionKey/verticalReader), а не просто первой появилась
+/// на экране (onAppear срабатывает уже при показе даже краешка сверху).
+private struct VerticalPagePosition: Equatable {
+    let segIndex: Int
+    let pageIndex: Int
+    let midY: CGFloat
+}
+
+private struct VerticalPagePositionKey: PreferenceKey {
+    static var defaultValue: [VerticalPagePosition] = []
+    static func reduce(value: inout [VerticalPagePosition], nextValue: () -> [VerticalPagePosition]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
 /// Полноэкранная читалка: горизонтальное листание страниц, тап переключает интерфейс.
 struct MangaReaderView: View {
 
@@ -46,13 +63,15 @@ struct MangaReaderView: View {
     /// страниц главы сразу. Сбрасывается при смене главы (см. onChange
     /// currentIndex) — индексы считаются от pages ТЕКУЩЕЙ главы.
     @State private var revealedCommentPages: Set<Int> = []
+    /// Та же логика «раскрытия по жесту», что и revealedCommentPages, но для
+    /// экрана конца главы (endPage) — блок комментариев там рендерится (и
+    /// начинает грузить данные) только после того, как реально доскроллили
+    /// до него, а не сразу при показе endPage. Сбрасывается при смене главы.
+    @State private var endCommentsRevealed = false
     /// Зумит ли пользователь текущую страницу сейчас — пока да, внешний
     /// вертикальный ScrollView страницы (см. horizontalPage) отключён, чтобы
     /// не конкурировать с панорамой зума за один и тот же вертикальный драг.
     @State private var isCurrentPageZoomed = false
-    /// Отключены ли комментарии в читалке (общая настройка) — тогда не
-    /// показываем их продолжением на экране конца главы.
-    @AppStorage("comments_disabled_in_reader") private var commentsDisabledInReader = false
     /// Залита ли кнопка-закладка белым (bookmark.fill). Локальное визуальное
     /// состояние: тап переключает, переход на след. главу сбрасывает.
     @State private var bookmarkFilled = false
@@ -164,11 +183,13 @@ struct MangaReaderView: View {
                 .animation(.easeInOut(duration: 0.16), value: showUI)
 
             // Индикатор текущей страницы — виден ВСЕГДА (даже при скрытом
-            // интерфейсе). При скрытии интерфейса плавно опускается ниже, при
-            // показе — поднимается над нижней панелью. Только горизонтальный
-            // режим (в вертикальном нет постраничного номера).
-            if pageMode != 1, !hidePageNumber, !viewModel.pages.isEmpty,
-               currentPage < viewModel.pages.count {
+            // интерфейсе), в обоих режимах листания. При скрытии интерфейса
+            // плавно опускается ниже, при показе — поднимается над нижней
+            // панелью. В вертикальном режиме номер страницы считается по
+            // центру экрана (см. verticalReader/onPreferenceChange), а не
+            // по первому появлению картинки.
+            if !hidePageNumber, pageBubbleTotal > 0,
+               (pageMode == 1 || currentPage < viewModel.pages.count) {
                 VStack {
                     Spacer()
                     pageBubble
@@ -209,6 +230,7 @@ struct MangaReaderView: View {
                 ChapterCommentsSheet(
                     chapterId: ch.id,
                     postPage: pageNo,
+                    chapterNumber: ch.number,
                     onClose: { withAnimation(.easeInOut(duration: 0.25)) { showComments = false } }
                 )
                 .transition(.move(edge: .bottom))
@@ -252,6 +274,7 @@ struct MangaReaderView: View {
             withAnimation(.easeInOut(duration: 0.2)) { bookmarkFilled = false }
             // Индексы revealedCommentPages относились к pages ПРЕДЫДУЩЕЙ главы.
             revealedCommentPages.removeAll()
+            endCommentsRevealed = false
             isCurrentPageZoomed = false
         }
         .onChange(of: currentPage) { _, page in
@@ -373,10 +396,18 @@ struct MangaReaderView: View {
                     ForEach(viewModel.segments) { seg in
                         ForEach(Array(seg.pages.enumerated()), id: \.offset) { pageIndex, page in
                             VerticalPageImage(candidates: viewModel.imageURLs(for: page))
-                                .onAppear {
-                                    viewModel.markCurrentChapter(seg.index)
-                                    verticalPage = pageIndex + 1
-                                }
+                                .background(
+                                    GeometryReader { pageGeo in
+                                        Color.clear.preference(
+                                            key: VerticalPagePositionKey.self,
+                                            value: [VerticalPagePosition(
+                                                segIndex: seg.index,
+                                                pageIndex: pageIndex,
+                                                midY: pageGeo.frame(in: .named("verticalReaderScroll")).midY
+                                            )]
+                                        )
+                                    }
+                                )
                         }
                         // Футер конца главы — при его появлении догружаем следующую.
                         chapterEndFooter(seg)
@@ -389,6 +420,22 @@ struct MangaReaderView: View {
                     }
                 }
                 .frame(width: geo.size.width * vScale)
+            }
+            .coordinateSpace(name: "verticalReaderScroll")
+            // Номер страницы/главы для индикатора считаем по той странице,
+            // чей центр ближе всего к центру ЭКРАНА — не по первой, что
+            // просто появилась в кадре (см. VerticalPagePosition выше).
+            .onPreferenceChange(VerticalPagePositionKey.self) { positions in
+                let viewportCenter = geo.size.height / 2
+                guard let nearest = positions.min(by: {
+                    abs($0.midY - viewportCenter) < abs($1.midY - viewportCenter)
+                }) else { return }
+                if nearest.segIndex != viewModel.currentIndex {
+                    viewModel.markCurrentChapter(nearest.segIndex)
+                }
+                if verticalPage != nearest.pageIndex + 1 {
+                    verticalPage = nearest.pageIndex + 1
+                }
             }
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize)
@@ -499,10 +546,15 @@ struct MangaReaderView: View {
                     )
                     .frame(width: geo.size.width, height: geo.size.height)
 
-                    if !commentsDisabledInReader, let ch = viewModel.currentChapter {
+                    if let ch = viewModel.currentChapter {
                         Color.clear.frame(height: 1)
                             .onAppear { revealedCommentPages.insert(index) }
 
+                        // Показываем блок (включая состояние "отключены" с
+                        // кнопкой настроек) только после реальной прокрутки
+                        // вниз — не сразу при показе страницы (см. маркер
+                        // выше). Сеть при этом не дёргаем, если отключено —
+                        // см. ChapterCommentsSheet.task(id:).
                         if revealedCommentPages.contains(index) {
                             Divider().overlay(fg.opacity(0.15))
                             ChapterCommentsSheet(chapterId: ch.id, postPage: index + 1, embedded: true)
@@ -551,38 +603,52 @@ struct MangaReaderView: View {
             .overlay { ProgressView().tint(fg) }
     }
 
-    // Экран конца главы: сверху «Конец…»/«Следующая глава», а НИЖЕ —
-    // продолжением идут комментарии к последней странице (долистал главу до
-    // конца → и ещё чуть вниз → бесконечная лента комментов). Всё в одной
-    // вертикальной прокрутке, без отдельного меню/жеста.
+    // Экран конца главы: сверху «Конец…»/«Следующая глава» на всю высоту
+    // экрана, а НИЖЕ, за её пределами — продолжением идут комментарии к
+    // последней странице (долистал главу до конца → и ЕЩЁ жест вниз →
+    // бесконечная лента комментов). endHeader занимает минимум высоту
+    // экрана (см. GeometryReader), поэтому блок комментариев физически ниже
+    // фолда и раскрывается (и грузит данные) только по факту скролла — не
+    // сразу вместе с показом endPage.
     private var endPage: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                endHeader
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
-                    .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 0) {
+                    endHeader
+                        .frame(maxWidth: .infinity, minHeight: geo.size.height)
+                        .contentShape(Rectangle())
+                        .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
 
-                if !commentsDisabledInReader,
-                   let ch = viewModel.currentChapter,
-                   !viewModel.pages.isEmpty {
-                    Divider().overlay(fg.opacity(0.15))
-                    ChapterCommentsSheet(
-                        chapterId: ch.id,
-                        postPage: viewModel.pages.count,
-                        embedded: true
-                    )
-                    .padding(.bottom, 40)
+                    if let ch = viewModel.currentChapter, !viewModel.pages.isEmpty {
+                        // Маркер ловит .onAppear только при реальной
+                        // прокрутке вниз — сам блок комментариев (и его
+                        // сетевой запрос, см. ChapterCommentsSheet.task)
+                        // появляется только после этого.
+                        Color.clear.frame(height: 1)
+                            .onAppear { endCommentsRevealed = true }
+
+                        if endCommentsRevealed {
+                            Divider().overlay(fg.opacity(0.15))
+                            ChapterCommentsSheet(
+                                chapterId: ch.id,
+                                postPage: viewModel.pages.count,
+                                embedded: true
+                            )
+                            .padding(.bottom, 40)
+                        }
+                    }
                 }
             }
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
         .background(readerBackground)
         .ignoresSafeArea()
     }
 
     /// Верхняя «шапка» экрана конца — «Конец · …» и кнопка следующей главы.
-    /// Компактная (не на весь экран), чтобы комментарии были видны сразу.
+    /// Сам контент компактный, но обёртка в endPage растягивает его на всю
+    /// высоту экрана (центрируя) — так комментарии физически оказываются
+    /// ниже фолда и раскрываются только по факту прокрутки вниз, а не сразу.
     private var endHeader: some View {
         VStack(spacing: 14) {
             Text("Конец · \(viewModel.currentChapter?.shortTitle ?? "главы")")
@@ -698,11 +764,26 @@ struct MangaReaderView: View {
         .glassEffect(.regular, in: Capsule())
     }
 
+    // Текущий номер страницы для бабла — в горизонтальном режиме это
+    // TabView-селекция (currentPage), в вертикальном — verticalPage,
+    // считаемый по центру экрана (см. verticalReader).
+    private var pageBubbleCurrent: Int { pageMode == 1 ? verticalPage : currentPage + 1 }
+
+    // Общее число страниц ТЕКУЩЕЙ главы для бабла — в вертикальном режиме
+    // берём из segments (там же, откуда verticalPage), а не из pages
+    // (которые заполняются только для горизонтального режима).
+    private var pageBubbleTotal: Int {
+        if pageMode == 1 {
+            return viewModel.segments.first(where: { $0.index == viewModel.currentIndex })?.pages.count ?? 0
+        }
+        return viewModel.pages.count
+    }
+
     // Бабл с номером страницы. Скрыт на "виртуальных" страницах конца главы/
     // перехода (currentPage >= pages.count) — иначе показывал бы, например,
     // "3/2" на экране "Конец главы", вместо того чтобы просто пропасть.
     private var pageBubble: some View {
-        Text("\(currentPage + 1)/\(viewModel.pages.count)")
+        Text("\(pageBubbleCurrent)/\(pageBubbleTotal)")
             .font(.footnote.weight(.semibold))
             .foregroundStyle(fg)
             .padding(.horizontal, 16).padding(.vertical, 8)

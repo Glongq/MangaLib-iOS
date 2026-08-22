@@ -4,10 +4,15 @@ import SwiftUI
 /// сортировка (Новые/Старые/Популярные), справа «Настройки». Ниже — поле ввода
 /// и дерево комментариев с голосованием/ответами/сворачиванием. Тема — под
 /// читалку (светлеет вместе с ней). Если комментарии отключены — светло-серое
-/// «Вы отключили комментарии» + «Настроить».
+/// «Комментарии отключены» + чип «Настройки».
 struct ChapterCommentsSheet: View {
     let chapterId: Int
     let postPage: Int
+    /// Номер главы для заголовка «Комментарии к главе N · Страница M» —
+    /// показывается только в неинлайн-панели (вертикальный режим, кнопка
+    /// "text.bubble" в bottomBar). В embedded-режиме заголовок не нужен —
+    /// глава и так ясна из контекста прокрутки.
+    var chapterNumber: String? = nil
     /// Закрытие при инлайн-показе (не sheet): вызывается «хваталкой» сверху
     /// (тап или свайп вниз). Панель встроена в читалку с тем же фоном, поэтому
     /// собственного модального dismiss у неё нет.
@@ -44,9 +49,7 @@ struct ChapterCommentsSheet: View {
                 VStack(spacing: 0) {
                     header
                     if disabledInReader {
-                        Text("Вы отключили комментарии")
-                            .font(.subheadline).foregroundStyle(palette.secondary)
-                            .frame(maxWidth: .infinity).padding(.vertical, 30)
+                        embeddedDisabledState
                     } else {
                         embeddedContent
                     }
@@ -106,22 +109,33 @@ struct ChapterCommentsSheet: View {
     // MARK: Шапка
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Menu {
-                Picker("Сортировка", selection: Binding(
-                    get: { vm.sort },
-                    set: { s in Task { await vm.changeSort(s) } }
-                )) {
-                    ForEach(CommentSort.allCases) { Text($0.title).tag($0) }
-                }
-            } label: {
-                pill(vm.sort.title, systemImage: "arrow.up.arrow.down")
+        VStack(alignment: .leading, spacing: 10) {
+            // Заголовок только у неинлайн-панели (вертикальный режим) — в
+            // embedded-режиме (продолжением страницы) он не нужен.
+            if let chapterNumber {
+                Text("Комментарии к главе \(chapterNumber) · Страница \(postPage)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.foreground)
+                    .lineLimit(1)
             }
 
-            Spacer()
+            HStack(spacing: 10) {
+                Menu {
+                    Picker("Сортировка", selection: Binding(
+                        get: { vm.sort },
+                        set: { s in Task { await vm.changeSort(s) } }
+                    )) {
+                        ForEach(CommentSort.allCases) { Text($0.title).tag($0) }
+                    }
+                } label: {
+                    pill(vm.sort.title, systemImage: "arrow.up.arrow.down")
+                }
 
-            Button { showSettings = true } label: {
-                pill("Настройки", systemImage: "slider.horizontal.3")
+                Spacer()
+
+                Button { showSettings = true } label: {
+                    pill("Настройки", systemImage: "slider.horizontal.3")
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -138,20 +152,38 @@ struct ChapterCommentsSheet: View {
             .background(palette.surface, in: Capsule())
     }
 
+    /// Чип-кнопка «Настройки», ведущая в CommentSettingsSheet — используется
+    /// в состоянии «отключено» вместо простой текстовой ссылки, чтобы явно
+    /// читалась как кнопка (тот же стиль pill(), что и в шапке).
+    private var disabledSettingsChip: some View {
+        Button { showSettings = true } label: {
+            pill("Настройки", systemImage: "slider.horizontal.3")
+        }
+    }
+
     private var disabledState: some View {
         VStack(spacing: 14) {
             Spacer()
-            Text("Вы отключили комментарии")
+            Text("Комментарии отключены")
                 .font(.subheadline)
                 .foregroundStyle(palette.secondary)
-            Button { showSettings = true } label: {
-                Text("Настроить")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.accent)
-            }
+            disabledSettingsChip
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Та же «отключено» надпись, но для встроенного режима (продолжением
+    /// страницы в читалке) — без Spacer'ов на всю высоту, просто блок в потоке.
+    private var embeddedDisabledState: some View {
+        VStack(spacing: 12) {
+            Text("Комментарии отключены")
+                .font(.subheadline)
+                .foregroundStyle(palette.secondary)
+            disabledSettingsChip
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 30)
     }
 
     // MARK: Контент
