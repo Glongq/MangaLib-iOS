@@ -412,7 +412,7 @@ struct MangaDetailView: View {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.textPrimary)
                     .frame(width: 48, height: 48)
                     .glassEffect(.regular, in: Circle())
             }
@@ -436,7 +436,7 @@ struct MangaDetailView: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.textPrimary)
                     .frame(width: 48, height: 48)
                     .glassEffect(.regular, in: Circle())
             }
@@ -591,19 +591,30 @@ struct MangaDetailView: View {
             return (heading: item.heading, value: value)
         }
 
-        return ScrollView(.horizontal) {
-            HStack(spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                    if index > 0 {
-                        Rectangle()
-                            .fill(Theme.separator)
-                            .frame(width: 1, height: Self.infoBlockHeight - 16)
+        return VStack(spacing: 0) {
+            // Верхняя полоска — та же линия, что и вертикальные разделители
+            // между блоками, только горизонтальная и во всю ширину контейнера
+            // (обычный Rectangle, а не Capsule/RoundedRectangle — прямые углы,
+            // чтобы её края ровно совпадали с краями остальных элементов
+            // карточки, как попросили).
+            Rectangle()
+                .fill(Theme.separator)
+                .frame(height: 1)
+
+            ScrollView(.horizontal) {
+                HStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                        if index > 0 {
+                            Rectangle()
+                                .fill(Theme.separator)
+                                .frame(width: 1, height: Self.infoBlockHeight - 16)
+                        }
+                        infoBlock(item.heading, value: item.value)
                     }
-                    infoBlock(item.heading, value: item.value)
                 }
             }
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
     }
 
     private var formatValue: String? {
@@ -620,9 +631,13 @@ struct MangaDetailView: View {
         // Без подложки (Capsule/фон убраны) и текст по центру — как в блоке
         // "Возраст/Категория/Разработчик" на странице приложения в App Store.
         // Разделяют блоки тонкие вертикальные линии (см. infoRow), а не фон.
+        // Размер текста увеличен в 1.35х от прежнего (caption2 ≈ 11 → 15,
+        // subheadline ≈ 15 → 17) — теперь фиксированный .system(size:), а не
+        // текстовые стили, чтобы точно контролировать масштаб. Значение
+        // (данные) чуть крупнее заголовка блока, как попросили.
         VStack(alignment: .center, spacing: 4) {
-            Text(heading).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1)
-            Text(value).font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary)
+            Text(heading).font(.system(size: 15)).foregroundStyle(Theme.textSecondary).lineLimit(1)
+            Text(value).font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
         }
         .multilineTextAlignment(.center)
