@@ -5,6 +5,7 @@ struct FilterView: View {
 
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var constants = ConstantsStore.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var filter: MangaFilter
     private let onApply: (MangaFilter) -> Void
 

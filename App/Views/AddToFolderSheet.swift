@@ -22,6 +22,7 @@ struct AddToFolderSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var store = BookmarksStore.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var newFolderName = ""
     @State private var pendingFolderId: String?
 

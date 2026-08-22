@@ -32,6 +32,11 @@ struct RootView: View {
     @ObservedObject private var downloads = DownloadsManager.shared
     // Запрос «открыть каталог по жанру/тегу» из карточки тайтла (см. CatalogNavigator).
     @ObservedObject private var catalogNav = CatalogNavigator.shared
+    // Тёмная/белая тема всего приложения (настройка в AppSettingsView),
+    // независима от темы читалки. Подписка здесь нужна для .preferredColorScheme
+    // ниже — без неё системные элементы (клавиатура, алерты и т.п.) не
+    // подхватили бы переключение темы.
+    @ObservedObject private var themeManager = ThemeManager.shared
 
     var body: some View {
         TabView(selection: $tab) {
@@ -90,7 +95,7 @@ struct RootView: View {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 0 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
         .tint(Theme.accent)
         .sheet(isPresented: $showLogin) { LoginView() }
         .sheet(isPresented: $showAccount) { AccountInfoView() }

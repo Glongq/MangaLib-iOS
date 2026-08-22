@@ -15,6 +15,7 @@ struct ProfileView: View {
 
     @ObservedObject private var auth = AuthSession.shared
     @ObservedObject private var site = SiteSession.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var profile: UserProfile?

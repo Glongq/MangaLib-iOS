@@ -20,6 +20,7 @@ struct DownloadTitleSheet: View {
     let readCount: Int
 
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var themeManager = ThemeManager.shared
 
     private var chaptersCount: Int { chapters.count }
 

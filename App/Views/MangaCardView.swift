@@ -7,6 +7,7 @@ import UIKit
 /// решает не сама карточка, а родительский ряд целиком, чтобы разные
 /// картинки и длинные названия не ломали сетку.
 struct MangaCardView: View {
+    @ObservedObject private var themeManager = ThemeManager.shared
     let item: MangaItem
     /// Ширина карточки в поинтах — ЯВНО считается один раз родительской
     /// сеткой (см. gridCardWidth ниже) и передаётся сюда, а не выводится

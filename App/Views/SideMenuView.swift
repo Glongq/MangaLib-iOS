@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Пункт-заглушка, на который ведут элементы меню.
 struct StubView: View {
+    @ObservedObject private var themeManager = ThemeManager.shared
     let title: String
     var body: some View {
         ZStack {
@@ -42,6 +43,8 @@ struct SideMenuView: View {
     // — см. LibSite.swift/SiteSession. @ObservedObject, чтобы строка сайта и
     // блок чекбоксов сразу перерисовывались при переключении.
     @ObservedObject private var siteSession = SiteSession.shared
+
+    @ObservedObject private var themeManager = ThemeManager.shared
 
     // История по-прежнему свой локальный sheet прямо здесь — быстрая кнопка
     // профиля её не касается, поэтому не нужно поднимать выше в RootView.

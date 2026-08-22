@@ -11,6 +11,7 @@ import SwiftUI
 /// viewModel.refresh() через `.refreshable`.
 struct NotificationsView: View {
     @StateObject private var viewModel = NotificationsViewModel()
+    @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
     // Схлопывание шапки при скролле — тот же механизм, что в Каталоге/

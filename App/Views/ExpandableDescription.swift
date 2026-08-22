@@ -13,6 +13,7 @@ struct ExpandableDescription: View {
     let text: String
     var collapsedLines: Int = 4
 
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var expanded = false
     @State private var truncatedHeight: CGFloat = 0
     @State private var fullHeight: CGFloat = 0

@@ -22,6 +22,8 @@ struct CollapsibleChips: View {
     let items: [Item]
     var maxCollapsedRows: Int = 2
 
+    @ObservedObject private var themeManager = ThemeManager.shared
+
     /// Старый вызов CollapsibleChips(items: [String]) продолжает работать
     /// без изменений на остальных экранах — просто оборачивает строки в
     /// Item с tint = nil (обычная раскраска).

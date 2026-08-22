@@ -5,6 +5,7 @@ import SwiftUI
 /// Настроек (см. AppSettingsView.debugAuthCard рядом). Убрать перед релизом.
 struct NetworkLogsView: View {
     @ObservedObject private var logger = NetworkLogger.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var showErrorsOnly = false
     @State private var expandedID: UUID?
     @State private var showCopiedToast = false
@@ -68,7 +69,7 @@ struct NetworkLogsView: View {
                 VStack {
                     Text("Скопировано")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.textPrimary)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .background(Theme.surfaceElevated, in: Capsule())

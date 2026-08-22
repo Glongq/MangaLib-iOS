@@ -4,6 +4,7 @@ import SwiftUI
 struct MangaCatalogView: View {
 
     @StateObject private var viewModel = CatalogViewModel()
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var showFilters = false
     @FocusState private var searchFocused: Bool
     /// Путь навигации — нужен, чтобы при тапе по жанру/тегу в уже открытой

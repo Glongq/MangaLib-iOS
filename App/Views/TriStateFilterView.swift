@@ -11,6 +11,7 @@ struct TriStateFilterView: View {
     @Binding var strict: Bool
 
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var search = ""
 
     init(title: String, options: [FilterOption], selection: Binding<TriStateSelection>, strict: Binding<Bool>) {

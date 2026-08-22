@@ -6,6 +6,7 @@ struct BookmarksView: View {
 
     @ObservedObject private var store = BookmarksStore.shared
     @ObservedObject private var catalogNav = CatalogNavigator.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var selectedFolderId: String? = nil   // nil = «Все»
     @State private var showNewFolder = false
     @State private var newFolderName = ""
@@ -78,7 +79,7 @@ struct BookmarksView: View {
             // тайтла, с моделью "отложенный выбор + Применить".
             .sheet(item: $editingBookmark) { bm in
                 AddToFolderSheet(slug: bm.slug, title: bm.title, coverURL: bm.coverURL, rating: bm.rating)
-                    .preferredColorScheme(.dark)
+                    .preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
             }
             // Полоска подкатегорий — снизу, над главной панелью. ВНУТРИ
             // NavigationStack (на корневом контенте), а не снаружи него: раньше

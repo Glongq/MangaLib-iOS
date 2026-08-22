@@ -33,6 +33,7 @@ struct AppSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var siteSession = SiteSession.shared
     @ObservedObject private var authSession = AuthSession.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var debugTokenInput = ""
 
     var body: some View {
@@ -52,6 +53,20 @@ struct AppSettingsView: View {
                     card {
                         infoRow(title: "Версия", value: AppVersionInfo.display)
                         infoRow(title: "Активный сайт", value: siteSession.activeSite.displayName, showDivider: false)
+                    }
+
+                    card {
+                        Toggle(isOn: $themeManager.isDarkTheme) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Тёмная тема").foregroundStyle(Theme.textPrimary)
+                                Text("Выключи для белой темы. Не влияет на тему читалки — она настраивается отдельно.")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                        .tint(Theme.accent)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 48)
                     }
 
                     card {

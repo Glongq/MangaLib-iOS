@@ -9,11 +9,16 @@ struct ReaderPalette {
     /// Фон под страницами: тёмный — чёрный, светлый — чуть серый (не чисто белый).
     var pageBackground: Color { isLight ? Color(white: 0.93) : .black }
     /// Фон меню (главы/настройки): светлый — белый.
-    var background: Color { isLight ? .white : Theme.background }
+    ///
+    /// Тёмная ветка берёт цвета из Theme.Dark (ФИКСИРОВАННАЯ тёмная палитра),
+    /// а не из Theme.xxx напрямую — тема читалки независима от белой/чёрной
+    /// темы всего приложения (см. Theme.swift/ThemeManager), поэтому не
+    /// должна меняться, если пользователь переключит тему приложения на белую.
+    var background: Color { isLight ? .white : Theme.Dark.background }
     var foreground: Color { isLight ? Color(white: 0.12) : .white }
-    var secondary: Color { isLight ? Color(white: 0.45) : Theme.textSecondary }
-    var surface: Color { isLight ? Color(white: 0.94) : Theme.surfaceElevated }
-    var separator: Color { isLight ? Color.black.opacity(0.10) : Theme.separator }
+    var secondary: Color { isLight ? Color(white: 0.45) : Theme.Dark.textSecondary }
+    var surface: Color { isLight ? Color(white: 0.94) : Theme.Dark.surfaceElevated }
+    var separator: Color { isLight ? Color.black.opacity(0.10) : Theme.Dark.separator }
 
     static func make(theme: Int, system: ColorScheme) -> ReaderPalette {
         switch theme {

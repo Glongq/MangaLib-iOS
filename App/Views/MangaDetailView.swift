@@ -7,6 +7,7 @@ struct MangaDetailView: View {
     @StateObject private var viewModel: MangaDetailViewModel
     @ObservedObject private var bookmarks = BookmarksStore.shared
     @ObservedObject private var downloads = DownloadsManager.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
 
     private let fallbackTitle: String

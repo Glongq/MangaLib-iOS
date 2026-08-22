@@ -9,6 +9,7 @@ struct CharacterView: View {
     let coverURL: URL?
 
     @StateObject private var vm: CharacterViewModel
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var showFilters = false
     @FocusState private var searchFocused: Bool
 

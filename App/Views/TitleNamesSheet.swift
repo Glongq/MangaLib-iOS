@@ -15,6 +15,7 @@ struct TitleNamesSheet: View {
     let otherNames: [String]
 
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var themeManager = ThemeManager.shared
 
     var body: some View {
         ScrollView {

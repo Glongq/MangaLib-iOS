@@ -8,6 +8,7 @@ struct MyCommentsView: View {
     let embedded: Bool
 
     @StateObject private var vm: MyCommentsViewModel
+    @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
 
     init(embedded: Bool = false, userId: Int? = nil) {
