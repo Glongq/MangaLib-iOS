@@ -1181,15 +1181,16 @@ struct MangaDetailView: View {
     // стеклянных капсул — как просили.
 
     private var tabBar: some View {
-        // Центрируем группу вкладок (было left-aligned + Spacer в конце).
-        HStack(spacing: 24) {
-            Spacer(minLength: 0)
+        // Три вкладки поровну делят ширину (было: HStack по естественной
+        // ширине текста + Spacer по краям) — при большом числе глав подпись
+        // "Главы 1234" раньше расширяла свою вкладку и весь центрированный
+        // блок съезжал в сторону; теперь у каждой вкладки фиксированная 1/3
+        // ширины, поэтому позиции вкладок не зависят от длины текста.
+        HStack(spacing: 0) {
             tabButton("О тайтле", .about)
             tabButton(displayChapters.isEmpty ? "Главы" : "Главы \(max(viewModel.totalChapters, displayChapters.count))", .chapters)
             tabButton("Комментарии", .comments)
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.separator).frame(height: 1)
         }
@@ -1201,6 +1202,9 @@ struct MangaDetailView: View {
             Text(title)
                 .font(.subheadline.weight(active ? .semibold : .regular))
                 .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
                 .padding(.bottom, 10)
                 .overlay(alignment: .bottom) {
                     // Подчёркивание рисуется ТОЛЬКО у активной вкладки, но с
@@ -1845,6 +1849,8 @@ struct MangaDetailView: View {
                     .background(Theme.surfaceElevated, in: Capsule())
             }
 
+            Spacer(minLength: 0)
+
             Button { showCommentSettings = true } label: {
                 Label("Настройки", systemImage: "slider.horizontal.3")
                     .font(.footnote.weight(.medium))
@@ -1853,8 +1859,6 @@ struct MangaDetailView: View {
                     .frame(minHeight: Theme.pillControlHeight)
                     .background(Theme.surfaceElevated, in: Capsule())
             }
-
-            Spacer(minLength: 0)
         }
     }
 

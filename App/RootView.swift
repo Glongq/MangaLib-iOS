@@ -50,7 +50,7 @@ struct RootView: View {
             Tab("Читают", systemImage: "book", value: 2) {
                 NavigationStack { StubView(title: "Читают") }
             }
-            Tab("Уведомления", systemImage: "bell", value: 3) {
+            Tab("Новое", systemImage: "bell", value: 3) {
                 NotificationsView()
             }
             Tab("Меню", systemImage: "line.3.horizontal", value: 4) {
