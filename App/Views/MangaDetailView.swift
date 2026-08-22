@@ -1521,10 +1521,16 @@ struct MangaDetailView: View {
             HStack(spacing: 10) {
                 // «Дерево»: вертикальная линия в фиксированной зоне-отступе, чтобы
                 // имя команды вставало под названием главы, а края строк совпадали.
+                // Зона остаётся 26pt (чтобы не сдвинуть аватар/имя), но сама
+                // линия прижата к leading с отступом 9 — тогда её центр (14+10=24)
+                // совпадает с центром глазка в chapterHeaderRow (тоже 14+10,
+                // т.к. у него .frame(width: 20, ...)); раньше линия центрировалась
+                // в зоне 26 и уезжала на 3pt правее глазка.
                 RoundedRectangle(cornerRadius: 1)
                     .fill(Theme.separator)
                     .frame(width: 2, height: 20)
-                    .frame(width: 26, alignment: .center)
+                    .padding(.leading, 9)
+                    .frame(width: 26, alignment: .leading)
 
                 RemoteImage(url: branch.teamAvatarURL) { img in
                     img.resizable().scaledToFill()
@@ -1850,7 +1856,11 @@ struct MangaDetailView: View {
                     .padding(.horizontal, 4)
                 }
 
-                HStack(alignment: .bottom, spacing: 8) {
+                // Высота и вертикальное центрирование строки — как у чипов
+                // «Сортировать»/«К главе» (см. chipLabel, minHeight 34) на
+                // вкладке глав того же тайтла: центр по HStack + стрелка
+                // зажата в те же 34pt, а не «плавает» по своей intrinsic-высоте.
+                HStack(alignment: .center, spacing: 8) {
                     TextField("Написать комментарий...", text: $commentDraft, axis: .vertical)
                         .lineLimit(1...4)
                         .foregroundStyle(Theme.textPrimary)
@@ -1873,6 +1883,7 @@ struct MangaDetailView: View {
                             .font(.system(size: 32))
                             .foregroundStyle(trimmed.isEmpty ? Theme.textSecondary : Theme.accent)
                     }
+                    .frame(width: 34, height: 34)
                     .disabled(trimmed.isEmpty || viewModel.isPostingComment)
                 }
             }

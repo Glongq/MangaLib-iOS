@@ -722,6 +722,9 @@ struct ChapterListSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var descending = true   // true = новые сверху
+    /// Фильтр по команде перевода (id ChapterTeam); nil — показываем все главы.
+    /// Доступен только когда у тайтла ≥2 переводчиков (см. allTeams/header).
+    @State private var selectedTeamId: Int?
 
     // Тема читалки — меню глав тоже светлеет при светлой теме.
     @AppStorage("reader_theme") private var readerTheme = 0
@@ -734,8 +737,31 @@ struct ChapterListSheet: View {
         var id: Int { chapter.id }
     }
 
+    /// Уникальные команды перевода по всем главам — если их ≥2, в шапке вместо
+    /// прямого тоггла порядка появляется меню (выбор переводчика + сортировка).
+    private var allTeams: [ChapterTeam] {
+        var seen = Set<Int>()
+        var result: [ChapterTeam] = []
+        for chapter in chapters {
+            for branch in chapter.branches ?? [] {
+                for team in branch.teams ?? [] where !seen.contains(team.id) {
+                    seen.insert(team.id)
+                    result.append(team)
+                }
+            }
+        }
+        return result
+    }
+
     private var ordered: [IndexedChapter] {
-        let indexed = chapters.enumerated().map { IndexedChapter(index: $0.offset, chapter: $0.element) }
+        var indexed = chapters.enumerated().map { IndexedChapter(index: $0.offset, chapter: $0.element) }
+        if let selectedTeamId {
+            indexed = indexed.filter { item in
+                (item.chapter.branches ?? []).contains { branch in
+                    (branch.teams ?? []).contains { $0.id == selectedTeamId }
+                }
+            }
+        }
         return descending ? Array(indexed.reversed()) : indexed
     }
 
@@ -772,14 +798,7 @@ struct ChapterListSheet: View {
             Text("Главы").font(.headline).foregroundStyle(palette.foreground)
                 .frame(maxWidth: .infinity, alignment: .center)
             HStack {
-                Button {
-                    withAnimation { descending.toggle() }
-                } label: {
-                    Image(systemName: "arrow.up.arrow.down").font(.subheadline.weight(.semibold))
-                        .foregroundStyle(palette.foreground)
-                        .frame(width: 40, height: 40)
-                        .glassEffect(.regular.interactive(), in: Circle())
-                }
+                sortControl
                 Spacer()
                 Button { dismiss() } label: {
                     Image(systemName: "xmark").font(.headline).foregroundStyle(palette.foreground)
@@ -789,6 +808,74 @@ struct ChapterListSheet: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    /// Кнопка сортировки в шапке. Если у тайтла ≥2 переводчиков — превращается
+    /// в меню с двумя разделёнными группами: выбор переводчика (фильтр списка)
+    /// и порядок (по убыванию/по возрастанию), как попросили. При 1 переводчике
+    /// (или без данных о командах) — как раньше, прямой тоггл по тапу.
+    @ViewBuilder
+    private var sortControl: some View {
+        if allTeams.count >= 2 {
+            Menu {
+                Section("Переводчик") {
+                    Button {
+                        selectedTeamId = nil
+                    } label: {
+                        if selectedTeamId == nil {
+                            Label("Все переводчики", systemImage: "checkmark")
+                        } else {
+                            Text("Все переводчики")
+                        }
+                    }
+                    ForEach(allTeams) { team in
+                        Button {
+                            selectedTeamId = team.id
+                        } label: {
+                            if selectedTeamId == team.id {
+                                Label(team.name, systemImage: "checkmark")
+                            } else {
+                                Text(team.name)
+                            }
+                        }
+                    }
+                }
+                Section {
+                    Button {
+                        withAnimation { descending = false }
+                    } label: {
+                        if !descending {
+                            Label("По возрастанию", systemImage: "checkmark")
+                        } else {
+                            Text("По возрастанию")
+                        }
+                    }
+                    Button {
+                        withAnimation { descending = true }
+                    } label: {
+                        if descending {
+                            Label("По убыванию", systemImage: "checkmark")
+                        } else {
+                            Text("По убыванию")
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down").font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.foreground)
+                    .frame(width: 40, height: 40)
+                    .glassEffect(.regular.interactive(), in: Circle())
+            }
+        } else {
+            Button {
+                withAnimation { descending.toggle() }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down").font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.foreground)
+                    .frame(width: 40, height: 40)
+                    .glassEffect(.regular.interactive(), in: Circle())
+            }
+        }
     }
 
     // Формат заголовка строки по референсу: "Том{X} Гл.{Y}" (без пробела
