@@ -210,19 +210,24 @@ struct NotificationsView: View {
             RemoteImage(url: item.media?.cover?.bestURL) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
-                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.surfaceElevated)
+                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surfaceElevated)
             } failure: {
-                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.surfaceElevated)
+                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surfaceElevated)
                     .overlay(Image(systemName: "bell.fill").foregroundStyle(Theme.textSecondary))
             }
-            .frame(width: 44, height: 60)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            // Тот же размер обложки, что и в Истории (60×84) — единый вид карточек списка.
+            .frame(width: 60, height: 84)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             VStack(alignment: .leading, spacing: 4) {
+                // maxWidth: .infinity — иначе Text меряет себя по идеальной
+                // ширине текста, а не по доступной ширине ряда, и справа
+                // остаётся пустая "мёртвая зона" вместо переноса строк.
                 Text(item.displayText)
                     .font(.subheadline)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Команда(ы) перевода — "Армия 100 богинь", "ImageBoard Team,
                 // ONIMAI.RU" и т.п. (см. NotificationItem.teamNames) —
@@ -238,8 +243,6 @@ struct NotificationsView: View {
                     .font(.caption2)
                     .foregroundStyle(Theme.textSecondary)
             }
-
-            Spacer(minLength: 0)
         }
         .padding(12)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))

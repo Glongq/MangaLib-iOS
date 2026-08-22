@@ -112,10 +112,15 @@ struct MyCommentsView: View {
                 } failure: {
                     ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
                 }
-                .frame(width: 46, height: 62)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                // Тот же размер обложки, что и в Истории (60×84) — единый вид карточек списка.
+                .frame(width: 60, height: 84)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
 
+            // maxWidth: .infinity — без этого VStack (и Text внутри) меряет
+            // себя по идеальной ширине контента, а не по доступной ширине
+            // ряда: HStack тогда не распределяет лишнее место, и справа
+            // остаётся пустая "мёртвая зона" вместо переноса строк текста.
             VStack(alignment: .leading, spacing: 4) {
                 if let title = c.title, !title.isEmpty {
                     Text(title)
@@ -131,7 +136,9 @@ struct MyCommentsView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(4)
+                    .multilineTextAlignment(.leading)
 
+                // Значки и дата — отдельной строкой под текстом.
                 HStack(spacing: 12) {
                     if let d = c.createdAt {
                         Text(d.relativeRussianString)
@@ -143,6 +150,7 @@ struct MyCommentsView: View {
                         .foregroundStyle(Theme.textSecondary)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
