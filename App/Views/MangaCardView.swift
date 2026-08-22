@@ -2,9 +2,10 @@ import SwiftUI
 import UIKit
 
 /// Карточка тайтла в сетке каталога.
-/// Строгая структура: обложка с фиксированным соотношением 2:3 (как в карточке
-/// тайтла на детальном экране) + заголовок в 2 строки, чтобы разные картинки
-/// и длинные названия не ломали сетку.
+/// Обложка с фиксированным соотношением 2:3 (как в карточке тайтла на
+/// детальном экране) + заголовок в 1 или 2 строки (см. titleLineLimit) —
+/// решает не сама карточка, а родительский ряд целиком, чтобы разные
+/// картинки и длинные названия не ломали сетку.
 struct MangaCardView: View {
     let item: MangaItem
     /// Ширина карточки в поинтах — ЯВНО считается один раз родительской
@@ -19,6 +20,23 @@ struct MangaCardView: View {
     /// и текст под обложками сдвигался. Теперь и сетка (GridItem.fixed), и
     /// каждая карточка получают ОДНО И ТО ЖЕ число — расхождению неоткуда взяться.
     let width: CGFloat
+    /// Сколько строк места резервировать под название — считается РОДИТЕЛЬСКОЙ
+    /// сеткой один раз на весь ряд (см. MangaCatalogView.grid), а не самой
+    /// карточкой: если хотя бы у одного соседа в ряду название в 2 строки —
+    /// весь ряд резервирует 2 строки (жанр у всех съезжает на одну и ту же
+    /// позицию, короткие названия просто оставляют пустую строку сверху от
+    /// жанра). Если у ВСЕХ карточек ряда название в 1 строку — резерв 1
+    /// строка, жанр прижат вплотную без пустого зазора.
+    let titleLineLimit: Int
+    /// Дефолт 2 — прежнее поведение для мест, которым не важна ужимка ряда
+    /// по факту (см. CharacterView.grid: там сетка маленькая, отдельная
+    /// row-логика ей не нужна). Каталог (MangaCatalogView) передаёт значение
+    /// явно, посчитанное на весь ряд.
+    init(item: MangaItem, width: CGFloat, titleLineLimit: Int = 2) {
+        self.item = item
+        self.width = width
+        self.titleLineLimit = titleLineLimit
+    }
 
     // Для бэйджа статуса закладки (см. statusBadge) — реактивно, чтобы
     // бэйдж сразу появлялся/менялся при добавлении/перемещении в закладках,
@@ -27,6 +45,29 @@ struct MangaCardView: View {
 
     private var titleFont: Font { .caption.weight(.medium) }
     private var typeFont: Font { .caption2 }
+    private static var titleUIFont: UIFont {
+        let base = UIFont.preferredFont(forTextStyle: .caption1)
+        return UIFont.systemFont(ofSize: base.pointSize, weight: .medium)
+    }
+
+    /// Сколько строк реально займёт название при данной ширине карточки —
+    /// точный расчёт через UIKit (boundingRect), а не догадка по длине
+    /// строки: шрифт и перенос слов зависят от конкретных символов, только
+    /// система знает точную раскладку. Используется родительской сеткой,
+    /// чтобы решить, нужно ли ряду резервировать 2 строки под название
+    /// (см. titleLineLimit выше).
+    static func titleLineCount(_ text: String, width: CGFloat) -> Int {
+        guard width > 0 else { return 1 }
+        let constraint = CGSize(width: width, height: .greatestFiniteMagnitude)
+        let box = (text as NSString).boundingRect(
+            with: constraint,
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: titleUIFont],
+            context: nil
+        )
+        let lines = Int((box.height / titleUIFont.lineHeight).rounded(.up))
+        return min(max(lines, 1), 2)
+    }
 
     /// Ширина одной карточки в сетке из `columns` равных колонок: общая
     /// ширина минус горизонтальные отступы контейнера с обеих сторон и
@@ -54,16 +95,17 @@ struct MangaCardView: View {
                 .overlay(alignment: .topLeading) { statusBadge }
                 .overlay(alignment: .topTrailing) { ratingBadge }
 
-            // Название — СТРОГО 2 строки места всегда, даже если реальный
-            // текст умещается в одну: reservesSpace резервирует высоту под
-            // 2 строки независимо от фактической длины названия. Иначе
-            // однострочные названия делают свою карточку короче соседних —
-            // и не только тип тайтла под ней, а вся карточка/ряд целиком
-            // "плывёт" относительно карточек с двухстрочным названием.
+            // Название — резерв в titleLineLimit строк (1 или 2, решает
+            // ряд целиком, см. комментарий у titleLineLimit): если у соседа
+            // в ряду название длиннее — эта карточка тоже резервирует 2
+            // строки (даже если своё название короче, реальный текст
+            // остаётся сверху, а жанр съезжает на позицию под резервом).
+            // Если весь ряд с короткими названиями — резерв 1 строка, жанр
+            // без зазора.
             Text(item.displayTitle)
                 .font(titleFont)
                 .foregroundStyle(Theme.textPrimary)
-                .lineLimit(2, reservesSpace: true)
+                .lineLimit(titleLineLimit, reservesSpace: true)
                 .multilineTextAlignment(.leading)
                 .frame(width: width, alignment: .topLeading)
 

@@ -242,12 +242,11 @@ struct MangaCatalogView: View {
     // Сначала меряем сетку (GeometryReader — один раз, на весь экран, а НЕ
     // на каждую карточку по отдельности), считаем ширину карточки ОДНИМ
     // числом (MangaCardView.gridCardWidth) и уже ЭТИМ числом одновременно
-    // задаём и колонки (GridItem.fixed), и саму карточку (MangaCardView.width) —
-    // сначала сетка, потом в неё кладём контент, а не наоборот. Раньше
-    // карточки сами угадывали свою ширину из .flexible()-колонки и
-    // независимо от этого считали высоту через .aspectRatio — два отдельных
-    // расчёта иногда расходились на пиксель между соседними карточками,
-    // сетка выглядела "поплывшей" и подписи под обложками съезжали.
+    // кормим и разбивку на ряды (rows ниже), и саму карточку
+    // (MangaCardView.width) — сначала сетка, потом в неё кладём контент, а
+    // не наоборот. Ряды — явные HStack по 3 карточки (не LazyVGrid с плоским
+    // ForEach): чтобы решить, сколько строк резервировать под название, надо
+    // видеть все карточки ряда сразу (см. комментарий у rows ниже).
     private var grid: some View {
         GeometryReader { proxy in
             let cardWidth = MangaCardView.gridCardWidth(
@@ -256,16 +255,31 @@ struct MangaCatalogView: View {
                 spacing: gridSpacing,
                 containerPadding: gridHorizontalPadding
             )
-            let columns = Array(repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing), count: gridColumnsCount)
+            // Ряды считаем явно (а не LazyVGrid с плоским ForEach): сколько
+            // строк резервировать под название — решение НА ВЕСЬ РЯД (если
+            // хоть у одной карточки название в 2 строки, весь ряд резервирует
+            // 2, иначе все карточки ряда жмутся к 1 строке без зазора перед
+            // жанром), а для этого нужно видеть все 3 карточки ряда сразу.
+            let rows = stride(from: 0, to: viewModel.results.count, by: gridColumnsCount).map { start in
+                Array(viewModel.results[start..<min(start + gridColumnsCount, viewModel.results.count)])
+            }
 
             ScrollView {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                    ForEach(viewModel.results) { item in
-                        NavigationLink(value: item) {
-                            MangaCardView(item: item, width: cardWidth)
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, rowItems in
+                        let rowTitleLineLimit = rowItems.contains {
+                            MangaCardView.titleLineCount($0.displayTitle, width: cardWidth) > 1
+                        } ? 2 : 1
+
+                        HStack(alignment: .top, spacing: gridSpacing) {
+                            ForEach(rowItems) { item in
+                                NavigationLink(value: item) {
+                                    MangaCardView(item: item, width: cardWidth, titleLineLimit: rowTitleLineLimit)
+                                }
+                                .buttonStyle(.plain)
+                                .onAppear { viewModel.loadMoreIfNeeded(currentItem: item) }
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .onAppear { viewModel.loadMoreIfNeeded(currentItem: item) }
                     }
                 }
                 .padding(.horizontal, gridHorizontalPadding)
