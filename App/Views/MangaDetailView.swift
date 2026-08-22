@@ -1653,9 +1653,15 @@ struct MangaDetailView: View {
         return isDownloaded(chapter) ? Theme.textPrimary : Theme.textSecondary
     }
 
-    /// Глазок слева: отметить прочитанными все главы ДО этой включительно
-    /// (прогресс чтения). Тайтл при этом добавляется в «Читаю», если его ещё
-    /// нет в закладках (иначе прогресс некуда писать).
+    /// Глазок/закладка слева: отметить прочитанными все главы ДО этой
+    /// включительно (прогресс чтения). Тайтл при этом добавляется в «Читаю»,
+    /// если его ещё нет в закладках (иначе прогресс некуда писать).
+    ///
+    /// `force: true` в setProgress — повторный тап на уже другую главу
+    /// ПЕРЕСТАВЛЯЕТ закладку ровно на неё (в т.ч. назад: например, была
+    /// глава 170, тапнули 166 — прогресс становится 166, и главы 167-170
+    /// в списке возвращаются в непрочитанное состояние), а не только
+    /// увеличивает счётчик, как это происходит при обычном чтении подряд.
     private func markReadUpTo(_ chapter: ChapterItem) {
         if !bookmarks.isBookmarked(slug: viewModel.slug) {
             bookmarks.add(
@@ -1668,8 +1674,22 @@ struct MangaDetailView: View {
         bookmarks.setProgress(
             slug: viewModel.slug,
             chapterNumber: chapter.number, chapterVolume: chapter.volume,
-            readCount: pos, total: displayChapters.count
+            readCount: pos, total: displayChapters.count, force: true
         )
+
+        // То же самое реальное подтверждение на сервере, что и при обычном
+        // чтении главы (см. ReaderViewModel.recordProgress) — POST
+        // .../view для выбранной главы, чтобы "продолжить чтение"
+        // на сайте/в других клиентах тоже указывало на неё.
+        if let mangaId = viewModel.detail?.id {
+            Task {
+                do {
+                    try await MangaNetworkService.shared.markChapterViewed(mangaId: mangaId, chapterId: chapter.id)
+                } catch {
+                    print("[MangaDetailView] не удалось отметить главу просмотренной на сервере: \(error)")
+                }
+            }
+        }
     }
 
     /// Контрол скачивания главы справа: серый значок «скачать» → кружок

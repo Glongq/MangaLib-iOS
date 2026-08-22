@@ -439,11 +439,18 @@ final class BookmarksStore: ObservableObject {
 
     func readingProgress(forSlug slug: String) -> ReadingProgress? { progress[slug] }
 
-    func setProgress(slug: String, chapterNumber: String, chapterVolume: String, readCount: Int, total: Int) {
+    /// `force: true` — выставляет readCount РОВНО в переданное значение (можно и
+    /// уменьшить), для явного выбора пользователем ("отметить прочитанным до
+    /// главы N" по тапу на закладку в списке глав — см. MangaDetailView.markReadUpTo).
+    /// `force: false` (по умолчанию) — как раньше, только увеличивает
+    /// (max с текущим значением): это путь автоматического прогресса при
+    /// самом чтении (см. ReaderViewModel.recordProgress) — открыть уже
+    /// прочитанную старую главу повторно не должно откатывать прогресс назад.
+    func setProgress(slug: String, chapterNumber: String, chapterVolume: String, readCount: Int, total: Int, force: Bool = false) {
         progress[slug] = ReadingProgress(
             lastChapterNumber: chapterNumber,
             lastChapterVolume: chapterVolume,
-            readCount: max(readCount, progress[slug]?.readCount ?? 0),
+            readCount: force ? readCount : max(readCount, progress[slug]?.readCount ?? 0),
             totalChapters: total,
             lastReadAt: Date()
         )
