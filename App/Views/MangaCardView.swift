@@ -38,22 +38,6 @@ struct MangaCardView: View {
         return max(0, floor(available / CGFloat(columns)))
     }
 
-    // ИСПРАВЛЕНО: `lineLimit(_:reservesSpace:)` в теории резервирует
-    // одинаковую высоту под 2/1 строки на всех карточках, но по факту всё
-    // равно "гуляло" по факту рендера (близко к системному округлению
-    // строк/шрифта) — визуально сетка продолжала казаться неровной. Вместо
-    // резервирования через lineLimit теперь у блока названия и у блока типа
-    // явный ЧИСЛОВОЙ .frame(height:) в поинтах, посчитанный один раз из
-    // реальной высоты строки шрифта (UIFont.lineHeight) — это уже не
-    // эвристика и не резервирование, а буквально фиксированный прямоугольник
-    // одного и того же размера на КАЖДОЙ карточке, вне зависимости от текста.
-    private var titleBlockHeight: CGFloat {
-        ceil(UIFont.preferredFont(forTextStyle: .caption1).lineHeight * 2)
-    }
-    private var typeBlockHeight: CGFloat {
-        ceil(UIFont.preferredFont(forTextStyle: .caption2).lineHeight)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             cover
@@ -67,26 +51,33 @@ struct MangaCardView: View {
                 .overlay(alignment: .topLeading) { statusBadge }
                 .overlay(alignment: .topTrailing) { ratingBadge }
 
-            // Название — фиксированный прямоугольник высотой ровно в 2
-            // строки шрифта, на ВСЕХ карточках одинаковый (см. комментарий выше).
+            // Название — максимум 2 строки, но БЕЗ фиксированной высоты: в
+            // одну строку название занимает одну строку, в две — две, а тип
+            // тайтла ниже всегда вплотную под последней реальной строкой
+            // названия (а не отдельным "3-м слотом" с пустым местом над ним,
+            // как было раньше при жёстком резерве под 2 строки). На
+            // выравнивание сетки это не влияет: обложки у всех карточек
+            // всё равно одной высоты и идут первыми в VStack — если у
+            // соседних карточек в ряду название разной длины (1 и 2 строки),
+            // просто сами карточки/ряд станут чуть выше по самой длинной, а
+            // обложки останутся строго на одном уровне сверху.
             Text(item.displayTitle)
                 .font(titleFont)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
                 .frame(width: width, alignment: .leading)
-                .frame(height: titleBlockHeight, alignment: .top)
 
-            // Тип тайтла под названием — фиксированный прямоугольник высотой
-            // ровно в 1 строку шрифта на ВСЕХ карточках, просто невидимый,
-            // если типа нет (место всё равно остаётся).
-            Text(typeLabel ?? " ")
-                .font(typeFont)
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
-                .frame(width: width, alignment: .leading)
-                .frame(height: typeBlockHeight, alignment: .top)
-                .opacity(typeLabel == nil ? 0 : 1)
+            // Тип тайтла — сразу под названием, только если он реально есть
+            // (раньше строка держалась всегда, невидимой, ради фиксированной
+            // высоты — это больше не нужно).
+            if let typeLabel {
+                Text(typeLabel)
+                    .font(typeFont)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .frame(width: width, alignment: .leading)
+            }
         }
         .frame(width: width, alignment: .top)
     }
