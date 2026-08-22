@@ -249,12 +249,16 @@ struct MangaReaderView: View {
             ChapterListSheet(
                 chapters: viewModel.chapters,
                 currentIndex: viewModel.currentIndex,
+                currentBranchId: viewModel.preferredBranchId,
                 onSelect: { index in
                     showChapters = false
                     Task {
                         if pageMode == 1 { await viewModel.goToVertical(index: index) }
                         else { await viewModel.goTo(index: index) }
                     }
+                },
+                onSelectTranslator: { branchId in
+                    Task { await viewModel.setPreferredBranch(branchId, verticalMode: pageMode == 1) }
                 }
             )
         }
@@ -718,7 +722,16 @@ struct MangaReaderView: View {
 struct ChapterListSheet: View {
     let chapters: [ChapterItem]
     let currentIndex: Int
+    /// branch_id, реально применяемый сейчас читалкой (ReaderViewModel.
+    /// preferredBranchId) — только чтобы при открытии меню сразу отметить
+    /// галочкой уже выбранного переводчика, а не сбрасывать на "Все".
+    let currentBranchId: Int?
     let onSelect: (Int) -> Void
+    /// Вызывается при смене переводчика с УЖЕ найденным branch_id (nil —
+    /// "Все переводчики"/сброс на дефолтный) — родитель применяет его к
+    /// ReaderViewModel, реально переключая, что загружается (см.
+    /// MangaReaderView.setPreferredBranch).
+    let onSelectTranslator: (Int?) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var descending = true   // true = новые сверху
@@ -730,6 +743,27 @@ struct ChapterListSheet: View {
     @AppStorage("reader_theme") private var readerTheme = 0
     @Environment(\.colorScheme) private var systemColorScheme
     private var palette: ReaderPalette { .make(theme: readerTheme, system: systemColorScheme) }
+
+    init(chapters: [ChapterItem], currentIndex: Int, currentBranchId: Int?,
+         onSelect: @escaping (Int) -> Void, onSelectTranslator: @escaping (Int?) -> Void) {
+        self.chapters = chapters
+        self.currentIndex = currentIndex
+        self.currentBranchId = currentBranchId
+        self.onSelect = onSelect
+        self.onSelectTranslator = onSelectTranslator
+        // Предвыбираем в меню ту команду, что уже реально применена в
+        // читалке, чтобы галочка совпадала с тем, что сейчас читается.
+        var initialTeamId: Int?
+        if let currentBranchId {
+            outer: for chapter in chapters {
+                for branch in chapter.branches ?? [] where branch.branchId == currentBranchId {
+                    initialTeamId = branch.teams?.first?.id
+                    break outer
+                }
+            }
+        }
+        _selectedTeamId = State(initialValue: initialTeamId)
+    }
 
     private struct IndexedChapter: Identifiable {
         let index: Int
@@ -751,6 +785,18 @@ struct ChapterListSheet: View {
             }
         }
         return result
+    }
+
+    /// branch_id команды перевода: branch_id стабилен для команды по всему
+    /// тайтлу (см. ReaderViewModel.preferredBranchId), поэтому достаточно
+    /// найти его у ЛЮБОЙ главы, где встречается эта команда.
+    private func branchId(forTeam teamId: Int) -> Int? {
+        for chapter in chapters {
+            for branch in chapter.branches ?? [] where (branch.teams ?? []).contains(where: { $0.id == teamId }) {
+                return branch.branchId
+            }
+        }
+        return nil
     }
 
     private var ordered: [IndexedChapter] {
@@ -784,11 +830,19 @@ struct ChapterListSheet: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                     .padding(.bottom, 20)
+                    .animation(.easeInOut(duration: 0.2), value: descending)
+                    .animation(.easeInOut(duration: 0.2), value: selectedTeamId)
                 }
                 .scrollIndicators(.hidden)
             }
         }
         .preferredColorScheme(palette.isLight ? .light : .dark)
+        // Смена переводчика в меню — это не просто фильтр списка: реально
+        // переключает branch_id, с которым читалка грузит главы (см.
+        // MangaReaderView.onSelectTranslator → ReaderViewModel.setPreferredBranch).
+        .onChange(of: selectedTeamId) { _, newValue in
+            onSelectTranslator(newValue.flatMap { branchId(forTeam: $0) })
+        }
     }
 
     // Шапка как в настройках читалки: заголовок по центру, стеклянные кнопки.
@@ -811,55 +865,29 @@ struct ChapterListSheet: View {
     }
 
     /// Кнопка сортировки в шапке. Если у тайтла ≥2 переводчиков — превращается
-    /// в меню с двумя разделёнными группами: выбор переводчика (фильтр списка)
-    /// и порядок (по убыванию/по возрастанию), как попросили. При 1 переводчике
-    /// (или без данных о командах) — как раньше, прямой тоггл по тапу.
+    /// в меню с двумя группами (Picker + .inline, ровно как меню "Сортировка"
+    /// в каталоге — см. MangaCatalogView.controlsBar): выбор переводчика
+    /// (реально переключает branch_id, а не только фильтрует список — см.
+    /// onChange(of: selectedTeamId) выше) и порядок (по убыванию/возрастанию).
+    /// При 1 переводчике (или без данных о командах) — как раньше, прямой
+    /// тоггл по тапу.
     @ViewBuilder
     private var sortControl: some View {
         if allTeams.count >= 2 {
             Menu {
-                Section("Переводчик") {
-                    Button {
-                        selectedTeamId = nil
-                    } label: {
-                        if selectedTeamId == nil {
-                            Label("Все переводчики", systemImage: "checkmark")
-                        } else {
-                            Text("Все переводчики")
-                        }
-                    }
+                Picker("Переводчик", selection: $selectedTeamId) {
+                    Text("Все переводчики").tag(Int?.none)
                     ForEach(allTeams) { team in
-                        Button {
-                            selectedTeamId = team.id
-                        } label: {
-                            if selectedTeamId == team.id {
-                                Label(team.name, systemImage: "checkmark")
-                            } else {
-                                Text(team.name)
-                            }
-                        }
+                        Text(team.name).tag(Int?(team.id))
                     }
                 }
-                Section {
-                    Button {
-                        withAnimation { descending = false }
-                    } label: {
-                        if !descending {
-                            Label("По возрастанию", systemImage: "checkmark")
-                        } else {
-                            Text("По возрастанию")
-                        }
-                    }
-                    Button {
-                        withAnimation { descending = true }
-                    } label: {
-                        if descending {
-                            Label("По убыванию", systemImage: "checkmark")
-                        } else {
-                            Text("По убыванию")
-                        }
-                    }
+                .pickerStyle(.inline)
+                Divider()
+                Picker("Сортировка", selection: $descending) {
+                    Label("По возрастанию", systemImage: "arrow.up").tag(false)
+                    Label("По убыванию", systemImage: "arrow.down").tag(true)
                 }
+                .pickerStyle(.inline)
             } label: {
                 Image(systemName: "arrow.up.arrow.down").font(.subheadline.weight(.semibold))
                     .foregroundStyle(palette.foreground)

@@ -31,8 +31,10 @@ final class ReaderViewModel: ObservableObject {
     private let service: MangaNetworkService
     /// Выбранная ветка перевода (команда). branch_id стабилен для команды по
     /// всему тайтлу, поэтому применяется ко всем главам. nil — брать первую
-    /// ветку главы (primaryBranchId), как раньше.
-    private let preferredBranchId: Int?
+    /// ветку главы (primaryBranchId), как раньше. @Published, а не let —
+    /// переводчика можно сменить прямо в читалке (см. setPreferredBranch),
+    /// и меню списка глав читает текущее значение, чтобы отметить выбор.
+    @Published private(set) var preferredBranchId: Int?
     /// Сайт тайтла (site_id) — страницы главы у тайтла с другого сайта надо
     /// запрашивать с его Site-Id, иначе 404 (см. MangaDetailViewModel.siteId).
     private let siteId: Int?
@@ -121,6 +123,20 @@ final class ReaderViewModel: ObservableObject {
         guard chapters.indices.contains(index), index != currentIndex else { return }
         currentIndex = index
         await load()
+    }
+
+    /// Сменить переводчика (ветку) прямо во время чтения: обновляет branch_id,
+    /// применяемый ко ВСЕМ главам, и перезагружает уже открытую главу/сегмент
+    /// с новым переводом — иначе выбор в меню списка глав только фильтровал бы
+    /// список, но не менял то, что реально загружается.
+    func setPreferredBranch(_ branchId: Int?, verticalMode: Bool) async {
+        guard branchId != preferredBranchId else { return }
+        preferredBranchId = branchId
+        if verticalMode {
+            await loadSegments(from: currentIndex)
+        } else {
+            await load()
+        }
     }
 
     // MARK: - Вертикальный (непрерывный) режим
