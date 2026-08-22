@@ -28,7 +28,7 @@ struct AddToFolderSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.background.opacity(0.72).ignoresSafeArea()
+                Theme.background.ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 8) {
@@ -56,7 +56,7 @@ struct AddToFolderSheet: View {
             }
             .navigationTitle("Добавить в")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarBackground(Theme.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -69,7 +69,7 @@ struct AddToFolderSheet: View {
         .tint(Theme.accent)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(.ultraThinMaterial)
+        .presentationBackground(Theme.background)
         .onAppear {
             // Стартовое состояние — реальная папка тайтла на момент открытия
             // (или nil, если тайтла ещё нет в закладках).

@@ -19,8 +19,8 @@ struct FilterView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Полупрозрачный фон — сквозь него просвечивает материал presentationBackground.
-                Theme.background.opacity(0.72).ignoresSafeArea()
+                // Сплошной фон — без стеклянного просвечивания.
+                Theme.background.ignoresSafeArea()
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
@@ -43,7 +43,7 @@ struct FilterView: View {
             }
             .navigationTitle("Фильтры")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarBackground(Theme.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -56,7 +56,7 @@ struct FilterView: View {
         }
         .tint(Theme.accent)
         .presentationDragIndicator(.visible)
-        .presentationBackground(.ultraThinMaterial)
+        .presentationBackground(Theme.background)
     }
 
     // MARK: 1. Диапазоны
@@ -120,6 +120,7 @@ struct FilterView: View {
             }
             .buttonStyle(.plain)
         }
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func selectRow(title: String, selection: TriStateSelection) -> some View {
@@ -214,8 +215,8 @@ struct FilterView: View {
 
     // MARK: Подвал
 
-    // Одна общая стеклянная капсула на весь подвал; "Применить" выделяется
-    // акцентной заливкой поверх неё, а не отдельным стеклом.
+    // Одна общая сплошная капсула на весь подвал; "Применить" выделяется
+    // акцентной заливкой поверх неё.
     private var bottomBar: some View {
         HStack(spacing: 4) {
             Button {
@@ -239,7 +240,7 @@ struct FilterView: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 6)
-        .glassEffect(.regular, in: Capsule())
+        .background(Theme.surface, in: Capsule())
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
     }
@@ -252,6 +253,8 @@ struct FilterView: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 

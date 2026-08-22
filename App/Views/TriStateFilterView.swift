@@ -38,7 +38,7 @@ struct TriStateFilterView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(Theme.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .tint(Theme.accent)
     }
@@ -60,7 +60,7 @@ struct TriStateFilterView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .glassEffect(.regular.interactive(), in: Capsule())
+            .background(Theme.surfaceElevated, in: Capsule())
 
             HStack {
                 Toggle(isOn: $strict) {
@@ -83,14 +83,14 @@ struct TriStateFilterView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(Theme.surface)
+        .background(Theme.background)
     }
 
     // MARK: Список
 
     private var list: some View {
         ScrollView {
-            // Одна общая стеклянная панель на весь список (соединённая подложка),
+            // Одна общая сплошная подложка на весь список (как в Комментариях/Главах),
             // строки внутри — обычные, разделены тонкими разделителями.
             VStack(spacing: 0) {
                 ForEach(Array(filtered.enumerated()), id: \.element.id) { index, option in
@@ -107,7 +107,7 @@ struct TriStateFilterView: View {
                 }
             }
             .padding(8)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
@@ -171,12 +171,12 @@ struct TriStateFilterView: View {
                     .foregroundStyle(Theme.background)
                     .padding(.horizontal, 22)
                     .frame(minHeight: 44)
-                    .glassEffect(.regular.tint(Theme.accent).interactive(), in: Capsule())
+                    .background(Theme.accent, in: Capsule())
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.ultraThinMaterial, ignoresSafeAreaEdges: .bottom)
+        .background(Theme.background, ignoresSafeAreaEdges: .bottom)
     }
 
     private func legend(color: Color, text: String) -> some View {
