@@ -571,11 +571,10 @@ struct MangaDetailView: View {
     // закладках (см. BookmarksView.categoryMenu): ScrollView(.horizontal) +
     // .scrollIndicators(.hidden), там это привычный, понятный пользователю
     // паттерн ("листай пальцем вбок").
-    // Стиль App Store (страница приложения: Возраст/Категория/Разработчик/…) —
-    // никакой подложки под блоками, только тонкие вертикальные разделители
-    // между ними, текст по центру. Разделители — только МЕЖДУ реально
-    // присутствующими блоками (отфильтровываем пустые заранее), чтобы не
-    // словить "осиротевший" разделитель, если сервер не прислал какое-то поле.
+    // Вернулись к чипам с подложкой (см. infoBlock) вместо App Store-стиля
+    // с разделителями — как попросили. Разделители (верхняя полоска и
+    // вертикальные линии между блоками) убраны совсем, между чипами теперь
+    // обычный зазор.
     private var infoRow: some View {
         let rawItems: [(heading: String, value: String?)] = [
             (heading: "Тип", value: (viewModel.detail?.type ?? listItem?.type)?.label),
@@ -590,30 +589,14 @@ struct MangaDetailView: View {
             return (heading: item.heading, value: value)
         }
 
-        return VStack(spacing: 0) {
-            // Верхняя полоска — та же линия, что и вертикальные разделители
-            // между блоками, только горизонтальная и во всю ширину контейнера
-            // (обычный Rectangle, а не Capsule/RoundedRectangle — прямые углы,
-            // чтобы её края ровно совпадали с краями остальных элементов
-            // карточки, как попросили).
-            Rectangle()
-                .fill(Theme.separator)
-                .frame(height: 1)
-
-            ScrollView(.horizontal) {
-                HStack(spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                        if index > 0 {
-                            Rectangle()
-                                .fill(Theme.separator)
-                                .frame(width: 1, height: Self.infoBlockHeight - 20.8)
-                        }
-                        infoBlock(item.heading, value: item.value)
-                    }
+        return ScrollView(.horizontal) {
+            HStack(spacing: 10) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    infoBlock(item.heading, value: item.value)
                 }
             }
-            .scrollIndicators(.hidden)
         }
+        .scrollIndicators(.hidden)
     }
 
     private var formatValue: String? {
@@ -627,21 +610,18 @@ struct MangaDetailView: View {
 
     @ViewBuilder
     private func infoBlock(_ heading: String, value: String) -> some View {
-        // Без подложки (Capsule/фон убраны) и текст по центру — как в блоке
-        // "Возраст/Категория/Разработчик" на странице приложения в App Store.
-        // Разделяют блоки тонкие вертикальные линии (см. infoRow), а не фон.
-        // Размер текста увеличен в 1.35х от прежнего (caption2 ≈ 11 → 15,
-        // subheadline ≈ 15 → 17) — теперь фиксированный .system(size:), а не
-        // текстовые стили, чтобы точно контролировать масштаб. Значение
-        // (данные) чуть крупнее заголовка блока, как попросили.
-        VStack(alignment: .center, spacing: 4) {
+        // Чип с подложкой (Theme.surfaceElevated + Capsule) — как попросили
+        // вернуть, вместо App Store-стиля без фона. Текст по левому краю
+        // (а не по центру) — Capsule со скруглёнными торцами и так даёт
+        // достаточный воздух по бокам.
+        VStack(alignment: .leading, spacing: 4) {
             Text(heading).font(.system(size: 15)).foregroundStyle(Theme.textSecondary).lineLimit(1)
             Text(value).font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
         }
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 16)
-        .frame(height: Self.infoBlockHeight)
+        .padding(.horizontal, 20)
+        .frame(height: Self.infoBlockHeight, alignment: .leading)
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 
     // MARK: Похожее (GET /manga/{slug}/similar, POST /similar/{id}/vote)
@@ -1263,7 +1243,12 @@ struct MangaDetailView: View {
         VStack(alignment: .leading, spacing: 18) {
             // Тип/Статус/Год/Просмотры/Формат — раньше висели над вкладками
             // на ВСЕХ вкладках, теперь показываются только здесь, в «О тайтле».
+            // Зазор от вкладок (О тайтле/Главы/Комментарии) до этого блока
+            // прижат до тех же 10pt, что и заголовок→контент у остальных
+            // подсекций (см. "Жанры и теги" ниже) — вместо унаследованных
+            // 18pt внешнего VStack, отсюда -8 компенсации.
             infoRow
+                .padding(.top, -8)
 
             if viewModel.detail == nil && viewModel.isLoading {
                 ProgressView().tint(Theme.accent).frame(maxWidth: .infinity)
