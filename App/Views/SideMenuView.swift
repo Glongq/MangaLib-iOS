@@ -48,7 +48,12 @@ struct SideMenuView: View {
     // История/Настройки/Загрузки теперь не sheet, а обычные PUSH-переходы внутри
     // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
     private enum MenuRoute: Hashable { case history, settings, downloads, comments }
-    @State private var path: [MenuRoute] = []
+    // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
+    // NavigationLink(value:) ВНУТРИ этих экранов (например, History →
+    // тайтл, см. HistoryView.navigationDestination(for: HistoryEntry.self))
+    // не могут запушиться в путь, типизированный только под MenuRoute, и тап
+    // по ссылке молча ничего не делает.
+    @State private var path = NavigationPath()
 
     // Какие сворачиваемые разделы сейчас развёрнуты (Профиль/Каталог/Другое) —
     // у каждого своя стрелка вверх/вниз в заголовке подложки. По умолчанию все

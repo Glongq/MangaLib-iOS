@@ -1368,7 +1368,7 @@ struct MangaDetailView: View {
                         }
                     }
                 }
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
         }
     }

@@ -1,22 +1,26 @@
 import SwiftUI
 
-/// Корень приложения — снова самодельная SwiftUI-панель (не системный
-/// UITabBarController).
+/// Корень приложения — настоящий системный SwiftUI `TabView` + `Tab` (не
+/// UIKit `UITabBarController`, не самодельная капсула).
 ///
-/// ИСТОРИЯ: раньше здесь была ровно такая же панель. Затем мигрировали на
-/// настоящий `UITabBarController` (см. `TabBarController.swift`, теперь
-/// неиспользуемый — см. комментарий там) ради системного Liquid Glass "из
-/// коробки". Но кнопка аватарки рядом с таббаром там требовала вручную
-/// ужимать `tabBar.frame` — а видимая плавающая капсула нового стиля iOS 26,
-/// похоже, рисуется отдельным системным слоем и/или переигрывается системой
-/// уже ПОСЛЕ нашей записи (внутренние анимации сворачивания и т.п.), из-за
-/// чего аватарка регулярно "отклеивалась" от реальной панели — семь попыток
-/// подряд не дали стабильного результата, потому что мы боролись с
-/// недокументированным приватным поведением системного компонента.
+/// ИСТОРИЯ: сначала была самодельная SwiftUI-панель, имитирующая Liquid
+/// Glass вручную (см. неиспользуемый `BottomBar.swift`). Потом попробовали
+/// настоящий `UITabBarController` + `UITab` (см. неиспользуемый
+/// `TabBarController.swift`) — сам таббар работал отлично, но кнопка
+/// аватарки РЯДОМ с ним (акцессуар сбоку) — нет: семь техник ручной
+/// подгонки frame/constraints не дали стабильного результата, боролись с
+/// недокументированным поведением приватного системного слоя. Вернулись к
+/// самодельному `HStack` (капсула + кружок аватарки рядом) как к компромиссу.
 ///
-/// Здесь — обычный SwiftUI `HStack` (капсула таббара + отдельный кружок
-/// аватарки рядом), где расположение полностью в наших руках, без каких-либо
-/// системных сюрпризов.
+/// Теперь кнопку аватарки убрали из этой панели совсем (доступ к профилю —
+/// через раздел «Меню», см. `SideMenuView`) — ровно та причина, из-за
+/// которой в прошлый раз отказались от системного таббара, больше не
+/// применима. Поэтому здесь снова настоящий системный компонент — чистый
+/// SwiftUI `TabView`/`Tab` (доступен с iOS 18, автоматически получает
+/// Liquid Glass на iOS 26 — деплоймент-таргет проекта и так уже 26.0 из-за
+/// `.glassEffect`, используемого по всему приложению). Никаких вручную
+/// подобранных отступов/высот — весь внешний вид, отступы от края экрана,
+/// сворачивание при скролле и т.п. рисует сама система, ровно по HIG.
 struct RootView: View {
 
     @State private var tab = 1 // Каталог выбран по умолчанию
@@ -29,90 +33,62 @@ struct RootView: View {
     // Запрос «открыть каталог по жанру/тегу» из карточки тайтла (см. CatalogNavigator).
     @ObservedObject private var catalogNav = CatalogNavigator.shared
 
-    // Высота панели + отступ от низа — те же числа, что уже "зашиты" в
-    // .safeAreaInset(edge: .bottom) внутри MangaCatalogView/BookmarksView
-    // (см. комментарии там: "84 = высота панели"). Резервируем именно эту
-    // зону снаружи, чтобы контент не оказывался под панелью.
-    private let tabBarHeight: CGFloat = 64
-    private let tabBarBottomMargin: CGFloat = 20
-
-    private let tabs: [(icon: String, label: String)] = [
-        ("bookmark", "Закладки"),
-        ("magnifyingglass", "Каталог"),
-        ("bell", "Уведомления"),
-        ("line.3.horizontal", "Меню")
-    ]
-
     var body: some View {
-        screen
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                Color.clear.frame(height: tabBarHeight + tabBarBottomMargin)
+        TabView(selection: $tab) {
+            Tab("Закладки", systemImage: "bookmark", value: 0) {
+                BookmarksView()
             }
-            .overlay(alignment: .bottom) {
-                HStack(spacing: 10) {
-                    FloatingTabBar(tabs: tabs, height: tabBarHeight, selection: $tab)
-                    AvatarButton {
-                        if AuthSession.shared.isLoggedIn {
-                            showAccount = true
-                        } else {
-                            showLogin = true
-                        }
+            Tab("Каталог", systemImage: "magnifyingglass", value: 1) {
+                MangaCatalogView()
+            }
+            // Заглушка — раздел в разработке (см. StubView).
+            Tab("Читают", systemImage: "book", value: 2) {
+                NavigationStack { StubView(title: "Читают") }
+            }
+            Tab("Уведомления", systemImage: "bell", value: 3) {
+                NotificationsView()
+            }
+            Tab("Меню", systemImage: "line.3.horizontal", value: 4) {
+                SideMenuView(
+                    onSelect: { title in stubRequest = StubRequest(title: title) },
+                    onOpenLogin: { showLogin = true },
+                    onOpenAccount: { showAccount = true },
+                    onOpenCatalog: { typeId in
+                        // Меню «Тайтлы» → тип: кладём фильтр и уходим на Каталог.
+                        CatalogNavigator.shared.pendingTypeId = typeId
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 1 }
                     }
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, tabBarBottomMargin)
+                )
             }
-            // Тост сверху: выезжает вниз из-под верхней кромки и уезжает обратно
-            // вверх (transition .move(edge: .top)). Полупрозрачная стеклянная
-            // подложка (glassEffect), как у остальных элементов приложения.
-            .overlay(alignment: .top) {
-                if let banner = downloads.banner {
-                    DownloadToast(text: banner.text)
-                        .padding(.top, 8)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
+        }
+        // Тост сверху: выезжает вниз из-под верхней кромки и уезжает обратно
+        // вверх (transition .move(edge: .top)). Полупрозрачная стеклянная
+        // подложка (glassEffect), как у остальных элементов приложения.
+        .overlay(alignment: .top) {
+            if let banner = downloads.banner {
+                DownloadToast(text: banner.text)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .animation(.spring(response: 0.42, dampingFraction: 0.82), value: downloads.banner)
-            // Тап по жанру/тегу в карточке → переключаемся на вкладку Каталог
-            // (сам фильтр применяется в MangaCatalogView.onAppear).
-            .onChange(of: catalogNav.switchRequest) { _, req in
-                if req != nil { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 1 } }
+        }
+        .animation(.spring(response: 0.42, dampingFraction: 0.82), value: downloads.banner)
+        // Тап по жанру/тегу в карточке → переключаемся на вкладку Каталог
+        // (сам фильтр применяется в MangaCatalogView.onAppear).
+        .onChange(of: catalogNav.switchRequest) { _, req in
+            if req != nil { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 1 } }
+        }
+        .onChange(of: catalogNav.openBookmarksRequest) { _, req in
+            if req != nil {
+                showAccount = false
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 0 }
             }
-            .onChange(of: catalogNav.openBookmarksRequest) { _, req in
-                if req != nil {
-                    showAccount = false
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 0 }
-                }
-            }
-            .preferredColorScheme(.dark)
-            .tint(Theme.accent)
-            .sheet(isPresented: $showLogin) { LoginView() }
-            .sheet(isPresented: $showAccount) { AccountInfoView() }
-            .sheet(item: $stubRequest) { request in
-                NavigationStack { StubView(title: request.title) }
-            }
-    }
-
-    @ViewBuilder
-    private var screen: some View {
-        switch tab {
-        case 0:
-            BookmarksView()
-        case 1:
-            MangaCatalogView()
-        case 2:
-            NotificationsView()
-        default:
-            SideMenuView(
-                onSelect: { title in stubRequest = StubRequest(title: title) },
-                onOpenLogin: { showLogin = true },
-                onOpenAccount: { showAccount = true },
-                onOpenCatalog: { typeId in
-                    // Меню «Тайтлы» → тип: кладём фильтр и уходим на Каталог.
-                    CatalogNavigator.shared.pendingTypeId = typeId
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 1 }
-                }
-            )
+        }
+        .preferredColorScheme(.dark)
+        .tint(Theme.accent)
+        .sheet(isPresented: $showLogin) { LoginView() }
+        .sheet(isPresented: $showAccount) { AccountInfoView() }
+        .sheet(item: $stubRequest) { request in
+            NavigationStack { StubView(title: request.title) }
         }
     }
 }
@@ -135,82 +111,6 @@ private struct DownloadToast: View {
             .padding(.vertical, 12)
             .glassEffect(.regular, in: Capsule())
             .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
-    }
-}
-
-/// Плавающая капсула с 4 вкладками — тот же `.glassEffect`, что используется
-/// по всему приложению (нижняя панель ридера, Фильтры/Сортировка в
-/// каталоге и т.д.), а не `.ultraThinMaterial` — для визуальной
-/// согласованности со всеми остальными стеклянными элементами.
-///
-/// Раньше здесь стоял `LiquidGlassTabBar` (эффект "жидкой капли" через
-/// Canvas/metaball, см. `LiquidGlassTabBar.swift` — теперь неиспользуемый)
-/// — попросили вернуть как было, без эффекта.
-private struct FloatingTabBar: View {
-    let tabs: [(icon: String, label: String)]
-    let height: CGFloat
-    @Binding var selection: Int
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(tabs.indices, id: \.self) { index in
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                        selection = index
-                    }
-                } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: tabs[index].icon)
-                            .font(.system(size: 21))
-                        Text(tabs[index].label)
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundStyle(index == selection ? Theme.accent : Theme.textSecondary)
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 4)
-        .frame(height: height)
-        .glassEffect(.regular, in: Capsule())
-    }
-}
-
-/// Кнопка аватарки — та же логика отрисовки (реальное фото профиля или
-/// плейсхолдер), что раньше жила в `TabBarController.ProfileAccessoryView`,
-/// перенесена сюда один в один.
-private struct AvatarButton: View {
-    @ObservedObject private var auth = AuthSession.shared
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            Group {
-                if let avatarURL = auth.avatarURL {
-                    RemoteImage(url: avatarURL) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        placeholder
-                    }
-                } else {
-                    placeholder
-                }
-            }
-            .frame(width: 56, height: 56)
-            .clipShape(Circle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var placeholder: some View {
-        Circle()
-            .fill(Theme.surfaceElevated)
-            .overlay(
-                Image(systemName: "person.fill")
-                    .font(.body)
-                    .foregroundStyle(Theme.textSecondary)
-            )
     }
 }
 

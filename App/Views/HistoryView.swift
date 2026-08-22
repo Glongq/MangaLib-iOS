@@ -16,15 +16,24 @@ struct HistoryView: View {
 
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var store = BookmarksStore.shared
+    @ObservedObject private var siteSession = SiteSession.shared
     @State private var query = ""
     @FocusState private var searchFocused: Bool
 
     /// Дедуп по media.id — сервер отдаёт КАЖДЫЙ просмотр главы отдельной
     /// записью, а не одну запись на тайтл (см. пример ответа в чате: два
     /// подряд идущих view_at для одного и того же тайтла, разные главы).
+    ///
+    /// Плюс фильтр по активному сайту: `/user/chapters/history` отдаёт
+    /// историю на весь аккаунт разом, не только по активному Site-Id — если
+    /// зайти на тайтл ДРУГОГО сайта через "Похожее"/"Связанное" (site
+    /// активным при этом не переключается, см. MangaItem.site), прочитанная
+    /// там глава всё равно попадала в общий список. media.site отсутствует
+    /// только в очень старых кэшах — в этом случае запись не прячем.
     private var deduped: [HistoryEntry] {
         var seen = Set<Int>()
         return store.historyEntries.filter { entry in
+            guard entry.media.site == nil || entry.media.site == siteSession.activeSite.rawValue else { return false }
             guard !seen.contains(entry.media.id) else { return false }
             seen.insert(entry.media.id)
             return true
