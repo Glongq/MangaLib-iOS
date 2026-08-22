@@ -117,10 +117,6 @@ struct MangaDetailView: View {
                     // overlay поверх фоновой картинки, а не отдельный блок
                     // здесь, чтобы фон мог тянуться ровно до его низа.
                     actionButtons
-                    // Метаданные (Тип/Статус/Год/Просмотры/Формат) — снова
-                    // над вкладками, видны на ВСЕХ вкладках (Главы/Комментарии
-                    // тоже), как было до переноса внутрь «О тайтле».
-                    infoRow
                     tabBar
                     tabContent
                 }
@@ -611,15 +607,16 @@ struct MangaDetailView: View {
     @ViewBuilder
     private func infoBlock(_ heading: String, value: String) -> some View {
         // Чип с подложкой — размер и паддинги 1в1 как у teamChip в разделе
-        // "Главы" (колонка с переводчиками, см. teamChip ниже): те же
-        // .padding(.horizontal, 10)/.padding(.vertical, 8) вместо фиксированной
-        // высоты 50, тот же .subheadline.weight(.medium) для основного текста.
+        // "Главы" (колонка с переводчиками, см. teamChip ниже) по высоте —
+        // тот же .padding(.vertical, 8), тот же .subheadline.weight(.medium)
+        // для основного текста. По ширине чип шире (18 вместо 10 — как
+        // попросили увеличить), т.к. у teamChip ширину и так задаёт аватар.
         VStack(alignment: .leading, spacing: 4) {
             Text(heading).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1)
             Text(value).font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 18)
         .padding(.vertical, 8)
         .background(Theme.surfaceElevated, in: Capsule())
     }
@@ -1241,6 +1238,16 @@ struct MangaDetailView: View {
 
     private var aboutTab: some View {
         VStack(alignment: .leading, spacing: 18) {
+            // Тип/Статус/Год/Просмотры/Формат — только здесь, во вкладке
+            // «О тайтле», а не на всех вкладках (пробовали над вкладками —
+            // попросили вернуть обратно). Зазор от вкладок (О тайтле/Главы/
+            // Комментарии) до этого блока прижат до тех же 10pt, что и
+            // заголовок→контент у остальных подсекций (см. "Жанры и теги"
+            // ниже) — вместо унаследованных 18pt внешнего VStack, отсюда
+            // -8 компенсации.
+            infoRow
+                .padding(.top, -8)
+
             if viewModel.detail == nil && viewModel.isLoading {
                 ProgressView().tint(Theme.accent).frame(maxWidth: .infinity)
             }
