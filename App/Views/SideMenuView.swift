@@ -209,16 +209,16 @@ struct SideMenuView: View {
     // с реальными действиями (открываются ПОВЕРХ меню).
     private var quickBlock: some View {
         card {
-            row("Настройки", icon: "gearshape", action: { path.append(.settings) })
-            row("История", icon: "clock.arrow.circlepath", action: { path.append(.history) })
-            row("Загрузки", icon: "arrow.down.circle", showDivider: false, action: { path.append(.downloads) })
+            row("Настройки", icon: "gearshape", action: { path.append(MenuRoute.settings) })
+            row("История", icon: "clock.arrow.circlepath", action: { path.append(MenuRoute.history) })
+            row("Загрузки", icon: "arrow.down.circle", showDivider: false, action: { path.append(MenuRoute.downloads) })
         }
     }
 
     // Сворачиваемый раздел «Профиль» — все пункты пока заглушки (StubView).
     private var profileSection: some View {
         collapsibleCard("Профиль") {
-            row("Комментарии", icon: "text.bubble", action: { path.append(.comments) })
+            row("Комментарии", icon: "text.bubble", action: { path.append(MenuRoute.comments) })
             row("Список друзей", icon: "person.2")
             row("Избранное", icon: "heart")
             row("Коллекции", icon: "square.stack")
