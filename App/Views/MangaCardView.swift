@@ -63,7 +63,15 @@ struct MangaCardView: View {
     /// Тот же spacing, что у VStack(название, жанр) ниже — вынесен в
     /// константу, т.к. используется и в body, и в textBlockHeight(_:) для
     /// расчёта итоговой высоты блока по тем же цифрам.
-    private static let titleTypeSpacing: CGFloat = 6
+    ///
+    /// Равен leading шрифта названия — это и есть тот самый межстрочный
+    /// зазор, с которым сама система разносит перенесённые строки названия
+    /// (Text без явного .lineSpacing() использует именно leading шрифта).
+    /// Раньше здесь была захардкоженная 6 — она была БОЛЬШЕ естественного
+    /// leading, из-за чего зазор название-жанр выглядел шире, чем зазор
+    /// строка-строка внутри названия; теперь оба зазора равны одному и
+    /// тому же (меньшему, естественному) числу.
+    private static var titleTypeSpacing: CGFloat { titleUIFont.leading }
 
     /// Сколько строк реально займёт название при данной ширине карточки —
     /// точный расчёт через UIKit (boundingRect), а не догадка по длине
@@ -92,12 +100,7 @@ struct MangaCardView: View {
     /// высота у карточек с более коротким названием уходит пустым местом
     /// НИЖЕ жанра, а не между названием и жанром.
     private static func textBlockHeight(twoLineTitle: Bool) -> CGFloat {
-        // Между строками названия (см. .lineSpacing(titleTypeSpacing) в body)
-        // и между названием и жанром используется ОДИН и тот же зазор
-        // titleTypeSpacing — поэтому при переносе название добавляет его
-        // ещё раз, как один лишний межстрочный промежуток.
         let titleHeight = titleUIFont.lineHeight * (twoLineTitle ? 2 : 1)
-            + (twoLineTitle ? titleTypeSpacing : 0)
         let typeHeight = typeUIFont.lineHeight
         return (titleHeight + titleTypeSpacing + typeHeight).rounded(.up)
     }
@@ -141,12 +144,6 @@ struct MangaCardView: View {
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                    // Тот же зазор, что и ниже между названием и жанром
-                    // (Self.titleTypeSpacing) — иначе перенос строки внутри
-                    // названия использует дефолтный (меньший) межстрочный
-                    // интервал шрифта, и расстояние строка-строка визуально
-                    // отличается от расстояния название-жанр.
-                    .lineSpacing(Self.titleTypeSpacing)
                     .frame(width: width, alignment: .topLeading)
 
                 // Тип тайтла — строка всегда занимает место, даже когда его
