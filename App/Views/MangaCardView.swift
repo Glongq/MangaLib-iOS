@@ -41,12 +41,13 @@ struct MangaCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             cover
-                // Явные width/height (3:4 от width), а не .aspectRatio — тот
-                // сам решал высоту от ПРЕДЛОЖЕННОЙ ширины, что зависело от
-                // текущего layout-прохода; здесь высота — прямое
-                // арифметическое следствие того же числа width, что и у
-                // всех остальных карточек ряда.
-                .frame(width: width, height: (width * 4 / 3).rounded())
+                // Явные width/height (а не .aspectRatio — тот сам решал
+                // высоту от ПРЕДЛОЖЕННОЙ ширины, что зависело от текущего
+                // layout-прохода) — здесь высота прямое арифметическое
+                // следствие того же width, что и у всех остальных карточек
+                // ряда. База 3:4, +10% высоты — как попросили, чтобы обложка
+                // была повыше.
+                .frame(width: width, height: (width * 4 / 3 * 1.1).rounded())
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .topLeading) { statusBadge }
                 .overlay(alignment: .topTrailing) { ratingBadge }
