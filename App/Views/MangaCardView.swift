@@ -45,14 +45,20 @@ struct MangaCardView: View {
     // не только при следующей перезагрузке экрана.
     @ObservedObject private var bookmarks = BookmarksStore.shared
 
-    private var titleFont: Font { .caption.weight(.medium) }
-    private var typeFont: Font { .caption2 }
+    /// Текст под обложкой в каталоге увеличен в 1.2х от стандартного
+    /// caption — коэффициент общий для titleFont/typeFont И их UIFont-
+    /// аналогов ниже, чтобы визуальный размер и расчёт высоты блока
+    /// (titleLineCount/textBlockHeight) не расходились.
+    private static let textScale: CGFloat = 1.2
+    private var titleFont: Font { Font(Self.titleUIFont) }
+    private var typeFont: Font { Font(Self.typeUIFont) }
     private static var titleUIFont: UIFont {
         let base = UIFont.preferredFont(forTextStyle: .caption1)
-        return UIFont.systemFont(ofSize: base.pointSize, weight: .medium)
+        return UIFont.systemFont(ofSize: base.pointSize * textScale, weight: .medium)
     }
     private static var typeUIFont: UIFont {
-        UIFont.preferredFont(forTextStyle: .caption2)
+        let base = UIFont.preferredFont(forTextStyle: .caption2)
+        return UIFont.systemFont(ofSize: base.pointSize * textScale, weight: .regular)
     }
     /// Тот же spacing, что у VStack(название, жанр) ниже — вынесен в
     /// константу, т.к. используется и в body, и в textBlockHeight(_:) для
