@@ -21,7 +21,13 @@ struct MangaCatalogView: View {
     @State private var isHeaderAnimating = false
 
     // Сетка: ровно 3 колонки одинаковой ширины — строгое выравнивание карточек.
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+    // Ширину меряем один раз через GeometryReader (см. grid) и кормим ЕЮ ЖЕ
+    // и GridItem(.fixed), и саму MangaCardView — см. комментарий у
+    // MangaCardView.width про то, почему раньше .flexible()+.aspectRatio
+    // иногда расходились на пиксель ("поплывшие" обложки).
+    private let gridColumnsCount = 3
+    private let gridSpacing: CGFloat = 12
+    private let gridHorizontalPadding: CGFloat = 12
 
     var body: some View {
         NavigationStack(path: $navPath) {
@@ -233,66 +239,77 @@ struct MangaCatalogView: View {
         }
     }
 
-    // ИСПРАВЛЕНО (регрессия): пробовал считать ширину карточки вручную через
-    // GeometryReader и передавать явным числом в каждую MangaCardView —
-    // из-за расхождения этого вручную вычисленного числа с тем, что
-    // LazyVGrid САМА даёт .flexible()-колонке, карточки переставали
-    // совпадать со своим слотом сетки ("поплывшие" обложки). Вернул простую,
-    // проверенную версию: карточки сами берут ширину из .flexible()-колонки
-    // (через .aspectRatio(fit).frame(maxWidth:.infinity) внутри
-    // MangaCardView) — никакой ручной геометрии на уровне каталога.
+    // Сначала меряем сетку (GeometryReader — один раз, на весь экран, а НЕ
+    // на каждую карточку по отдельности), считаем ширину карточки ОДНИМ
+    // числом (MangaCardView.gridCardWidth) и уже ЭТИМ числом одновременно
+    // задаём и колонки (GridItem.fixed), и саму карточку (MangaCardView.width) —
+    // сначала сетка, потом в неё кладём контент, а не наоборот. Раньше
+    // карточки сами угадывали свою ширину из .flexible()-колонки и
+    // независимо от этого считали высоту через .aspectRatio — два отдельных
+    // расчёта иногда расходились на пиксель между соседними карточками,
+    // сетка выглядела "поплывшей" и подписи под обложками съезжали.
     private var grid: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                ForEach(viewModel.results) { item in
-                    NavigationLink(value: item) {
-                        MangaCardView(item: item)
+        GeometryReader { proxy in
+            let cardWidth = MangaCardView.gridCardWidth(
+                totalWidth: proxy.size.width,
+                columns: gridColumnsCount,
+                spacing: gridSpacing,
+                containerPadding: gridHorizontalPadding
+            )
+            let columns = Array(repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing), count: gridColumnsCount)
+
+            ScrollView {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                    ForEach(viewModel.results) { item in
+                        NavigationLink(value: item) {
+                            MangaCardView(item: item, width: cardWidth)
+                        }
+                        .buttonStyle(.plain)
+                        .onAppear { viewModel.loadMoreIfNeeded(currentItem: item) }
                     }
-                    .buttonStyle(.plain)
-                    .onAppear { viewModel.loadMoreIfNeeded(currentItem: item) }
+                }
+                .padding(.horizontal, gridHorizontalPadding)
+                .padding(.top, 12)
+                // Запас снизу побольше обычного — гарантирует, что последний ряд
+                // карточек не окажется под Фильтры/Сортировка внизу, даже если
+                // safe-area-резерв через NavigationStack посчитается неточно.
+                .padding(.bottom, 90)
+
+                if viewModel.isLoadingMore {
+                    ProgressView()
+                        .tint(Theme.accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            // Запас снизу побольше обычного — гарантирует, что последний ряд
-            // карточек не окажется под Фильтры/Сортировка внизу, даже если
-            // safe-area-резерв через NavigationStack посчитается неточно.
-            .padding(.bottom, 90)
-
-            if viewModel.isLoadingMore {
-                ProgressView()
-                    .tint(Theme.accent)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
+            // Прошлый вариант (GeometryReader-«датчик» + PreferenceKey) — самодельный
+            // и ненадёжный способ отследить смещение скролла. onScrollGeometryChange —
+            // штатный API именно под эту задачу, отдаёт contentOffset напрямую и не
+            // зависит от таймингов рендера отдельного sensor-view.
+            .onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.y
+            } action: { _, newOffset in
+                defer { lastScrollOffset = newOffset }
+                // Пока идёт анимация схлопывания — игнорируем, иначе дребезг
+                // (см. isHeaderAnimating выше).
+                guard !isHeaderAnimating else { return }
+                let delta = newOffset - lastScrollOffset
+                if newOffset <= 0 {
+                    // У самого верха (или в зоне лишнего оттягивания) шапка всегда развёрнута.
+                    setHeaderCollapsed(false)
+                } else if delta > 6 {
+                    // Скроллим вниз (contentOffset растёт) — прячем шапку.
+                    setHeaderCollapsed(true)
+                } else if delta < -6 {
+                    // Малейшее движение вверх — сразу возвращаем всё на место.
+                    setHeaderCollapsed(false)
+                }
             }
-        }
-        // Прошлый вариант (GeometryReader-«датчик» + PreferenceKey) — самодельный
-        // и ненадёжный способ отследить смещение скролла. onScrollGeometryChange —
-        // штатный API именно под эту задачу, отдаёт contentOffset напрямую и не
-        // зависит от таймингов рендера отдельного sensor-view.
-        .onScrollGeometryChange(for: CGFloat.self) { geo in
-            geo.contentOffset.y
-        } action: { _, newOffset in
-            defer { lastScrollOffset = newOffset }
-            // Пока идёт анимация схлопывания — игнорируем, иначе дребезг
-            // (см. isHeaderAnimating выше).
-            guard !isHeaderAnimating else { return }
-            let delta = newOffset - lastScrollOffset
-            if newOffset <= 0 {
-                // У самого верха (или в зоне лишнего оттягивания) шапка всегда развёрнута.
-                setHeaderCollapsed(false)
-            } else if delta > 6 {
-                // Скроллим вниз (contentOffset растёт) — прячем шапку.
-                setHeaderCollapsed(true)
-            } else if delta < -6 {
-                // Малейшее движение вверх — сразу возвращаем всё на место.
-                setHeaderCollapsed(false)
-            }
-        }
-        .scrollIndicators(.hidden)
-        .overlay {
-            if viewModel.isLoading && viewModel.results.isEmpty {
-                ProgressView().tint(Theme.accent)
+            .scrollIndicators(.hidden)
+            .overlay {
+                if viewModel.isLoading && viewModel.results.isEmpty {
+                    ProgressView().tint(Theme.accent)
+                }
             }
         }
     }

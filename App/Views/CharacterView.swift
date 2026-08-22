@@ -12,7 +12,8 @@ struct CharacterView: View {
     @State private var showFilters = false
     @FocusState private var searchFocused: Bool
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+    private let gridColumnsCount = 3
+    private let gridSpacing: CGFloat = 12
 
     init(slugURL: String, fallbackName: String? = nil, coverURL: URL? = nil) {
         self.slugURL = slugURL
@@ -22,17 +23,30 @@ struct CharacterView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                header
-                titlesControls
-                grid
+        // GeometryReader меряет ширину один раз, а не на каждую карточку —
+        // из неё считаем cardWidth (см. MangaCardView.gridCardWidth) и кормим
+        // ЭТИМ ЖЕ числом и колонки (GridItem.fixed), и саму карточку, чтобы
+        // сетка и карточки не могли разойтись (см. тот же приём в MangaCatalogView).
+        GeometryReader { proxy in
+            let cardWidth = MangaCardView.gridCardWidth(
+                totalWidth: proxy.size.width,
+                columns: gridColumnsCount,
+                spacing: gridSpacing,
+                containerPadding: 16
+            )
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    header
+                    titlesControls
+                    grid(cardWidth: cardWidth)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 90)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 90)
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle(vm.detail?.displayName ?? fallbackName ?? "Персонаж")
         .navigationBarTitleDisplayMode(.inline)
@@ -206,7 +220,7 @@ struct CharacterView: View {
     // MARK: Грид тайтлов
 
     @ViewBuilder
-    private var grid: some View {
+    private func grid(cardWidth: CGFloat) -> some View {
         if let error = vm.errorMessage, vm.titles.isEmpty {
             VStack(spacing: 10) {
                 Text(error).font(.footnote).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
@@ -219,6 +233,7 @@ struct CharacterView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 140)
         } else {
+            let columns = Array(repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing), count: gridColumnsCount)
             LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
                 ForEach(vm.titles) { item in
                     NavigationLink {
@@ -229,7 +244,7 @@ struct CharacterView: View {
                             item: item
                         )
                     } label: {
-                        MangaCardView(item: item)
+                        MangaCardView(item: item, width: cardWidth)
                     }
                     .buttonStyle(.plain)
                     .onAppear { vm.loadMoreIfNeeded(item) }

@@ -6,25 +6,37 @@ import UIKit
 /// чтобы разные картинки и длинные названия не ломали сетку.
 struct MangaCardView: View {
     let item: MangaItem
+    /// Ширина карточки в поинтах — ЯВНО считается один раз родительской
+    /// сеткой (см. gridCardWidth ниже) и передаётся сюда, а не выводится
+    /// самой карточкой из .flexible()-колонки/.aspectRatio. Раньше ширина
+    /// колонки (которую сама решает LazyVGrid для .flexible()) и высота
+    /// обложки (которую сама решает .aspectRatio от предложенной ширины)
+    /// считались НЕЗАВИСИМО друг от друга в двух разных местах — на практике
+    /// эти два независимых расчёта иногда расходились на пиксель между
+    /// соседними карточками (разная промежуточная перекомпоновка при
+    /// подгрузке асинхронных обложек), из-за чего сетка выглядела "поплывшей"
+    /// и текст под обложками сдвигался. Теперь и сетка (GridItem.fixed), и
+    /// каждая карточка получают ОДНО И ТО ЖЕ число — расхождению неоткуда взяться.
+    let width: CGFloat
 
     // Для бэйджа статуса закладки (см. statusBadge) — реактивно, чтобы
     // бэйдж сразу появлялся/менялся при добавлении/перемещении в закладках,
     // не только при следующей перезагрузке экрана.
     @ObservedObject private var bookmarks = BookmarksStore.shared
 
-    // ИСПРАВЛЕНО (регрессия): пробовал считать ширину карточки вручную через
-    // GeometryReader (и на уровне ячейки, и на уровне всей сетки) — оба раза
-    // это либо давало неоднозначную высоту (GeometryReader не участвует в
-    // обычном "идеальном размере" наравне с другими вью), либо явно
-    // вычисленное число расходилось с тем, что LazyVGrid САМА даёт
-    // .flexible()-колонке, из-за чего карточки переставали совпадать со
-    // своим слотом в сетке — отсюда и "поплывшие" обложки. Вернул исходный,
-    // проверенный способ: .aspectRatio(fit) НАПРЯМУЮ на обложке (не на
-    // GeometryReader) — это ровно то, для чего этот модификатор
-    // предназначен, и он не имеет описанной выше двусмысленности. Именно
-    // так это уже работало раньше, до серии моих правок.
     private var titleFont: Font { .caption.weight(.medium) }
     private var typeFont: Font { .caption2 }
+
+    /// Ширина одной карточки в сетке из `columns` равных колонок: общая
+    /// ширина минус горизонтальные отступы контейнера с обеих сторон и
+    /// промежутки между колонками, делённая на число колонок. Единая точка
+    /// расчёта — вызывающая сетка использует ЭТО ЖЕ число и для
+    /// GridItem(.fixed(...)), и для параметра width каждой карточки, поэтому
+    /// они физически не могут разойтись (см. комментарий у width выше).
+    static func gridCardWidth(totalWidth: CGFloat, columns: Int = 3, spacing: CGFloat = 12, containerPadding: CGFloat = 12) -> CGFloat {
+        let available = totalWidth - containerPadding * 2 - spacing * CGFloat(columns - 1)
+        return max(0, floor(available / CGFloat(columns)))
+    }
 
     // ИСПРАВЛЕНО: `lineLimit(_:reservesSpace:)` в теории резервирует
     // одинаковую высоту под 2/1 строки на всех карточках, но по факту всё
@@ -45,8 +57,12 @@ struct MangaCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             cover
-                .aspectRatio(3.0 / 4.0, contentMode: .fit)
-                .frame(maxWidth: .infinity)
+                // Явные width/height (3:4 от width), а не .aspectRatio — тот
+                // сам решал высоту от ПРЕДЛОЖЕННОЙ ширины, что зависело от
+                // текущего layout-прохода; здесь высота — прямое
+                // арифметическое следствие того же числа width, что и у
+                // всех остальных карточек ряда.
+                .frame(width: width, height: (width * 4 / 3).rounded())
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .topLeading) { statusBadge }
                 .overlay(alignment: .topTrailing) { ratingBadge }
@@ -58,7 +74,7 @@ struct MangaCardView: View {
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: width, alignment: .leading)
                 .frame(height: titleBlockHeight, alignment: .top)
 
             // Тип тайтла под названием — фиксированный прямоугольник высотой
@@ -68,11 +84,11 @@ struct MangaCardView: View {
                 .font(typeFont)
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: width, alignment: .leading)
                 .frame(height: typeBlockHeight, alignment: .top)
                 .opacity(typeLabel == nil ? 0 : 1)
         }
-        .frame(maxWidth: .infinity, alignment: .top)
+        .frame(width: width, alignment: .top)
     }
 
     private var typeLabel: String? {
