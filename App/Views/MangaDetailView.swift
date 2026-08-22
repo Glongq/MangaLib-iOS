@@ -117,6 +117,10 @@ struct MangaDetailView: View {
                     // overlay поверх фоновой картинки, а не отдельный блок
                     // здесь, чтобы фон мог тянуться ровно до его низа.
                     actionButtons
+                    // Метаданные (Тип/Статус/Год/Просмотры/Формат) — снова
+                    // над вкладками, видны на ВСЕХ вкладках (Главы/Комментарии
+                    // тоже), как было до переноса внутрь «О тайтле».
+                    infoRow
                     tabBar
                     tabContent
                 }
@@ -604,23 +608,19 @@ struct MangaDetailView: View {
         return labels.isEmpty ? nil : labels.joined(separator: ", ")
     }
 
-    // Фиксированная высота (вместо .padding(.vertical)) — гарантирует, что
-    // все плашки одинаковой высоты независимо от длины текста, как попросили.
-    private static let infoBlockHeight: CGFloat = 50
-
     @ViewBuilder
     private func infoBlock(_ heading: String, value: String) -> some View {
-        // Чип с подложкой (Theme.surfaceElevated + Capsule) — как попросили
-        // вернуть, вместо App Store-стиля без фона. Текст по левому краю
-        // (а не по центру) — Capsule со скруглёнными торцами и так даёт
-        // достаточный воздух по бокам.
+        // Чип с подложкой — размер и паддинги 1в1 как у teamChip в разделе
+        // "Главы" (колонка с переводчиками, см. teamChip ниже): те же
+        // .padding(.horizontal, 10)/.padding(.vertical, 8) вместо фиксированной
+        // высоты 50, тот же .subheadline.weight(.medium) для основного текста.
         VStack(alignment: .leading, spacing: 4) {
-            Text(heading).font(.system(size: 15)).foregroundStyle(Theme.textSecondary).lineLimit(1)
-            Text(value).font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.textPrimary)
+            Text(heading).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1)
+            Text(value).font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
         }
-        .padding(.horizontal, 20)
-        .frame(height: Self.infoBlockHeight, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(Theme.surfaceElevated, in: Capsule())
     }
 
@@ -1241,15 +1241,6 @@ struct MangaDetailView: View {
 
     private var aboutTab: some View {
         VStack(alignment: .leading, spacing: 18) {
-            // Тип/Статус/Год/Просмотры/Формат — раньше висели над вкладками
-            // на ВСЕХ вкладках, теперь показываются только здесь, в «О тайтле».
-            // Зазор от вкладок (О тайтле/Главы/Комментарии) до этого блока
-            // прижат до тех же 10pt, что и заголовок→контент у остальных
-            // подсекций (см. "Жанры и теги" ниже) — вместо унаследованных
-            // 18pt внешнего VStack, отсюда -8 компенсации.
-            infoRow
-                .padding(.top, -8)
-
             if viewModel.detail == nil && viewModel.isLoading {
                 ProgressView().tint(Theme.accent).frame(maxWidth: .infinity)
             }
