@@ -1797,6 +1797,11 @@ struct MangaDetailView: View {
                     .rotationEffect(.degrees(-90))
             }
             .frame(width: 20, height: 20)
+            // Та же зона 28×30, что у кнопки "скачать"/меню "…" в соседних
+            // ветках этого @ViewBuilder — иначе при смене состояния кружок
+            // (20×20 без внешней зоны) съезжает на ~4pt относительно места,
+            // где были иконки, и выглядит криво пришпиленным.
+            .frame(width: 28, height: 30)
             .animation(.linear(duration: 0.15), value: frac)
         } else {
             Button { startChapterDownload(chapter, branchId: branchId) } label: {

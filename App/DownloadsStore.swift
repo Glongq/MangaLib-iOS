@@ -434,7 +434,7 @@ final class DownloadsManager: ObservableObject {
         // компилируется ("call to main actor-isolated ... in a synchronous
         // nonisolated context"). Поэтому каждое обращение к состоянию актора
         // явно оборачиваем в `await MainActor.run { ... }`.
-        await withTaskGroup(of: (chapter: ChapterItem, branchId: Int?, pageCount: Int).self) { group in
+        await withTaskGroup(of: (chapter: ChapterItem, branchId: Int?, pageCount: Int, total: Int).self) { group in
             var iterator = chapters.makeIterator()
 
             func startNext() async {
@@ -450,10 +450,10 @@ final class DownloadsManager: ObservableObject {
                 // только те, что скачали отдельной иконкой.
                 let key = self.chapterKey(slug, chapter.id, bid)
                 group.addTask {
-                    let pageCount = await Self.downloadChapter(slug: slug, chapter: chapter, branchId: bid, into: dir) { frac in
+                    let (saved, total) = await Self.downloadChapter(slug: slug, chapter: chapter, branchId: bid, into: dir) { frac in
                         Task { await MainActor.run { self.chapterProgress[key] = frac } }
                     }
-                    return (chapter, bid, pageCount)
+                    return (chapter, bid, saved, total)
                 }
             }
 
@@ -463,19 +463,30 @@ final class DownloadsManager: ObservableObject {
                 await MainActor.run {
                     // Кружок прогресса убираем ВСЕГДА (даже на паузе) —
                     // иначе он застревал бы на последнем значении после
-                    // pause(). Успешный результат учитываем, только если
-                    // загрузку не прервали (см. Task.isCancelled ниже).
+                    // pause(). ВАЖНО: главу, которая успела докачаться
+                    // ПОЛНОСТЬЮ (pageCount == total), засчитываем и
+                    // сохраняем в манифест ДАЖЕ если pause() уже отменил
+                    // задачу — иначе до 4 параллельно качавшихся глав
+                    // (см. concurrentChapterDownloads) в момент "Стоп"
+                    // терялись бесследно: файлы на диске были, а в
+                    // manifest.json записи не было, и resume() качал их
+                    // заново с нуля (баг: "Стоп" выглядел как полная
+                    // отмена, а "Возобновить" — как загрузка с 0%).
+                    // Если же главу прервали НА СЕРЕДИНЕ — недокачанные
+                    // файлы подчищаем, чтобы resume() начал её заново, а
+                    // не подхватил половину.
                     self.chapterProgress[self.chapterKey(slug, result.chapter.id, result.branchId)] = nil
-                    guard !Task.isCancelled else { return }
-                    if result.pageCount > 0 {
+                    if result.pageCount > 0 && result.pageCount == result.total {
                         self.appendChapter(
                             DownloadedChapter(id: result.chapter.id, volume: result.chapter.volume,
                                               number: result.chapter.number, name: result.chapter.name,
                                               pageCount: result.pageCount, branchId: result.branchId),
                             toSlug: slug
                         )
+                        self.progress[slug]?.completed += 1
+                    } else if result.pageCount > 0 {
+                        try? self.fm.removeItem(at: self.chapterDir(slug, result.chapter.id, result.branchId))
                     }
-                    self.progress[slug]?.completed += 1
                 }
                 await startNext()
             }
@@ -576,10 +587,10 @@ final class DownloadsManager: ObservableObject {
     nonisolated private static func downloadChapter(
         slug: String, chapter: ChapterItem, branchId: Int?, into dir: URL,
         onProgress: (@Sendable (Double) -> Void)? = nil
-    ) async -> Int {
+    ) async -> (saved: Int, total: Int) {
         guard let result = try? await MangaNetworkService.shared.fetchPages(
             slug: slug, volume: chapter.volume, number: chapter.number, branchId: branchId
-        ) else { return 0 }
+        ) else { return (0, 0) }
 
         let total = result.pages.count
         var saved = 0
@@ -594,6 +605,6 @@ final class DownloadsManager: ObservableObject {
             }
             if total > 0 { onProgress?(Double(idx + 1) / Double(total)) }
         }
-        return saved
+        return (saved, total)
     }
 }
