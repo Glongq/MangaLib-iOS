@@ -47,7 +47,11 @@ struct ChapterCommentsSheet: View {
                 // Продолжение страницы: без фона (просвечивает фон читалки) и
                 // без своего ScrollView — список течёт в общей прокрутке.
                 VStack(spacing: 0) {
-                    header
+                    // chapterNumber тут всегда nil (embedded-режим не
+                    // передаёт его), поэтому при отключённых комментариях
+                    // header был бы полностью пуст — не рендерим его вовсе,
+                    // чтобы не оставлять пустой отступ над уведомлением.
+                    if !disabledInReader { header }
                     if disabledInReader {
                         embeddedDisabledState
                     } else {
@@ -111,7 +115,9 @@ struct ChapterCommentsSheet: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Заголовок только у неинлайн-панели (вертикальный режим) — в
-            // embedded-режиме (продолжением страницы) он не нужен.
+            // embedded-режиме (продолжением страницы) он не нужен. Показываем
+            // его независимо от disabledInReader — это просто ориентир «где
+            // я нахожусь», а не часть управления комментариями.
             if let chapterNumber {
                 Text("Комментарии к главе \(chapterNumber) · Страница \(postPage)")
                     .font(.subheadline.weight(.semibold))
@@ -119,22 +125,28 @@ struct ChapterCommentsSheet: View {
                     .lineLimit(1)
             }
 
-            HStack(spacing: 10) {
-                Menu {
-                    Picker("Сортировка", selection: Binding(
-                        get: { vm.sort },
-                        set: { s in Task { await vm.changeSort(s) } }
-                    )) {
-                        ForEach(CommentSort.allCases) { Text($0.title).tag($0) }
+            // Сортировка и «Настройки» имеют смысл только когда комментарии
+            // реально показаны — при отключённых комментариях эта строка
+            // пропадает, а единственная кнопка «Настройки» остаётся ниже,
+            // под текстом «Комментарии отключены» (см. disabledSettingsChip).
+            if !disabledInReader {
+                HStack(spacing: 10) {
+                    Menu {
+                        Picker("Сортировка", selection: Binding(
+                            get: { vm.sort },
+                            set: { s in Task { await vm.changeSort(s) } }
+                        )) {
+                            ForEach(CommentSort.allCases) { Text($0.title).tag($0) }
+                        }
+                    } label: {
+                        pill(vm.sort.title, systemImage: "arrow.up.arrow.down")
                     }
-                } label: {
-                    pill(vm.sort.title, systemImage: "arrow.up.arrow.down")
-                }
 
-                Spacer()
+                    Spacer()
 
-                Button { showSettings = true } label: {
-                    pill("Настройки", systemImage: "slider.horizontal.3")
+                    Button { showSettings = true } label: {
+                        pill("Настройки", systemImage: "slider.horizontal.3")
+                    }
                 }
             }
         }
