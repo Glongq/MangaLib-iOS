@@ -43,6 +43,21 @@ final class RemoteImageLoader: ObservableObject {
         load(candidates: [url])
     }
 
+    /// Декодирование UIImage(data:)/UIImage(contentsOfFile:) — это CPU-тяжёлая
+    /// операция (JPEG/WebP/PNG-декод), а класс сам @MainActor — без явного
+    /// ухода в фон она бы выполнялась прямо на главном потоке (там же, где
+    /// скролл и layout SwiftUI), из-за чего картинки иногда "зависали" в
+    /// загрузке на долгое время, хотя сеть уже давно всё скачала. Вынесено в
+    /// nonisolated + Task.detached, чтобы это было гарантировано фоном
+    /// независимо от того, откуда вызвано.
+    nonisolated private static func decodeImage(data: Data) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) { UIImage(data: data) }.value
+    }
+
+    nonisolated private static func decodeImage(contentsOfFile path: String) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) { UIImage(contentsOfFile: path) }.value
+    }
+
     /// Пробует список URL по очереди (перебор серверов картинок), пока один не отдаст изображение.
     func load(candidates: [URL]) {
         guard let key = candidates.first else { state = .failure; return }
@@ -60,7 +75,7 @@ final class RemoteImageLoader: ObservableObject {
                 // Локальный файл скачанной страницы: URLSession не умеет file://,
                 // читаем картинку прямо с диска.
                 if url.isFileURL {
-                    if let image = UIImage(contentsOfFile: url.path) {
+                    if let image = await Self.decodeImage(contentsOfFile: url.path) {
                         RemoteImageCache.shared.insert(image, for: key)
                         if !Task.isCancelled { self?.state = .success(image) }
                         return
@@ -72,7 +87,7 @@ final class RemoteImageLoader: ObservableObject {
                     if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                         continue // сервер не отдал — пробуем следующий
                     }
-                    guard let image = UIImage(data: data) else { continue }
+                    guard let image = await Self.decodeImage(data: data) else { continue }
                     RemoteImageCache.shared.insert(image, for: key)
                     if !Task.isCancelled { self?.state = .success(image) }
                     return
@@ -93,7 +108,7 @@ final class RemoteImageLoader: ObservableObject {
         for url in candidates {
             if Task.isCancelled { return nil }
             if url.isFileURL {
-                if let img = UIImage(contentsOfFile: url.path) {
+                if let img = await decodeImage(contentsOfFile: url.path) {
                     RemoteImageCache.shared.insert(img, for: key)
                     return img
                 }
@@ -102,7 +117,7 @@ final class RemoteImageLoader: ObservableObject {
             do {
                 let (data, response) = try await session.data(from: url)
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { continue }
-                guard let img = UIImage(data: data) else { continue }
+                guard let img = await decodeImage(data: data) else { continue }
                 RemoteImageCache.shared.insert(img, for: key)
                 return img
             } catch { continue }
@@ -125,7 +140,7 @@ final class RemoteImageLoader: ObservableObject {
             for url in candidates {
                 if Task.isCancelled { return }
                 if url.isFileURL {
-                    if let image = UIImage(contentsOfFile: url.path) {
+                    if let image = await decodeImage(contentsOfFile: url.path) {
                         RemoteImageCache.shared.insert(image, for: key)
                         return
                     }
@@ -136,7 +151,7 @@ final class RemoteImageLoader: ObservableObject {
                     if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                         continue
                     }
-                    guard let image = UIImage(data: data) else { continue }
+                    guard let image = await decodeImage(data: data) else { continue }
                     RemoteImageCache.shared.insert(image, for: key)
                     return
                 } catch {
