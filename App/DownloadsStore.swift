@@ -342,35 +342,44 @@ final class DownloadsManager: ObservableObject {
         // которые сеть качает параллельно — см. downloadChapter/runChapter).
         // Внутри одной главы страницы по-прежнему качаются последовательно
         // (не бьём по одному и тому же CDN-серверу пачкой запросов сразу).
+        //
+        // ВАЖНО: тело withTaskGroup в этом режиме компиляции НЕ наследует
+        // MainActor-изоляцию run() (в отличие от обычного async-кода) — прямой
+        // вызов chapterDir()/progress[...]/appendChapter() отсюда не
+        // компилируется ("call to main actor-isolated ... in a synchronous
+        // nonisolated context"). Поэтому каждое обращение к состоянию актора
+        // явно оборачиваем в `await MainActor.run { ... }`.
         await withTaskGroup(of: (chapter: ChapterItem, branchId: Int?, pageCount: Int).self) { group in
             var iterator = chapters.makeIterator()
 
-            func startNext() {
-                guard !Task.isCancelled, let chapter = iterator.next() else { return }
+            func startNext() async {
+                guard let chapter = iterator.next() else { return }
                 let bid = branchId ?? chapter.primaryBranchId
-                let dir = chapterDir(slug, chapter.id, bid)
-                try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+                let dir = await MainActor.run { self.chapterDir(slug, chapter.id, bid) }
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                if Task.isCancelled { return }
                 group.addTask {
                     let pageCount = await Self.downloadChapter(slug: slug, chapter: chapter, branchId: bid, into: dir)
                     return (chapter, bid, pageCount)
                 }
             }
 
-            for _ in 0..<Self.concurrentChapterDownloads { startNext() }
+            for _ in 0..<Self.concurrentChapterDownloads { await startNext() }
 
             while let result = await group.next() {
-                if !Task.isCancelled {
+                await MainActor.run {
+                    guard !Task.isCancelled else { return }
                     if result.pageCount > 0 {
-                        appendChapter(
+                        self.appendChapter(
                             DownloadedChapter(id: result.chapter.id, volume: result.chapter.volume,
                                               number: result.chapter.number, name: result.chapter.name,
                                               pageCount: result.pageCount, branchId: result.branchId),
                             toSlug: slug
                         )
                     }
-                    progress[slug]?.completed += 1
+                    self.progress[slug]?.completed += 1
                 }
-                startNext()
+                await startNext()
             }
         }
 
