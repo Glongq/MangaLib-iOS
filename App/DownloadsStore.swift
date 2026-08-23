@@ -65,8 +65,23 @@ final class DownloadsManager: ObservableObject {
         var currentTitle: String
         var finished: Bool
         var failed: Bool
+        /// На паузе (см. pause()/resume()) — в отличие от cancel()/delete(),
+        /// уже скачанные главы и очередь остаются на месте, докачать можно
+        /// кнопкой «Возобновить».
+        var paused: Bool = false
 
         var fraction: Double { total > 0 ? Double(completed) / Double(total) : 0 }
+    }
+
+    /// Параметры запущенной загрузки тайтла — нужны, чтобы resume() знал, ЧТО
+    /// докачивать (полный список глав, а не только оставшиеся: см. resume()).
+    private struct PendingDownload {
+        let title: String
+        let typeLabel: String?
+        let coverURLString: String?
+        let heroURLString: String?
+        let chapters: [ChapterItem]
+        let branchId: Int?
     }
 
     /// Всплывающее уведомление (тост) — например «Загрузка начата». Своё id у
@@ -96,6 +111,9 @@ final class DownloadsManager: ObservableObject {
     /// Активные задачи загрузки по slug — нужны, чтобы отменять скачивание.
     private var tasks: [String: Task<Void, Never>] = [:]
     private var chapterTasks: [String: Task<Void, Never>] = [:]
+    /// Параметры последнего запуска download() по slug — для resume() после
+    /// pause(). Очищается при полном завершении/удалении тайтла.
+    private var pending: [String: PendingDownload] = [:]
 
     private init() { load() }
 
@@ -128,6 +146,25 @@ final class DownloadsManager: ObservableObject {
         return fm.fileExists(atPath: f.path) ? f : nil
     }
 
+    /// Локальный файл «хиро»-фона карточки тайтла (если уже скачан).
+    func localHeroURL(slug: String) -> URL? {
+        let f = titleDir(slug).appendingPathComponent("hero.jpg")
+        return fm.fileExists(atPath: f.path) ? f : nil
+    }
+
+    /// Качает обложку (cover.jpg) и «хиро»-фон (hero.jpg) тайтла на диск — и
+    /// при по-главном скачивании (одна иконка), и при загрузке всего тайтла,
+    /// чтобы после скачивания хотя бы одной главы карточка тайтла открывалась
+    /// офлайн с обеими картинками, а не только с превью-обложкой.
+    private func saveTitleImages(slug: String, coverURLString: String?, heroURLString: String?) async {
+        if let coverURLString, let url = URL(string: coverURLString), let data = await Self.fetchData([url]) {
+            try? data.write(to: titleDir(slug).appendingPathComponent("cover.jpg"))
+        }
+        if let heroURLString, let url = URL(string: heroURLString), let data = await Self.fetchData([url]) {
+            try? data.write(to: titleDir(slug).appendingPathComponent("hero.jpg"))
+        }
+    }
+
     /// Папка страниц конкретной главы+ветки на диске.
     private func chapterDir(_ slug: String, _ chapterId: Int, _ branchId: Int?) -> URL {
         titleDir(slug).appendingPathComponent("\(chapterId)-b\(branchId ?? 0)", isDirectory: true)
@@ -148,14 +185,60 @@ final class DownloadsManager: ObservableObject {
     /// branchId — явно выбранная ветка перевода (см. DownloadTitleSheet):
     /// nil качает каждую главу её собственной первой веткой (как раньше),
     /// значение — качает ВСЕ переданные главы именно этой веткой/переводчиком.
-    func download(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapters: [ChapterItem], branchId: Int? = nil) {
+    /// heroURLString — «хиро»-фон карточки тайтла (MangaDetail.backgroundURL),
+    /// отдельно от обычной обложки (coverURLString) — качаются оба (см.
+    /// saveTitleImages), чтобы карточка тайтла открывалась офлайн один-в-один.
+    func download(slug: String, title: String, typeLabel: String?, coverURLString: String?, heroURLString: String? = nil, chapters: [ChapterItem], branchId: Int? = nil) {
         guard !chapters.isEmpty else { return }
         guard progress[slug]?.finished != false else { return } // уже качается
 
+        pending[slug] = PendingDownload(title: title, typeLabel: typeLabel, coverURLString: coverURLString,
+                                        heroURLString: heroURLString, chapters: chapters, branchId: branchId)
         progress[slug] = Progress(total: chapters.count, completed: 0, currentTitle: "", finished: false, failed: false)
         showBanner("Загрузка начата")
         let task = Task { [weak self] in
-            await self?.run(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, chapters: chapters, branchId: branchId)
+            await self?.run(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, heroURLString: heroURLString, chapters: chapters, branchId: branchId)
+            self?.tasks[slug] = nil
+        }
+        tasks[slug] = task
+    }
+
+    /// Приостановить активную загрузку тайтла — В ОТЛИЧИЕ от cancel()/delete(),
+    /// НЕ стирает уже скачанные главы и не убирает запись из «Загрузок»:
+    /// докачать оставшиеся главы можно кнопкой «Возобновить» (см. resume()).
+    func pause(slug: String) {
+        guard progress[slug]?.finished == false else { return }
+        tasks[slug]?.cancel()
+        tasks[slug] = nil
+        progress[slug]?.paused = true
+    }
+
+    func isPaused(slug: String) -> Bool { progress[slug]?.paused == true }
+
+    /// Продолжить приостановленную загрузку: докачивает только те главы из
+    /// исходного запроса, которых ещё нет на диске — уже скачанные не трогает.
+    func resume(slug: String) {
+        guard let req = pending[slug], progress[slug]?.paused == true else { return }
+        let downloadedKeys = Set((titles.first(where: { $0.slug == slug })?.chapters ?? [])
+            .map { "\($0.id)-\($0.branchId ?? 0)" })
+        let remaining = req.chapters.filter { chapter in
+            let bid = req.branchId ?? chapter.primaryBranchId
+            return !downloadedKeys.contains("\(chapter.id)-\(bid ?? 0)")
+        }
+        guard !remaining.isEmpty else {
+            // Всё, что было в очереди, уже скачано — просто закрываем прогресс.
+            progress[slug]?.paused = false
+            progress[slug]?.finished = true
+            pending[slug] = nil
+            save()
+            let s = slug
+            Task { try? await Task.sleep(nanoseconds: 2_000_000_000); self.progress[s] = nil }
+            return
+        }
+        progress[slug]?.paused = false
+        let task = Task { [weak self] in
+            await self?.run(slug: slug, title: req.title, typeLabel: req.typeLabel, coverURLString: req.coverURLString,
+                            heroURLString: req.heroURLString, chapters: remaining, branchId: req.branchId)
             self?.tasks[slug] = nil
         }
         tasks[slug] = task
@@ -193,7 +276,9 @@ final class DownloadsManager: ObservableObject {
 
     // MARK: По-главное скачивание (отдельная глава+ветка)
 
-    func chapterKey(_ slug: String, _ id: Int, _ branchId: Int?) -> String { "\(slug)#\(id)#\(branchId ?? 0)" }
+    /// nonisolated — чистая склейка строки, без обращения к состоянию актора;
+    /// нужно звать и из nonisolated-тела withTaskGroup (см. run()).
+    nonisolated func chapterKey(_ slug: String, _ id: Int, _ branchId: Int?) -> String { "\(slug)#\(id)#\(branchId ?? 0)" }
 
     func isChapterDownloaded(slug: String, chapterId: Int, branchId: Int?) -> Bool {
         titles.first(where: { $0.slug == slug })?.chapters.contains { $0.id == chapterId && ($0.branchId ?? 0) == (branchId ?? 0) } ?? false
@@ -205,13 +290,13 @@ final class DownloadsManager: ObservableObject {
     }
 
     /// Скачать ОДНУ главу конкретной ветки (с прогрессом по %).
-    func downloadChapter(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapter: ChapterItem, branchId: Int?) {
+    func downloadChapter(slug: String, title: String, typeLabel: String?, coverURLString: String?, heroURLString: String? = nil, chapter: ChapterItem, branchId: Int?) {
         let bid = branchId ?? chapter.primaryBranchId
         let key = chapterKey(slug, chapter.id, bid)
         guard chapterProgress[key] == nil, !isChapterDownloaded(slug: slug, chapterId: chapter.id, branchId: bid) else { return }
         chapterProgress[key] = 0
         let task = Task { [weak self] in
-            await self?.runChapter(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, chapter: chapter, branchId: bid)
+            await self?.runChapter(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, heroURLString: heroURLString, chapter: chapter, branchId: bid)
             self?.chapterTasks[key] = nil
         }
         chapterTasks[key] = task
@@ -243,18 +328,17 @@ final class DownloadsManager: ObservableObject {
         return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    private func runChapter(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapter: ChapterItem, branchId: Int?) async {
+    private func runChapter(slug: String, title: String, typeLabel: String?, coverURLString: String?, heroURLString: String? = nil, chapter: ChapterItem, branchId: Int?) async {
         let key = chapterKey(slug, chapter.id, branchId)
         try? fm.createDirectory(at: titleDir(slug), withIntermediateDirectories: true)
 
-        // Заводим запись тайтла, если её ещё нет (+ обложку и карточку для оффлайна).
+        // Заводим запись тайтла, если её ещё нет (+ обложку, хиро-фон и
+        // карточку для оффлайна) — качаем ИХ уже при первой скачанной главе,
+        // а не только при "Скачать весь тайтл".
         if !titles.contains(where: { $0.slug == slug }) {
             upsertTitle(DownloadedTitle(slug: slug, title: title, typeLabel: typeLabel,
                                         coverURLString: coverURLString, chapters: [], addedAt: Date()))
-            if let coverURLString, let url = URL(string: coverURLString),
-               let data = await Self.fetchData([url]) {
-                try? data.write(to: titleDir(slug).appendingPathComponent("cover.jpg"))
-            }
+            await saveTitleImages(slug: slug, coverURLString: coverURLString, heroURLString: heroURLString)
             await cacheDetailAndStats(slug: slug)
         }
 
@@ -300,9 +384,11 @@ final class DownloadsManager: ObservableObject {
     func delete(slug: String) {
         tasks[slug]?.cancel()
         tasks[slug] = nil
+        pending[slug] = nil
         try? fm.removeItem(at: titleDir(slug))
         titles.removeAll { $0.slug == slug }
         progress[slug] = nil
+        chapterProgress.keys.filter { $0.hasPrefix("\(slug)#") }.forEach { chapterProgress[$0] = nil }
         save()
     }
 
@@ -318,7 +404,7 @@ final class DownloadsManager: ObservableObject {
 
     // MARK: Процесс загрузки
 
-    private func run(slug: String, title: String, typeLabel: String?, coverURLString: String?, chapters: [ChapterItem], branchId: Int?) async {
+    private func run(slug: String, title: String, typeLabel: String?, coverURLString: String?, heroURLString: String? = nil, chapters: [ChapterItem], branchId: Int?) async {
         try? fm.createDirectory(at: titleDir(slug), withIntermediateDirectories: true)
 
         // Сразу заводим запись (с пустым списком глав) — чтобы тайтл появился в
@@ -326,12 +412,11 @@ final class DownloadsManager: ObservableObject {
         upsertTitle(DownloadedTitle(slug: slug, title: title, typeLabel: typeLabel,
                                     coverURLString: coverURLString, chapters: [], addedAt: Date()))
 
-        // Обложка и карточка тайтла (описание/жанры/оценки) — для оффлайн-показа
-        // (см. cachedDetail/cachedStats и MangaDetailViewModel).
-        if let coverURLString, let url = URL(string: coverURLString),
-           let data = await Self.fetchData([url]) {
-            try? data.write(to: titleDir(slug).appendingPathComponent("cover.jpg"))
-        }
+        // Обложка, хиро-фон и карточка тайтла (описание/жанры/оценки) — для
+        // оффлайн-показа (см. cachedDetail/cachedStats и MangaDetailViewModel).
+        // При resume() (докачка после паузы) это скачается заново — не страшно,
+        // просто перезапишет те же файлы.
+        await saveTitleImages(slug: slug, coverURLString: coverURLString, heroURLString: heroURLString)
         await cacheDetailAndStats(slug: slug)
 
         // Качаем несколько глав ОДНОВРЕМЕННО (пул из concurrentChapterDownloads
@@ -358,8 +443,16 @@ final class DownloadsManager: ObservableObject {
                 let dir = await MainActor.run { self.chapterDir(slug, chapter.id, bid) }
                 try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 if Task.isCancelled { return }
+                // Ключ такой же, как у по-главного скачивания одной иконкой
+                // (chapterKey) — поэтому кружок прогресса в списке глав
+                // (chapterDownloadControl) зелёными кружками отражает и
+                // главы, качающиеся как часть "Скачать весь тайтл", а не
+                // только те, что скачали отдельной иконкой.
+                let key = self.chapterKey(slug, chapter.id, bid)
                 group.addTask {
-                    let pageCount = await Self.downloadChapter(slug: slug, chapter: chapter, branchId: bid, into: dir)
+                    let pageCount = await Self.downloadChapter(slug: slug, chapter: chapter, branchId: bid, into: dir) { frac in
+                        Task { await MainActor.run { self.chapterProgress[key] = frac } }
+                    }
                     return (chapter, bid, pageCount)
                 }
             }
@@ -368,6 +461,11 @@ final class DownloadsManager: ObservableObject {
 
             while let result = await group.next() {
                 await MainActor.run {
+                    // Кружок прогресса убираем ВСЕГДА (даже на паузе) —
+                    // иначе он застревал бы на последнем значении после
+                    // pause(). Успешный результат учитываем, только если
+                    // загрузку не прервали (см. Task.isCancelled ниже).
+                    self.chapterProgress[self.chapterKey(slug, result.chapter.id, result.branchId)] = nil
                     guard !Task.isCancelled else { return }
                     if result.pageCount > 0 {
                         self.appendChapter(
@@ -383,7 +481,7 @@ final class DownloadsManager: ObservableObject {
             }
         }
 
-        if Task.isCancelled { return }
+        if Task.isCancelled { return } // приостановили (pause()) — pending остаётся для resume()
 
         // Если вообще ничего не скачалось — убираем пустую запись и помечаем сбой.
         if let idx = titles.firstIndex(where: { $0.slug == slug }), titles[idx].chapters.isEmpty {
@@ -394,6 +492,7 @@ final class DownloadsManager: ObservableObject {
         }
 
         progress[slug]?.finished = true
+        pending[slug] = nil
         save()
 
         // Убираем прогресс из UI через пару секунд после завершения.
@@ -471,21 +570,29 @@ final class DownloadsManager: ObservableObject {
     }
 
     /// Скачивает страницы одной главы (ветки branchId) в папку dir, возвращает
-    /// число сохранённых.
-    nonisolated private static func downloadChapter(slug: String, chapter: ChapterItem, branchId: Int?, into dir: URL) async -> Int {
+    /// число сохранённых. onProgress (0…1) — опционально, дёргается после
+    /// каждой страницы; используется run() для зелёного кружка прогресса у
+    /// главы, качающейся как часть "Скачать весь тайтл" (см. вызов в run()).
+    nonisolated private static func downloadChapter(
+        slug: String, chapter: ChapterItem, branchId: Int?, into dir: URL,
+        onProgress: (@Sendable (Double) -> Void)? = nil
+    ) async -> Int {
         guard let result = try? await MangaNetworkService.shared.fetchPages(
             slug: slug, volume: chapter.volume, number: chapter.number, branchId: branchId
         ) else { return 0 }
 
+        let total = result.pages.count
         var saved = 0
         for (idx, page) in result.pages.enumerated() {
             if Task.isCancelled { break }
             let candidates = MangaImageURL.pageURLs(for: page)
-            guard !candidates.isEmpty, let data = await fetchData(candidates) else { continue }
-            let ext = (candidates.first?.pathExtension).flatMap { $0.isEmpty ? nil : $0 } ?? "jpg"
-            let file = dir.appendingPathComponent(String(format: "%03d.%@", idx, ext))
-            try? data.write(to: file)
-            saved += 1
+            if !candidates.isEmpty, let data = await fetchData(candidates) {
+                let ext = (candidates.first?.pathExtension).flatMap { $0.isEmpty ? nil : $0 } ?? "jpg"
+                let file = dir.appendingPathComponent(String(format: "%03d.%@", idx, ext))
+                try? data.write(to: file)
+                saved += 1
+            }
+            if total > 0 { onProgress?(Double(idx + 1) / Double(total)) }
         }
         return saved
     }

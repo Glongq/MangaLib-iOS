@@ -11,6 +11,9 @@ struct DownloadTitleSheet: View {
 
     let slug: String
     let coverURL: URL?
+    /// «Хиро»-фон карточки тайтла (MangaDetail.backgroundURL) — качается вместе
+    /// с обычной обложкой, чтобы офлайн-карточка тайтла выглядела 1-в-1.
+    var heroURL: URL? = nil
     let title: String
     let typeLabel: String?
     let chapters: [ChapterItem]
@@ -274,6 +277,7 @@ struct DownloadTitleSheet: View {
                 title: title,
                 typeLabel: typeLabel,
                 coverURLString: coverURL?.absoluteString,
+                heroURLString: heroURL?.absoluteString,
                 chapters: chaptersToDownload,
                 branchId: activeTranslator.branchId
             )

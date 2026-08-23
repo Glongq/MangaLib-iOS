@@ -209,6 +209,7 @@ struct MangaDetailView: View {
             DownloadTitleSheet(
                 slug: viewModel.slug,
                 coverURL: viewModel.detail?.cover?.bestURL ?? coverURL ?? listItem?.cover?.bestURL,
+                heroURL: viewModel.detail?.backgroundURL,
                 title: title,
                 typeLabel: viewModel.detail?.type?.label ?? listItem?.type?.label,
                 chapters: viewModel.chapters,
@@ -1380,12 +1381,20 @@ struct MangaDetailView: View {
                 // Строка «Сортировать» (слева) + «К главе» (справа, если есть закладка).
                 sortAndJumpRow(count: chapters.count)
 
-                // Пока идёт скачивание — показываем прогресс над списком.
+                // Пока идёт скачивание — показываем прогресс над списком, а
+                // справа — «Стоп»/«Возобновить» (см. downloadStopResumeButton).
                 if let p = activeDownloadProgress {
+                    let paused = downloads.isPaused(slug: viewModel.slug)
                     HStack(spacing: 10) {
-                        ProgressView().tint(Theme.accent)
-                        Text("Главы качаются… \(p.completed)/\(p.total)")
+                        if paused {
+                            Image(systemName: "pause.circle").foregroundStyle(Theme.textSecondary)
+                        } else {
+                            ProgressView().tint(Theme.accent)
+                        }
+                        Text(paused ? "Пауза… \(p.completed)/\(p.total)" : "Главы качаются… \(p.completed)/\(p.total)")
                             .font(.subheadline).foregroundStyle(Theme.textSecondary)
+                        Spacer(minLength: 8)
+                        downloadStopResumeButton(paused: paused)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14).padding(.vertical, 10)
@@ -1438,6 +1447,25 @@ struct MangaDetailView: View {
                 }
             }
         }
+    }
+
+    /// «Стоп»/«Возобновить» у строки прогресса загрузки тайтла (chaptersTab) —
+    /// пилюля с подложкой справа. На паузе — зелёная «Возобновить», иначе —
+    /// обычная «Стоп». Пропадает вместе со всей строкой прогресса, когда
+    /// загрузка реально завершится (см. activeDownloadProgress).
+    private func downloadStopResumeButton(paused: Bool) -> some View {
+        Button {
+            if paused { downloads.resume(slug: viewModel.slug) }
+            else { downloads.pause(slug: viewModel.slug) }
+        } label: {
+            Text(paused ? "Возобновить" : "Стоп")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(paused ? .green : Theme.textPrimary)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 30)
+                .background(Theme.surfaceElevated, in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private func chipLabel(_ text: String, systemImage: String) -> some View {
@@ -1783,6 +1811,7 @@ struct MangaDetailView: View {
             title: title,
             typeLabel: viewModel.detail?.type?.label ?? listItem?.type?.label,
             coverURLString: (viewModel.detail?.cover?.bestURL ?? coverURL ?? listItem?.cover?.bestURL)?.absoluteString,
+            heroURLString: viewModel.detail?.backgroundURL?.absoluteString,
             chapter: chapter,
             branchId: branchId
         )

@@ -122,20 +122,41 @@ struct DownloadsView: View {
         }
         .padding(10)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        // Справа снизу: «Отменить» пока идёт загрузка, «Удалить» — когда готово.
+        // Справа снизу: пока идёт загрузка — «Стоп»/«Возобновить» + «Отменить»,
+        // когда готово — только «Удалить». Стоп/Возобновить пропадает вместе
+        // со всей парой, как только загрузка реально завершится (downloading
+        // становится false).
         .overlay(alignment: .bottomTrailing) {
-            Button {
-                if downloading { downloads.cancel(slug: title.slug) }
-                else { downloads.delete(slug: title.slug) }
-            } label: {
-                Text(downloading ? "Отменить" : "Удалить")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.red)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
+            HStack(spacing: 8) {
+                if downloading {
+                    let paused = downloads.isPaused(slug: title.slug)
+                    Button {
+                        if paused { downloads.resume(slug: title.slug) }
+                        else { downloads.pause(slug: title.slug) }
+                    } label: {
+                        Text(paused ? "Возобновить" : "Стоп")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(paused ? .green : Theme.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button {
+                    if downloading { downloads.cancel(slug: title.slug) }
+                    else { downloads.delete(slug: title.slug) }
+                } label: {
+                    Text(downloading ? "Отменить" : "Удалить")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             .padding(6)
         }
     }
