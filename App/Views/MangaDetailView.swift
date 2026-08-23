@@ -865,9 +865,10 @@ struct MangaDetailView: View {
     /// явно попросили: "увеличь обложку до размеров подложки, чтобы левый
     /// край подложки начинался с обложки").
     private static let similarCardHeight: CGFloat = 132
-    /// Ширина обложки при этой высоте — та же пропорция 80:112 (~5:7), что
-    /// была раньше, просто отмасштабированная под новую высоту.
-    private static let similarCoverWidth: CGFloat = similarCardHeight * 80 / 112
+    /// Ширина обложки при этой высоте — та же пропорция 2:3, что у главной
+    /// обложки тайтла в шапке (heroCoverSize, 88×132) — попросили привести
+    /// к единому виду вместо прежних 80:112 (~5:7).
+    private static let similarCoverWidth: CGFloat = similarCardHeight * 2 / 3
     /// Ширина карточки — доля от видимой ширины экрана. Изначально было 0.6
     /// ("по ширине примерно максимум 60% видимого экрана"), потом попросили
     /// увеличить на +20% (0.6 × 1.2 = 0.72) — фиксированная, не зависит от
@@ -1263,10 +1264,14 @@ struct MangaDetailView: View {
                 // "Нет глав" + подтверждённые маркеры (is_licensed/moderated,
                 // см. MangaDetail.isBlockedByLicenseOrModeration) — вместо
                 // обычного описания объясняем ПОЧЕМУ глав нет, как попросили.
-                // Отступ заголовок→контент — 10pt, как у similarSection/
-                // relatedSection (единый отступ во всех подсекциях), а не
-                // унаследованный spacing:18 внешнего VStack.
-                VStack(alignment: .leading, spacing: 10) {
+                // Отступ заголовок→контент визуально меньше, чем 10pt у
+                // similarSection/relatedSection/"Жанры и теги" — там под
+                // заголовком идёт не-текстовый контент (карусель/чипы), а
+                // здесь Text под Text, и встроенный line-height у обоих
+                // складывается с VStack-отступом, из-за чего 10pt казались
+                // заметно больше, чем в остальных блоках (попросили
+                // выровнять на глаз).
+                VStack(alignment: .leading, spacing: 6) {
                     blockTitle("Описание")
                     Label(
                         "Главы удалены по требованию правообладателя или роскомнадзора, либо тайтл находится на проверке.",
@@ -1276,7 +1281,7 @@ struct MangaDetailView: View {
                     .foregroundStyle(.orange)
                 }
             } else if let summary = viewModel.detail?.summary, !summary.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
                     blockTitle("Описание")
                     // Максимум 4 строки + оранжевая "Подробнее.../Свернуть" —
                     // см. ExpandableDescription (показывается только если текст
