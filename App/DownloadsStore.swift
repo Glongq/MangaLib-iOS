@@ -86,6 +86,12 @@ final class DownloadsManager: ObservableObject {
     /// запись, пока глава качается; по завершении удаляется.
     @Published private(set) var chapterProgress: [String: Double] = [:]
 
+    /// Сколько глав качаем одновременно при загрузке всего тайтла (см. run()).
+    /// 4 — по ощущениям близко к тому, сколько реально параллелится, если
+    /// вручную потыкать иконки скачивания подряд; больше не даёт заметного
+    /// выигрыша и сильнее грузит CDN/память.
+    private static let concurrentChapterDownloads = 4
+
     private let fm = FileManager.default
     /// Активные задачи загрузки по slug — нужны, чтобы отменять скачивание.
     private var tasks: [String: Task<Void, Never>] = [:]
@@ -328,23 +334,44 @@ final class DownloadsManager: ObservableObject {
         }
         await cacheDetailAndStats(slug: slug)
 
-        for chapter in chapters {
-            if Task.isCancelled { return } // отменили — cancel()/delete() уже всё убрал
-            progress[slug]?.currentTitle = "Том \(chapter.volume) Глава \(chapter.number)"
-            let bid = branchId ?? chapter.primaryBranchId
-            let dir = chapterDir(slug, chapter.id, bid)
-            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Качаем несколько глав ОДНОВРЕМЕННО (пул из concurrentChapterDownloads
+        // штук), а не строго по одной — раньше "Скачать весь тайтл" шёл
+        // строго последовательно (одна глава от начала до конца, потом
+        // следующая), из-за чего был заметно медленнее, чем вручную потыкать
+        // несколько иконок "скачать" подряд (те запускают независимые Task,
+        // которые сеть качает параллельно — см. downloadChapter/runChapter).
+        // Внутри одной главы страницы по-прежнему качаются последовательно
+        // (не бьём по одному и тому же CDN-серверу пачкой запросов сразу).
+        await withTaskGroup(of: (chapter: ChapterItem, branchId: Int?, pageCount: Int).self) { group in
+            var iterator = chapters.makeIterator()
 
-            let pageCount = await Self.downloadChapter(slug: slug, chapter: chapter, branchId: bid, into: dir)
-            if Task.isCancelled { return }
-            if pageCount > 0 {
-                appendChapter(
-                    DownloadedChapter(id: chapter.id, volume: chapter.volume,
-                                      number: chapter.number, name: chapter.name, pageCount: pageCount, branchId: bid),
-                    toSlug: slug
-                )
+            func startNext() {
+                guard !Task.isCancelled, let chapter = iterator.next() else { return }
+                let bid = branchId ?? chapter.primaryBranchId
+                let dir = chapterDir(slug, chapter.id, bid)
+                try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+                group.addTask {
+                    let pageCount = await Self.downloadChapter(slug: slug, chapter: chapter, branchId: bid, into: dir)
+                    return (chapter, bid, pageCount)
+                }
             }
-            progress[slug]?.completed += 1
+
+            for _ in 0..<Self.concurrentChapterDownloads { startNext() }
+
+            while let result = await group.next() {
+                if !Task.isCancelled {
+                    if result.pageCount > 0 {
+                        appendChapter(
+                            DownloadedChapter(id: result.chapter.id, volume: result.chapter.volume,
+                                              number: result.chapter.number, name: result.chapter.name,
+                                              pageCount: result.pageCount, branchId: result.branchId),
+                            toSlug: slug
+                        )
+                    }
+                    progress[slug]?.completed += 1
+                }
+                startNext()
+            }
         }
 
         if Task.isCancelled { return }

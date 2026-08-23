@@ -1394,7 +1394,13 @@ struct MangaDetailView: View {
 
                 // Порядок: по умолчанию новые сверху; «Сортировать» переключает.
                 let sorted = chaptersNewestFirst ? Array(chapters.reversed()) : chapters
-                VStack(spacing: 0) {
+                // LazyVStack — при 300+ главах обычный VStack строит и
+                // раскладывает ВСЕ строки сразу (весь экран — один общий
+                // ScrollView), из-за чего скролл фризился тем сильнее, чем
+                // больше глав. LazyVStack строит только то, что реально
+                // попадает в область показа — ровно как в остальных списках
+                // читалки (ChapterListSheet/ChapterCommentsSheet).
+                LazyVStack(spacing: 0) {
                     ForEach(Array(sorted.enumerated()), id: \.element.id) { index, chapter in
                         chapterBlock(chapter)
                             .id(chapter.id) // для прокрутки по «К главе»

@@ -22,7 +22,18 @@ enum CommentSort: String, CaseIterable, Identifiable {
 final class MangaDetailViewModel: ObservableObject {
 
     @Published private(set) var detail: MangaDetail?
-    @Published private(set) var chapters: [ChapterItem] = []
+    @Published private(set) var chapters: [ChapterItem] = [] {
+        didSet {
+            // Индекс id→позиция — чтобы position(of:) не делал линейный
+            // firstIndex(of:) (со сравнением ВСЕГО ChapterItem, включая
+            // branches) на каждую строку списка глав. При 300+ главах это
+            // давало O(n²) при построении/скролле экрана карточки — чем
+            // больше глав, тем сильнее фризы (см. chaptersTab/isRead в
+            // MangaDetailView).
+            chapterPositionById = Dictionary(uniqueKeysWithValues: chapters.enumerated().map { ($1.id, $0 + 1) })
+        }
+    }
+    private var chapterPositionById: [Int: Int] = [:]
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var errorMessage: String?
     /// Ошибка ИМЕННО загрузки карточки (detail), в отличие от errorMessage
@@ -96,9 +107,11 @@ final class MangaDetailViewModel: ObservableObject {
         } ?? chapters.first
     }
 
-    /// Позиция главы в списке (1-based) — для сохранения прогресса.
+    /// Позиция главы в списке (1-based) — для сохранения прогресса. O(1) по
+    /// заранее построенному индексу (см. chapters.didSet), а не линейный
+    /// поиск по всему списку на каждый вызов.
     func position(of chapter: ChapterItem) -> Int {
-        (chapters.firstIndex(of: chapter) ?? 0) + 1
+        chapterPositionById[chapter.id] ?? 1
     }
 
     /// Загружает карточку и главы параллельно и независимо:
