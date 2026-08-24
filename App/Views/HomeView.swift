@@ -545,7 +545,13 @@ struct HomeView: View {
             }
         }
         .padding(10)
-        .frame(width: 210)
+        // maxWidth (не фиксированная width) — чип подстраивается под длину
+        // ника: у коротких ников раньше оставалась пустая полоса и контент
+        // выглядел "центрированным" внутри фиксированных 210pt. Верхняя
+        // граница на всякий случай оставлена той же — длинный ник (20+
+        // символов) просто обрежется многоточием (.lineLimit(1) у Text
+        // выше), а не растянет чип.
+        .frame(maxWidth: 210, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
