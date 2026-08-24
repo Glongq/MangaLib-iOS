@@ -206,6 +206,21 @@ final class MangaNetworkService {
         }
     }
 
+    /// «Мои обновления» на вкладке «Читают» — ПОДТВЕРЖДЕНО реальным
+    /// перехватом (пользователь прислал полное тело ответа): `GET
+    /// /user-latest-updates?page=`, форма элемента и пагинация — та же, что
+    /// у fetchLatestUpdates (MangaItem + meta.has_next_page), просто с
+    /// заранее включённым metadata.latest_items — без нашего fields[]=
+    /// metadata и без риска 422. Судя по названию пути — обновления по
+    /// тайтлам аккаунта (закладки/подписки), а не весь каталог, поэтому,
+    /// как и /auth/me, скорее всего требует авторизации.
+    func fetchUserLatestUpdates(page: Int = 1) async throws -> CatalogPage {
+        let items: [URLQueryItem] = [URLQueryItem(name: "page", value: String(max(page, 1)))]
+        let request = try makeRequest(path: "/user-latest-updates", queryItems: items)
+        let response: APIListResponse<MangaItem> = try await perform(request)
+        return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
     /// «Сейчас читают» — ПОДТВЕРЖДЕНО реальным перехватом (файл от
     /// пользователя): `GET /media/top-views`, пагинация как у обычного
     /// каталога (meta.has_next_page). Имя параметра периода — `time` (НЕ

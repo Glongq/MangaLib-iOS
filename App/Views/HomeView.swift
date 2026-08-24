@@ -11,11 +11,12 @@ import UIKit
 /// (см. HomeViewModel.loadMoreUpdatesIfNeeded), как попросили — "беск вниз
 /// листать можно".
 ///
-/// ВАЖНО про данные: «Продолжить читать» и «Последние обновления» стоят на
-/// подтверждённых, уже используемых эндпоинтах (история/закладки, каталог с
-/// sort=updated/added, уведомления). «Сейчас читают» — на подтверждённом
-/// пути `/media/top-views`, но параметры вкладок/периода — догадка (см.
-/// MangaNetworkService.fetchTopViews). «Коллекции»/«Топ активных недели» —
+/// ВАЖНО про данные: «Продолжить читать» и оба «Последних обновления» (Все/
+/// Мои) стоят на ПОДТВЕРЖДЁННЫХ эндпоинтах (история/закладки, каталог с
+/// sort=updated/added, /user-latest-updates). «Сейчас читают» — на
+/// подтверждённом пути `/media/top-views` с подтверждённым же параметром
+/// периода `time` (см. MangaNetworkService.fetchTopViews); значения sort_by
+/// для трёх вкладок — всё ещё догадка. «Коллекции»/«Топ активных недели» —
 /// на НЕподтверждённом пути (см. fetchHomeWidgets) и тихо не показываются,
 /// если сервер не ответит 200.
 struct HomeView: View {
@@ -50,12 +51,6 @@ struct HomeView: View {
             .navigationDestination(for: HistoryEntry.self) { entry in
                 MangaDetailView(slug: entry.media.apiSlug, fallbackTitle: entry.media.displayTitle,
                                  coverURL: entry.media.cover?.bestURL, item: entry.media)
-            }
-            .navigationDestination(for: NotificationItem.self) { note in
-                if let media = note.media {
-                    MangaDetailView(slug: media.apiSlug, fallbackTitle: media.displayTitle,
-                                     coverURL: media.cover?.bestURL, item: media)
-                }
             }
         }
         .task {
@@ -589,20 +584,13 @@ struct HomeView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
 
+            // "Все" и "Мои" — теперь оба ПОДТВЕРЖДЁННЫЕ эндпоинты одной формы
+            // (см. HomeViewModel.fetchUpdatesPage) — общий ряд для обеих вкладок.
             LazyVStack(spacing: 10) {
-                switch viewModel.updatesTab {
-                case .all:
-                    ForEach(viewModel.updates) { item in
-                        NavigationLink(value: item) { updateRow(item) }
-                            .buttonStyle(.plain)
-                            .onAppear { viewModel.loadMoreUpdatesIfNeeded(currentId: item.id) }
-                    }
-                case .mine:
-                    ForEach(viewModel.myUpdates) { note in
-                        NavigationLink(value: note) { updateRow(note) }
-                            .buttonStyle(.plain)
-                            .onAppear { viewModel.loadMoreUpdatesIfNeeded(currentId: note.id) }
-                    }
+                ForEach(viewModel.updates) { item in
+                    NavigationLink(value: item) { updateRow(item) }
+                        .buttonStyle(.plain)
+                        .onAppear { viewModel.loadMoreUpdatesIfNeeded(currentId: item.id) }
                 }
                 if viewModel.isLoadingMoreUpdates {
                     ProgressView().tint(Theme.accent).frame(maxWidth: .infinity)
@@ -656,38 +644,6 @@ struct HomeView: View {
             line += " + ещё \(item.extraLatestChaptersCount)"
         }
         return line.isEmpty ? (item.type?.label ?? "") : line
-    }
-
-    private func updateRow(_ note: NotificationItem) -> some View {
-        HStack(spacing: 12) {
-            RemoteImage(url: note.media?.cover?.bestURL) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                SkeletonBox()
-            } failure: {
-                ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
-            }
-            .frame(width: 48, height: 48)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .clipped()
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(note.media?.displayTitle ?? "")
-                    .font(Self.mangaTitleFont)
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                Text(note.displayText)
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            Text(note.createdAt.relativeRussianString)
-                .font(.caption2)
-                .foregroundStyle(Theme.textSecondary)
-        }
-        .padding(10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     // MARK: Общее

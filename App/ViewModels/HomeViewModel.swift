@@ -13,8 +13,8 @@ enum HomeUpdatesTab: String, CaseIterable, Identifiable {
 /// продолжить читать (из BookmarksStore, локально), сейчас читают
 /// (fetchTopViews, три категории параллельно), коллекции + топ активных
 /// недели (fetchHomeWidgets, см. его комментарий про неподтверждённый путь),
-/// новинки (fetchCatalog(sort: .added)), последние обновления
-/// (fetchLatestUpdates / уведомления).
+/// новинки (fetchCatalog(sort: .added)), последние обновления — Все
+/// (fetchLatestUpdates) и Мои (fetchUserLatestUpdates), оба подтверждённые.
 ///
 /// Каждая секция грузится и падает НЕЗАВИСИМО — ошибка одной (например,
 /// неподтверждённых виджетов) не должна очищать уже показанные остальные,
@@ -55,8 +55,10 @@ final class HomeViewModel: ObservableObject {
     @Published var updatesTab: HomeUpdatesTab = .all {
         didSet { if oldValue != updatesTab { Task { await reloadUpdates() } } }
     }
+    /// Общий список и для «Все обновления», и для «Мои обновления» — оба
+    /// эндпоинта отдают одну и ту же форму (см. fetchUpdatesPage), сброс/
+    /// перезагрузка при смене updatesTab делает reloadUpdates().
     @Published private(set) var updates: [MangaItem] = []
-    @Published private(set) var myUpdates: [NotificationItem] = []
     @Published private(set) var isLoadingMoreUpdates = false
 
     // MARK: Общее состояние экрана
@@ -182,72 +184,47 @@ final class HomeViewModel: ObservableObject {
 
     // MARK: Последние обновления
 
+    /// Всё обновления и мои обновления — оба ПОДТВЕРЖДЁННЫЕ эндпоинты одной
+    /// формы (CatalogPage: [MangaItem] + hasNextPage), см. fetchLatestUpdates
+    /// / fetchUserLatestUpdates — поэтому загрузка/пагинация общие, разница
+    /// только в том, какой из двух запросов делать.
+    private func fetchUpdatesPage(_ page: Int) async throws -> CatalogPage {
+        switch updatesTab {
+        case .all:  return try await service.fetchLatestUpdates(page: page)
+        case .mine: return try await service.fetchUserLatestUpdates(page: page)
+        }
+    }
+
     private func reloadUpdates() async {
         updatesPage = 1
         updatesHasNext = true
-        switch updatesTab {
-        case .all:
-            do {
-                let page = try await service.fetchLatestUpdates(page: 1)
-                updates = page.items
-                updatesHasNext = page.hasNextPage
-            } catch {
-                guard !isCancellation(error) else { return }
-                updates = []
-                updatesHasNext = false
-            }
-        case .mine:
-            do {
-                // "Мои обновления" — та же лента, что и вкладка «Новое»
-                // (уведомления), отфильтрованная до категории "chapter"
-                // (новая глава), см. NotificationCategoryCounts.chapter.
-                let result = try await service.fetchNotifications(readType: "all", sortType: "desc", page: 1)
-                myUpdates = result.items.filter { $0.category == "chapter" }
-                updatesHasNext = result.hasNextPage
-            } catch {
-                guard !isCancellation(error) else { return }
-                myUpdates = []
-                updatesHasNext = false
-            }
+        do {
+            let page = try await fetchUpdatesPage(1)
+            updates = page.items
+            updatesHasNext = page.hasNextPage
+        } catch {
+            guard !isCancellation(error) else { return }
+            updates = []
+            updatesHasNext = false
         }
     }
 
     func loadMoreUpdatesIfNeeded(currentId: Int) {
-        guard updatesHasNext, !isLoadingMoreUpdates else { return }
-        switch updatesTab {
-        case .all:
-            guard currentId == updates.last?.id else { return }
-        case .mine:
-            guard currentId == myUpdates.last?.id else { return }
-        }
+        guard updatesHasNext, !isLoadingMoreUpdates, currentId == updates.last?.id else { return }
         Task { await loadMoreUpdates() }
     }
 
     private func loadMoreUpdates() async {
         isLoadingMoreUpdates = true
         let next = updatesPage + 1
-        switch updatesTab {
-        case .all:
-            do {
-                let page = try await service.fetchLatestUpdates(page: next)
-                let existing = Set(updates.map(\.id))
-                updates.append(contentsOf: page.items.filter { !existing.contains($0.id) })
-                updatesPage = next
-                updatesHasNext = page.hasNextPage
-            } catch {
-                // тихо игнорируем — можно попробовать снова при следующем скролле
-            }
-        case .mine:
-            do {
-                let result = try await service.fetchNotifications(readType: "all", sortType: "desc", page: next)
-                let fresh = result.items.filter { $0.category == "chapter" }
-                let existing = Set(myUpdates.map(\.id))
-                myUpdates.append(contentsOf: fresh.filter { !existing.contains($0.id) })
-                updatesPage = next
-                updatesHasNext = result.hasNextPage
-            } catch {
-                // тихо игнорируем
-            }
+        do {
+            let page = try await fetchUpdatesPage(next)
+            let existing = Set(updates.map(\.id))
+            updates.append(contentsOf: page.items.filter { !existing.contains($0.id) })
+            updatesPage = next
+            updatesHasNext = page.hasNextPage
+        } catch {
+            // тихо игнорируем — можно попробовать снова при следующем скролле
         }
         isLoadingMoreUpdates = false
     }
