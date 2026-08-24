@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// Вкладка «Мои обновления» внутри секции «Последние обновления» (см.
 /// HomeView) — по словам пользователя это те же данные, что и на вкладке
@@ -86,9 +87,24 @@ final class HomeViewModel: ObservableObject {
     /// докачивание totalChapters — не долбим сервер повторно при каждом
     /// перерисовывании карточки (см. loadChapterCountIfNeeded).
     private var chapterCountRequested: Set<String> = []
+    private var siteCancellable: AnyCancellable?
 
     init(service: MangaNetworkService = .shared) {
         self.service = service
+
+        // Переключение активного сайта в меню (см. SiteSession) — все
+        // секции ленты (продолжить читать, сейчас читают, коллекции, топ
+        // недели, новинки, обновления) относятся к КОНКРЕТНОМУ сайту,
+        // поэтому при смене сайта нужна полная перезагрузка, как и у
+        // CatalogViewModel/BookmarksStore. dropFirst() — Published сразу
+        // отдаёт текущее значение при подписке, этот "стартовый" эмит не
+        // нужен (loadInitialIfNeeded() и так вызывается отдельно).
+        siteCancellable = SiteSession.shared.$activeSite
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.scheduleReload()
+            }
     }
 
     // MARK: Точки входа
