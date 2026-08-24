@@ -1887,7 +1887,10 @@ enum TopViewsPeriod: String, CaseIterable, Identifiable {
 /// отдельным эндпоинтом — НЕТ (в дампах виден только вложенным в агрегат
 /// главной, см. MangaNetworkService.fetchHomeWidgets). `previews` — до трёх
 /// обложек тайтлов внутри подборки, та же форма, что MangaCover.
-struct MangaCollection: Decodable, Identifiable, Hashable {
+/// Не Hashable: MangaCover (см. previews ниже) сам не Hashable, а нигде в
+/// HomeView коллекции не кладутся в Set/используются как значение таба —
+/// хватает Identifiable для ForEach.
+struct MangaCollection: Decodable, Identifiable {
     let id: Int
     let name: String
     let views: Int?
