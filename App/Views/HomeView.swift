@@ -258,14 +258,12 @@ struct HomeView: View {
     private static let currentlyReadingCoverSize: CGFloat = 56
     private static let currentlyReadingRowSpacing: CGFloat = 10
     /// Заголовок страницы-подкатегории (Новинки/Набирающее популярность/
-    /// Популярное) — по просьбе поменян местами с sectionHeader() (тот был
-    /// крупнее, .headline) и затем ещё увеличен в 1.25х поверх нового,
-    /// более крупного эталона (.headline), поэтому теперь заметно крупнее
-    /// заголовков секций. Высота строки берётся из реальных метрик шрифта
-    /// (а не фиксированного числа), чтобы крупный текст не обрезался.
+    /// Популярное) — по просьбе снова поменян местами с sectionHeader():
+    /// та версия (headline×1.25) делала подкатегории заметно крупнее
+    /// заголовков секций, что смотрелось наоборот — теперь здесь меньший
+    /// эталон (subheadline, без множителя), а больший ушёл в sectionHeader.
     private static var currentlyReadingLabelUIFont: UIFont {
-        let base = UIFont.preferredFont(forTextStyle: .headline)
-        return UIFont.systemFont(ofSize: base.pointSize * 1.25, weight: .semibold)
+        UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .semibold)
     }
     private static var currentlyReadingLabelFont: Font { Font(currentlyReadingLabelUIFont) }
     private static var currentlyReadingLabelHeight: CGFloat { currentlyReadingLabelUIFont.lineHeight.rounded(.up) }
@@ -654,11 +652,12 @@ struct HomeView: View {
 
     // MARK: Общее
 
-    /// Раньше .headline — по просьбе поменян местами с заголовком
-    /// подкатегории «Сейчас читают» (см. currentlyReadingLabelUIFont),
-    /// который был крупнее; теперь заголовки секций — тот меньший эталон.
+    /// По просьбе снова поменян местами с заголовком подкатегории «Сейчас
+    /// читают» (см. currentlyReadingLabelUIFont) — теперь заголовки секций
+    /// (у всех есть стрелочка chevron.right справа) крупнее, headline×1.25.
     private static var sectionHeaderFont: Font {
-        Font(UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .semibold))
+        let base = UIFont.preferredFont(forTextStyle: .headline)
+        return Font(UIFont.systemFont(ofSize: base.pointSize * 1.25, weight: .semibold))
     }
 
     private func sectionHeader(_ title: String) -> some View {
