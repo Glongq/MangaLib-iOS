@@ -538,9 +538,12 @@ struct HomeView: View {
                     Text("Уровень \(points.level)")
                         .font(.caption2)
                         .foregroundStyle(Theme.textSecondary)
+                    // maxWidth: .infinity вместо фиксированных 90 — растягивается
+                    // на ширину, которую VStack уже определил по нику (обычно
+                    // самому широкому элементу), а не на свою собственную.
                     progressBar(fraction: points.maxLevelPoints > 0
                                 ? Double(points.currentLevelPoints) / Double(points.maxLevelPoints) : nil)
-                        .frame(width: 90, height: 4)
+                        .frame(maxWidth: .infinity, minHeight: 4, maxHeight: 4)
                 }
             }
         }
