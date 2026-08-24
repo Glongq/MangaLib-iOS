@@ -177,7 +177,7 @@ struct HomeView: View {
     private func continueReadingCard(_ entry: HistoryEntry) -> some View {
         let progress = bookmarks.readingProgress(forSlug: entry.media.apiSlug)
         return HStack(spacing: 12) {
-            RemoteImage(url: entry.media.cover?.bestURL) { image in
+            RemoteImage(url: entry.media.cover?.thumbnailURL ?? entry.media.cover?.bestURL) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
                 SkeletonBox()
@@ -349,7 +349,7 @@ struct HomeView: View {
 
     private func currentlyReadingRow(_ item: MangaItem) -> some View {
         HStack(spacing: 10) {
-            RemoteImage(url: item.cover?.bestURL) { image in
+            RemoteImage(url: item.cover?.thumbnailURL ?? item.cover?.bestURL) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
                 SkeletonBox()
@@ -563,7 +563,7 @@ struct HomeView: View {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(viewModel.newest) { item in
                             NavigationLink(value: item) {
-                                MangaCardView(item: item, width: 108)
+                                MangaCardView(item: item, width: 108, coverURLOverride: item.cover?.thumbnailURL ?? item.cover?.bestURL)
                             }
                             .buttonStyle(.plain)
                         }
@@ -608,7 +608,7 @@ struct HomeView: View {
 
     private func updateRow(_ item: MangaItem) -> some View {
         HStack(spacing: 12) {
-            RemoteImage(url: item.cover?.bestURL) { image in
+            RemoteImage(url: item.cover?.thumbnailURL ?? item.cover?.bestURL) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
                 SkeletonBox()

@@ -31,14 +31,22 @@ struct MangaCardView: View {
     /// пустым местом НИЖЕ жанра. Если у ВСЕХ карточек ряда название в 1
     /// строку — минимальная высота блока под 1 строку, пустого места нет.
     let rowNeedsTwoLines: Bool
+    /// Явный override URL обложки — по умолчанию nil, тогда используется
+    /// item.cover?.bestURL (полноразмерная), как и раньше везде. Передаётся
+    /// отдельно (например item.cover?.thumbnailURL из HomeView), чтобы
+    /// мелкие превью в лентах главной грузили сжатую версию, не трогая
+    /// остальные места (Каталог, Закладки, Персонаж и т.д.), где карточка
+    /// крупнее и полноразмерная обложка оправдана.
+    let coverURLOverride: URL?
     /// Дефолт true — прежнее поведение для мест, которым не важна ужимка
     /// ряда по факту (см. CharacterView.grid: там сетка маленькая, отдельная
     /// row-логика ей не нужна). Каталог (MangaCatalogView) передаёт значение
     /// явно, посчитанное на весь ряд.
-    init(item: MangaItem, width: CGFloat, rowNeedsTwoLines: Bool = true) {
+    init(item: MangaItem, width: CGFloat, rowNeedsTwoLines: Bool = true, coverURLOverride: URL? = nil) {
         self.item = item
         self.width = width
         self.rowNeedsTwoLines = rowNeedsTwoLines
+        self.coverURLOverride = coverURLOverride
     }
 
     // Для бэйджа статуса закладки (см. statusBadge) — реактивно, чтобы
@@ -174,7 +182,7 @@ struct MangaCardView: View {
     // MARK: Обложка (object-fit: cover + скелетон + fallback)
 
     private var cover: some View {
-        RemoteImage(url: item.cover?.bestURL) { image in
+        RemoteImage(url: coverURLOverride ?? item.cover?.bestURL) { image in
             image
                 .resizable()
                 .scaledToFill()          // аналог object-fit: cover

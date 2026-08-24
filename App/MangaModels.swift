@@ -380,6 +380,12 @@ struct MangaCover: Decodable {
         }
         return nil
     }
+
+    /// Маленькая, заранее сжатая версия (суффикс `_thumb` в реальных URL) —
+    /// для мелких превью в лентах (см. HomeView), где полноразмерная
+    /// default/md обложка (обычно = то же самое, что и md, см. комментарий
+    /// у bestURL) не нужна и только тратит трафик/время загрузки.
+    var thumbnailURL: URL? { thumbnail.flatMap(URL.init(string:)) }
 }
 
 /// Фоновая картинка тайтла (MangaDetail.background) — ПОДТВЕРЖДЕНО реальным
