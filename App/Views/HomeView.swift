@@ -21,7 +21,6 @@ struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var bookmarks = BookmarksStore.shared
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -52,9 +51,15 @@ struct HomeView: View {
             // при холодном старте (см. BookmarksView/HistoryView.task, тот же приём).
             await bookmarks.syncHistoryFromServer()
         }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await viewModel.refresh() } }
-        }
+        // НЕТ .onChange(of: scenePhase) — раньше здесь был автообновление при
+        // каждом возврате из фона, и это оказалось причиной бага из фидбека
+        // ("если на чуть-чуть свернуть приложение — элементы то появляются, то
+        // пропадают"): даже мгновенный взгляд в App Switcher засчитывался как
+        // "вернулись", запускал полный reloadAll() поверх уже показанных
+        // данных, и без защиты от параллельных вызовов (см. HomeViewModel.
+        // reloadTask) более старый ещё не завершившийся запрос мог перезаписать
+        // уже пришедший свежий результат пустым/устаревшим. Обновление теперь
+        // только по .task (при первом открытии) и потянуть-обновить.
     }
 
     @ViewBuilder
@@ -110,13 +115,31 @@ struct HomeView: View {
         let entries = bookmarks.continueReadingEntries
         if !entries.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                sectionHeader("Продолжить читать")
-                    .padding(.horizontal, 16)
+                HStack {
+                    sectionHeader("Продолжить читать")
+                    Spacer(minLength: 0)
+                    // Заглушка: локально прячет из виджета всё, что видно
+                    // прямо сейчас (см. BookmarksStore.clearContinueReading) —
+                    // не удаляет ни историю, ни закладку на сервере, реального
+                    // подтверждённого эндпоинта под "очистить" ещё нет.
+                    Button("Очистить") { bookmarks.clearContinueReading() }
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .padding(.horizontal, 16)
                 ScrollView(.horizontal) {
                     HStack(spacing: 12) {
                         ForEach(entries) { entry in
-                            NavigationLink(value: entry) { continueReadingCard(entry) }
-                                .buttonStyle(.plain)
+                            // Мусорка — ОТДЕЛЬНЫЙ Button рядом с NavigationLink
+                            // в ZStack, а не вложен в его label: вложенная
+                            // кнопка внутри NavigationLink ненадёжно ловит тап
+                            // (жест может уйти на переход вместо кнопки).
+                            ZStack(alignment: .topTrailing) {
+                                NavigationLink(value: entry) { continueReadingCard(entry) }
+                                    .buttonStyle(.plain)
+                                trashButton(slug: entry.media.apiSlug)
+                            }
+                            .onAppear { viewModel.loadChapterCountIfNeeded(for: entry) }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -152,10 +175,27 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 4)
             }
+            Spacer(minLength: 0)
         }
         .padding(10)
         .frame(width: 220)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    /// Мусорка поверх подложки карточки — только прячет локально (см.
+    /// BookmarksStore.dismissContinueReading), заглушка до реального API.
+    private func trashButton(slug: String) -> some View {
+        Button {
+            bookmarks.dismissContinueReading(slug: slug)
+        } label: {
+            Image(systemName: "trash")
+                .font(.caption)
+                .foregroundStyle(.white)
+                .padding(6)
+                .background(.black.opacity(0.45), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .padding(6)
     }
 
     private func progressFraction(_ progress: ReadingProgress?) -> Double? {
@@ -175,9 +215,21 @@ struct HomeView: View {
 
     // MARK: Сейчас читают
 
+    /// Квадратная обложка ряда + высота одного ряда/страницы пейджинга —
+    /// вынесены в константы, чтобы карусель ниже и высота её GeometryReader
+    /// считались от одних и тех же чисел.
+    private static let currentlyReadingCoverSize: CGFloat = 56
+    private static let currentlyReadingRowSpacing: CGFloat = 10
+    private static let currentlyReadingLabelHeight: CGFloat = 20
+    private static let currentlyReadingPageHeight: CGFloat =
+        currentlyReadingLabelHeight + 8
+        + currentlyReadingCoverSize * 3
+        + currentlyReadingRowSpacing * 2
+
     @ViewBuilder
     private var currentlyReadingSection: some View {
-        if !viewModel.currentlyReading.isEmpty || viewModel.isLoadingCurrentlyReading {
+        let hasAnyItems = TopViewsSort.allCases.contains { !(viewModel.currentlyReadingBySort[$0] ?? []).isEmpty }
+        if hasAnyItems || viewModel.isLoadingCurrentlyReading || viewModel.currentlyReadingErrorMessage != nil {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     sectionHeader("Сейчас читают")
@@ -186,51 +238,107 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 16)
 
-                sortTabs
-                    .padding(.horizontal, 16)
-
-                if viewModel.currentlyReading.isEmpty && viewModel.isLoadingCurrentlyReading {
-                    ProgressView().tint(Theme.accent).frame(height: 190)
-                } else {
-                    ScrollView(.horizontal) {
-                        HStack(alignment: .top, spacing: 12) {
-                            ForEach(viewModel.currentlyReading) { item in
-                                NavigationLink(value: item) {
-                                    MangaCardView(item: item, width: 108)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
+                if !hasAnyItems, let error = viewModel.currentlyReadingErrorMessage {
+                    errorRow(error) { viewModel.retry() }
                         .padding(.horizontal, 16)
-                    }
-                    .scrollIndicators(.hidden)
+                } else if !hasAnyItems && viewModel.isLoadingCurrentlyReading {
+                    ProgressView().tint(Theme.accent)
+                        .frame(height: Self.currentlyReadingPageHeight)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    currentlyReadingCarousel
                 }
             }
         }
     }
 
-    private var sortTabs: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(TopViewsSort.allCases) { sort in
-                    Button {
-                        viewModel.currentlyReadingSort = sort
-                    } label: {
-                        Text(sort.title)
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(sort == viewModel.currentlyReadingSort ? Theme.background : Theme.textSecondary)
-                            .padding(.horizontal, 12)
-                            .frame(height: 32)
-                            .background(
-                                sort == viewModel.currentlyReadingSort ? Theme.accent : Theme.surfaceElevated,
-                                in: Capsule()
-                            )
+    /// Горизонтальный пейджинг страниц-категорий (Новинки/Набирающее
+    /// популярность/Популярное), каждая — 3 тайтла строками друг под другом.
+    /// Ширина страницы — почти весь экран минус ~40pt, чтобы справа
+    /// проглядывал краешек следующей страницы (обложка + первые буквы её
+    /// заголовка, как попросили — "должно быть видно первые 2 буквы На и По").
+    /// .scrollTargetBehavior(.viewAligned) — нативный снап по странице.
+    private var currentlyReadingCarousel: some View {
+        GeometryReader { proxy in
+            let peekWidth: CGFloat = 44
+            let pageWidth = max(0, proxy.size.width - 16 - peekWidth)
+            ScrollView(.horizontal) {
+                HStack(spacing: 12) {
+                    ForEach(TopViewsSort.allCases) { sort in
+                        currentlyReadingPage(sort: sort, items: viewModel.currentlyReadingBySort[sort] ?? [])
+                            .frame(width: pageWidth, alignment: .leading)
                     }
-                    .buttonStyle(.plain)
+                }
+                .scrollTargetLayout()
+                .padding(.leading, 16)
+                .padding(.trailing, peekWidth)
+            }
+            .scrollTargetBehavior(.viewAligned)
+            .scrollIndicators(.hidden)
+        }
+        .frame(height: Self.currentlyReadingPageHeight)
+    }
+
+    private func currentlyReadingPage(sort: TopViewsSort, items: [MangaItem]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(sort.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .frame(height: Self.currentlyReadingLabelHeight, alignment: .leading)
+            VStack(spacing: Self.currentlyReadingRowSpacing) {
+                ForEach(items.prefix(3)) { item in
+                    NavigationLink(value: item) { currentlyReadingRow(item) }
+                        .buttonStyle(.plain)
                 }
             }
         }
-        .scrollIndicators(.hidden)
+    }
+
+    private func currentlyReadingRow(_ item: MangaItem) -> some View {
+        HStack(spacing: 10) {
+            RemoteImage(url: item.cover?.bestURL) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                SkeletonBox()
+            } failure: {
+                ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
+            }
+            .frame(width: Self.currentlyReadingCoverSize, height: Self.currentlyReadingCoverSize)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipped()
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.displayTitle)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                if let typeLabel = item.type?.label, !typeLabel.isEmpty {
+                    Text(typeLabel)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(height: Self.currentlyReadingCoverSize)
+    }
+
+    /// Короткая строка ошибки + "Повторить" — используется там, где секция
+    /// не может просто промолчать (см. currentlyReadingSection): без неё
+    /// неудачный запрос выглядел как "вообще не грузит" без объяснений.
+    private func errorRow(_ message: String, retry: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+            Button("Повторить", action: retry)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+        }
     }
 
     private var periodMenu: some View {

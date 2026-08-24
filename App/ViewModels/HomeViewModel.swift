@@ -11,24 +11,35 @@ enum HomeUpdatesTab: String, CaseIterable, Identifiable {
 
 /// ViewModel вкладки «Читают» — главная лента приложения (см. HomeView):
 /// продолжить читать (из BookmarksStore, локально), сейчас читают
-/// (fetchTopViews), коллекции + топ активных недели (fetchHomeWidgets, см.
-/// его комментарий про неподтверждённый путь), новинки (fetchCatalog(sort:
-/// .added)), последние обновления (fetchLatestUpdates / уведомления).
+/// (fetchTopViews, три категории параллельно), коллекции + топ активных
+/// недели (fetchHomeWidgets, см. его комментарий про неподтверждённый путь),
+/// новинки (fetchCatalog(sort: .added)), последние обновления
+/// (fetchLatestUpdates / уведомления).
 ///
 /// Каждая секция грузится и падает НЕЗАВИСИМО — ошибка одной (например,
 /// неподтверждённых виджетов) не должна очищать уже показанные остальные,
 /// поэтому каждый load-метод сам ловит свою ошибку и просто оставляет
 /// секцию пустой, а не пробрасывает исключение наверх.
+///
+/// ВАЖНО про повторные вызовы (баг из фидбека — "если на чуть-чуть свернуть
+/// приложение, элементы то появляются, то пропадают"): reloadAll() раньше
+/// не защищался от параллельного запуска — pull-to-refresh, повторный вызов
+/// и т.п. могли выполняться ОДНОВРЕМЕННО, и более старый запрос, ответивший
+/// ПОЗЖЕ нового, затирал свежие данные пустым/устаревшим результатом. Теперь
+/// reloadTask хранится и отменяется перед стартом нового, а отмена (в
+/// отличие от настоящей ошибки сети) НЕ очищает уже показанные данные — см.
+/// isCancellationError в каждом load-методе.
 @MainActor
 final class HomeViewModel: ObservableObject {
 
     // MARK: Сейчас читают
 
-    @Published private(set) var currentlyReading: [MangaItem] = []
+    /// Все три категории грузятся параллельно и хранятся отдельно — виджет
+    /// показывает их одновременно как страницы горизонтального пейджинга
+    /// (см. HomeView), а не как одну вкладку по выбору.
+    @Published private(set) var currentlyReadingBySort: [TopViewsSort: [MangaItem]] = [:]
     @Published private(set) var isLoadingCurrentlyReading = false
-    @Published var currentlyReadingSort: TopViewsSort = .newest {
-        didSet { if oldValue != currentlyReadingSort { Task { await loadCurrentlyReading() } } }
-    }
+    @Published private(set) var currentlyReadingErrorMessage: String?
     @Published var currentlyReadingPeriod: TopViewsPeriod = .day {
         didSet { if oldValue != currentlyReadingPeriod { Task { await loadCurrentlyReading() } } }
     }
@@ -56,6 +67,13 @@ final class HomeViewModel: ObservableObject {
     private let service: MangaNetworkService
     private var updatesPage = 1
     private var updatesHasNext = true
+    /// Активная полная перезагрузка — отменяется перед стартом новой (см.
+    /// комментарий у типа выше). Не хранит частичные (loadMoreUpdates и т.п.).
+    private var reloadTask: Task<Void, Never>?
+    /// Тайтлы «Продолжить читать», для которых уже идёт/прошёл фоновый
+    /// докачивание totalChapters — не долбим сервер повторно при каждом
+    /// перерисовывании карточки (см. loadChapterCountIfNeeded).
+    private var chapterCountRequested: Set<String> = []
 
     init(service: MangaNetworkService = .shared) {
         self.service = service
@@ -65,12 +83,27 @@ final class HomeViewModel: ObservableObject {
 
     func loadInitialIfNeeded() {
         guard !didLoadOnce else { return }
-        Task { await reloadAll() }
+        scheduleReload()
     }
 
-    func retry() { Task { await reloadAll() } }
+    /// Кнопка "Повторить" в состоянии ошибки — как и loadInitialIfNeeded,
+    /// не проверяет didLoadOnce (тот выставляется в true и при неудаче).
+    func retry() { scheduleReload() }
 
-    func refresh() async { await reloadAll() }
+    /// Потянуть-обновить (.refreshable) — та же перезагрузка, отменяющая
+    /// предыдущую, если она почему-то ещё не завершилась.
+    func refresh() async {
+        reloadTask?.cancel()
+        let task = Task { await reloadAll() }
+        reloadTask = task
+        await task.value
+    }
+
+    private func scheduleReload() {
+        reloadTask?.cancel()
+        let task = Task { await reloadAll() }
+        reloadTask = task
+    }
 
     private func reloadAll() async {
         isLoading = true
@@ -79,19 +112,44 @@ final class HomeViewModel: ObservableObject {
         async let c: Void = loadNewest()
         async let d: Void = reloadUpdates()
         _ = await (a, b, c, d)
+        guard !Task.isCancelled else { isLoading = false; return }
         didLoadOnce = true
         isLoading = false
     }
 
+    /// Отмена задачи (наш же reloadTask.cancel() перед новым запуском, или
+    /// смена вкладки/сцены) — это НЕ ошибка сети: старые данные должны
+    /// остаться на экране как есть, а не очищаться в пустоту.
+    private func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let networkError = error as? NetworkError, case .cancelled = networkError { return true }
+        return false
+    }
+
     // MARK: Сейчас читают
 
+    /// Три категории — фиксированное, статически известное число детей,
+    /// поэтому async let (а не withTaskGroup — тот в этом проекте, как
+    /// выяснилось на withTaskGroup в DownloadsStore.run(), не наследует
+    /// MainActor-изоляцию своего тела, и обращение к self изнутри требует
+    /// лишних await MainActor.run{}; async let этой проблемы не создаёт).
     private func loadCurrentlyReading() async {
         isLoadingCurrentlyReading = true
+        let period = currentlyReadingPeriod
         do {
-            let page = try await service.fetchTopViews(period: currentlyReadingPeriod, sort: currentlyReadingSort)
-            currentlyReading = Array(page.items.prefix(15))
+            async let newestPage = service.fetchTopViews(period: period, sort: .newest)
+            async let risingPage = service.fetchTopViews(period: period, sort: .rising)
+            async let popularPage = service.fetchTopViews(period: period, sort: .popular)
+            let (n, r, p) = try await (newestPage, risingPage, popularPage)
+            currentlyReadingBySort = [
+                .newest: Array(n.items.prefix(3)),
+                .rising: Array(r.items.prefix(3)),
+                .popular: Array(p.items.prefix(3))
+            ]
+            currentlyReadingErrorMessage = nil
         } catch {
-            currentlyReading = []
+            guard !isCancellation(error) else { isLoadingCurrentlyReading = false; return }
+            currentlyReadingErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         isLoadingCurrentlyReading = false
     }
@@ -104,6 +162,7 @@ final class HomeViewModel: ObservableObject {
             collections = payload.collections ?? []
             topActiveUsers = payload.weeklyTopUsers ?? []
         } catch {
+            guard !isCancellation(error) else { return }
             collections = []
             topActiveUsers = []
         }
@@ -116,6 +175,7 @@ final class HomeViewModel: ObservableObject {
             let page = try await service.fetchCatalog(query: "", sort: .added, filter: MangaFilter(), page: 1)
             newest = page.items
         } catch {
+            guard !isCancellation(error) else { return }
             newest = []
         }
     }
@@ -132,6 +192,7 @@ final class HomeViewModel: ObservableObject {
                 updates = page.items
                 updatesHasNext = page.hasNextPage
             } catch {
+                guard !isCancellation(error) else { return }
                 updates = []
                 updatesHasNext = false
             }
@@ -144,6 +205,7 @@ final class HomeViewModel: ObservableObject {
                 myUpdates = result.items.filter { $0.category == "chapter" }
                 updatesHasNext = result.hasNextPage
             } catch {
+                guard !isCancellation(error) else { return }
                 myUpdates = []
                 updatesHasNext = false
             }
@@ -188,5 +250,25 @@ final class HomeViewModel: ObservableObject {
             }
         }
         isLoadingMoreUpdates = false
+    }
+
+    // MARK: Прогресс-бар «Продолжить читать»
+
+    /// История аккаунта (`GET /user/chapters/history`) не знает общее число
+    /// глав тайтла — только номер последней открытой (см.
+    /// ReadingProgress.totalChapters == 0 в этом случае, комментарий в
+    /// BookmarksStore). Чтобы прогресс-бар был не пустой полоской, а с
+    /// реальной долей, докачиваем список глав тайтла один раз лениво (по
+    /// .onAppear карточки в HomeView) и дозаполняем знаменатель — см.
+    /// BookmarksStore.setTotalChaptersIfUnknown (не трогает readCount/
+    /// lastReadAt, только total).
+    func loadChapterCountIfNeeded(for entry: HistoryEntry) {
+        let slug = entry.media.apiSlug
+        guard chapterCountRequested.insert(slug).inserted else { return }
+        guard (BookmarksStore.shared.readingProgress(forSlug: slug)?.totalChapters ?? 0) <= 0 else { return }
+        Task { [service] in
+            guard let chapters = try? await service.fetchChapters(slug: slug, siteId: entry.media.site) else { return }
+            BookmarksStore.shared.setTotalChaptersIfUnknown(slug: slug, total: chapters.count)
+        }
     }
 }

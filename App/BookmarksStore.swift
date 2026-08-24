@@ -110,6 +110,14 @@ final class BookmarksStore: ObservableObject {
     @Published private(set) var historyEntries: [HistoryEntry] = []
     @Published private(set) var isSyncingHistory = false
 
+    /// Тайтлы, скрытые из «Продолжить читать» на вкладке «Читают» (мусорка на
+    /// карточке / «Очистить» в шапке секции, см. HomeView) — ЛОКАЛЬНО ТОЛЬКО:
+    /// подтверждённого эндпоинта "удалить запись истории" нет, так что это не
+    /// трогает историю на сервере, а просто прячет её из этого виджета на
+    /// этом устройстве. Пока заглушка до реального API (пользователь пришлёт
+    /// перехват) — см. кнопки "Очистить"/trashButton в HomeView.
+    @Published private(set) var dismissedContinueReading: Set<String> = []
+
     private let defaults = UserDefaults.standard
     /// Папки — общие для всех сайтов (это просто пользовательские категории,
     /// а не серверные данные), но закладки/прогресс/история строго привязаны
@@ -120,6 +128,7 @@ final class BookmarksStore: ObservableObject {
         static let folders = "bm_folders"
         static func items(_ site: LibSite) -> String { "bm_items_\(site.rawValue)" }
         static func progress(_ site: LibSite) -> String { "bm_progress_\(site.rawValue)" }
+        static func dismissedContinueReading(_ site: LibSite) -> String { "bm_continue_dismissed_\(site.rawValue)" }
     }
 
     private var siteCancellable: AnyCancellable?
@@ -168,6 +177,11 @@ final class BookmarksStore: ObservableObject {
             progress = p
         } else {
             progress = [:]
+        }
+        if let raws = defaults.array(forKey: Keys.dismissedContinueReading(site)) as? [String] {
+            dismissedContinueReading = Set(raws)
+        } else {
+            dismissedContinueReading = []
         }
     }
 
@@ -449,9 +463,48 @@ final class BookmarksStore: ObservableObject {
         var result: [HistoryEntry] = []
         for entry in historyEntries {
             guard seenMangaIds.insert(entry.media.id).inserted else { continue }
+            guard !dismissedContinueReading.contains(entry.media.apiSlug) else { continue }
             result.append(entry)
         }
         return result
+    }
+
+    /// Мусорка на карточке — скрывает один тайтл из «Продолжить читать»
+    /// (только на этом устройстве, см. dismissedContinueReading выше).
+    func dismissContinueReading(slug: String) {
+        dismissedContinueReading.insert(slug)
+        persistDismissedContinueReading()
+    }
+
+    /// «Очистить» в шапке секции — прячет ВСЕ тайтлы, видимые в «Продолжить
+    /// читать» ПРЯМО СЕЙЧАС (а не будущие: новая прочитанная глава снова
+    /// вернёт тайтл в список — «Очистить» не выключает виджет насовсем).
+    func clearContinueReading() {
+        dismissedContinueReading.formUnion(continueReadingEntries.map(\.media.apiSlug))
+        persistDismissedContinueReading()
+    }
+
+    private func persistDismissedContinueReading() {
+        let site = SiteSession.shared.activeSite
+        defaults.set(Array(dismissedContinueReading), forKey: Keys.dismissedContinueReading(site))
+    }
+
+    /// Дозаполняет totalChapters для тайтла в «Продолжить читать», когда он
+    /// пришёл из истории аккаунта без известного количества глав (см.
+    /// ReadingProgress.totalChapters). В отличие от setProgress НЕ трогает
+    /// lastReadAt/readCount — только добавляет знаменатель к уже известному
+    /// прогрессу, чтобы не переставить тайтл в начало списка "недавно читал"
+    /// просто из-за фонового досчёта количества глав.
+    func setTotalChaptersIfUnknown(slug: String, total: Int) {
+        guard let existing = progress[slug], existing.totalChapters <= 0, total > 0 else { return }
+        progress[slug] = ReadingProgress(
+            lastChapterNumber: existing.lastChapterNumber,
+            lastChapterVolume: existing.lastChapterVolume,
+            readCount: existing.readCount,
+            totalChapters: total,
+            lastReadAt: existing.lastReadAt
+        )
+        persistProgress()
     }
 
     /// `force: true` — выставляет readCount РОВНО в переданное значение (можно и
