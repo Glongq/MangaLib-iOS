@@ -137,7 +137,7 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 16)
                 ScrollView(.horizontal) {
-                    HStack(spacing: 12) {
+                    LazyHStack(spacing: 12) {
                         ForEach(entries) { entry in
                             // Мусорка — ОТДЕЛЬНЫЙ Button рядом с NavigationLink
                             // в ZStack, а не вложен в его label: вложенная
@@ -315,7 +315,7 @@ struct HomeView: View {
             let peekWidth: CGFloat = 30
             let pageWidth = max(0, proxy.size.width - 16 - peekWidth)
             ScrollView(.horizontal) {
-                HStack(spacing: 12) {
+                LazyHStack(spacing: 12) {
                     ForEach(TopViewsSort.allCases) { sort in
                         currentlyReadingPage(sort: sort, items: viewModel.currentlyReadingBySort[sort] ?? [])
                             .frame(width: pageWidth, alignment: .leading)
@@ -422,7 +422,7 @@ struct HomeView: View {
                 sectionHeader("Последние коллекции")
                     .padding(.horizontal, 16)
                 ScrollView(.horizontal) {
-                    HStack(spacing: 12) {
+                    LazyHStack(spacing: 12) {
                         ForEach(viewModel.collections) { collection in
                             collectionCard(collection)
                         }
@@ -499,7 +499,7 @@ struct HomeView: View {
                 // Без горизонтальных отступов по просьбе — карточки
                 // выравниваются по самому левому краю экрана, без зазора.
                 ScrollView(.horizontal) {
-                    HStack(spacing: 12) {
+                    LazyHStack(spacing: 12) {
                         ForEach(Array(viewModel.topActiveUsers.enumerated()), id: \.element.id) { index, user in
                             topActiveUserCard(user, rank: index + 1)
                         }
@@ -560,7 +560,7 @@ struct HomeView: View {
                 sectionHeader("Новинки")
                     .padding(.horizontal, 16)
                 ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: 12) {
+                    LazyHStack(alignment: .top, spacing: 12) {
                         ForEach(viewModel.newest) { item in
                             NavigationLink(value: item) {
                                 MangaCardView(item: item, width: 108, coverURLOverride: item.cover?.thumbnailURL ?? item.cover?.bestURL)

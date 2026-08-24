@@ -310,7 +310,10 @@ struct MangaDetailView: View {
 
             VStack(alignment: .leading, spacing: Self.heroCoverTitleSpacing) {
                 // Обложка увеличена ещё на 30% сверх прошлого 1.3х (88×132 → ~149×223).
-                RemoteImage(url: viewModel.detail?.cover?.bestURL ?? coverURL) { image in
+                // .highPriority — экран может открыться сразу после ленты «Читают»,
+                // где в очереди URLSession ещё висят незавершённые запросы её
+                // карточек (см. RemoteImageLoader.load(candidates:priority:)).
+                RemoteImage(url: viewModel.detail?.cover?.bestURL ?? coverURL, priority: URLSessionTask.highPriority) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
                     SkeletonBox()
@@ -352,7 +355,7 @@ struct MangaDetailView: View {
                         // параметра существующей), поэтому .transition(.opacity)
                         // ниже реально проигрывает плавный кросс-фейд между
                         // старой и новой картинкой, а не мгновенную подмену.
-                        RemoteImage(url: heroURL) { image in
+                        RemoteImage(url: heroURL, priority: URLSessionTask.highPriority) { image in
                             image.resizable().scaledToFill()
                         } placeholder: {
                             SkeletonBox()

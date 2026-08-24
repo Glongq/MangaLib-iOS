@@ -38,9 +38,9 @@ final class RemoteImageLoader: ObservableObject {
         return URLSession(configuration: config)
     }()
 
-    func load(_ url: URL?) {
+    func load(_ url: URL?, priority: Float? = nil) {
         guard let url else { state = .failure; return }
-        load(candidates: [url])
+        load(candidates: [url], priority: priority)
     }
 
     /// Декодирование UIImage(data:)/UIImage(contentsOfFile:) — это CPU-тяжёлая
@@ -58,8 +58,35 @@ final class RemoteImageLoader: ObservableObject {
         await Task.detached(priority: .userInitiated) { UIImage(contentsOfFile: path) }.value
     }
 
+    /// Скачивание с опциональным приоритетом сетевого запроса
+    /// (URLSessionTask.priority). `session.data(from:)` такого контроля не
+    /// даёт — приоритет есть только у самого URLSessionTask, поэтому вместо
+    /// него используется dataTask(with:) с continuation. nil — как раньше,
+    /// сессия сама ставит стандартный приоритет (0.5), поведение не меняется.
+    nonisolated private static func fetchData(from url: URL, priority: Float?) async throws -> (Data, URLResponse) {
+        try await withCheckedThrowingContinuation { continuation in
+            let task = session.dataTask(with: url) { data, response, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let data, let response {
+                    continuation.resume(returning: (data, response))
+                } else {
+                    continuation.resume(throwing: URLError(.badServerResponse))
+                }
+            }
+            if let priority { task.priority = priority }
+            task.resume()
+        }
+    }
+
     /// Пробует список URL по очереди (перебор серверов картинок), пока один не отдаст изображение.
-    func load(candidates: [URL]) {
+    ///
+    /// `priority` — URLSessionTask.priority (0...1). Нужен для обложки/фона
+    /// карточки тайтла в MangaDetailView: если экран открыт сразу после ленты
+    /// «Читают», в очереди URLSession ещё могут висеть незавершённые запросы
+    /// её карточек — без явного приоритета все они конкурируют за канал
+    /// наравне, и герой-картинка грузится не быстрее остальных.
+    func load(candidates: [URL], priority: Float? = nil) {
         guard let key = candidates.first else { state = .failure; return }
 
         if let cached = RemoteImageCache.shared.image(for: key) {
@@ -83,7 +110,7 @@ final class RemoteImageLoader: ObservableObject {
                     continue
                 }
                 do {
-                    let (data, response) = try await Self.session.data(from: url)
+                    let (data, response) = try await Self.fetchData(from: url, priority: priority)
                     if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                         continue // сервер не отдал — пробуем следующий
                     }
@@ -169,6 +196,9 @@ struct RemoteImage<Placeholder: View, Failure: View>: View {
     let url: URL?
     /// Кандидаты (несколько серверов) — перебираются при ошибке. Если nil, грузится `url`.
     private let candidates: [URL]?
+    /// URLSessionTask.priority (0...1). nil по умолчанию — как раньше,
+    /// стандартный приоритет сессии. См. RemoteImageLoader.load(candidates:priority:).
+    private let priority: Float?
     private let content: (Image) -> AnyView
     private let placeholder: () -> Placeholder
     private let failure: () -> Failure
@@ -177,12 +207,14 @@ struct RemoteImage<Placeholder: View, Failure: View>: View {
 
     init(
         url: URL?,
+        priority: Float? = nil,
         @ViewBuilder content: @escaping (Image) -> some View,
         @ViewBuilder placeholder: @escaping () -> Placeholder,
         @ViewBuilder failure: @escaping () -> Failure
     ) {
         self.url = url
         self.candidates = nil
+        self.priority = priority
         self.content = { AnyView(content($0)) }
         self.placeholder = placeholder
         self.failure = failure
@@ -191,12 +223,14 @@ struct RemoteImage<Placeholder: View, Failure: View>: View {
     /// Вариант с несколькими URL-кандидатами (для страниц манги — перебор серверов).
     init(
         candidates: [URL],
+        priority: Float? = nil,
         @ViewBuilder content: @escaping (Image) -> some View,
         @ViewBuilder placeholder: @escaping () -> Placeholder,
         @ViewBuilder failure: @escaping () -> Failure
     ) {
         self.url = candidates.first
         self.candidates = candidates
+        self.priority = priority
         self.content = { AnyView(content($0)) }
         self.placeholder = placeholder
         self.failure = failure
@@ -218,8 +252,8 @@ struct RemoteImage<Placeholder: View, Failure: View>: View {
     }
 
     private func loadCurrent() {
-        if let candidates { loader.load(candidates: candidates) }
-        else { loader.load(url) }
+        if let candidates { loader.load(candidates: candidates, priority: priority) }
+        else { loader.load(url, priority: priority) }
     }
 }
 
