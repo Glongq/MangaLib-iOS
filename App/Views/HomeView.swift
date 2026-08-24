@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Вкладка «Читают» — теперь настоящая главная лента приложения (раньше
 /// была заглушкой StubView, см. историю в RootView), собранная по образцу
@@ -149,9 +150,30 @@ struct HomeView: View {
         }
     }
 
+    /// Общий множитель размера карточки "Продолжить читать" — попросили
+    /// "увеличить в целом размер в 1.2х", от старых чисел (56x78 обложка,
+    /// 220 ширина карточки, 10 паддинг).
+    private static let continueReadingScale: CGFloat = 1.2
+    private static let continueReadingCoverWidth: CGFloat = (56 * continueReadingScale).rounded()
+    private static let continueReadingCoverHeight: CGFloat = (78 * continueReadingScale).rounded()
+    private static let continueReadingCardWidth: CGFloat = (220 * continueReadingScale).rounded()
+    private static let continueReadingPadding: CGFloat = (10 * continueReadingScale).rounded()
+
+    private static var continueReadingTitleUIFont: UIFont {
+        let base = UIFont.preferredFont(forTextStyle: .footnote)
+        return UIFont.systemFont(ofSize: base.pointSize * continueReadingScale, weight: .medium)
+    }
+    private static var continueReadingTitleFont: Font { Font(continueReadingTitleUIFont) }
+    /// Название — ВСЕГДА ровно 2 строки высотой (пустая вторая строка, если
+    /// название короче), чтобы прогресс-бар был на одном и том же месте у
+    /// всех карточек ряда независимо от длины конкретного названия.
+    private static var continueReadingTitleBlockHeight: CGFloat {
+        (continueReadingTitleUIFont.lineHeight * 2).rounded(.up)
+    }
+
     private func continueReadingCard(_ entry: HistoryEntry) -> some View {
         let progress = bookmarks.readingProgress(forSlug: entry.media.apiSlug)
-        return HStack(spacing: 10) {
+        return HStack(spacing: 12) {
             RemoteImage(url: entry.media.cover?.bestURL) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
@@ -159,27 +181,39 @@ struct HomeView: View {
             } failure: {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
-            .frame(width: 56, height: 78)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .frame(width: Self.continueReadingCoverWidth, height: Self.continueReadingCoverHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .clipped()
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text(entry.media.displayTitle)
-                    .font(.footnote.weight(.medium))
+                    .font(Self.continueReadingTitleFont)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
-                Text("Глава \(entry.item.number)")
-                    .font(.caption2)
+                    .multilineTextAlignment(.leading)
+                    .frame(height: Self.continueReadingTitleBlockHeight, alignment: .top)
+                Text(continueReadingProgressLabel(entry: entry, progress: progress))
+                    .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                 progressBar(fraction: progressFraction(progress))
                     .frame(maxWidth: .infinity)
-                    .frame(height: 4)
+                    .frame(height: 5)
             }
             Spacer(minLength: 0)
         }
-        .padding(10)
-        .frame(width: 220)
+        .padding(Self.continueReadingPadding)
+        .frame(width: Self.continueReadingCardWidth)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    /// "Глава 5 — 3 из 14" — номер главы + позиция/всего, когда общее число
+    /// глав известно (см. loadChapterCountIfNeeded); "постраничный" прогресс
+    /// внутри самой главы ("страница 3 из 14") — этого в API нет вообще
+    /// (история аккаунта отдаёт только номер главы, не страницу), поэтому
+    /// показываем прогресс по главам, не по страницам.
+    private func continueReadingProgressLabel(entry: HistoryEntry, progress: ReadingProgress?) -> String {
+        guard let progress, progress.totalChapters > 0 else { return "Глава \(entry.item.number)" }
+        return "Глава \(entry.item.number) — \(progress.readCount) из \(progress.totalChapters)"
     }
 
     /// Мусорка поверх подложки карточки — только прячет локально (см.
