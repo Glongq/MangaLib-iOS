@@ -512,7 +512,7 @@ struct HomeView: View {
 
     private func topActiveUserCard(_ user: TopActiveUser, rank: Int) -> some View {
         HStack(spacing: 10) {
-            RemoteImage(url: user.avatarURL) { image in
+            RemoteImage(url: user.avatarURL, maxPixelSize: 88) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
                 SkeletonBox()
