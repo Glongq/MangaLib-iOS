@@ -258,12 +258,14 @@ struct HomeView: View {
     private static let currentlyReadingCoverSize: CGFloat = 56
     private static let currentlyReadingRowSpacing: CGFloat = 10
     /// Заголовок страницы-подкатегории (Новинки/Набирающее популярность/
-    /// Популярное) — увеличен в 1.25х по просьбе. Высота строки берётся из
-    /// реальных метрик шрифта (а не фиксированного числа), чтобы более
-    /// крупный текст не обрезался по вертикали.
+    /// Популярное) — по просьбе поменян местами с sectionHeader() (тот был
+    /// крупнее, .headline) и затем ещё увеличен в 1.3х поверх нового,
+    /// более крупного эталона (.headline), поэтому теперь заметно крупнее
+    /// заголовков секций. Высота строки берётся из реальных метрик шрифта
+    /// (а не фиксированного числа), чтобы крупный текст не обрезался.
     private static var currentlyReadingLabelUIFont: UIFont {
-        let base = UIFont.preferredFont(forTextStyle: .subheadline)
-        return UIFont.systemFont(ofSize: base.pointSize * 1.25, weight: .semibold)
+        let base = UIFont.preferredFont(forTextStyle: .headline)
+        return UIFont.systemFont(ofSize: base.pointSize * 1.3, weight: .semibold)
     }
     private static var currentlyReadingLabelFont: Font { Font(currentlyReadingLabelUIFont) }
     private static var currentlyReadingLabelHeight: CGFloat { currentlyReadingLabelUIFont.lineHeight.rounded(.up) }
@@ -307,7 +309,10 @@ struct HomeView: View {
     /// .scrollTargetBehavior(.viewAligned) — нативный снап по странице.
     private var currentlyReadingCarousel: some View {
         GeometryReader { proxy in
-            let peekWidth: CGFloat = 44
+            // Было ~10% ширины экрана (44pt) — по просьбе убавлено примерно
+            // на 3 процентных пункта (~7%), чтобы справа проглядывали 2
+            // буквы следующего заголовка, а не 3.
+            let peekWidth: CGFloat = 30
             let pageWidth = max(0, proxy.size.width - 16 - peekWidth)
             ScrollView(.horizontal) {
                 HStack(spacing: 12) {
@@ -491,13 +496,14 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 10) {
                 sectionHeader("Топ активных недели")
                     .padding(.horizontal, 16)
+                // Без горизонтальных отступов по просьбе — карточки
+                // выравниваются по самому левому краю экрана, без зазора.
                 ScrollView(.horizontal) {
                     HStack(spacing: 12) {
                         ForEach(Array(viewModel.topActiveUsers.enumerated()), id: \.element.id) { index, user in
                             topActiveUserCard(user, rank: index + 1)
                         }
                     }
-                    .padding(.horizontal, 16)
                 }
                 .scrollIndicators(.hidden)
             }
@@ -648,9 +654,16 @@ struct HomeView: View {
 
     // MARK: Общее
 
+    /// Раньше .headline — по просьбе поменян местами с заголовком
+    /// подкатегории «Сейчас читают» (см. currentlyReadingLabelUIFont),
+    /// который был крупнее; теперь заголовки секций — тот меньший эталон.
+    private static var sectionHeaderFont: Font {
+        Font(UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .semibold))
+    }
+
     private func sectionHeader(_ title: String) -> some View {
         HStack(spacing: 4) {
-            Text(title).font(.headline).foregroundStyle(Theme.textPrimary)
+            Text(title).font(Self.sectionHeaderFont).foregroundStyle(Theme.textPrimary)
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
