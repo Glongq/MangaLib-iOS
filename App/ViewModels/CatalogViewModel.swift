@@ -72,6 +72,14 @@ final class CatalogViewModel: ObservableObject {
         reloadNow()
     }
 
+    /// Принудительный повтор загрузки (кнопка "Повторить" в состоянии ошибки).
+    /// В отличие от loadInitialIfNeeded() не проверяет didLoadOnce — тот
+    /// выставляется в true и при неудачной попытке, так что "если нужно"
+    /// после первой ошибки уже никогда не сработает повторно.
+    func retry() {
+        reloadNow()
+    }
+
     func apply(filter newFilter: MangaFilter) {
         filter = newFilter
         reloadNow()

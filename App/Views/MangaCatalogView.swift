@@ -343,7 +343,7 @@ struct MangaCatalogView: View {
         } description: {
             Text(message).foregroundStyle(Theme.textSecondary)
         } actions: {
-            Button("Повторить") { viewModel.loadInitialIfNeeded() }
+            Button("Повторить") { viewModel.retry() }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
         }
