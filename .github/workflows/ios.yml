@@ -116,6 +116,13 @@ jobs:
           ls -la build/MangaLib.ipa
           unzip -l build/MangaLib.ipa | head -20
 
+      - name: Upload MangaLib.ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangaLib-ipa
+          path: build/MangaLib.ipa
+          if-no-files-found: error
+
       - name: Publish/update "latest" release
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
