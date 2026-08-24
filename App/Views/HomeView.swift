@@ -262,11 +262,21 @@ struct HomeView: View {
     /// считались от одних и тех же чисел.
     private static let currentlyReadingCoverSize: CGFloat = 56
     private static let currentlyReadingRowSpacing: CGFloat = 10
-    private static let currentlyReadingLabelHeight: CGFloat = 20
-    private static let currentlyReadingPageHeight: CGFloat =
+    /// Заголовок страницы-подкатегории (Новинки/Набирающее популярность/
+    /// Популярное) — увеличен в 1.25х по просьбе. Высота строки берётся из
+    /// реальных метрик шрифта (а не фиксированного числа), чтобы более
+    /// крупный текст не обрезался по вертикали.
+    private static var currentlyReadingLabelUIFont: UIFont {
+        let base = UIFont.preferredFont(forTextStyle: .subheadline)
+        return UIFont.systemFont(ofSize: base.pointSize * 1.25, weight: .semibold)
+    }
+    private static var currentlyReadingLabelFont: Font { Font(currentlyReadingLabelUIFont) }
+    private static var currentlyReadingLabelHeight: CGFloat { currentlyReadingLabelUIFont.lineHeight.rounded(.up) }
+    private static var currentlyReadingPageHeight: CGFloat {
         currentlyReadingLabelHeight + 8
         + currentlyReadingCoverSize * 3
         + currentlyReadingRowSpacing * 2
+    }
 
     @ViewBuilder
     private var currentlyReadingSection: some View {
@@ -324,7 +334,7 @@ struct HomeView: View {
     private func currentlyReadingPage(sort: TopViewsSort, items: [MangaItem]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(sort.title)
-                .font(.subheadline.weight(.semibold))
+                .font(Self.currentlyReadingLabelFont)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
                 .frame(height: Self.currentlyReadingLabelHeight, alignment: .leading)
