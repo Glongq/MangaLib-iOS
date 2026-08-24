@@ -1855,15 +1855,44 @@ enum TopViewsSort: String, CaseIterable, Identifiable {
         }
     }
 
-    /// nil = не слать sort_by вовсе (собственный порядок top-views —
-    /// по просмотрам за период, то есть уже "популярное"/"набирающее").
-    var apiSortBy: String? {
+    /// Ключ группы в `TopViewsPayload.items` ("1"/"2"/"3") — сама нумерация
+    /// ПОДТВЕРЖДЕНА реальным 200-ответом (два дампа, time=week и
+    /// time=month), но КАКОЙ ключ значит какую вкладку сервер нигде не
+    /// подписывает. Судя по составу — "3" стабильно содержит устоявшуюся
+    /// классику с максимальным числом просмотров (One Piece, Grand Blue) →
+    /// похоже на "Популярное"; "1" — недавно добавленные тайтлы → похоже на
+    /// "Новинки"; "2" — то, что осталось, → "Набирающее популярность". Тот
+    /// же порядок, что на исходном скриншоте вкладок.
+    var groupKey: String {
         switch self {
-        case .newest:  return "created_at"
-        case .rising:  return nil
-        case .popular: return "views"
+        case .newest:  return "1"
+        case .rising:  return "2"
+        case .popular: return "3"
         }
     }
+}
+
+/// Ответ `GET /media/top-views?time=` — ПОДТВЕРЖДЕНО реальным перехватом
+/// (пользователь прислал два полных тела ответа, time=week и time=month,
+/// оба 200): один запрос сразу возвращает все три категории, сгруппированные
+/// под items."1"/"2"/"3" (см. TopViewsSort.groupKey) — НЕ плоский список с
+/// пагинацией, как предполагалось раньше по обрывочному перехвату из первого
+/// файла (там же "page"/"popularity" тоже, судя по всему, относились к
+/// другому/устаревшему поведению этого эндпоинта). `page`/`sort_by` в
+/// подтверждённых 200-ответах не участвуют вообще.
+struct TopViewsPayload: Decodable {
+    let timeFilter: String?
+    let items: [String: [TopViewEntry]]?
+
+    enum CodingKeys: String, CodingKey {
+        case timeFilter = "time_filter"
+        case items
+    }
+}
+
+struct TopViewEntry: Decodable {
+    let views: Int
+    let media: MangaItem
 }
 
 /// Период для "Сейчас читают". Значение "day" и имя параметра "time" (см.

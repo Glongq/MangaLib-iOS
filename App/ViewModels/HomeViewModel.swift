@@ -11,7 +11,7 @@ enum HomeUpdatesTab: String, CaseIterable, Identifiable {
 
 /// ViewModel вкладки «Читают» — главная лента приложения (см. HomeView):
 /// продолжить читать (из BookmarksStore, локально), сейчас читают
-/// (fetchTopViews, три категории параллельно), коллекции + топ активных
+/// (fetchTopViews — один запрос, все три категории сразу), коллекции + топ активных
 /// недели (fetchHomeWidgets, см. его комментарий про неподтверждённый путь),
 /// новинки (fetchCatalog(sort: .added)), последние обновления — Все
 /// (fetchLatestUpdates) и Мои (fetchUserLatestUpdates), оба подтверждённые.
@@ -130,24 +130,19 @@ final class HomeViewModel: ObservableObject {
 
     // MARK: Сейчас читают
 
-    /// Три категории — фиксированное, статически известное число детей,
-    /// поэтому async let (а не withTaskGroup — тот в этом проекте, как
-    /// выяснилось на withTaskGroup в DownloadsStore.run(), не наследует
-    /// MainActor-изоляцию своего тела, и обращение к self изнутри требует
-    /// лишних await MainActor.run{}; async let этой проблемы не создаёт).
+    /// ОДИН запрос уже возвращает все три категории сразу (см.
+    /// TopViewsPayload/MangaNetworkService.fetchTopViews) — раньше здесь
+    /// было три параллельных запроса (async let), пока не подтвердилось
+    /// реальным перехватом, что сервер и так отдаёт всё одним ответом.
     private func loadCurrentlyReading() async {
         isLoadingCurrentlyReading = true
-        let period = currentlyReadingPeriod
         do {
-            async let newestPage = service.fetchTopViews(period: period, sort: .newest)
-            async let risingPage = service.fetchTopViews(period: period, sort: .rising)
-            async let popularPage = service.fetchTopViews(period: period, sort: .popular)
-            let (n, r, p) = try await (newestPage, risingPage, popularPage)
-            currentlyReadingBySort = [
-                .newest: Array(n.items.prefix(3)),
-                .rising: Array(r.items.prefix(3)),
-                .popular: Array(p.items.prefix(3))
-            ]
+            let payload = try await service.fetchTopViews(period: currentlyReadingPeriod)
+            var bySort: [TopViewsSort: [MangaItem]] = [:]
+            for sort in TopViewsSort.allCases {
+                bySort[sort] = (payload.items?[sort.groupKey] ?? []).map(\.media)
+            }
+            currentlyReadingBySort = bySort
             currentlyReadingErrorMessage = nil
         } catch {
             guard !isCancellation(error) else { isLoadingCurrentlyReading = false; return }

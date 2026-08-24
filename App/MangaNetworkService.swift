@@ -221,41 +221,29 @@ final class MangaNetworkService {
         return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
     }
 
-    /// «Сейчас читают» — ПОДТВЕРЖДЕНО реальным перехватом (файл от
-    /// пользователя): `GET /media/top-views`, пагинация как у обычного
-    /// каталога (meta.has_next_page). Имя параметра периода — `time` (НЕ
-    /// `period`) — ПОДТВЕРЖДЕНО реальным ответом сервера: первая попытка с
-    /// `period=` дала 422 `{"time":["Поле Время обязательно для
-    /// заполнения."]}` — сервер вообще не увидел параметр под тем именем.
-    /// `sort`/значения sort_by — см. TopViewsSort: сами они всё ещё
-    /// best-effort догадка (сервер на них не жаловался в том же перехвате,
-    /// но и 200 с реальными данными пока не подтверждён).
-    func fetchTopViews(page: Int = 1, period: TopViewsPeriod = .day, sort: TopViewsSort = .popular) async throws -> CatalogPage {
-        var items: [URLQueryItem] = [
-            URLQueryItem(name: "page", value: String(max(page, 1))),
-            URLQueryItem(name: "time", value: period.rawValue)
-        ]
-        if let sortBy = sort.apiSortBy {
-            items.append(URLQueryItem(name: "sort_by", value: sortBy))
-        }
+    /// «Сейчас читают» — ПОДТВЕРЖДЕНО реальным перехватом (пользователь
+    /// прислал два ПОЛНЫХ тела ответа: `time=week` и `time=month`, оба 200):
+    /// `GET /media/top-views?time=` одним запросом отдаёт сразу все три
+    /// категории, см. TopViewsPayload. Имя параметра — `time` (не `period`,
+    /// см. историю в этом файле), никаких `page`/`sort_by` в подтверждённых
+    /// ответах нет вообще — ни пагинации, ни отдельного запроса на категорию.
+    func fetchTopViews(period: TopViewsPeriod = .day) async throws -> TopViewsPayload {
+        let items: [URLQueryItem] = [URLQueryItem(name: "time", value: period.rawValue)]
         let request = try makeRequest(path: "/media/top-views", queryItems: items)
-        let response: APIListResponse<MangaItem> = try await perform(request)
-        return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
+        let response: APIObjectResponse<TopViewsPayload> = try await perform(request)
+        return response.data
     }
 
     /// Виджеты главной страницы (коллекции + топ активных читателей недели,
-    /// см. HomeWidgetsPayload) — ЭНДПОИНТ НЕ ПОДТВЕРЖДЁН. В обоих
-    /// перехваченных дампах от пользователя виден только домен
-    /// api.cdnlibs.org и голый путь "/api/" без query — судя по всему,
-    /// инструмент перехвата обрезал настоящие путь/тело запроса, сама ФОРМА
-    /// ответа (HomeWidgetsPayload) при этом подтверждена дважды дословно.
-    /// Путь ниже — правдоподобная догадка по конвенции остальных эндпоинтов
-    /// этого файла. Если сервер ответит не 200 — вызывающий код (см.
-    /// HomeViewModel) просто не показывает эти два раздела, приложение не
-    /// падает. Чтобы поправить: перехватить реальный запрос (DevTools →
-    /// Network на mangalib.me, "Copy as cURL") и подставить точный путь сюда.
+    /// см. HomeWidgetsPayload) — ПУТЬ ПОДТВЕРЖДЁН реальным перехватом
+    /// (дважды, два разных дампа): буквально корень API, `GET
+    /// https://api.cdnlibs.org/api/` — то есть baseURL вообще без
+    /// дополнительного сегмента. Раньше здесь была догадка "/home", которая
+    /// на практике давала настоящий 404 (см. лог пользователя) — теперь
+    /// путь настоящий, "/" даёт `makeRequest` итоговый URL "…/api/" (см.
+    /// normalizedPath ниже: "/" уже начинается со слэша, второй не добавится).
     func fetchHomeWidgets() async throws -> HomeWidgetsPayload {
-        let request = try makeRequest(path: "/home", queryItems: [])
+        let request = try makeRequest(path: "/", queryItems: [])
         let response: APIObjectResponse<HomeWidgetsPayload> = try await perform(request)
         return response.data
     }

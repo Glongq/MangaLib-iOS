@@ -11,14 +11,14 @@ import UIKit
 /// (см. HomeViewModel.loadMoreUpdatesIfNeeded), как попросили — "беск вниз
 /// листать можно".
 ///
-/// ВАЖНО про данные: «Продолжить читать» и оба «Последних обновления» (Все/
-/// Мои) стоят на ПОДТВЕРЖДЁННЫХ эндпоинтах (история/закладки, каталог с
-/// sort=updated/added, /user-latest-updates). «Сейчас читают» — на
-/// подтверждённом пути `/media/top-views` с подтверждённым же параметром
-/// периода `time` (см. MangaNetworkService.fetchTopViews); значения sort_by
-/// для трёх вкладок — всё ещё догадка. «Коллекции»/«Топ активных недели» —
-/// на НЕподтверждённом пути (см. fetchHomeWidgets) и тихо не показываются,
-/// если сервер не ответит 200.
+/// ВАЖНО про данные: «Продолжить читать», оба «Последних обновления» (Все/
+/// Мои), «Сейчас читают» и теперь ТАКЖЕ «Коллекции»/«Топ активных недели» —
+/// все на ПОДТВЕРЖДЁННЫХ реальным перехватом эндпоинтах (история/закладки,
+/// каталог с sort=updated/added, /user-latest-updates, /media/top-views с
+/// параметром `time`, и агрегат главной на корне API `/`, см.
+/// MangaNetworkService.fetchTopViews/fetchHomeWidgets). Единственное, что
+/// всё ещё догадка — какой именно ключ группы ("1"/"2"/"3") в ответе
+/// top-views соответствует какой из трёх вкладок (см. TopViewsSort.groupKey).
 struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @ObservedObject private var themeManager = ThemeManager.shared
