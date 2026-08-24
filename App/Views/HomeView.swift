@@ -23,6 +23,19 @@ struct HomeView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var bookmarks = BookmarksStore.shared
 
+    /// Эталонный размер названия тайтла для ЭТОЙ страницы — тот же расчёт,
+    /// что и MangaCardView.titleFont (caption1 × 1.2, medium), которым уже
+    /// рендерятся карточки в «Новинках»: "текст как у названия тайтла в
+    /// Новинках", везде на «Читают», где показывается НАЗВАНИЕ ТАЙТЛА
+    /// («Продолжить читать», строки «Сейчас читают», строки «Последние
+    /// обновления») — а не вообще любой текст (заголовки секций, подписи,
+    /// имена пользователей/коллекций — другая роль, эталон на них не давят).
+    private static var mangaTitleUIFont: UIFont {
+        let base = UIFont.preferredFont(forTextStyle: .caption1)
+        return UIFont.systemFont(ofSize: base.pointSize * 1.2, weight: .medium)
+    }
+    private static var mangaTitleFont: Font { Font(mangaTitleUIFont) }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -159,16 +172,11 @@ struct HomeView: View {
     private static let continueReadingCardWidth: CGFloat = (220 * continueReadingScale).rounded()
     private static let continueReadingPadding: CGFloat = (10 * continueReadingScale).rounded()
 
-    private static var continueReadingTitleUIFont: UIFont {
-        let base = UIFont.preferredFont(forTextStyle: .footnote)
-        return UIFont.systemFont(ofSize: base.pointSize * continueReadingScale, weight: .medium)
-    }
-    private static var continueReadingTitleFont: Font { Font(continueReadingTitleUIFont) }
     /// Название — ВСЕГДА ровно 2 строки высотой (пустая вторая строка, если
     /// название короче), чтобы прогресс-бар был на одном и том же месте у
     /// всех карточек ряда независимо от длины конкретного названия.
     private static var continueReadingTitleBlockHeight: CGFloat {
-        (continueReadingTitleUIFont.lineHeight * 2).rounded(.up)
+        (mangaTitleUIFont.lineHeight * 2).rounded(.up)
     }
 
     private func continueReadingCard(_ entry: HistoryEntry) -> some View {
@@ -187,7 +195,7 @@ struct HomeView: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 Text(entry.media.displayTitle)
-                    .font(Self.continueReadingTitleFont)
+                    .font(Self.mangaTitleFont)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
@@ -344,7 +352,7 @@ struct HomeView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.displayTitle)
-                    .font(.footnote.weight(.medium))
+                    .font(Self.mangaTitleFont)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
                 if let typeLabel = item.type?.label, !typeLabel.isEmpty {
@@ -609,7 +617,7 @@ struct HomeView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.displayTitle)
-                    .font(.subheadline.weight(.medium))
+                    .font(Self.mangaTitleFont)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 Text(chapterLine(for: item))
@@ -655,7 +663,7 @@ struct HomeView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(note.media?.displayTitle ?? "")
-                    .font(.subheadline.weight(.medium))
+                    .font(Self.mangaTitleFont)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 Text(note.displayText)
