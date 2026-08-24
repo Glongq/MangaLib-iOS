@@ -259,13 +259,13 @@ struct HomeView: View {
     private static let currentlyReadingRowSpacing: CGFloat = 10
     /// Заголовок страницы-подкатегории (Новинки/Набирающее популярность/
     /// Популярное) — по просьбе поменян местами с sectionHeader() (тот был
-    /// крупнее, .headline) и затем ещё увеличен в 1.3х поверх нового,
+    /// крупнее, .headline) и затем ещё увеличен в 1.25х поверх нового,
     /// более крупного эталона (.headline), поэтому теперь заметно крупнее
     /// заголовков секций. Высота строки берётся из реальных метрик шрифта
     /// (а не фиксированного числа), чтобы крупный текст не обрезался.
     private static var currentlyReadingLabelUIFont: UIFont {
         let base = UIFont.preferredFont(forTextStyle: .headline)
-        return UIFont.systemFont(ofSize: base.pointSize * 1.3, weight: .semibold)
+        return UIFont.systemFont(ofSize: base.pointSize * 1.25, weight: .semibold)
     }
     private static var currentlyReadingLabelFont: Font { Font(currentlyReadingLabelUIFont) }
     private static var currentlyReadingLabelHeight: CGFloat { currentlyReadingLabelUIFont.lineHeight.rounded(.up) }
