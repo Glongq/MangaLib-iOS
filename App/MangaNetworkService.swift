@@ -208,13 +208,17 @@ final class MangaNetworkService {
 
     /// «Сейчас читают» — ПОДТВЕРЖДЕНО реальным перехватом (файл от
     /// пользователя): `GET /media/top-views`, пагинация как у обычного
-    /// каталога (meta.has_next_page). `period`/`sort` — см. TopViewsPeriod/
-    /// TopViewsSort: сами их query-имена и значения — best-effort догадка
-    /// (см. комментарии там), сервер незнакомые параметры игнорирует.
+    /// каталога (meta.has_next_page). Имя параметра периода — `time` (НЕ
+    /// `period`) — ПОДТВЕРЖДЕНО реальным ответом сервера: первая попытка с
+    /// `period=` дала 422 `{"time":["Поле Время обязательно для
+    /// заполнения."]}` — сервер вообще не увидел параметр под тем именем.
+    /// `sort`/значения sort_by — см. TopViewsSort: сами они всё ещё
+    /// best-effort догадка (сервер на них не жаловался в том же перехвате,
+    /// но и 200 с реальными данными пока не подтверждён).
     func fetchTopViews(page: Int = 1, period: TopViewsPeriod = .day, sort: TopViewsSort = .popular) async throws -> CatalogPage {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "page", value: String(max(page, 1))),
-            URLQueryItem(name: "period", value: period.rawValue)
+            URLQueryItem(name: "time", value: period.rawValue)
         ]
         if let sortBy = sort.apiSortBy {
             items.append(URLQueryItem(name: "sort_by", value: sortBy))
