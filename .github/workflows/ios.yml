@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-26
@@ -101,3 +104,23 @@ jobs:
           name: MangaLib-Debug-iphoneos
           path: build/MangaLib.app.zip
           if-no-files-found: error
+
+      - name: Package MangaLib.ipa
+        run: |
+          set -euo pipefail
+          APP_PATH="build/DerivedData/Build/Products/Debug-iphoneos/MangaLib.app"
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          ditto "$APP_PATH" "build/Payload/MangaLib.app"
+          (cd build && zip -r -X -q MangaLib.ipa Payload)
+          ls -la build/MangaLib.ipa
+          unzip -l build/MangaLib.ipa | head -20
+
+      - name: Publish/update "latest" release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build
+          body: "Automatically published from ${{ github.sha }}."
+          files: build/MangaLib.ipa
