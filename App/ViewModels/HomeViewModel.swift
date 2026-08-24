@@ -53,7 +53,7 @@ final class HomeViewModel: ObservableObject {
     // MARK: Последние обновления (беск. скролл вниз)
 
     @Published var updatesTab: HomeUpdatesTab = .all {
-        didSet { if oldValue != updatesTab { Task { await reloadUpdates() } } }
+        didSet { if oldValue != updatesTab { scheduleUpdatesReload() } }
     }
     /// Общий список и для «Все обновления», и для «Мои обновления» — оба
     /// эндпоинта отдают одну и ту же форму (см. fetchUpdatesPage), сброс/
@@ -72,6 +72,16 @@ final class HomeViewModel: ObservableObject {
     /// Активная полная перезагрузка — отменяется перед стартом новой (см.
     /// комментарий у типа выше). Не хранит частичные (loadMoreUpdates и т.п.).
     private var reloadTask: Task<Void, Never>?
+    /// Отдельная задача именно для "Последние обновления" — ДО этого поля
+    /// смена updatesTab запускала голый Task{} без какой-либо отмены. Баг из
+    /// фидбека ("переключаю на Мои обновления, сеть отдаёт 200, но список не
+    /// меняется"): если запрос предыдущей вкладки (например, начальный
+    /// reloadAll() для «Все») ещё не успел ответить и отвечает ПОЗЖЕ, чем
+    /// только что запущенный запрос «Мои», он затирает уже показанные свежие
+    /// данные устаревшими — классическая гонка "кто последний ответил, тот и
+    /// победил". Теперь, как и у reloadTask, предыдущая задача отменяется
+    /// перед стартом новой.
+    private var updatesTask: Task<Void, Never>?
     /// Тайтлы «Продолжить читать», для которых уже идёт/прошёл фоновый
     /// докачивание totalChapters — не долбим сервер повторно при каждом
     /// перерисовывании карточки (см. loadChapterCountIfNeeded).
@@ -112,11 +122,25 @@ final class HomeViewModel: ObservableObject {
         async let a: Void = loadCurrentlyReading()
         async let b: Void = loadWidgets()
         async let c: Void = loadNewest()
-        async let d: Void = reloadUpdates()
-        _ = await (a, b, c, d)
+        let d = scheduleUpdatesReload()
+        _ = await (a, b, c)
+        await d.value
         guard !Task.isCancelled else { isLoading = false; return }
         didLoadOnce = true
         isLoading = false
+    }
+
+    /// Отменяет предыдущую задачу "Последние обновления" (если ещё не
+    /// ответила) и запускает новую — используется и при смене updatesTab, и
+    /// внутри reloadAll(), чтобы обе точки входа координировались через одну
+    /// и ту же задачу и не могли затереть данные друг друга (см. комментарий
+    /// у updatesTask).
+    @discardableResult
+    private func scheduleUpdatesReload() -> Task<Void, Never> {
+        updatesTask?.cancel()
+        let task = Task { await reloadUpdates() }
+        updatesTask = task
+        return task
     }
 
     /// Отмена задачи (наш же reloadTask.cancel() перед новым запуском, или
