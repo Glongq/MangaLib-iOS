@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import ImageIO
 
 /// Кэш загруженных изображений в памяти.
 final class RemoteImageCache {
@@ -39,9 +38,9 @@ final class RemoteImageLoader: ObservableObject {
         return URLSession(configuration: config)
     }()
 
-    func load(_ url: URL?, maxPixelSize: CGFloat? = nil) {
+    func load(_ url: URL?) {
         guard let url else { state = .failure; return }
-        load(candidates: [url], maxPixelSize: maxPixelSize)
+        load(candidates: [url])
     }
 
     /// Декодирование UIImage(data:)/UIImage(contentsOfFile:) — это CPU-тяжёлая
@@ -51,32 +50,8 @@ final class RemoteImageLoader: ObservableObject {
     /// загрузке на долгое время, хотя сеть уже давно всё скачала. Вынесено в
     /// nonisolated + Task.detached, чтобы это было гарантировано фоном
     /// независимо от того, откуда вызвано.
-    ///
-    /// `maxPixelSize` — nil (по умолчанию, как раньше) декодирует картинку
-    /// целиком в исходном разрешении. Если передан — вместо полного декода
-    /// используется ImageIO-миниатюра (CGImageSourceCreateThumbnailAtIndex):
-    /// она не держит в памяти полноразмерный CGImage перед сжатием, а сразу
-    /// декодирует уменьшенную версию — для мелких превью (аватарки и т.п.,
-    /// у которых на сервере нет отдельного маленького файла, в отличие от
-    /// обложек тайтлов с их thumbnail) это заметно дешевле по памяти/CPU,
-    /// чем декодировать оригинал и сжимать его уже на экране.
-    nonisolated private static func decodeImage(data: Data, maxPixelSize: CGFloat?) async -> UIImage? {
-        guard let maxPixelSize else {
-            return await Task.detached(priority: .userInitiated) { UIImage(data: data) }.value
-        }
-        return await Task.detached(priority: .userInitiated) {
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCacheImmediately: true
-            ]
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-                return UIImage(data: data) // запасной путь, если ImageIO не справился
-            }
-            return UIImage(cgImage: cgImage)
-        }.value
+    nonisolated private static func decodeImage(data: Data) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) { UIImage(data: data) }.value
     }
 
     nonisolated private static func decodeImage(contentsOfFile path: String) async -> UIImage? {
@@ -84,7 +59,7 @@ final class RemoteImageLoader: ObservableObject {
     }
 
     /// Пробует список URL по очереди (перебор серверов картинок), пока один не отдаст изображение.
-    func load(candidates: [URL], maxPixelSize: CGFloat? = nil) {
+    func load(candidates: [URL]) {
         guard let key = candidates.first else { state = .failure; return }
 
         if let cached = RemoteImageCache.shared.image(for: key) {
@@ -112,7 +87,7 @@ final class RemoteImageLoader: ObservableObject {
                     if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                         continue // сервер не отдал — пробуем следующий
                     }
-                    guard let image = await Self.decodeImage(data: data, maxPixelSize: maxPixelSize) else { continue }
+                    guard let image = await Self.decodeImage(data: data) else { continue }
                     RemoteImageCache.shared.insert(image, for: key)
                     if !Task.isCancelled { self?.state = .success(image) }
                     return
@@ -142,7 +117,7 @@ final class RemoteImageLoader: ObservableObject {
             do {
                 let (data, response) = try await session.data(from: url)
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { continue }
-                guard let img = await decodeImage(data: data, maxPixelSize: nil) else { continue }
+                guard let img = await decodeImage(data: data) else { continue }
                 RemoteImageCache.shared.insert(img, for: key)
                 return img
             } catch { continue }
@@ -176,7 +151,7 @@ final class RemoteImageLoader: ObservableObject {
                     if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                         continue
                     }
-                    guard let image = await decodeImage(data: data, maxPixelSize: nil) else { continue }
+                    guard let image = await decodeImage(data: data) else { continue }
                     RemoteImageCache.shared.insert(image, for: key)
                     return
                 } catch {
@@ -194,9 +169,6 @@ struct RemoteImage<Placeholder: View, Failure: View>: View {
     let url: URL?
     /// Кандидаты (несколько серверов) — перебираются при ошибке. Если nil, грузится `url`.
     private let candidates: [URL]?
-    /// nil (по умолчанию) — как раньше, полноразмерный декод. Передаётся для
-    /// мелких превью без серверного thumbnail (см. RemoteImageLoader.decodeImage).
-    private let maxPixelSize: CGFloat?
     private let content: (Image) -> AnyView
     private let placeholder: () -> Placeholder
     private let failure: () -> Failure
@@ -205,14 +177,12 @@ struct RemoteImage<Placeholder: View, Failure: View>: View {
 
     init(
         url: URL?,
-        maxPixelSize: CGFloat? = nil,
         @ViewBuilder content: @escaping (Image) -> some View,
         @ViewBuilder placeholder: @escaping () -> Placeholder,
         @ViewBuilder failure: @escaping () -> Failure
     ) {
         self.url = url
         self.candidates = nil
-        self.maxPixelSize = maxPixelSize
         self.content = { AnyView(content($0)) }
         self.placeholder = placeholder
         self.failure = failure
@@ -221,14 +191,12 @@ struct RemoteImage<Placeholder: View, Failure: View>: View {
     /// Вариант с несколькими URL-кандидатами (для страниц манги — перебор серверов).
     init(
         candidates: [URL],
-        maxPixelSize: CGFloat? = nil,
         @ViewBuilder content: @escaping (Image) -> some View,
         @ViewBuilder placeholder: @escaping () -> Placeholder,
         @ViewBuilder failure: @escaping () -> Failure
     ) {
         self.url = candidates.first
         self.candidates = candidates
-        self.maxPixelSize = maxPixelSize
         self.content = { AnyView(content($0)) }
         self.placeholder = placeholder
         self.failure = failure
@@ -250,8 +218,8 @@ struct RemoteImage<Placeholder: View, Failure: View>: View {
     }
 
     private func loadCurrent() {
-        if let candidates { loader.load(candidates: candidates, maxPixelSize: maxPixelSize) }
-        else { loader.load(url, maxPixelSize: maxPixelSize) }
+        if let candidates { loader.load(candidates: candidates) }
+        else { loader.load(url) }
     }
 }
 
@@ -259,13 +227,11 @@ extension RemoteImage where Failure == AnyView {
     /// Упрощённый инициализатор: одинаковый placeholder для загрузки и ошибки.
     init(
         url: URL?,
-        maxPixelSize: CGFloat? = nil,
         @ViewBuilder content: @escaping (Image) -> some View,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.init(
             url: url,
-            maxPixelSize: maxPixelSize,
             content: content,
             placeholder: placeholder,
             failure: { AnyView(placeholder()) }
