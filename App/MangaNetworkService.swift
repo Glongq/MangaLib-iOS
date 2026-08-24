@@ -115,10 +115,14 @@ final class MangaNetworkService {
     /// (страница персонажа фильтрует по одному типу контента). `targetId`+
     /// `targetModel` — фильтр «тайтлы, где есть эта сущность» (персонаж и т.п.),
     /// ПОДТВЕРЖДЕНО перехватом `?target_id=1221&target_model=character`.
+    /// `extraFields` — дополнительные значения `fields[]` сверх стандартного
+    /// набора (напр. "metadata" — см. fetchLatestUpdates). Пустой массив по
+    /// умолчанию не меняет поведение существующих вызовов ни на бит.
     func fetchCatalog(query: String, sort: SortOption, filter: MangaFilter, page: Int = 1,
                       sortByOverride: String? = nil, sortType: String = "desc",
                       siteIds: [Int]? = nil,
-                      targetId: Int? = nil, targetModel: String? = nil) async throws -> CatalogPage {
+                      targetId: Int? = nil, targetModel: String? = nil,
+                      extraFields: [String] = []) async throws -> CatalogPage {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "fields[]", value: "rate"),
             URLQueryItem(name: "fields[]", value: "rate_avg"),
@@ -126,6 +130,9 @@ final class MangaNetworkService {
             URLQueryItem(name: "fields[]", value: "releaseDate"),
             URLQueryItem(name: "page", value: String(max(page, 1)))
         ]
+        for field in extraFields {
+            items.append(URLQueryItem(name: "fields[]", value: field))
+        }
         let sites = siteIds ?? SiteSession.shared.effectiveSearchSites.map(\.rawValue)
         for site in sites {
             items.append(URLQueryItem(name: "site_id[]", value: String(site)))
@@ -179,6 +186,59 @@ final class MangaNetworkService {
         let request = try makeRequest(path: "/manga", queryItems: items)
         let response: APIListResponse<MangaItem> = try await perform(request)
         return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// «Последние обновления» на вкладке «Читают» (см. HomeView) — тот же
+    /// каталог, отсортированный по дате последней главы (SortOption.updated →
+    /// sort_by=last_chapter_at, ПОДТВЕРЖДЕНО реальным поведением каталога), но
+    /// с попыткой попросить `fields[]=metadata`, чтобы получить "Том X Глава Y"
+    /// (см. MangaItem.latestChapter) — ИМЯ ЭТОГО КОНКРЕТНОГО значения fields[]
+    /// НЕ ПОДТВЕРЖДЕНО перехватом, только предположение по аналогии с полем
+    /// "metadata" в агрегате главной страницы. Если сервер отклонит его (422,
+    /// как уже бывает с неверным sort_by — см. CatalogViewModel.fetchPage),
+    /// повторяем без него: список тайтлов не пропадает, просто без строки
+    /// "Том/Глава".
+    func fetchLatestUpdates(page: Int = 1) async throws -> CatalogPage {
+        do {
+            return try await fetchCatalog(query: "", sort: .updated, filter: MangaFilter(), page: page, extraFields: ["metadata"])
+        } catch NetworkError.server(let status) where status == 422 {
+            return try await fetchCatalog(query: "", sort: .updated, filter: MangaFilter(), page: page)
+        }
+    }
+
+    /// «Сейчас читают» — ПОДТВЕРЖДЕНО реальным перехватом (файл от
+    /// пользователя): `GET /media/top-views`, пагинация как у обычного
+    /// каталога (meta.has_next_page). `period`/`sort` — см. TopViewsPeriod/
+    /// TopViewsSort: сами их query-имена и значения — best-effort догадка
+    /// (см. комментарии там), сервер незнакомые параметры игнорирует.
+    func fetchTopViews(page: Int = 1, period: TopViewsPeriod = .day, sort: TopViewsSort = .popular) async throws -> CatalogPage {
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "period", value: period.rawValue)
+        ]
+        if let sortBy = sort.apiSortBy {
+            items.append(URLQueryItem(name: "sort_by", value: sortBy))
+        }
+        let request = try makeRequest(path: "/media/top-views", queryItems: items)
+        let response: APIListResponse<MangaItem> = try await perform(request)
+        return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// Виджеты главной страницы (коллекции + топ активных читателей недели,
+    /// см. HomeWidgetsPayload) — ЭНДПОИНТ НЕ ПОДТВЕРЖДЁН. В обоих
+    /// перехваченных дампах от пользователя виден только домен
+    /// api.cdnlibs.org и голый путь "/api/" без query — судя по всему,
+    /// инструмент перехвата обрезал настоящие путь/тело запроса, сама ФОРМА
+    /// ответа (HomeWidgetsPayload) при этом подтверждена дважды дословно.
+    /// Путь ниже — правдоподобная догадка по конвенции остальных эндпоинтов
+    /// этого файла. Если сервер ответит не 200 — вызывающий код (см.
+    /// HomeViewModel) просто не показывает эти два раздела, приложение не
+    /// падает. Чтобы поправить: перехватить реальный запрос (DevTools →
+    /// Network на mangalib.me, "Copy as cURL") и подставить точный путь сюда.
+    func fetchHomeWidgets() async throws -> HomeWidgetsPayload {
+        let request = try makeRequest(path: "/home", queryItems: [])
+        let response: APIObjectResponse<HomeWidgetsPayload> = try await perform(request)
+        return response.data
     }
 
     /// Профиль текущего пользователя (ник + аватар) — только когда есть токен

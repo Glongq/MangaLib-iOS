@@ -499,6 +499,14 @@ struct MangaItem: Decodable, Identifiable, Hashable {
     /// каталоге/поиске/похожем/связанном. Нужен, чтобы карточку с ДРУГОГО сайта
     /// (напр. из «Похожего») запрашивать с правильным Site-Id, иначе 404.
     let site: Int?
+    /// Время последней главы (ISO8601, строкой — см. APIISODate.parse) и
+    /// её краткое описание — приходят у элементов главной страницы
+    /// (popular/newest/latest_updates, см. HomeFeed) при явном запросе
+    /// `fields[]=metadata` (MangaNetworkService.fetchLatestUpdates). В обычном
+    /// каталоге/поиске сервер их не присылает — оба поля Optional, остальной
+    /// код с MangaItem их не требует.
+    let lastItemAt: String?
+    let metadata: MangaItemMetadata?
 
     /// Название для отображения: русское, если есть, иначе оригинальное.
     var displayTitle: String { rusName?.isEmpty == false ? rusName! : name }
@@ -509,16 +517,60 @@ struct MangaItem: Decodable, Identifiable, Hashable {
     /// URL обложки строкой (для сохранения в закладки).
     var coverURLString: String? { cover?.bestURL?.absoluteString }
 
+    /// Последняя глава для строки "Том X Глава Y" (см. HomeView) — сначала
+    /// ищет в metadata.latestItems (форма секции "latest_updates"), потом в
+    /// metadata.lastItem (форма секции "popular"/"newest").
+    var latestChapter: MangaChapterMetadata? { metadata?.latestItems?.items.first ?? metadata?.lastItem }
+    /// Сколько ЕЩЁ глав вышло, кроме показанной latestChapter (для "+ ещё N").
+    var extraLatestChaptersCount: Int { max(0, (metadata?.latestItems?.count ?? 1) - 1) }
+    var lastItemDate: Date? { lastItemAt.flatMap(APIISODate.parse) ?? latestChapter?.createdAt.flatMap(APIISODate.parse) }
+
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, cover, rating, status, type, site
+        case id, name, slug, cover, rating, status, type, site, metadata
         case rusName = "rus_name"
         case engName = "eng_name"
         case slugURL = "slug_url"
         case ageRestriction = "ageRestriction"
+        case lastItemAt = "last_item_at"
     }
 
     static func == (lhs: MangaItem, rhs: MangaItem) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+/// `metadata` у элемента списка тайтлов — ДВЕ РАЗНЫЕ подтверждённые формы
+/// в перехваченном дампе агрегата главной страницы (пользователь прислал
+/// два файла): у "popular"/"newest" это одиночный `last_item`, у
+/// "latest_updates" — `latest_items: {count, items:[...]}`. Оба optional и
+/// оба декодируются здесь — MangaItem.latestChapter сам выбирает, какой есть.
+struct MangaItemMetadata: Decodable, Hashable {
+    let lastItem: MangaChapterMetadata?
+    let latestItems: MangaLatestItems?
+
+    enum CodingKeys: String, CodingKey {
+        case lastItem = "last_item"
+        case latestItems = "latest_items"
+    }
+}
+
+struct MangaLatestItems: Decodable, Hashable {
+    let count: Int
+    let items: [MangaChapterMetadata]
+}
+
+/// Краткое описание главы внутри metadata (НЕ то же самое, что ChapterItem/
+/// HistoryChapterRef/NotificationChapter — своя, третья форма того же
+/// понятия "глава", подтверждено тем же дампом).
+struct MangaChapterMetadata: Decodable, Hashable {
+    let volume: String?
+    let number: String?
+    let name: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case volume, number, name
+        case createdAt = "created_at"
+    }
 }
 
 // MARK: - "Похожее" (GET /manga/{slug}/similar)
@@ -1777,5 +1829,143 @@ struct NotificationCategoryCounts: Decodable {
     enum CodingKeys: String, CodingKey {
         case all, chapter, episode, comments, message, card, other
         case chapterPlayer = "chapter_player"
+    }
+}
+
+// MARK: - Главная / вкладка «Читают» (см. HomeView/HomeViewModel)
+
+/// «Сейчас читают» — подвкладка виджета на главной. ПОДТВЕРЖДЁН только сам
+/// путь эндпоинта (см. MangaNetworkService.fetchTopViews); за какие именно
+/// query-параметры отвечают три вкладки скриншота (Новинки/Набирающее
+/// популярность/Популярное) — НЕ подтверждено перехватом (таблица параметров
+/// в присланном дампе дошла обрывочно). Значения ниже — лучшая догадка по
+/// аналогии с sort_by каталога (см. SortOption.apiSortBy); сервер молча
+/// игнорирует незнакомые параметры (проверено на других эндпоинтах этого же
+/// API — см. genres_and/tags_and в fetchCatalog), так что худший случай
+/// неверной догадки — вкладка визуально не меняет список, а не ломает его.
+enum TopViewsSort: String, CaseIterable, Identifiable {
+    case newest, rising, popular
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .newest:  return "Новинки"
+        case .rising:  return "Набирающее популярность"
+        case .popular: return "Популярное"
+        }
+    }
+
+    /// nil = не слать sort_by вовсе (собственный порядок top-views —
+    /// по просмотрам за период, то есть уже "популярное"/"набирающее").
+    var apiSortBy: String? {
+        switch self {
+        case .newest:  return "created_at"
+        case .rising:  return nil
+        case .popular: return "views"
+        }
+    }
+}
+
+/// Период для "Сейчас читают" — единственное подтверждённое значение из
+/// присланного дампа буквально "day"; "week"/"month" — по аналогии с
+/// подписями на скриншоте (За день/За неделю/За месяц), не перехвачены.
+enum TopViewsPeriod: String, CaseIterable, Identifiable {
+    case day, week, month
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .day:   return "За день"
+        case .week:  return "За неделю"
+        case .month: return "За месяц"
+        }
+    }
+}
+
+/// Подборка ("коллекция") — ПОДТВЕРЖДЕНО реальным перехватом (агрегат
+/// главной страницы, два файла от пользователя), но сам путь ЭТОГО списка
+/// отдельным эндпоинтом — НЕТ (в дампах виден только вложенным в агрегат
+/// главной, см. MangaNetworkService.fetchHomeWidgets). `previews` — до трёх
+/// обложек тайтлов внутри подборки, та же форма, что MangaCover.
+struct MangaCollection: Decodable, Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let views: Int?
+    let favoritesCount: Int?
+    let itemsCount: Int?
+    let votes: MangaCollectionVotes?
+    let previews: [MangaCover]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, views, previews, votes
+        case favoritesCount = "favorites_count"
+        case itemsCount = "items_count"
+    }
+}
+
+struct MangaCollectionVotes: Decodable, Hashable {
+    let up: Int
+    let down: Int
+}
+
+/// Участник «Топ активных недели» — ПОДТВЕРЖДЕНО реальным перехватом (тот же
+/// агрегат главной, что и MangaCollection выше — см. ту же оговорку про
+/// неподтверждённый отдельный путь).
+struct TopActiveUser: Decodable, Identifiable, Hashable {
+    let id: Int
+    let username: String
+    let avatarURL: URL?
+    let pointsInfo: TopActiveUserPoints?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, username, avatar, pointsInfo = "points_info"
+    }
+    private enum AvatarKeys: String, CodingKey { case url }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        username = ((try? c.decodeIfPresent(String.self, forKey: .username)) ?? nil) ?? ""
+        pointsInfo = (try? c.decodeIfPresent(TopActiveUserPoints.self, forKey: .pointsInfo)) ?? nil
+        if let avatarC = try? c.nestedContainer(keyedBy: AvatarKeys.self, forKey: .avatar) {
+            let urlString = (try? avatarC.decodeIfPresent(String.self, forKey: .url)) ?? nil
+            avatarURL = urlString.flatMap(URL.init(string:))
+        } else {
+            avatarURL = nil
+        }
+    }
+}
+
+struct TopActiveUserPoints: Decodable, Hashable {
+    let level: Int
+    let maxLevelPoints: Int
+    let currentLevelPoints: Int
+
+    enum CodingKeys: String, CodingKey {
+        case level
+        case maxLevelPoints = "max_level_points"
+        case currentLevelPoints = "current_level_points"
+    }
+}
+
+/// Полезная нагрузка агрегата главной страницы — из ВСЕГО перехваченного
+/// дампа (popular/collections/reviews/newest/latest_updates/currently_views/
+/// weekly_top_users/weekly_top_views_users/news/forum/slider) сюда взяты
+/// ТОЛЬКО collections и weeklyTopUsers: остальное либо уже покрыто другими,
+/// подтверждёнными эндпоинтами (newest/latest_updates — см.
+/// fetchCatalog(sort:.added/.updated)), либо не нужно для экрана «Читают»
+/// (reviews/news/forum/slider). JSONDecoder тихо игнорирует лишние ключи
+/// верхнего уровня, которых нет в CodingKeys — остальные секции агрегата
+/// не мешают декодированию.
+///
+/// ВАЖНО: путь самого этого эндпоинта НЕ ПОДТВЕРЖДЁН — см.
+/// MangaNetworkService.fetchHomeWidgets.
+struct HomeWidgetsPayload: Decodable {
+    let collections: [MangaCollection]?
+    let weeklyTopUsers: [TopActiveUser]?
+
+    enum CodingKeys: String, CodingKey {
+        case collections
+        case weeklyTopUsers = "weekly_top_users"
     }
 }

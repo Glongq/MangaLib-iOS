@@ -439,6 +439,21 @@ final class BookmarksStore: ObservableObject {
 
     func readingProgress(forSlug slug: String) -> ReadingProgress? { progress[slug] }
 
+    /// «Продолжить читать» на вкладке «Читают» (см. HomeView) — по одной, самой
+    /// свежей записи на каждый тайтл. historyEntries уже отдаются сервером от
+    /// новых к старым (см. syncHistoryFromServer) — дедуп по media.id, сохраняя
+    /// порядок первого (=самого свежего) вхождения, даёт готовый список без
+    /// отдельного запроса/сортировки.
+    var continueReadingEntries: [HistoryEntry] {
+        var seenMangaIds = Set<Int>()
+        var result: [HistoryEntry] = []
+        for entry in historyEntries {
+            guard seenMangaIds.insert(entry.media.id).inserted else { continue }
+            result.append(entry)
+        }
+        return result
+    }
+
     /// `force: true` — выставляет readCount РОВНО в переданное значение (можно и
     /// уменьшить), для явного выбора пользователем ("отметить прочитанным до
     /// главы N" по тапу на закладку в списке глав — см. MangaDetailView.markReadUpTo).

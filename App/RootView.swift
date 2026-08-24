@@ -23,7 +23,9 @@ import SwiftUI
 /// сворачивание при скролле и т.п. рисует сама система, ровно по HIG.
 struct RootView: View {
 
-    @State private var tab = 1 // Каталог выбран по умолчанию
+    // «Читают» (см. HomeView) теперь открывается первой — по требованию:
+    // "По дефолту оно будет теперь открываться первым при заходе".
+    @State private var tab = 2
     @State private var showLogin = false
     @State private var showAccount = false
     @State private var stubRequest: StubRequest?
@@ -46,9 +48,9 @@ struct RootView: View {
             Tab("Каталог", systemImage: "magnifyingglass", value: 1) {
                 MangaCatalogView()
             }
-            // Заглушка — раздел в разработке (см. StubView).
+            // Главная лента приложения (см. HomeView) — открывается первой.
             Tab("Читают", systemImage: "book", value: 2) {
-                NavigationStack { StubView(title: "Читают") }
+                HomeView()
             }
             Tab("Новое", systemImage: "bell", value: 3) {
                 NotificationsView()
