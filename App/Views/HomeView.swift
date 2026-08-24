@@ -576,7 +576,10 @@ struct HomeView: View {
                     LazyHStack(alignment: .top, spacing: 12) {
                         ForEach(viewModel.newest) { item in
                             NavigationLink(value: item) {
-                                MangaCardView(item: item, width: 108, coverURLOverride: item.cover?.thumbnailURL ?? item.cover?.bestURL)
+                                // Без thumbnail (в отличие от остальных 3 секций) — карточка
+                                // здесь такой же ширины (108pt), что и в Каталоге, где на
+                                // маленьком thumbnail (100px) при апскейле уже заметно мылит.
+                                MangaCardView(item: item, width: 108)
                             }
                             .buttonStyle(.plain)
                         }
