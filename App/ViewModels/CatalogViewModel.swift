@@ -31,28 +31,37 @@ final class CatalogViewModel: ObservableObject {
     private var page = 1
     private var hasNextPage = true
     private var siteCancellable: AnyCancellable?
+    private var searchSitesCancellable: AnyCancellable?
 
     init(service: MangaNetworkService = .shared, debounceMilliseconds: Int = 350) {
         self.service = service
         self.debounce = .milliseconds(debounceMilliseconds)
 
         // Переключение активного сайта в меню (см. SiteSession) должно сразу
-        // обновлять список каталога — по требованию "После переключения
-        // каталог обновляется". searchSites (чекбоксы мультипоиска) тоже
-        // влияют на fetchCatalog (см. effectiveSearchSites), поэтому слушаем
-        // и их — любое изменение набора сайтов даёт мгновенный reload.
-        siteCancellable = Publishers.Merge(
-            SiteSession.shared.$activeSite.map { _ in () }.eraseToAnyPublisher(),
-            SiteSession.shared.$searchSites.map { _ in () }.eraseToAnyPublisher()
-        )
-        // dropFirst(2): оба Publisher'а синхронно отдают текущее значение при
-        // подписке (по одному каждый) — пропускаем ровно эти два "стартовых"
-        // события, чтобы не делать лишний reload до loadInitialIfNeeded().
-        .dropFirst(2)
-        .receive(on: DispatchQueue.main)
-        .sink { [weak self] in
-            self?.reloadNow()
-        }
+        // сбрасывать фильтры каталога (фильтры одного сайта — например
+        // жанры MangaLib — почти наверняка не валидны/не то же самое на
+        // другом сайте) и перезагружать список — по требованию "После
+        // переключения сайтов сбрасываются все фильтры".
+        // dropFirst(): Published синхронно отдаёт текущее значение при
+        // подписке — пропускаем этот "стартовый" эмит, чтобы не сбрасывать
+        // фильтры и не делать лишний reload до loadInitialIfNeeded().
+        siteCancellable = SiteSession.shared.$activeSite
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.resetFilters()
+            }
+
+        // searchSites (чекбоксы мультипоиска) тоже влияют на fetchCatalog
+        // (см. effectiveSearchSites) — любое изменение набора сайтов даёт
+        // мгновенный reload, но без сброса фильтров (это не смена активного
+        // сайта, а лишь добавление источников для поиска/каталога).
+        searchSitesCancellable = SiteSession.shared.$searchSites
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.reloadNow()
+            }
     }
 
     // MARK: Точки входа
@@ -136,11 +145,22 @@ final class CatalogViewModel: ObservableObject {
     /// оказался пустым.
     private func fetchPage(_ page: Int) async throws -> CatalogPage {
         let type = sortDescending ? "desc" : "asc"
+        let result: CatalogPage
         do {
-            return try await service.fetchCatalog(query: query, sort: sort, filter: filter, page: page, sortType: type)
+            result = try await service.fetchCatalog(query: query, sort: sort, filter: filter, page: page, sortType: type)
         } catch NetworkError.server(let status) where status == 422 {
-            return try await service.fetchCatalog(query: query, sort: .popularity, filter: filter, page: page, sortType: type)
+            result = try await service.fetchCatalog(query: query, sort: .popularity, filter: filter, page: page, sortType: type)
         }
+        // "По популярности" — единственная сортировка без своего sort_by
+        // (см. SortOption.apiSortBy): сервер не принимает НИ ОДНО значение
+        // для неё (проверено — rate/rating/votes/total_votes/popularity/...
+        // все дают 422), так что sort_type там серверу передать не на что и
+        // переключатель "по возрастанию/по убыванию" молча не работал.
+        // Раз сервер не даёт управлять направлением, разворачиваем страницу
+        // на клиенте — переключатель хотя бы ощутимо меняет порядок, как и
+        // для остальных сортировок.
+        guard sort == .popularity, !sortDescending else { return result }
+        return CatalogPage(items: result.items.reversed(), hasNextPage: result.hasNextPage)
     }
 
     private func fetchNextPage() async {
