@@ -174,6 +174,11 @@ struct HomeView: View {
         (mangaTitleUIFont.lineHeight * 2).rounded(.up)
     }
 
+    /// Обложка вплотную к краю подложки (как в "Похожем" на экране тайтла,
+    /// см. similarCard) — раньше был общий .padding() на весь HStack, из-за
+    /// которого обложка висела с отступом от левого/верхнего/нижнего краёв
+    /// карточки. Теперь падинг только у текстовой колонки и справа, а
+    /// радиус обложки (16) совпадает с радиусом самой подложки — угол в угол.
     private func continueReadingCard(_ entry: HistoryEntry) -> some View {
         let progress = bookmarks.readingProgress(forSlug: entry.media.apiSlug)
         return HStack(spacing: 12) {
@@ -185,7 +190,7 @@ struct HomeView: View {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
             .frame(width: Self.continueReadingCoverWidth, height: Self.continueReadingCoverHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
 
             VStack(alignment: .leading, spacing: 7) {
@@ -202,9 +207,10 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 5)
             }
+            .padding(.vertical, Self.continueReadingPadding)
             Spacer(minLength: 0)
         }
-        .padding(Self.continueReadingPadding)
+        .padding(.trailing, Self.continueReadingPadding)
         .frame(width: Self.continueReadingCardWidth)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
