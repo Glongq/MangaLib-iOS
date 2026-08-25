@@ -166,9 +166,17 @@ struct NetworkLogsView: View {
         }
         .padding(12)
         .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        // Долгое нажатие на запись (без необходимости сначала её раскрывать)
-        // — сразу скопировать именно её, как попросили. Уважает тумблер
-        // "Короткие логи" так же, как и остальные способы копирования.
+        .contentShape(Rectangle())
+        // Тап по карточке МИМО текстовых блоков (заголовок — свой Button на
+        // схлопывание, каждый текстовый блок — свой Button на копирование
+        // именно себя, см. detailBlock) — копирует запись целиком. Button
+        // внутри перехватывает тап раньше, чем он дойдёт досюда, поэтому
+        // конфликта с ними нет — сработает только там, где под пальцем
+        // действительно ничего кликабельного нет (паддинги, подписи блоков).
+        .onTapGesture {
+            copyToClipboard(text: copyText(for: entry))
+        }
+        // Долгое нажатие — то же самое, но привычным жестом (было раньше).
         .contextMenu {
             Button {
                 copyToClipboard(text: copyText(for: entry))
@@ -178,18 +186,27 @@ struct NetworkLogsView: View {
         }
     }
 
+    /// Раньше здесь стоял .textSelection(.enabled) — ручное выделение
+    /// драгом слишком неудобно для длинных JSON-тел (см. фидбек — приходили
+    /// куски текста, рваные посередине слова, похоже на копирование через
+    /// скриншот+OCR, а не через приложение). Теперь один тап по блоку
+    /// копирует его целиком — простой и надёжный жест вместо выделения.
     private func detailBlock(title: String, text: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
-            Text(text)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Theme.textPrimary)
-                .textSelection(.enabled)
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Button {
+                copyToClipboard(text: text)
+            } label: {
+                Text(text)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
         }
     }
 
