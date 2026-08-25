@@ -17,18 +17,17 @@ struct TeamView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showFilters = false
+    @State private var showTeamNames = false
     @State private var selectedTab: Tab = .titles
     @FocusState private var searchFocused: Bool
 
     private let gridColumnsCount = 3
     private let gridSpacing: CGFloat = 12
 
-    /// Размер/отступы/радиус — СТРОГО те же значения, что у обложки в
-    /// MangaDetailView.heroHeader (heroCoverSize/heroCoverTitleSpacing/
-    /// heroCoverTopOffset/радиус 12) — по прямой просьбе "полностью как в
-    /// карточке тайтла", а не эталон Theme.coverCornerRadius(16) отсюда.
-    private static let heroAvatarSize = CGSize(width: 88 * 1.3 * 1.3, height: 132 * 1.3 * 1.3)
     private static let heroTitleSpacing: CGFloat = 10
+    /// Расстояние от верха баннера до аватара — фиксированное, чтобы кнопка
+    /// "назад"/подписки никогда не пересекались с аватаром (тот же приём,
+    /// что и в MangaDetailView.heroCoverTopOffset).
     private static let heroAvatarTopOffset: CGFloat = 120
     /// Та же величина, что и MangaDetailView.metaChipHeight — своя копия,
     /// т.к. та константа fileprivate к своему файлу.
@@ -58,11 +57,11 @@ struct TeamView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    heroHeader
+                    heroHeader(avatarSize: cardWidth)
 
                     VStack(alignment: .leading, spacing: 18) {
-                        metaRow
                         socialLinks
+                        metaRow
                         membersSection
 
                         if let desc = vm.detail?.description, !desc.isEmpty {
@@ -96,15 +95,38 @@ struct TeamView: View {
         .sheet(isPresented: $showFilters) {
             FilterView(initial: vm.filter) { vm.apply(filter: $0) }
         }
+        .sheet(isPresented: $showTeamNames) {
+            // Переиспользуем тот же sheet, что и у названия тайтла (см.
+            // MangaDetailView.titleBlock) — по прямой просьбе. У команды нет
+            // отдельных рус/оригинал/англ полей, только name + alt_name
+            // (одна строка через запятую) — раскладываем её в otherNames.
+            TitleNamesSheet(rusName: vm.detail?.name ?? fallbackName, originalName: nil, engName: nil, otherNames: teamOtherNames)
+                .presentationDetents([.medium, .large])
+        }
+    }
+
+    /// alt_name с сервера — одна строка через запятую ("DIT, дед, деды, …") —
+    /// раскладывается в список для TitleNamesSheet.
+    private var teamOtherNames: [String] {
+        (vm.detail?.altName ?? "")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
 
     // MARK: Шапка (1-в-1 MangaDetailView.heroHeader)
 
-    private var heroHeader: some View {
-        VStack(alignment: .leading, spacing: 0) {
+    /// avatarSize — ширина карточки в гриде тайтлов ниже (cardWidth), по
+    /// прямой просьбе: аватар команды уменьшен до размера обложки тайтла в
+    /// списке "тайтлы, где есть эта команда", а не увеличенный размер
+    /// обложки, как в MangaDetailView.heroHeader. Высота — тот же формат
+    /// 2:3, что и у карточки тайтла (см. MangaCardView.body: width*3/2).
+    private func heroHeader(avatarSize: CGFloat) -> some View {
+        let avatarHeight = (avatarSize * 3 / 2).rounded()
+        return VStack(alignment: .center, spacing: 0) {
             Color.clear.frame(height: Self.heroAvatarTopOffset)
 
-            VStack(alignment: .leading, spacing: Self.heroTitleSpacing) {
+            VStack(alignment: .center, spacing: Self.heroTitleSpacing) {
                 RemoteImage(url: vm.detail?.cover?.bestURL ?? coverURL, priority: URLSessionTask.highPriority) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
@@ -112,16 +134,17 @@ struct TeamView: View {
                 } failure: {
                     ZStack { Theme.surfaceElevated; Image(systemName: "person.2.fill").foregroundStyle(Theme.textSecondary) }
                 }
-                .frame(width: Self.heroAvatarSize.width, height: Self.heroAvatarSize.height)
+                .frame(width: avatarSize, height: avatarHeight)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
 
                 titleBlockOverlay
             }
-            .padding(.leading, 16)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
         .background(alignment: .top) {
             // Та же "тянущаяся шапка" под rubber-band overscroll, что и у
             // тайтла — см. подробный комментарий в MangaDetailView.heroHeader.
@@ -170,19 +193,29 @@ struct TeamView: View {
         .overlay(alignment: .topTrailing) { subscribeButton }
     }
 
+    /// По прямой просьбе — по центру (не слева, как в MangaDetailView), и
+    /// тап открывает тот же sheet со всеми названиями, что и у тайтла (см.
+    /// showTeamNames/TitleNamesSheet).
     private var titleBlockOverlay: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .center, spacing: 4) {
             Text(vm.detail?.name ?? fallbackName ?? "")
                 .font(.title3.weight(.bold))
                 .foregroundStyle(Theme.textPrimary)
+                .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let altName = vm.detail?.altName, !altName.isEmpty {
-                Text(altName).font(.footnote).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                Text(altName)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
             }
         }
-        .padding(.trailing, 16)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { showTeamNames = true }
     }
 
     /// Своя стеклянная кнопка "назад" вместо системной шапки — по прямой
@@ -270,11 +303,10 @@ struct TeamView: View {
     }
 
     /// Ссылки на соцсети (vk/discord/website — все три подтверждены
-    /// перехватом), только если реально есть. Раньше жили в углу шапки —
-    /// теперь там кнопка подписки (см. subscribeButton), поэтому перенесены
-    /// сюда, тем же стилем "пилюль", что и у поиска/фильтров ниже. Своих
-    /// иконок VK/Discord в приложении нет — generic SF Symbols (см. список
-    /// "что уточнить").
+    /// перехватом), только если реально есть. НЕ стеклянные — по прямой
+    /// просьбе, обычная плашка (Theme.surfaceElevated), как у чипов
+    /// метаданных ниже. Своих иконок VK/Discord в приложении нет — generic
+    /// SF Symbols (см. список "что уточнить").
     @ViewBuilder
     private var socialLinks: some View {
         let links = socialLinkItems
@@ -290,7 +322,7 @@ struct TeamView: View {
                             .foregroundStyle(Theme.textPrimary)
                             .padding(.horizontal, 14)
                             .frame(minHeight: Theme.pillControlHeight)
-                            .glassEffect(.regular.interactive(), in: Capsule())
+                            .background(Theme.surfaceElevated, in: Capsule())
                         }
                     }
                 }
