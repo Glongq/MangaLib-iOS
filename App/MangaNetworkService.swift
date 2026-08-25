@@ -201,13 +201,28 @@ final class MangaNetworkService {
         appendTri(&items, "genres", filter.genres)
         appendTri(&items, "tags", filter.tags)
 
-        // «Строгое совпадение» = AND по выбранным жанрам/тегам (по умолчанию сервер даёт OR).
-        // Имя параметра — предположительное; сервер игнорирует неизвестные параметры.
-        if filter.genresStrict && !filter.genres.included.isEmpty {
-            items.append(URLQueryItem(name: "genres_and", value: "true"))
+        // «Строгое совпадение» — реальное имя параметра ПОДТВЕРЖДЕНО перехватом
+        // (proxypin, 2026-08-26, каталог HentaiLib): `genres_soft_search=1` /
+        // `tags_soft_search=1`, а НЕ `genres_and`/`tags_and`, как было раньше
+        // (тот вариант — чистая догадка, ни разу не встретился ни в одной
+        // капче за всю сессию; сервер молча игнорировал неизвестный параметр,
+        // так что тумблер "Строгое совпадение" фактически не работал вообще —
+        // ни на MangaLib, ни на других сайтах, просто это было незаметно,
+        // потому что сервер и без него отдавал какие-то результаты).
+        // Полярность (наличие параметра, а не его значение — сервер именно
+        // так его и видел в капче: у одного запроса ключ `tags_soft_search`
+        // в URL присутствовал, у следующего с ТЕМИ ЖЕ genres/tags — просто
+        // отсутствовал целиком, значения "0" нигде не встретилось): при
+        // СТРОГОМ совпадении параметр не шлём вообще (точное совпадение),
+        // иначе — шлём "=1" (это и есть прежнее поведение по умолчанию).
+        // Чистого A/B-перехвата с явным переключением чекбокса в UI не
+        // было — если после реального теста окажется, что полярность
+        // перепутана, достаточно поменять местами условия ниже.
+        if !filter.genres.included.isEmpty && !filter.genresStrict {
+            items.append(URLQueryItem(name: "genres_soft_search", value: "1"))
         }
-        if filter.tagsStrict && !filter.tags.included.isEmpty {
-            items.append(URLQueryItem(name: "tags_and", value: "true"))
+        if !filter.tags.included.isEmpty && !filter.tagsStrict {
+            items.append(URLQueryItem(name: "tags_soft_search", value: "1"))
         }
         appendTri(&items, "caution", filter.ageRatings)
         appendTri(&items, "types", filter.types)
