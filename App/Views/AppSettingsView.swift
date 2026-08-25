@@ -34,6 +34,7 @@ struct AppSettingsView: View {
     @ObservedObject private var siteSession = SiteSession.shared
     @ObservedObject private var authSession = AuthSession.shared
     @ObservedObject private var themeManager = ThemeManager.shared
+    @ObservedObject private var specialFilterStore = SpecialFilterStore.shared
     @State private var debugTokenInput = ""
     @State private var showLogoutConfirm = false
     // Сворачиваемые разделы ("Профиль"/"Приложение"/"Помощь"/"Прочее") — та же
@@ -91,6 +92,7 @@ struct AppSettingsView: View {
                     settingsSection("Приложение") {
                         storageSettingsRow
                         personalizationRow
+                        specialFilterRow
                         settingsRow(icon: "arrow.triangle.2.circlepath", title: "Проверить обновления", showDivider: false)
                     }
 
@@ -250,6 +252,43 @@ struct AppSettingsView: View {
                 PersonalizationSettingsView()
             } label: {
                 settingsRowLabel(icon: "paintbrush", title: "Персонализация")
+            }
+            .buttonStyle(.plain)
+
+            Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14)
+        }
+    }
+
+    /// "Спец фильтр" — реальный экран (SpecialFilterSettingsView), с "Вкл"
+    /// справа вместо привычной стрелки, когда режим реально активен (см.
+    /// SpecialFilterStore.isActive — включён И выбрано ≥2 пунктов), чтобы
+    /// не забыть, что каталог сейчас работает не как обычно.
+    private var specialFilterRow: some View {
+        VStack(spacing: 0) {
+            NavigationLink {
+                SpecialFilterSettingsView()
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "wand.and.stars")
+                        .font(.title3)
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 24)
+                    Text("Спец фильтр").foregroundStyle(Theme.textPrimary)
+                    Spacer(minLength: 0)
+                    if specialFilterStore.isActive {
+                        Text("Вкл")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Theme.background)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Theme.accent, in: Capsule())
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary.opacity(0.6))
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 52)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 

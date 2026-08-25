@@ -1,5 +1,15 @@
 import SwiftUI
 
+extension Binding where Value == Bool {
+    /// Оборачивает non-optional Binding<Bool> в Binding<Bool?> — нужен, чтобы
+    /// прокидывать реальные (не спец-фильтровые) genresStrict/tagsStrict из
+    /// MangaFilter в TriStateFilterView.strict, у которого теперь optional-тип
+    /// (см. TriStateFilterView.strict).
+    var toOptional: Binding<Bool?> {
+        Binding<Bool?>(get: { self.wrappedValue }, set: { self.wrappedValue = $0 ?? false })
+    }
+}
+
 /// Экран трёхпозиционного выбора (Жанры / Теги).
 /// Каждый элемент циклически переключается: нейтрально → включить → исключить.
 struct TriStateFilterView: View {
@@ -8,13 +18,17 @@ struct TriStateFilterView: View {
     let options: [FilterOption]
 
     @Binding var selection: TriStateSelection
-    @Binding var strict: Bool
+    /// nil — экран используется вне обычного MangaFilter (например «Спец
+    /// фильтр» в настройках, см. SpecialFilterSettingsView), где отдельного
+    /// серверного параметра "строгое совпадение" нет и сам тумблер только
+    /// сбивал бы с толку — тогда строка тумблера просто не показывается.
+    @Binding var strict: Bool?
 
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var search = ""
 
-    init(title: String, options: [FilterOption], selection: Binding<TriStateSelection>, strict: Binding<Bool>) {
+    init(title: String, options: [FilterOption], selection: Binding<TriStateSelection>, strict: Binding<Bool?> = .constant(nil)) {
         self.title = title
         self.options = options
         _selection = selection
@@ -64,12 +78,14 @@ struct TriStateFilterView: View {
             .background(Theme.surfaceElevated, in: Capsule())
 
             HStack {
-                Toggle(isOn: $strict) {
-                    Text("Строгое совпадение")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textPrimary)
+                if let strictBinding = Binding($strict) {
+                    Toggle(isOn: strictBinding) {
+                        Text("Строгое совпадение")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.textPrimary)
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
                 }
-                .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
 
                 Spacer(minLength: 16)
 
@@ -193,8 +209,7 @@ struct TriStateFilterView: View {
         TriStateFilterView(
             title: "Жанры",
             options: FilterCatalog.genres,
-            selection: .constant(TriStateSelection()),
-            strict: .constant(false)
+            selection: .constant(TriStateSelection())
         )
     }
     .preferredColorScheme(.dark)

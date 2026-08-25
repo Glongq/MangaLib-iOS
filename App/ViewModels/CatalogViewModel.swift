@@ -32,6 +32,7 @@ final class CatalogViewModel: ObservableObject {
     private var hasNextPage = true
     private var siteCancellable: AnyCancellable?
     private var searchSitesCancellable: AnyCancellable?
+    private var specialFilterCancellable: AnyCancellable?
 
     init(service: MangaNetworkService = .shared, debounceMilliseconds: Int = 350) {
         self.service = service
@@ -58,6 +59,18 @@ final class CatalogViewModel: ObservableObject {
         // сайта, а лишь добавление источников для поиска/каталога).
         searchSitesCancellable = SiteSession.shared.$searchSites
             .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.reloadNow()
+            }
+
+        // «Спец фильтр» (см. SpecialFilterStore/SpecialFilterEngine) —
+        // настройка уровня приложения, а не часть обычного MangaFilter:
+        // включили/выключили или поменяли выбор жанров/тегов в Настройках —
+        // каталог должен сразу пересчитаться, даже если сам экран каталога
+        // не открыт (objectWillChange реагирует на ЛЮБое @Published-поле
+        // стора, без надобности перечислять их по отдельности).
+        specialFilterCancellable = SpecialFilterStore.shared.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.reloadNow()
@@ -121,10 +134,25 @@ final class CatalogViewModel: ObservableObject {
         page = 1
         hasNextPage = true
         do {
-            let result = try await fetchPage(1)
-            guard !Task.isCancelled else { return }
-            results = result.items
-            hasNextPage = result.hasNextPage
+            if SpecialFilterStore.shared.isActive {
+                // «Спец фильтр» сам отдаёт готовый ранжированный список одним
+                // махом (см. SpecialFilterEngine) — не постранично с сервера,
+                // поэтому дальнейший бесконечный скролл (loadMore) в этом
+                // режиме просто не включается: hasNextPage = false.
+                let type = sortDescending ? "desc" : "asc"
+                let ranked = try await SpecialFilterEngine.search(
+                    service: service, query: query, sort: sort, sortType: type,
+                    baseFilter: filter, selection: SpecialFilterStore.shared
+                )
+                guard !Task.isCancelled else { return }
+                results = ranked.map(\.item)
+                hasNextPage = false
+            } else {
+                let result = try await fetchPage(1)
+                guard !Task.isCancelled else { return }
+                results = result.items
+                hasNextPage = result.hasNextPage
+            }
             didLoadOnce = true
         } catch is CancellationError {
         } catch NetworkError.cancelled {

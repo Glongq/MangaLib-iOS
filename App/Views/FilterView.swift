@@ -106,7 +106,7 @@ struct FilterView: View {
         VStack(spacing: 0) {
             NavigationLink {
                 TriStateFilterView(title: "Жанры", options: constants.genres,
-                                   selection: $filter.genres, strict: $filter.genresStrict)
+                                   selection: $filter.genres, strict: $filter.genresStrict.toOptional)
             } label: {
                 selectRow(title: "Жанры", selection: filter.genres)
             }
@@ -116,7 +116,7 @@ struct FilterView: View {
 
             NavigationLink {
                 TriStateFilterView(title: "Теги", options: constants.tags,
-                                   selection: $filter.tags, strict: $filter.tagsStrict)
+                                   selection: $filter.tags, strict: $filter.tagsStrict.toOptional)
             } label: {
                 selectRow(title: "Теги", selection: filter.tags)
             }
