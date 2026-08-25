@@ -11,8 +11,14 @@ import SwiftUI
 /// тайтла"). Картинки — центрированы, растянуты во всю ширину экрана
 /// (scaledToFit, края доходят до горизонтальных краёв экрана). Внизу —
 /// текстовый индикатор "N / всего" (не точки — просили именно "номер").
+///
+/// Принимает готовые URL, а не [MangaCoverGalleryItem] — тайтл может не
+/// иметь доп. обложек вообще (пустая галерея с сервера), но открыть
+/// основную обложку на весь экран должно быть можно ВСЕГДА (по прямой
+/// просьбе) — тогда сюда просто передаётся один-единственный URL основной
+/// обложки (см. MangaDetailView.coverGalleryImageURLs).
 struct CoverGalleryView: View {
-    let items: [MangaCoverGalleryItem]
+    let imageURLs: [URL]
     @Environment(\.dismiss) private var dismiss
     @State private var currentIndex = 0
 
@@ -21,7 +27,7 @@ struct CoverGalleryView: View {
             Color.black.ignoresSafeArea()
 
             TabView(selection: $currentIndex) {
-                ForEach(items.indices, id: \.self) { index in
+                ForEach(imageURLs.indices, id: \.self) { index in
                     ZStack {
                         // Слабый блюр той же картинки на весь экран — под
                         // основной (scaledToFit, поэтому по бокам/сверху-снизу
@@ -29,7 +35,7 @@ struct CoverGalleryView: View {
                         // поля) — по прямой просьбе, вместо голого чёрного фона.
                         // Тот же URL — RemoteImageCache отдаст уже скачанный
                         // байткод картинки, а не второй отдельный запрос.
-                        RemoteImage(url: items[index].cover.fullResURL) { image in
+                        RemoteImage(url: imageURLs[index]) { image in
                             image.resizable().scaledToFill()
                         } placeholder: {
                             Color.clear
@@ -40,7 +46,7 @@ struct CoverGalleryView: View {
                         .overlay(Color.black.opacity(0.35))
                         .clipped()
 
-                        RemoteImage(url: items[index].cover.fullResURL) { image in
+                        RemoteImage(url: imageURLs[index]) { image in
                             image.resizable().scaledToFit()
                         } placeholder: {
                             ProgressView().tint(.white)
@@ -69,8 +75,8 @@ struct CoverGalleryView: View {
             .padding(.top, 54)
         }
         .overlay(alignment: .bottom) {
-            if items.count > 1 {
-                Text("\(currentIndex + 1) / \(items.count)")
+            if imageURLs.count > 1 {
+                Text("\(currentIndex + 1) / \(imageURLs.count)")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)
@@ -84,6 +90,6 @@ struct CoverGalleryView: View {
 }
 
 #Preview {
-    CoverGalleryView(items: [])
+    CoverGalleryView(imageURLs: [])
         .preferredColorScheme(.dark)
 }

@@ -23,6 +23,21 @@ struct MangaDetailView: View {
     /// Полноэкранная листалка доп. обложек (тап по обложке в шапке) — см.
     /// CoverGalleryView/coverGalleryBadge.
     @State private var showCoverGallery = false
+    /// URL'ы для листалки — реальная галерея (GET /manga/{slug}/covers), а
+    /// если она пустая (у большинства тайтлов доп. обложек вообще нет) —
+    /// один-единственный URL основной обложки: тап должен открывать
+    /// полноэкранный вид ВСЕГДА, вне зависимости от того, есть ли доп.
+    /// обложки (по прямой просьбе), просто без пролистывания в этом случае.
+    private var coverGalleryImageURLs: [URL] {
+        if !viewModel.coverGallery.isEmpty {
+            return viewModel.coverGallery.compactMap { $0.cover.fullResURL }
+        }
+        if let url = viewModel.detail?.cover?.fullResURL ?? viewModel.detail?.cover?.bestURL
+            ?? coverURL ?? listItem?.cover?.bestURL {
+            return [url]
+        }
+        return []
+    }
     /// URL тайтла для «Поделиться» (см. actionMenu) — обычная ссылка на
     /// страницу тайтла на активном сайте.
     private var shareURL: URL? {
@@ -197,7 +212,7 @@ struct MangaDetailView: View {
             readerView(for: open.chapter, branchId: open.branchId)
         }
         .fullScreenCover(isPresented: $showCoverGallery) {
-            CoverGalleryView(items: viewModel.coverGallery)
+            CoverGalleryView(imageURLs: coverGalleryImageURLs)
         }
         .sheet(isPresented: $showLoginForComment) { LoginView() }
         .sheet(isPresented: $showLoginForSimilarVote) { LoginView() }
@@ -333,12 +348,12 @@ struct MangaDetailView: View {
                 .overlay(alignment: .topLeading) { bookmarkStatusBadge }
                 .overlay(alignment: .bottomLeading) { coverRatingBadge }
                 .overlay(alignment: .topTrailing) { coverGalleryBadge }
-                // Тап в любое место обложки — полноэкранная листалка доп.
-                // обложек (см. CoverGalleryView), только если галерея реально
-                // не пустая (у большинства тайтлов доп. обложек нет вообще).
+                // Тап в любое место обложки — полноэкранный вид ВСЕГДА (см.
+                // coverGalleryImageURLs — если доп. обложек нет, там всё равно
+                // будет один URL основной обложки, просто без пролистывания).
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    guard !viewModel.coverGallery.isEmpty else { return }
+                    guard !coverGalleryImageURLs.isEmpty else { return }
                     showCoverGallery = true
                 }
 
@@ -541,12 +556,13 @@ struct MangaDetailView: View {
 
     /// Чип "иконка изображения + кол-во доп. обложек" — сверху справа на
     /// обложке (см. GET /manga/{slug}/covers, MangaDetailViewModel.coverGallery).
-    /// Показывается только если галерея реально не пустая. Тап по всей
-    /// обложке (не только по чипу) открывает полноэкранную листалку — см.
-    /// heroHeader.
+    /// Показывается только если обложек БОЛЬШЕ ОДНОЙ (при ровно одной чип не
+    /// нужен — по прямой просьбе, хотя тап всё равно открывает её на весь
+    /// экран, см. coverGalleryImageURLs). Тап по всей обложке (не только по
+    /// чипу) открывает полноэкранную листалку — см. heroHeader.
     @ViewBuilder
     private var coverGalleryBadge: some View {
-        if !viewModel.coverGallery.isEmpty {
+        if viewModel.coverGallery.count > 1 {
             HStack(spacing: 4) {
                 Image(systemName: "photo.on.rectangle")
                     .font(.system(size: 9))
