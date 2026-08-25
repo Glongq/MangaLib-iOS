@@ -38,11 +38,15 @@ struct MangaDetailView: View {
     /// полноэкранный вид ВСЕГДА, вне зависимости от того, есть ли доп.
     /// обложки (по прямой просьбе), просто без пролистывания в этом случае.
     private var coverGalleryImageURLs: [URL] {
+        // bestURL (md), не fullResURL (orig) — в листалке нет зума, orig
+        // ничего не даёт визуально (экран телефона всё равно меньше), а
+        // декодировать/рендерить полноразмерный оригинал на лету во время
+        // интерактивного свайпа заметно тяжелее — вероятная причина
+        // "резко перепрыгивает" при пролистывании (просадка кадров).
         if !viewModel.coverGallery.isEmpty {
-            return viewModel.coverGallery.compactMap { $0.cover.fullResURL }
+            return viewModel.coverGallery.compactMap { $0.cover.bestURL }
         }
-        if let url = viewModel.detail?.cover?.fullResURL ?? viewModel.detail?.cover?.bestURL
-            ?? coverURL ?? listItem?.cover?.bestURL {
+        if let url = viewModel.detail?.cover?.bestURL ?? coverURL ?? listItem?.cover?.bestURL {
             return [url]
         }
         return []
