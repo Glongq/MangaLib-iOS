@@ -68,6 +68,17 @@ struct SideMenuView: View {
     // Раскрыт ли список выбора активного сайта в блоке профиля (см. siteRow).
     @State private var siteExpanded = false
 
+    // Схлопывание шапки при скролле — тот же механизм, что в Каталоге/
+    // Закладках (см. комментарии у setHeaderCollapsed там): вниз — крупный
+    // заголовок "Меню" блюр-фейдом уходит, вместо него появляется маленький
+    // ЦЕНТРИРОВАННЫЙ заголовок (как у нативного navigationTitle в .large,
+    // сжимающегося в .inline); вверх (хоть чуть-чуть) — всё возвращается.
+    @State private var headerCollapsed = false
+    @State private var lastScrollOffset: CGFloat = 0
+    // Та же защита от дребезга во время анимации схлопывания, что и в
+    // Каталоге/Закладках — см. комментарий у isHeaderAnimating там.
+    @State private var isHeaderAnimating = false
+
     var body: some View {
         NavigationStack(path: $path) {
             ZStack {
@@ -93,6 +104,22 @@ struct SideMenuView: View {
                         .padding(.bottom, 24)
                     }
                     .scrollIndicators(.hidden)
+                    // Тот же приём, что в Каталоге/Закладках — onScrollGeometryChange
+                    // вместо самодельного GeometryReader-датчика.
+                    .onScrollGeometryChange(for: CGFloat.self) { geo in
+                        geo.contentOffset.y
+                    } action: { _, newOffset in
+                        defer { lastScrollOffset = newOffset }
+                        guard !isHeaderAnimating else { return }
+                        let delta = newOffset - lastScrollOffset
+                        if newOffset <= 0 {
+                            setHeaderCollapsed(false)
+                        } else if delta > 6 {
+                            setHeaderCollapsed(true)
+                        } else if delta < -6 {
+                            setHeaderCollapsed(false)
+                        }
+                    }
                 }
             }
             // У меню своя шапка «Меню» — системный навбар прячем.
@@ -114,17 +141,41 @@ struct SideMenuView: View {
         // Кнопку-крестик убрали — меню теперь обычная вкладка (не sheet),
         // закрывать/сворачивать её через "крестик" незачем: переключение на
         // другой раздел происходит через нижнюю панель, как и у любой другой вкладки.
-        HStack(spacing: 12) {
-            Image(systemName: "book.closed.fill")
-                .font(.title2)
-                .foregroundStyle(Theme.accent)
-            Text("Меню")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(Theme.textPrimary)
-            Spacer()
+        //
+        // Развёрнуто — крупный заголовок слева, тот же размер (29pt bold),
+        // что и в шапках Каталога/Закладок. Схлопнуто — маленький ЦЕНТРИРОВАННЫЙ
+        // заголовок, как у нативного navigationTitle при переходе из .large
+        // в .inline (см. AppSettingsView/StubView) — тот эффект и попросили
+        // повторить здесь, только в размере большого состояния как в Каталоге.
+        ZStack {
+            if headerCollapsed {
+                Text("Меню")
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .transition(.blurFade)
+            } else {
+                HStack(spacing: 12) {
+                    Image(systemName: "book.closed.fill")
+                        .font(.title2)
+                        .foregroundStyle(Theme.accent)
+                    Text("Меню")
+                        .font(.system(size: 29, weight: .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer(minLength: 0)
+                }
+                .transition(.blurFade)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
+    }
+
+    private func setHeaderCollapsed(_ value: Bool) {
+        guard headerCollapsed != value else { return }
+        isHeaderAnimating = true
+        withAnimation(.easeInOut(duration: 0.22)) { headerCollapsed = value }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isHeaderAnimating = false }
     }
 
     // MARK: Блоки (по группировке, которую попросили)
