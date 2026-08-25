@@ -368,9 +368,12 @@ struct HomeView: View {
 
     private func currentlyReadingPage(sort: TopViewsSort, items: [MangaItem]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Приглушённый цвет (textSecondary) — тот же, что у жанра/типа
+            // тайтла в карточках (см. MangaCardView.typeLabel) — по просьбе,
+            // чтобы подкатегории читались чуть обесцвеченными.
             Text(sort.title)
                 .font(Self.currentlyReadingLabelFont)
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
                 .frame(height: Self.currentlyReadingLabelHeight, alignment: .leading)
             VStack(spacing: Self.currentlyReadingRowSpacing) {
@@ -657,6 +660,10 @@ struct HomeView: View {
         }
     }
 
+    /// Размер обложки и оформление текста — как в «Продолжить читать» (те же
+    /// continueReadingCoverWidth/Height и mangaTitleFont, обложка вплотную к
+    /// краю подложки) — по прямой просьбе, раньше здесь была маленькая
+    /// квадратная 48×48 обложка.
     private func updateRow(_ item: MangaItem) -> some View {
         HStack(spacing: 12) {
             RemoteImage(url: item.cover?.thumbnailURL ?? item.cover?.bestURL) { image in
@@ -666,28 +673,31 @@ struct HomeView: View {
             } failure: {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
-            .frame(width: 48, height: 48)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .frame(width: Self.continueReadingCoverWidth, height: Self.continueReadingCoverHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.displayTitle)
                     .font(Self.mangaTitleFont)
                     .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
+                    .lineLimit(2)
                 Text(chapterLine(for: item))
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
+            .padding(.vertical, 10)
+
             Spacer(minLength: 0)
+
             if let date = item.lastItemDate {
                 Text(date.relativeRussianString)
                     .font(.caption2)
                     .foregroundStyle(Theme.textSecondary)
             }
         }
-        .padding(10)
+        .padding(.trailing, Self.continueReadingPadding)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
@@ -697,6 +707,12 @@ struct HomeView: View {
         if let volume = chapter.volume, !volume.isEmpty { parts.append("Том \(volume)") }
         if let number = chapter.number, !number.isEmpty { parts.append("Глава \(number)") }
         var line = parts.joined(separator: " ")
+        // Название главы (metadata.last_item.name) — есть не у всех глав
+        // (часто пусто), но когда есть — показываем его тоже, это и есть
+        // "что именно изменилось", а не только номер.
+        if let name = chapter.name, !name.isEmpty {
+            line = line.isEmpty ? name : "\(line) — \(name)"
+        }
         if item.extraLatestChaptersCount > 0 {
             line += " + ещё \(item.extraLatestChaptersCount)"
         }
