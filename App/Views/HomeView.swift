@@ -571,7 +571,7 @@ struct HomeView: View {
                 ZStack { Theme.surfaceElevated; Image(systemName: "person.fill").foregroundStyle(Theme.textSecondary) }
             }
             .frame(width: 44, height: 44)
-            .clipShape(Circle())
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .clipped()
             .overlay(alignment: .topLeading) {
                 Text("\(rank)#")
