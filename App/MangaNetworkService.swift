@@ -749,11 +749,9 @@ final class MangaNetworkService {
             URLQueryItem(name: "fields[]", value: "status"),
             URLQueryItem(name: "fields[]", value: "scanlateStatus"),
             URLQueryItem(name: "fields[]", value: "ageRestriction"),
-            // Не подтверждено перехватом реального запроса (в отличие от
-            // остальных полей выше) — но безопасно попробовать: если сервер
-            // не знает такого поля, он его просто не вернёт (imageServers
-            // останется nil), и приложение продолжит работать на
-            // захардкоженном списке (см. MangaImageURL.imageServers).
+            // ПОДТВЕРЖДЕНО перехватом (proxypin, 2026-08-26): реальный
+            // список серверов картинок, свой для каждого сайта экосистемы
+            // (см. ConstantImageServer / MangaImageURL.realServers).
             URLQueryItem(name: "fields[]", value: "imageServers")
         ]
         let request = try makeRequest(path: "/constants", queryItems: items)
@@ -1400,14 +1398,26 @@ enum ImageServerChoice: Int, CaseIterable, Identifiable {
         }
     }
 
-    /// Базовый хост для этого варианта. Значения — известные серверы картинок
-    /// экосистемы Lib (могут быть перекрыты реальным списком из /constants, см.
-    /// MangaImageURL.updateServers).
+    /// Запасной хост для этого варианта — используется только пока реальный
+    /// список с сервера ещё не подтянулся (см. MangaImageURL.pageURLs) или
+    /// если для активного сайта в /constants.imageServers нет данных.
     var baseURL: String {
         switch self {
         case .first:    return "https://img2.imglib.info"
         case .second:   return "https://img4.imgslib.link"
         case .compress: return "https://img3.cdnlibs.org"
+        }
+    }
+
+    /// `id` того же варианта в /constants.imageServers ("main"/"secondary"/
+    /// "compress" — ПОДТВЕРЖДЕНО перехватом, см. ConstantImageServer) — чтобы
+    /// найти РЕАЛЬНЫЙ url для активного сайта, соответствующий выбору
+    /// пользователя (Первый/Второй/Сжатия).
+    var serverId: String {
+        switch self {
+        case .first:    return "main"
+        case .second:   return "secondary"
+        case .compress: return "compress"
         }
     }
 
@@ -1423,43 +1433,32 @@ enum ImageServerChoice: Int, CaseIterable, Identifiable {
 enum MangaImageURL {
 
     /// Захардкоженный запасной список — используется, пока реальный список с
-    /// сервера ещё не подтянулся (или если сервер вообще не отдаёт это поле,
-    /// см. ConstantsResponse.Payload.imageServers).
+    /// /constants ещё не подтянулся, или если для активного сайта в нём
+    /// вообще нет записей. Это старые универсальные сервера MangaLib —
+    /// для 18+-сайтов (site_id 2/4) они не подойдут, но это крайний случай
+    /// (см. realServers ниже — реальные данные на них ЕСТЬ, отдельные для
+    /// каждого сайта).
     private static let fallbackServers: [String] = [
-        "https://img2.imglib.info",   // main / secondary
-        "https://img3.cdnlibs.org",   // compress / download
-        "https://img4.imgslib.link"   // дополнительный резерв
+        "https://img2.imglib.info",
+        "https://img3.cdnlibs.org",
+        "https://img4.imgslib.link"
     ]
 
-    /// Серверы картинок MangaLib (site_id = 1). Изначально — захардкоженный
-    /// список выше; при успешной загрузке /constants (см. ConstantsStore)
-    /// подставляются РЕАЛЬНЫЕ серверы с сервера первыми (в приоритете), а
-    /// захардкоженные остаются следом как дополнительный резерв — так,
-    /// даже если формат ответа сервера окажется неожиданным, ничего не
-    /// сломается, просто список останется прежним.
-    /// Порядок = приоритет; при неудаче загрузчик пробует следующий.
-    static var imageServers: [String] = fallbackServers
+    /// Реальные сервера картинок ПО САЙТАМ и уровням (main/secondary/
+    /// compress/download) — ПОДТВЕРЖДЕНО перехватом (proxypin, 2026-08-26,
+    /// прицельный `GET /constants?fields[0]=imageServers`): url РАЗНЫЙ для
+    /// каждого site_id (у MangaLib/RanobeLib — img2/img3.hentaicdn.org, у
+    /// SlashLib — свой порядок тех же хостов, у HentaiLib — ОТДЕЛЬНЫЕ
+    /// поддомены img2h/img3h.hentaicdn.org). Раньше здесь был единый плоский
+    /// список на все сайты — то есть, например, страницы HentaiLib никаким
+    /// общим сервером бы не открылись. Заполняется один раз из
+    /// ConstantsStore после загрузки /constants.
+    static var realServers: [ConstantImageServer] = []
 
-    /// Вызывается один раз из ConstantsStore после успешной загрузки
-    /// /constants — если сервер реально прислал список, ставит его первым,
-    /// сохраняя захардкоженные как резерв (без дублей).
-    static func updateServers(fromAccount servers: [String]) {
-        guard !servers.isEmpty else { return }
-        var merged = servers
-        for fallback in fallbackServers where !merged.contains(fallback) {
-            merged.append(fallback)
-        }
-        imageServers = merged
+    /// Вызывается один раз из ConstantsStore после успешной загрузки /constants.
+    static func updateServers(fromAccount servers: [ConstantImageServer]) {
+        realServers = servers
     }
-
-    /// CDN страниц 18+-сайтов (SlashLib=2, HentaiLib=4) — ПОДТВЕРЖДЕНО
-    /// перехватом (proxypin, 2026-08-25: `img3.hentaicdn.org//manga/qtut/
-    /// chapters/613537/...page-34_6w55.png`). Ни в fallbackServers, ни в
-    /// реальном /constants.imageServers (тот запрос его вообще не отдал у
-    /// HentaiLib — см. капчу с /constants) этого хоста нет, поэтому без
-    /// отдельной подстановки страницы этих двух сайтов не грузились бы ни
-    /// одним из общих серверов картинок MangaLib/RanobeLib.
-    private static let hentaiImageServer = "https://img3.hentaicdn.org"
 
     /// Все варианты URL страницы (по разным серверам) — для перебора при ошибке загрузки.
     /// Важно: `url` приходит вида «//manga/.../001.jpg» (ведущий двойной слэш) — нормализуем.
@@ -1481,23 +1480,25 @@ enum MangaImageURL {
         while path.hasPrefix("/") { path.removeFirst() }
         guard !path.isEmpty else { return [] }
 
-        // Выбранный пользователем сервер (Первый/Второй/Сжатия) пробуем ПЕРВЫМ,
-        // остальные — как резерв (если выбранный не отдал картинку). Так и
-        // читалка (перебор кандидатов в RemoteImage), и скачивание
-        // (DownloadsManager.fetchData) используют предпочитаемый сервер.
-        let preferred = ImageServerChoice.current.baseURL
-        var ordered = imageServers
-        if let idx = ordered.firstIndex(of: preferred) {
-            ordered.remove(at: idx)
-        }
-        ordered.insert(preferred, at: 0)
+        // Реальные сервера ИМЕННО активного сайта (см. realServers) —
+        // предпочитаемый пользователем уровень (Первый/Второй/Сжатия,
+        // читалка/скачивание берут его через ImageServerChoice.current)
+        // первым, остальные уровни того же сайта следом, общий
+        // захардкоженный список — в самом конце как крайний резерв (вдруг
+        // /constants ещё не подтянулся или для сайта нет записей).
+        let site = SiteSession.shared.activeSite.rawValue
+        let preferredId = ImageServerChoice.current.serverId
+        let siteServers = realServers.filter { $0.siteIds.contains(site) && !$0.url.isEmpty }
 
-        // На 18+-сайтах общие сервера картинок не отдадут страницу вообще —
-        // ставим подтверждённый хентай-CDN первым кандидатом, общие
-        // оставляем следом резервом (см. hentaiImageServer выше).
-        if [2, 4].contains(SiteSession.shared.activeSite.rawValue) {
-            ordered.removeAll { $0 == hentaiImageServer }
-            ordered.insert(hentaiImageServer, at: 0)
+        var ordered: [String] = []
+        if let preferred = siteServers.first(where: { $0.id == preferredId })?.url {
+            ordered.append(preferred)
+        }
+        for s in siteServers where !ordered.contains(s.url) {
+            ordered.append(s.url)
+        }
+        for fallback in fallbackServers where !ordered.contains(fallback) {
+            ordered.append(fallback)
         }
 
         return ordered.compactMap { URL(string: $0 + "/" + path) }
