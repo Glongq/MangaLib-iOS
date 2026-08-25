@@ -193,20 +193,24 @@ struct StorageSettingsView: View {
 
     // MARK: Общее
 
+    // Радиус — тот же, что и у карточек в разделе "Меню" (см.
+    // SideMenuView.cardCornerRadius) — это эталон, под него выравниваем.
+    private static let cardCornerRadius: CGFloat = 24
+
     private func card(@ViewBuilder content: () -> some View) -> some View {
         VStack(spacing: 0) {
             content()
         }
-        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous))
     }
 
     /// Заголовок карточки (первая строка внутри самой card) — один и тот же
-    /// стиль что у "Хранилище устройства", что у "Загрузки", по прямой
-    /// просьбе сделать эти две надписи 1-в-1.
+    /// стиль что у "Хранилище устройства", что у "Загрузки", а размер
+    /// шрифта — как у заголовков разделов в Меню/Настройках (.headline).
     private func cardHeader(title: String, value: String) -> some View {
         HStack {
             Text(title)
-                .font(.subheadline.weight(.semibold))
+                .font(.headline)
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
             Text(value)

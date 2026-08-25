@@ -22,7 +22,7 @@ struct PersonalizationSettingsView: View {
                         }
                         .tint(Theme.accent)
                         .padding(.horizontal, 16)
-                        .frame(minHeight: 48)
+                        .frame(minHeight: 52)
                     }
 
                     Spacer(minLength: 0)
@@ -36,11 +36,13 @@ struct PersonalizationSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    // Радиус — тот же, что и у карточек в разделе "Меню" (см.
+    // SideMenuView.cardCornerRadius) — это эталон, под него выравниваем.
     private func card(@ViewBuilder content: () -> some View) -> some View {
         VStack(spacing: 0) {
             content()
         }
-        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 }
 

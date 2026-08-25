@@ -138,11 +138,15 @@ struct AppSettingsView: View {
         .background { if embedded { InteractivePopGesture() } }
     }
 
+    // Радиус — тот же, что и у карточек в разделе "Меню" (см.
+    // SideMenuView.cardCornerRadius) — это эталон, под него выравниваем.
+    private static let cardCornerRadius: CGFloat = 24
+
     private func card(@ViewBuilder content: () -> some View) -> some View {
         VStack(spacing: 0) {
             content()
         }
-        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous))
     }
 
     /// Сворачиваемая группа пунктов ("Профиль"/"Приложение"/"Помощь"/"Прочее")
@@ -266,18 +270,19 @@ struct AppSettingsView: View {
         Button {
             showLogoutConfirm = true
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.system(size: 16))
+                    .font(.title3)
+                    .frame(width: 24)
                 Text("Выход из аккаунта")
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.red)
             .padding(.horizontal, 16)
-            .frame(minHeight: 48)
+            .frame(minHeight: 52)
         }
         .buttonStyle(.plain)
-        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous))
         .confirmationDialog("Выйти из аккаунта?", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
             Button("Выйти из аккаунта", role: .destructive) { authSession.logout() }
             Button("Отмена", role: .cancel) {}
@@ -369,7 +374,7 @@ struct AppSettingsView: View {
                 Text(value).foregroundStyle(Theme.textSecondary)
             }
             .padding(.horizontal, 16)
-            .frame(minHeight: 48)
+            .frame(minHeight: 52)
 
             if showDivider {
                 Divider().overlay(Theme.separator).padding(.horizontal, 16)
