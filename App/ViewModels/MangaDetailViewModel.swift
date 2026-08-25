@@ -251,7 +251,7 @@ final class MangaDetailViewModel: ObservableObject {
     func voteSimilar(_ item: SimilarItem, isUp: Bool) async -> Bool {
         guard let index = similar.firstIndex(where: { $0.id == item.id }) else { return false }
         do {
-            similar[index].votes = try await service.voteSimilar(id: item.id, isUp: isUp)
+            similar[index].votes = try await service.voteSimilar(id: item.id, isUp: isUp, siteId: resolvedSiteId)
             return true
         } catch NetworkError.cancelled {
             return false
@@ -299,7 +299,7 @@ final class MangaDetailViewModel: ObservableObject {
         commentsError = nil
         commentsPage = 1
         do {
-            let result = try await service.fetchComments(postId: mangaId, sortBy: sortByParam, sortType: sortTypeParam, page: 1)
+            let result = try await service.fetchComments(postId: mangaId, sortBy: sortByParam, sortType: sortTypeParam, page: 1, siteId: resolvedSiteId)
             comments = result.comments
             hasMoreComments = result.hasNextPage
             hasLoadedComments = true
@@ -329,7 +329,7 @@ final class MangaDetailViewModel: ObservableObject {
         isLoadingComments = true
         let nextPage = commentsPage + 1
         do {
-            let result = try await service.fetchComments(postId: mangaId, sortBy: sortByParam, sortType: sortTypeParam, page: nextPage)
+            let result = try await service.fetchComments(postId: mangaId, sortBy: sortByParam, sortType: sortTypeParam, page: nextPage, siteId: resolvedSiteId)
             comments.append(contentsOf: result.comments)
             hasMoreComments = result.hasNextPage
             commentsPage = nextPage
@@ -363,7 +363,8 @@ final class MangaDetailViewModel: ObservableObject {
         do {
             let created = try await service.postComment(
                 postId: mangaId, text: trimmed,
-                commentLevel: level, parentComment: replyingTo?.id
+                commentLevel: level, parentComment: replyingTo?.id,
+                siteId: resolvedSiteId
             )
             comments.insert(created, at: 0)
             isPostingComment = false
@@ -386,7 +387,7 @@ final class MangaDetailViewModel: ObservableObject {
         guard AuthSession.shared.isLoggedIn,
               let idx = comments.firstIndex(where: { $0.id == comment.id }) else { return false }
         do {
-            let votes = try await service.voteComment(id: comment.id, direction: isUp ? 1 : 0)
+            let votes = try await service.voteComment(id: comment.id, direction: isUp ? 1 : 0, siteId: resolvedSiteId)
             comments[idx].votesUp = votes.up
             comments[idx].votesDown = votes.down
             comments[idx].userVote = votes.user

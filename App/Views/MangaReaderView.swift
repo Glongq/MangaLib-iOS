@@ -230,6 +230,7 @@ struct MangaReaderView: View {
                 ChapterCommentsSheet(
                     chapterId: ch.id,
                     postPage: pageNo,
+                    siteId: viewModel.siteId,
                     chapterNumber: ch.number,
                     onClose: { withAnimation(.easeInOut(duration: 0.25)) { showComments = false } }
                 )
@@ -557,7 +558,7 @@ struct MangaReaderView: View {
                         // см. ChapterCommentsSheet.task(id:).
                         if revealedCommentPages.contains(index) {
                             Divider().overlay(fg.opacity(0.15))
-                            ChapterCommentsSheet(chapterId: ch.id, postPage: index + 1, embedded: true)
+                            ChapterCommentsSheet(chapterId: ch.id, postPage: index + 1, siteId: viewModel.siteId, embedded: true)
                                 .padding(.bottom, 40)
                         }
                     }
@@ -632,6 +633,7 @@ struct MangaReaderView: View {
                             ChapterCommentsSheet(
                                 chapterId: ch.id,
                                 postPage: viewModel.pages.count,
+                                siteId: viewModel.siteId,
                                 embedded: true
                             )
                             .padding(.bottom, 40)

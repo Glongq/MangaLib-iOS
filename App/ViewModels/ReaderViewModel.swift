@@ -37,7 +37,9 @@ final class ReaderViewModel: ObservableObject {
     @Published private(set) var preferredBranchId: Int?
     /// Сайт тайтла (site_id) — страницы главы у тайтла с другого сайта надо
     /// запрашивать с его Site-Id, иначе 404 (см. MangaDetailViewModel.siteId).
-    private let siteId: Int?
+    /// Не private — MangaReaderView передаёт его дальше в ChapterCommentsSheet
+    /// (комментарии к главе — тот же тайтл, тот же сайт, см. fetchComments(siteId:)).
+    let siteId: Int?
 
     init(slug: String,
          chapters: [ChapterItem],
@@ -304,7 +306,7 @@ final class ReaderViewModel: ObservableObject {
         if let mangaId, !currentChapterAlreadyViewed {
             Task {
                 do {
-                    try await MangaNetworkService.shared.markChapterViewed(mangaId: mangaId, chapterId: chapter.id)
+                    try await MangaNetworkService.shared.markChapterViewed(mangaId: mangaId, chapterId: chapter.id, siteId: siteId)
                 } catch {
                     print("[ReaderViewModel] не удалось отметить главу просмотренной на сервере: \(error)")
                 }

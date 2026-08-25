@@ -1829,7 +1829,7 @@ struct MangaDetailView: View {
         if let mangaId = viewModel.detail?.id {
             Task {
                 do {
-                    try await MangaNetworkService.shared.markChapterViewed(mangaId: mangaId, chapterId: chapter.id)
+                    try await MangaNetworkService.shared.markChapterViewed(mangaId: mangaId, chapterId: chapter.id, siteId: viewModel.resolvedSiteId)
                 } catch {
                     print("[MangaDetailView] не удалось отметить главу просмотренной на сервере: \(error)")
                 }

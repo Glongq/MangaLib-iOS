@@ -648,8 +648,10 @@ final class MangaNetworkService {
     /// (fetchPages, который мы и так вызываем при чтении) её НЕ пишет, как
     /// предполагалось раньше; это отдельный, специальный вызов.
     /// `POST /manga/{manga_id}/chapters/{chapter_id}/view`, без тела.
-    func markChapterViewed(mangaId: Int, chapterId: Int) async throws {
-        var request = try makeRequest(path: "/manga/\(mangaId)/chapters/\(chapterId)/view", queryItems: [])
+    /// `siteId` — та же логика, что у fetchMangaDetail(siteId:): тайтл может
+    /// быть НЕ активного сайта.
+    func markChapterViewed(mangaId: Int, chapterId: Int, siteId: Int? = nil) async throws {
+        var request = try makeRequest(path: "/manga/\(mangaId)/chapters/\(chapterId)/view", queryItems: [], siteId: siteId)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await performVoid(request)
@@ -681,7 +683,13 @@ final class MangaNetworkService {
     /// переворачиваем значение; сортировка "Популярные" — НЕ через сервер (не
     /// подтверждено, что сервер это умеет), считается на клиенте по score
     /// (см. MangaDetailViewModel.commentSort/MangaDetailView).
-    func fetchComments(postId: Int, postType: String = "manga", postPage: Int? = nil, sortBy: String = "id", sortType: String = "desc", page: Int = 1) async throws -> (comments: [Comment], hasNextPage: Bool) {
+    /// `siteId` — тайтл/глава, к которым идут комментарии, могут принадлежать
+    /// НЕ активному сайту (тот же смысл, что у fetchMangaDetail(siteId:) —
+    /// см. MangaDetailViewModel.resolvedSiteId/ReaderViewModel.siteId,
+    /// откуда он и приходит); раньше здесь его не было вообще, и открытие
+    /// комментариев к тайтлу с другого сайта уходило на хост АКТИВНОГО
+    /// сайта — то есть либо 404, либо не те комментарии.
+    func fetchComments(postId: Int, postType: String = "manga", postPage: Int? = nil, sortBy: String = "id", sortType: String = "desc", page: Int = 1, siteId: Int? = nil) async throws -> (comments: [Comment], hasNextPage: Bool) {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "post_id", value: String(postId)),
             URLQueryItem(name: "post_type", value: postType),
@@ -695,7 +703,7 @@ final class MangaNetworkService {
         if let postPage {
             items.append(URLQueryItem(name: "post_page", value: String(postPage)))
         }
-        let request = try makeRequest(path: "/comments", queryItems: items)
+        let request = try makeRequest(path: "/comments", queryItems: items, siteId: siteId)
         let response: CommentsListResponse = try await perform(request)
         return (response.comments, response.hasNextPage)
     }
@@ -725,14 +733,15 @@ final class MangaNetworkService {
     /// скорее всего, ожидается в такой же форме. Это ОБОСНОВАННОЕ предположение
     /// по аналогии (не гадание с нуля) — если сервер всё ещё вернёт 422, тело
     /// снова будет видно в NetworkLogsView и можно поправить точнее.
-    func postComment(postId: Int, postType: String = "manga", postPage: Int? = nil, text: String, commentLevel: Int, parentComment: Int? = nil) async throws -> Comment {
+    /// `siteId` — см. комментарий у fetchComments(siteId:) выше, тот же смысл.
+    func postComment(postId: Int, postType: String = "manga", postPage: Int? = nil, text: String, commentLevel: Int, parentComment: Int? = nil, siteId: Int? = nil) async throws -> Comment {
         let payload = CommentPayload(
             post_id: postId, post_type: postType, post_page: postPage,
             comment: ProseMirrorDoc(text: text),
             comment_level: commentLevel,
             parent_comment: parentComment
         )
-        let request = try makeJSONRequest(path: "/comments", method: "POST", body: payload)
+        let request = try makeJSONRequest(path: "/comments", method: "POST", body: payload, siteId: siteId)
         let response: APIObjectResponse<Comment> = try await perform(request)
         return response.data
     }
@@ -742,10 +751,12 @@ final class MangaNetworkService {
     /// `{"data":{"up":8,"down":0,"user":1}}` — актуальные счётчики + голос юзера
     /// (1 = плюс, 0 = минус, null = не голосовал), как и у «Похожего». Возвращаем
     /// их, чтобы сразу обновить UI без перезагрузки списка.
+    /// `siteId` — см. комментарий у fetchComments(siteId:), тот же смысл:
+    /// комментарий может принадлежать тайтлу НЕ активного сайта.
     @discardableResult
-    func voteComment(id: Int, direction: Int) async throws -> SimilarVotes {
+    func voteComment(id: Int, direction: Int, siteId: Int? = nil) async throws -> SimilarVotes {
         let payload = CommentVotePayload(vote: direction)
-        let request = try makeJSONRequest(path: "/comments/\(id)/vote", method: "POST", body: payload)
+        let request = try makeJSONRequest(path: "/comments/\(id)/vote", method: "POST", body: payload, siteId: siteId)
         let response: APIObjectResponse<SimilarVotes> = try await perform(request)
         return response.data
     }
@@ -996,9 +1007,11 @@ final class MangaNetworkService {
     /// MangaDetailViewModel.voteSimilar). `id` здесь — id ЭЛЕМЕНТА "Похожего"
     /// (SimilarItem.id), а НЕ id самой манги — тоже подтверждено перехватом
     /// (URL был `/similar/492/vote`, где 492 — id элемента из списка).
-    func voteSimilar(id: Int, isUp: Bool) async throws -> SimilarVotes {
+    /// `siteId` — см. комментарий у fetchComments(siteId:), тот же смысл:
+    /// связь "похожего" относится к тайтлу, который может быть НЕ активного сайта.
+    func voteSimilar(id: Int, isUp: Bool, siteId: Int? = nil) async throws -> SimilarVotes {
         let payload = SimilarVotePayload(vote: isUp ? 1 : 0)
-        let request = try makeJSONRequest(path: "/similar/\(id)/vote", method: "POST", body: payload)
+        let request = try makeJSONRequest(path: "/similar/\(id)/vote", method: "POST", body: payload, siteId: siteId)
         let response: APIObjectResponse<SimilarVotes> = try await perform(request)
         return response.data
     }
@@ -1093,15 +1106,22 @@ final class MangaNetworkService {
 
     /// Запрос с JSON-телом (POST/DELETE и т.д.) — для write-эндпоинтов вроде
     /// /bookmarks, в отличие от makeRequest выше (только GET, без тела).
-    private func makeJSONRequest<Body: Encodable>(path: String, method: String, body: Body) throws -> URLRequest {
+    /// `siteId` — тот же смысл, что у makeRequest (см. его комментарий):
+    /// переопределяет и хост, и заголовок Site-Id для ресурса, который
+    /// принадлежит НЕ активному сайту (например, комментарии/отправка
+    /// комментария к тайтлу, открытому из «Похожего» с другого сайта).
+    private func makeJSONRequest<Body: Encodable>(path: String, method: String, body: Body, siteId: Int? = nil) throws -> URLRequest {
         let normalizedPath = path.hasPrefix("/") ? path : "/" + path
-        guard let url = URL(string: baseURL().absoluteString + normalizedPath) else {
+        guard let url = URL(string: baseURL(siteId: siteId).absoluteString + normalizedPath) else {
             throw NetworkError.invalidURL
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
         for (field, value) in defaultHeaders {
             request.setValue(value, forHTTPHeaderField: field)
+        }
+        if let siteId {
+            request.setValue(String(siteId), forHTTPHeaderField: "Site-Id")
         }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)

@@ -8,6 +8,8 @@ import SwiftUI
 struct ChapterCommentsSheet: View {
     let chapterId: Int
     let postPage: Int
+    /// Сайт тайтла этой главы — см. ChapterCommentsViewModel.configure(siteId:).
+    var siteId: Int? = nil
     /// Номер главы для заголовка «Комментарии к главе N · Страница M» —
     /// показывается только в неинлайн-панели (вертикальный режим, кнопка
     /// "text.bubble" в bottomBar). В embedded-режиме заголовок не нужен —
@@ -78,7 +80,7 @@ struct ChapterCommentsSheet: View {
         }
         .tint(Theme.accent)
         .task(id: postPage) {
-            vm.configure(chapterId: chapterId, postPage: postPage)
+            vm.configure(chapterId: chapterId, postPage: postPage, siteId: siteId)
             if !disabledInReader { await vm.loadIfNeeded() }
         }
         .sheet(isPresented: $showSettings) {
