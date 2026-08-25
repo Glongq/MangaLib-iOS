@@ -124,7 +124,11 @@ jobs:
           if-no-files-found: error
 
       - name: Publish/update "latest" release
-        if: github.event_name != 'pull_request'
+        # push/workflow_dispatch — публикуем всегда. pull_request — только
+        # если голова PR из ЭТОГО ЖЕ репозитория (не форк): репозиторий
+        # публичный, и без этой проверки чужой сторонний PR мог бы
+        # автоматически подменить публичный релиз "latest" своей сборкой.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
