@@ -775,6 +775,19 @@ final class MangaNetworkService {
         return response.data
     }
 
+    /// Детальная страница переводчика — ПОДТВЕРЖДЕНО перехватом:
+    /// `GET /teams/{slug_url}?fields[]=chaptersPerMonth&fields[]=auto_moderation&
+    /// fields[]=team_rating&fields[]=ignored_by_user` (те же fields[], что и в
+    /// реальном запросе — сервер отдаёт "Глав / мес" в stats[] только при
+    /// явном запросе chaptersPerMonth, по аналогии с background у MangaDetail).
+    func fetchTeamDetail(slugURL: String) async throws -> TeamDetail {
+        let items = ["chaptersPerMonth", "auto_moderation", "team_rating", "ignored_by_user"]
+            .map { URLQueryItem(name: "fields[]", value: $0) }
+        let request = try makeRequest(path: "/teams/\(encodePath(slugURL))", queryItems: items)
+        let response: APIObjectResponse<TeamDetail> = try await perform(request)
+        return response.data
+    }
+
     /// Голос "+"/"-" за рекомендацию из "Похожего" — ПОДТВЕРЖДЕНО реальным
     /// перехватом: `POST /similar/{id}/vote`, тело `{"vote":1}` для "+",
     /// `{"vote":0}` для "-"; ответ — АКТУАЛЬНЫЕ up/down/user целиком (не

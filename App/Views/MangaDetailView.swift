@@ -1453,12 +1453,24 @@ struct MangaDetailView: View {
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         } else {
             VStack(alignment: .leading, spacing: 12) {
-                // Команды перевода тайтла — чипы сверху (аватар + имя + колокол).
+                // Команды перевода тайтла — чипы сверху (аватар + имя + колокол),
+                // тап открывает страницу переводчика (см. TeamView).
                 let teams = allTeams
                 if !teams.isEmpty {
                     ScrollView(.horizontal) {
                         HStack(spacing: 10) {
-                            ForEach(teams) { teamChip($0) }
+                            ForEach(teams) { team in
+                                if let slugURL = team.slugURL {
+                                    NavigationLink {
+                                        TeamView(slugURL: slugURL, fallbackName: team.name, coverURL: team.avatarURL)
+                                    } label: {
+                                        teamChip(team)
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    teamChip(team)
+                                }
+                            }
                         }
                     }
                     .scrollIndicators(.hidden)

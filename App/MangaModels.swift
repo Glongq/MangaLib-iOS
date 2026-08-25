@@ -1225,17 +1225,107 @@ struct CharacterDetail: Decodable, Identifiable {
     }
 }
 
+// MARK: - Команда перевода (детальная страница)
+
+/// Одна метрика в шапке страницы переводчика — ПОДТВЕРЖДЕНО перехватом:
+/// сервер сам отдаёт готовые label ("Тайтлов"/"Лайков"/"Глава"/"Глав / мес"/
+/// "Подписчика") и короткое отображаемое значение (short, напр. "8.9 M") —
+/// в отличие от CharacterDetail (там подписи захардкожены в UI, потому что
+/// в перехвате персонажа было только 2 метрики без готовых русских label).
+/// Здесь label уже готовы и в том же порядке, что в перехвате, — используем
+/// как есть, не дублируя переводы вручную.
+struct TeamStat: Decodable, Identifiable {
+    let value: Int?
+    let short: String?
+    let label: String?
+    let tag: String?
+    var id: String { tag ?? label ?? UUID().uuidString }
+
+    enum CodingKeys: String, CodingKey { case value, short, label, tag }
+}
+
+/// Детальная страница переводчика (команды) — ПОДТВЕРЖДЕНО реальным
+/// перехватом `GET /teams/{slug_url}?fields[]=chaptersPerMonth&
+/// fields[]=auto_moderation&fields[]=team_rating&fields[]=ignored_by_user`.
+/// team_rating/auto_moderation/ignored_by_user в перехвате ЕСТЬ, но здесь
+/// не декодируются — экран пока не реализует оценку/жалобы/модерацию (см.
+/// список "что уточнить" в чате), декодер их просто проигнорирует.
+struct TeamDetail: Decodable, Identifiable {
+    let id: Int
+    let slug: String
+    let slugURL: String
+    let name: String
+    let cover: MangaCover?
+    let background: MangaBackgroundImage?
+    let altName: String?
+    let vk: String?
+    let discord: String?
+    let website: String?
+    let description: String?
+    let stats: [TeamStat]
+    let titlesCountBySite: [Int: Int]
+
+    enum CodingKeys: String, CodingKey {
+        case id, slug, name, cover, background, vk, discord, website, stats, description
+        case slugURL = "slug_url"
+        case altName = "alt_name"
+        case titlesCountDetails = "titles_count_details"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        slug = (try? c.decode(String.self, forKey: .slug)) ?? ""
+        slugURL = ((try? c.decodeIfPresent(String.self, forKey: .slugURL)) ?? nil) ?? slug
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        cover = (try? c.decodeIfPresent(MangaCover.self, forKey: .cover)) ?? nil
+        background = (try? c.decodeIfPresent(MangaBackgroundImage.self, forKey: .background)) ?? nil
+        altName = (try? c.decodeIfPresent(String.self, forKey: .altName)) ?? nil
+        vk = (try? c.decodeIfPresent(String.self, forKey: .vk)) ?? nil
+        discord = (try? c.decodeIfPresent(String.self, forKey: .discord)) ?? nil
+        website = (try? c.decodeIfPresent(String.self, forKey: .website)) ?? nil
+
+        // "description" — тот же ProseMirror/doc, что и у персонажа/тайтла,
+        // но с активным использованием hardBreak между текстовыми узлами
+        // (см. реальный перехваченный пример) — SummaryDoc/SummaryNode.plainText
+        // склеивает детей БЕЗ разделителя и игнорирует hardBreak, из-за чего
+        // текст слипся бы в одну строку. AnyJSON.extractReadableText() же
+        // берёт каждый текстовый узел как отдельный абзац (разделяя "\n\n") —
+        // для этой формы результат читаемее, поэтому используется он один,
+        // без промежуточной попытки через SummaryDoc.
+        if let generic = (try? c.decodeIfPresent(AnyJSON.self, forKey: .description)) ?? nil {
+            let t = generic.extractReadableText()
+            description = t.isEmpty ? nil : t
+        } else {
+            description = nil
+        }
+
+        stats = ((try? c.decodeIfPresent([TeamStat].self, forKey: .stats)) ?? nil) ?? []
+
+        if let raw = ((try? c.decodeIfPresent([String: Int].self, forKey: .titlesCountDetails)) ?? nil) {
+            var m: [Int: Int] = [:]
+            for (k, v) in raw { if let ik = Int(k) { m[ik] = v } }
+            titlesCountBySite = m
+        } else {
+            titlesCountBySite = [:]
+        }
+    }
+}
+
 // MARK: - Chapter
 
 /// Команда перевода (сканлейт-тим) — ПОДТВЕРЖДЕНО перехватом ветки:
 /// `{id, slug, slug_url, model:"team", name:"May Days", cover:{thumbnail,default,md}}`.
-/// cover — аватар команды (у некоторых плейсхолдер user_avatar.png).
+/// cover — аватар команды (у некоторых плейсхолдер user_avatar.png). slugURL
+/// нужен для перехода на страницу переводчика (см. TeamView) — раньше не
+/// декодировался, хотя в перехвате есть.
 struct ChapterTeam: Decodable, Identifiable {
     let id: Int
     let name: String
     let cover: MangaCover?
+    let slugURL: String?
     var avatarURL: URL? { cover?.bestURL }
-    enum CodingKeys: String, CodingKey { case id, name, cover }
+    enum CodingKeys: String, CodingKey { case id, name, cover, slugURL = "slug_url" }
 }
 
 /// Кто залил ветку — `{username, id}`. Запасная подпись, если у ветки нет team.
