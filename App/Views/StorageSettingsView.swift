@@ -120,29 +120,35 @@ struct StorageSettingsView: View {
     }
 
     /// Полоска — реальная пропорция от ВСЕЙ ёмкости диска, единым цельным
-    /// столбиком БЕЗ зазоров между сегментами (другие приложения → скачанные
-    /// тайтлы → кеш идут вплотную друг к другу), с тонкой "палочкой"-границей
-    /// ровно там, где занятое место заканчивается и начинается свободное
-    /// (серый сегмент, без строки в легенде — по прямой просьбе). У любого
-    /// ненулевого сегмента — минимальная видимая ширина: иначе совсем
-    /// маленький объём (доли МБ на фоне сотен ГБ ёмкости) при округлении
-    /// пропорции пропадал бы совсем, а он должен быть виден хоть тонкой
-    /// полоской.
+    /// столбиком без единого зазора: сегменты (другие приложения → скачанные
+    /// тайтлы → кеш → свободное место) идут строго вплотную друг к другу от
+    /// начала до самого конца. Никакой отдельной "палочки"-разделителя между
+    /// занятым и свободным нет — граница просто прямой (не скруглённый,
+    /// "|"-образный) стык двух цветов: скругление — только у самой полоски
+    /// целиком по краям (clipShape(Capsule())), у внутренних сегментов углов
+    /// нет вообще. Свободное место — это ОСТАТОК до конца ширины (а не своя
+    /// пропорция), чтобы полоска гарантированно доходила до самого конца
+    /// без хвоста фона карточки, даже если другие сегменты чуть округлились.
+    /// У любого ненулевого сегмента — минимальная видимая ширина: иначе
+    /// совсем маленький объём (доли МБ на фоне сотен ГБ ёмкости) при
+    /// округлении пропорции пропадал бы совсем, а он должен быть виден хоть
+    /// тонкой полоской.
     private var storageBar: some View {
         let total = max(1, stats.totalCapacity)
         return GeometryReader { geo in
-            let width = geo.size.width
+            let fullWidth = geo.size.width
+            let otherW = barWidth(bytes: stats.otherAppsBytes, total: total, fullWidth: fullWidth)
+            let downloadsW = barWidth(bytes: stats.downloadsBytes, total: total, fullWidth: fullWidth)
+            let cacheW = barWidth(bytes: stats.cacheBytes, total: total, fullWidth: fullWidth)
+            let freeW = max(0, fullWidth - otherW - downloadsW - cacheW)
+
             HStack(spacing: 0) {
-                barSegment(.blue, bytes: stats.otherAppsBytes, total: total, fullWidth: width)
-                barSegment(.green, bytes: stats.downloadsBytes, total: total, fullWidth: width)
-                barSegment(Theme.textSecondary.opacity(0.6), bytes: stats.cacheBytes, total: total, fullWidth: width)
-                if stats.usedByApp + stats.otherAppsBytes > 0 && stats.availableCapacity > 0 {
-                    Rectangle().fill(Theme.background).frame(width: 2)
-                }
-                barSegment(Color.gray.opacity(0.25), bytes: stats.availableCapacity, total: total, fullWidth: width)
-                Spacer(minLength: 0)
+                Rectangle().fill(.blue).frame(width: otherW)
+                Rectangle().fill(.green).frame(width: downloadsW)
+                Rectangle().fill(Theme.textSecondary.opacity(0.6)).frame(width: cacheW)
+                Rectangle().fill(Color.gray.opacity(0.25)).frame(width: freeW)
             }
-            .frame(width: width, height: 10)
+            .frame(width: fullWidth, height: 10)
             .clipShape(Capsule())
         }
         .frame(height: 10)
@@ -151,15 +157,16 @@ struct StorageSettingsView: View {
     /// Минимум 3pt для любого ненулевого сегмента — гарантированно видимая
     /// тонкая полоска, даже если реальная доля от общей ёмкости диска
     /// округляется до долей пикселя.
-    private func barSegment(_ color: Color, bytes: Int64, total: Int64, fullWidth: CGFloat) -> some View {
+    private func barWidth(bytes: Int64, total: Int64, fullWidth: CGFloat) -> CGFloat {
+        guard bytes > 0 else { return 0 }
         let raw = fullWidth * CGFloat(bytes) / CGFloat(total)
-        let width: CGFloat = bytes > 0 ? max(raw, 3) : 0
-        return Rectangle().fill(color).frame(width: width)
+        return max(raw, 3)
     }
 
     private func legendRow(color: Color, title: String, bytes: Int64) -> some View {
         HStack(spacing: 8) {
-            Circle().fill(color).frame(width: 8, height: 8)
+            // Та же высота, что и у самой полоски (storageBar) — по просьбе.
+            Circle().fill(color).frame(width: 10, height: 10)
             Text(title).font(.footnote).foregroundStyle(Theme.textPrimary)
             Spacer(minLength: 12)
             Text(Self.byteString(bytes)).font(.footnote).foregroundStyle(Theme.textSecondary)
