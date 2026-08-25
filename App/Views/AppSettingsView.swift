@@ -35,6 +35,7 @@ struct AppSettingsView: View {
     @ObservedObject private var authSession = AuthSession.shared
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var debugTokenInput = ""
+    @State private var showLogoutConfirm = false
 
     var body: some View {
         if embedded {
@@ -81,6 +82,49 @@ struct AppSettingsView: View {
                         .padding(16)
                     }
 
+                    // Пункты ниже — ПОЛНОЦЕННЫЙ пункт меню с переходом внутрь,
+                    // но сам раздел внутри пока заглушка (StubView, тот же
+                    // приём, что и у остальных ещё не реализованных разделов
+                    // приложения) — реальное наполнение добавим по мере
+                    // готовности. Единственное исключение — "Выход из
+                    // аккаунта" ниже: он настоящий, реально разлогинивает.
+                    settingsSection("Профиль") {
+                        settingsRow(icon: "info.circle", title: "Информация")
+                        settingsRow(icon: "bell", title: "Уведомления")
+                        settingsRow(icon: "eye.slash", title: "Игнор-лист")
+                        settingsRow(icon: "lock.shield", title: "Безопасность и вход")
+                        settingsRow(icon: "slider.horizontal.3", title: "Фильтр контента")
+                        settingsRow(icon: "hand.raised", title: "Приватность")
+                        settingsRow(icon: "creditcard", title: "Платежи", showDivider: false)
+                    }
+
+                    settingsSection("Приложение") {
+                        settingsRow(icon: "internaldrive", title: "Данные и память")
+                        settingsRow(icon: "paintbrush", title: "Персонализация")
+                        settingsRow(icon: "arrow.triangle.2.circlepath", title: "Проверить обновления", showDivider: false)
+                    }
+
+                    settingsSection("Помощь") {
+                        settingsRow(icon: "questionmark.circle", title: "Вопросы и ответы")
+                        settingsRow(icon: "envelope", title: "Обратная связь")
+                        settingsRow(icon: "doc.text", title: "Пользовательское соглашение", showDivider: false)
+                    }
+
+                    settingsSection("Прочее") {
+                        settingsRow(icon: "flask", title: "Стать тестировщиком")
+                        settingsRow(icon: "ladybug", title: "Сообщить об ошибке", showDivider: false)
+                    }
+
+                    // Отдельная красная плашка, а не строка внутри "Прочее" —
+                    // по прямой просьбе. Показывается только если реально
+                    // залогинены (выходить не из чего иначе). Настоящее
+                    // действие (не заглушка) — тот же authSession.logout(),
+                    // что и в AccountInfoView, с подтверждением (необратимое
+                    // без повторного входа действие).
+                    if authSession.isLoggedIn {
+                        logoutRow
+                    }
+
                     debugAuthCard
                     debugNetworkLogsCard
 
@@ -109,6 +153,76 @@ struct AppSettingsView: View {
             content()
         }
         .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    /// Заголовок группы пунктов ("Профиль"/"Приложение"/"Помощь"/"Прочее") +
+    /// сама группа в одной card — эталонные скругления/подложка те же, что и
+    /// у "Версия"/"Активный сайт" выше (Theme.surfaceElevated, radius 16).
+    private func settingsSection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.leading, 4)
+            card(content: content)
+        }
+    }
+
+    /// Один пункт настроек — переход внутрь пока ведёт на StubView (тот же
+    /// приём, что и у остальных ещё не реализованных разделов приложения,
+    /// см. RootView.stubRequest/SideMenuView) — заменим на реальный экран,
+    /// когда раздел будет готов.
+    private func settingsRow(icon: String, title: String, showDivider: Bool = true) -> some View {
+        VStack(spacing: 0) {
+            NavigationLink {
+                StubView(title: title)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: icon)
+                        .font(.system(size: 16))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 24)
+                    Text(title).foregroundStyle(Theme.textPrimary)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 48)
+            }
+            .buttonStyle(.plain)
+
+            if showDivider {
+                Divider().overlay(Theme.separator).padding(.leading, 52)
+            }
+        }
+    }
+
+    /// "Выход из аккаунта" — ОТДЕЛЬНАЯ красная плашка (не строка внутри
+    /// "Прочее"), по прямой просьбе. Настоящее действие, не заглушка — тот
+    /// же authSession.logout(), что и в AccountInfoView.actions, но с
+    /// подтверждением (необратимо без повторного входа).
+    private var logoutRow: some View {
+        Button {
+            showLogoutConfirm = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 16))
+                Text("Выход из аккаунта")
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.red)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 48)
+        }
+        .buttonStyle(.plain)
+        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .confirmationDialog("Выйти из аккаунта?", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
+            Button("Выйти из аккаунта", role: .destructive) { authSession.logout() }
+            Button("Отмена", role: .cancel) {}
+        }
     }
 
     /// ВРЕМЕННЫЙ debug-инструмент (по просьбе, на время тестирования) — вставить
