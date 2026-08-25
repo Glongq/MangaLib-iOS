@@ -688,11 +688,17 @@ struct HomeView: View {
         }
     }
 
-    /// Размер обложки и текстов — как в «Новинки» (см. MangaCardView:
-    /// cover 2:3 от width=108 → 108×162, titleUIFont/typeUIFont), а не как в
-    /// «Продолжить читать», как было раньше — по прямой просьбе.
-    private static let updatesCoverWidth: CGFloat = 108
-    private static let updatesCoverHeight: CGFloat = (updatesCoverWidth * 3 / 2).rounded()
+    /// Размер обложки — «Продолжить читать» ×1.5 (была «как в Новинки»,
+    /// 108×162 — по просьбе уменьшено). Подложка карточки — ФИКСИРОВАННОЙ
+    /// высоты (= высота обложки), не зависит от того, сколько строк текста
+    /// реально показано — раньше высота HStack следовала за более высоким
+    /// из детей (обложка ИЛИ текстовый блок), и на длинных названиях/главах
+    /// подложка "плыла" по контенту. Текстовый блок внутри — короче этой
+    /// высоты почти всегда, поэтому центрируется по вертикали сам собой
+    /// (обычное .center-выравнивание HStack, без явного Spacer/anchor) —
+    /// то самое "выравнивание к середине в зависимости от кол-ва строк".
+    private static let updatesCoverWidth: CGFloat = (continueReadingCoverWidth * 1.5).rounded()
+    private static let updatesCoverHeight: CGFloat = (continueReadingCoverHeight * 1.5).rounded()
     /// caption2×1.2 regular — та же формула, что и MangaCardView.typeUIFont.
     private static var updatesTypeUIFont: UIFont {
         let base = UIFont.preferredFont(forTextStyle: .caption2)
@@ -713,10 +719,11 @@ struct HomeView: View {
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
 
-            // Название на всю ширину (макс 2 строки), под ним "Том X Глава Y
-            // — Название" (макс 2 строки; только название главы и дата
-            // приглушённые — см. chapterAttributedLine), дата — в самом низу
-            // блока (Spacer перед ней прижимает её вниз).
+            // Название (макс 2 строки), под ним "Том X Глава Y — Название"
+            // (макс 2 строки; только название главы и дата приглушённые —
+            // см. chapterAttributedLine), дата — сразу под ним. Без верхнего/
+            // нижнего Spacer — блок сам центрируется в фиксированной высоте
+            // строки (см. updatesCoverHeight выше).
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.displayTitle)
                     .font(Self.mangaTitleFont)
@@ -726,16 +733,15 @@ struct HomeView: View {
                 chapterAttributedLine(for: item)
                     .font(Self.updatesTypeFont)
                     .lineLimit(2)
-                Spacer(minLength: 0)
                 if let date = item.lastItemDate {
                     Text(date.relativeRussianString)
                         .font(Self.updatesTypeFont)
                         .foregroundStyle(Theme.textSecondary)
                 }
             }
-            .padding(.vertical, 10)
         }
         .padding(.trailing, 12)
+        .frame(height: Self.updatesCoverHeight)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
