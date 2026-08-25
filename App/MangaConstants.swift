@@ -193,7 +193,18 @@ final class ConstantsStore: ObservableObject {
         case .serverOrder:
             return base
         case .alphabetical:
-            return base.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+            // Часть тегов в справочнике вообще без русского названия (только
+            // английское, см. /api/constants — например "Acrobatics",
+            // "Ancient China" и т.п. вперемешку с русскими). По просьбе:
+            // сначала единым блоком все англоязычные (латиница), по
+            // алфавиту, затем — все русские (кириллица/остальное), тоже по
+            // алфавиту — а не как раньше, где localizedCompare перемешивал
+            // их в одну ленту по locale-зависимым правилам сортировки.
+            let latin = base.filter { Self.isLatinTitle($0.title) }
+                .sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+            let rest = base.filter { !Self.isLatinTitle($0.title) }
+                .sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+            return latin + rest
         case .ageDescending:
             return base.sorted { numericPrefix($0.title) > numericPrefix($1.title) }
         case .priority(let names):
@@ -208,5 +219,14 @@ final class ConstantsStore: ObservableObject {
     private func numericPrefix(_ s: String) -> Int {
         let digits = s.prefix { $0.isNumber }
         return Int(digits) ?? -1
+    }
+
+    /// Название начинается с латинской буквы («Acrobatics») — а не с
+    /// кириллицы/цифры/спецсимвола. Первый буквенный символ определяет
+    /// принадлежность — этого достаточно, у названий из /api/constants не
+    /// встречается смешение алфавитов внутри одного title.
+    private static func isLatinTitle(_ title: String) -> Bool {
+        guard let first = title.first(where: { $0.isLetter }) else { return false }
+        return first.isASCII
     }
 }
