@@ -689,14 +689,8 @@ struct HomeView: View {
     }
 
     /// Размер обложки — «Продолжить читать» ×1.5 (была «как в Новинки»,
-    /// 108×162 — по просьбе уменьшено). Подложка карточки — ФИКСИРОВАННОЙ
-    /// высоты (= высота обложки), не зависит от того, сколько строк текста
-    /// реально показано — раньше высота HStack следовала за более высоким
-    /// из детей (обложка ИЛИ текстовый блок), и на длинных названиях/главах
-    /// подложка "плыла" по контенту. Текстовый блок внутри — короче этой
-    /// высоты почти всегда, поэтому центрируется по вертикали сам собой
-    /// (обычное .center-выравнивание HStack, без явного Spacer/anchor) —
-    /// то самое "выравнивание к середине в зависимости от кол-ва строк".
+    /// 108×162 — по просьбе уменьшено). Высота и ширина всей подложки —
+    /// см. updatesRowHeight ниже и .frame(maxWidth: .infinity) в updateRow.
     private static let updatesCoverWidth: CGFloat = (continueReadingCoverWidth * 1.5).rounded()
     private static let updatesCoverHeight: CGFloat = (continueReadingCoverHeight * 1.5).rounded()
     /// caption2×1.2 regular — та же формула, что и MangaCardView.typeUIFont.
@@ -705,6 +699,22 @@ struct HomeView: View {
         return UIFont.systemFont(ofSize: base.pointSize * 1.2, weight: .regular)
     }
     private static var updatesTypeFont: Font { Font(updatesTypeUIFont) }
+    private static let updatesTextSpacing: CGFloat = 4
+
+    /// Высота подложки — под ХУДШИЙ случай текста (название в 2 строки +
+    /// "Том X Глава Y — Название" в 2 строки + дата), а не константа "от
+    /// балды": иначе либо остаётся лишний пустой отступ у коротких карточек,
+    /// либо длинный текст не влезает и подложка "плывёт" по контенту. Если
+    /// это меньше высоты обложки — берём высоту обложки. Текст короче этой
+    /// высоты центрируется сам (обычное .center HStack, без Spacer/anchor).
+    private static var updatesRowHeight: CGFloat {
+        let textBlockHeight = (mangaTitleUIFont.lineHeight * 2).rounded(.up)
+            + updatesTextSpacing
+            + (updatesTypeUIFont.lineHeight * 2).rounded(.up)
+            + updatesTextSpacing
+            + updatesTypeUIFont.lineHeight.rounded(.up)
+        return max(updatesCoverHeight, textBlockHeight)
+    }
 
     private func updateRow(_ item: MangaItem) -> some View {
         HStack(spacing: 12) {
@@ -723,8 +733,10 @@ struct HomeView: View {
             // (макс 2 строки; только название главы и дата приглушённые —
             // см. chapterAttributedLine), дата — сразу под ним. Без верхнего/
             // нижнего Spacer — блок сам центрируется в фиксированной высоте
-            // строки (см. updatesCoverHeight выше).
-            VStack(alignment: .leading, spacing: 4) {
+            // строки (см. updatesRowHeight выше). maxWidth: .infinity — чтобы
+            // подложка ВСЕГДА была одной и той же ширины (во всю строку), а
+            // не сжималась по фактической ширине текста у коротких названий.
+            VStack(alignment: .leading, spacing: Self.updatesTextSpacing) {
                 Text(item.displayTitle)
                     .font(Self.mangaTitleFont)
                     .foregroundStyle(Theme.textPrimary)
@@ -739,9 +751,11 @@ struct HomeView: View {
                         .foregroundStyle(Theme.textSecondary)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.trailing, 12)
-        .frame(height: Self.updatesCoverHeight)
+        .frame(height: Self.updatesRowHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
