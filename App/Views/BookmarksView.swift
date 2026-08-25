@@ -327,11 +327,14 @@ struct BookmarksView: View {
             // в каталоге/карточке тайтла, теперь и в закладках.
             .overlay(alignment: .topTrailing) { RatingChip(rating: bm.rating) }
 
-            VStack(alignment: .leading, spacing: 6) {
+            // Тот же размер текста, что и в «Новое» (NotificationsView.row) —
+            // .subheadline для основной строки, .caption2 для второстепенной
+            // (было .system(size: 16, weight: .medium) / .caption — крупнее
+            // и другой шрифт, экраны выглядели по-разному при одинаковой
+            // структуре, попросили "одинаковые по форме").
+            VStack(alignment: .leading, spacing: 4) {
                 Text(bm.title)
-                    // Обложка стала крупнее — чуть увеличили и текст названия
-                    // (было .subheadline/15pt), оставили 2 строки с обрезкой.
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
 
@@ -344,10 +347,10 @@ struct BookmarksView: View {
                     Text(p.totalChapters > 0
                          ? "Продолжить \(p.lastChapterNumber)/\(p.totalChapters)"
                          : "Продолжить: Том \(p.lastChapterVolume), Глава \(p.lastChapterNumber)")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(Theme.accent)
                 } else {
-                    Text("Открыть").font(.caption).foregroundStyle(Theme.textSecondary)
+                    Text("Открыть").font(.caption2).foregroundStyle(Theme.textSecondary)
                 }
             }
             Spacer(minLength: 0)

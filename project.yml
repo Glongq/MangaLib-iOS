@@ -9,8 +9,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.10"
-    MARKETING_VERSION: "0.25.2"
-    CURRENT_PROJECT_VERSION: "133"
+    MARKETING_VERSION: "0.25.3"
+    CURRENT_PROJECT_VERSION: "134"
 
 targets:
   MangaLib:
