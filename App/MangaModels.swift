@@ -31,10 +31,23 @@ struct LossyArray<T: Decodable>: Decodable {
         // container.decode(_:) продвигает курсор массива независимо от того,
         // успешно ли декодировался элемент, поэтому try? здесь просто
         // пропускает битый элемент, не зацикливаясь и не роняя остальные.
+        //
+        // currentIndex-предохранитель: баг из фидбека ("Закладки бесконечно
+        // грузит") завёлся именно на элементе, ронявшем decode глубоко
+        // вложенным тип-мисматчем (см. MangaChapterMetadata.volume) — сам
+        // тип-мисматч уже исправлен там, но точно ли JSONDecoder ВСЕГДА
+        // продвигает курсор при ошибке на такой глубине вложенности —
+        // недокументированное поведение, а не гарантия. Если курсор
+        // когда-нибудь не продвинется, while остался бы бесконечным
+        // (зависший спиннер навсегда) — явно проверяем это и прерываемся,
+        // а не полагаемся молча на недокументированное поведение JSONDecoder.
+        var lastIndex = -1
         while !container.isAtEnd {
             if let value = try? container.decode(T.self) {
                 result.append(value)
             }
+            guard container.currentIndex != lastIndex else { break }
+            lastIndex = container.currentIndex
         }
         elements = result
     }
@@ -576,6 +589,29 @@ struct MangaChapterMetadata: Decodable, Hashable {
     enum CodingKeys: String, CodingKey {
         case volume, number, name
         case createdAt = "created_at"
+    }
+
+    /// ПОДТВЕРЖДЕНО реальным перехватом (закладки аккаунта, `last_item.volume`):
+    /// сервер иногда отдаёт "volume" ЧИСЛОМ (`"volume":1`), а не строкой, как
+    /// в остальных местах (`"volume":"1"`). Обычный `String?` в этом случае
+    /// бросает DecodingError.typeMismatch — а поскольку MangaChapterMetadata
+    /// декодируется ВНУТРИ LossyArray (см. BookmarkListEntry/MangaItem), эта
+    /// одна нетипичная закладка тихо выкидывала из результата ВЕСЬ элемент
+    /// массива; на аккаунте, где так размечено большинство/все закладки,
+    /// itemы «Все обновления»/«Закладки» приходили пустым списком целиком.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        volume = try Self.flexibleString(c, .volume)
+        number = try Self.flexibleString(c, .number)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+    }
+
+    private static func flexibleString(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) throws -> String? {
+        if let value = try? c.decodeIfPresent(String.self, forKey: key) { return value }
+        if let value = try? c.decodeIfPresent(Int.self, forKey: key) { return String(value) }
+        if let value = try? c.decodeIfPresent(Double.self, forKey: key) { return String(value) }
+        return nil
     }
 }
 
