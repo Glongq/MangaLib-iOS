@@ -375,8 +375,13 @@ struct StorageSettingsView: View {
         }
     }
 
+    // allowsNonnumericFormatting = false — иначе ByteCountFormatter при 0
+    // байт пишет словом ("Zero KB"/"Ноль КБ") вместо цифры "0 КБ".
     private static func byteString(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowsNonnumericFormatting = false
+        return formatter.string(fromByteCount: bytes)
     }
 }
 
