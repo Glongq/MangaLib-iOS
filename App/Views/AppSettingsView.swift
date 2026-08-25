@@ -99,7 +99,7 @@ struct AppSettingsView: View {
                     }
 
                     settingsSection("Приложение") {
-                        settingsRow(icon: "internaldrive", title: "Данные и память")
+                        storageSettingsRow
                         settingsRow(icon: "paintbrush", title: "Персонализация")
                         settingsRow(icon: "arrow.triangle.2.circlepath", title: "Проверить обновления", showDivider: false)
                     }
@@ -196,6 +196,34 @@ struct AppSettingsView: View {
             if showDivider {
                 Divider().overlay(Theme.separator).padding(.leading, 52)
             }
+        }
+    }
+
+    /// "Данные и память" — единственный пункт из этого раздела с реальным
+    /// экраном (StorageSettingsView), а не StubView — та же вёрстка строки,
+    /// что и у settingsRow(), но с переходом на конкретный тип вместо общего.
+    private var storageSettingsRow: some View {
+        VStack(spacing: 0) {
+            NavigationLink {
+                StorageSettingsView()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "internaldrive")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 24)
+                    Text("Данные и память").foregroundStyle(Theme.textPrimary)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 48)
+            }
+            .buttonStyle(.plain)
+
+            Divider().overlay(Theme.separator).padding(.leading, 52)
         }
     }
 

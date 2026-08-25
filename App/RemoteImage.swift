@@ -8,6 +8,10 @@ final class RemoteImageCache {
 
     func image(for url: URL) -> UIImage? { cache.object(forKey: url as NSURL) }
     func insert(_ image: UIImage, for url: URL) { cache.setObject(image, forKey: url as NSURL) }
+    /// Для "Очистить кеш изображений" в Данные и память (см. StorageSettingsView) —
+    /// сбрасывает только оперативную часть, дисковую чистит отдельно
+    /// RemoteImageLoader.clearDiskCache() (это два разных кэша).
+    func removeAll() { cache.removeAllObjects() }
 }
 
 /// Загрузчик изображений через URLSession с обязательными заголовками MangaLib
@@ -37,6 +41,19 @@ final class RemoteImageLoader: ObservableObject {
                                    diskCapacity: 256 * 1024 * 1024)
         return URLSession(configuration: config)
     }()
+
+    /// Дисковый кэш обложек/страниц (те же картинки, что грузит RemoteImage
+    /// по всему приложению — карточки, обложки тайтла, страницы читалки, всё
+    /// через один и тот же session.urlCache) — для "Кеш изображений" в
+    /// Данные и память (см. StorageSettingsView.imageCacheBytes/clearImageCache).
+    static var diskCache: URLCache? { session.configuration.urlCache }
+
+    /// Полная очистка кэша картинок — и дисковой части (URLCache), и
+    /// оперативной (RemoteImageCache, см. её removeAll() выше).
+    static func clearImageCache() {
+        diskCache?.removeAllCachedResponses()
+        RemoteImageCache.shared.removeAll()
+    }
 
     func load(_ url: URL?, priority: Float? = nil) {
         guard let url else { state = .failure; return }

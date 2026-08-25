@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Network
 
 // MARK: - Модель скачанного
 
@@ -101,6 +102,16 @@ final class DownloadsManager: ObservableObject {
     /// запись, пока глава качается; по завершении удаляется.
     @Published private(set) var chapterProgress: [String: Double] = [:]
 
+    /// "Скачивать только через Wi-Fi" (см. StorageSettingsView) — реально
+    /// блокирует СТАРТ новой загрузки на сотовой сети (см. canStartDownload
+    /// ниже), но НЕ отслеживает переключение сети посреди уже идущей
+    /// загрузки — это отдельная, более сложная доработка, пока не сделана.
+    @Published var wifiOnlyDownloads: Bool {
+        didSet { defaults.set(wifiOnlyDownloads, forKey: Keys.wifiOnly) }
+    }
+    private let pathMonitor = NWPathMonitor()
+    private var currentPath: NWPath?
+
     /// Сколько глав качаем одновременно при загрузке всего тайтла (см. run()).
     /// 4 — по ощущениям близко к тому, сколько реально параллелится, если
     /// вручную потыкать иконки скачивания подряд; больше не даёт заметного
@@ -108,6 +119,10 @@ final class DownloadsManager: ObservableObject {
     private static let concurrentChapterDownloads = 4
 
     private let fm = FileManager.default
+    private let defaults = UserDefaults.standard
+    private enum Keys {
+        static let wifiOnly = "downloads_wifi_only"
+    }
     /// Активные задачи загрузки по slug — нужны, чтобы отменять скачивание.
     private var tasks: [String: Task<Void, Never>] = [:]
     private var chapterTasks: [String: Task<Void, Never>] = [:]
@@ -115,7 +130,24 @@ final class DownloadsManager: ObservableObject {
     /// pause(). Очищается при полном завершении/удалении тайтла.
     private var pending: [String: PendingDownload] = [:]
 
-    private init() { load() }
+    private init() {
+        wifiOnlyDownloads = defaults.bool(forKey: Keys.wifiOnly)
+        load()
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in self?.currentPath = path }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "DownloadsManager.pathMonitor"))
+    }
+
+    /// Можно ли СТАРТОВАТЬ новую загрузку прямо сейчас — true, если ограничение
+    /// выключено, или включено и мы реально на Wi-Fi. currentPath — nil в
+    /// первые доли секунды после старта приложения (монитор ещё не успел
+    /// отдать первый путь) — в этом случае не блокируем, чтобы не ловить
+    /// ложный отказ сразу при холодном старте.
+    private var canStartDownload: Bool {
+        guard wifiOnlyDownloads, let currentPath else { return true }
+        return currentPath.usesInterfaceType(.wifi)
+    }
 
     // MARK: Пути на диске
 
@@ -191,6 +223,10 @@ final class DownloadsManager: ObservableObject {
     func download(slug: String, title: String, typeLabel: String?, coverURLString: String?, heroURLString: String? = nil, chapters: [ChapterItem], branchId: Int? = nil) {
         guard !chapters.isEmpty else { return }
         guard progress[slug]?.finished != false else { return } // уже качается
+        guard canStartDownload else {
+            showBanner("Только Wi-Fi — включите Wi-Fi или отключите ограничение в Данные и память")
+            return
+        }
 
         pending[slug] = PendingDownload(title: title, typeLabel: typeLabel, coverURLString: coverURLString,
                                         heroURLString: heroURLString, chapters: chapters, branchId: branchId)
@@ -219,6 +255,10 @@ final class DownloadsManager: ObservableObject {
     /// исходного запроса, которых ещё нет на диске — уже скачанные не трогает.
     func resume(slug: String) {
         guard let req = pending[slug], progress[slug]?.paused == true else { return }
+        guard canStartDownload else {
+            showBanner("Только Wi-Fi — включите Wi-Fi или отключите ограничение в Данные и память")
+            return
+        }
         let downloadedKeys = Set((titles.first(where: { $0.slug == slug })?.chapters ?? [])
             .map { "\($0.id)-\($0.branchId ?? 0)" })
         let remaining = req.chapters.filter { chapter in
@@ -294,6 +334,10 @@ final class DownloadsManager: ObservableObject {
         let bid = branchId ?? chapter.primaryBranchId
         let key = chapterKey(slug, chapter.id, bid)
         guard chapterProgress[key] == nil, !isChapterDownloaded(slug: slug, chapterId: chapter.id, branchId: bid) else { return }
+        guard canStartDownload else {
+            showBanner("Только Wi-Fi — включите Wi-Fi или отключите ограничение в Данные и память")
+            return
+        }
         chapterProgress[key] = 0
         let task = Task { [weak self] in
             await self?.runChapter(slug: slug, title: title, typeLabel: typeLabel, coverURLString: coverURLString, heroURLString: heroURLString, chapter: chapter, branchId: bid)
@@ -326,6 +370,56 @@ final class DownloadsManager: ObservableObject {
         let bytes = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey]))?
             .reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) } ?? 0
         return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    // MARK: Данные и память (StorageSettingsView)
+
+    /// Рекурсивный размер папки в байтах — общий хелпер для "Скачанные
+    /// тайтлы"/"Кеш загрузки" ниже.
+    private static func directorySize(_ url: URL, fm: FileManager) -> Int64 {
+        guard let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) else { return 0 }
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            total += Int64((try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        return total
+    }
+
+    /// Общий объём ВСЕХ скачанных тайтлов на диске (рекурсивно) — реальные
+    /// данные, а не оценка.
+    var totalDownloadedBytes: Int64 { Self.directorySize(baseDir, fm: fm) }
+
+    /// Папки-сироты в Downloads/, оставшиеся от отменённых/недокачанных/не
+    /// доигравших до конца загрузок (тайтл-папка без записи в manifest.json,
+    /// или папка главы внутри известного тайтла, которой нет в его chapters).
+    /// Реальный мусор — можно чистить без риска задеть что-то из "Загрузок".
+    private func orphanedDownloadPaths() -> [URL] {
+        guard let items = try? fm.contentsOfDirectory(at: baseDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        let knownBySlug = Dictionary(uniqueKeysWithValues: titles.map { (Self.sanitize($0.slug), $0) })
+        var result: [URL] = []
+        for item in items {
+            guard (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            guard let title = knownBySlug[item.lastPathComponent] else {
+                result.append(item)
+                continue
+            }
+            let knownChapterDirs = Set(title.chapters.map { "\($0.id)-b\($0.branchId ?? 0)" })
+            guard let subitems = try? fm.contentsOfDirectory(at: item, includingPropertiesForKeys: [.isDirectoryKey]) else { continue }
+            for sub in subitems {
+                guard (try? sub.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
+                      !knownChapterDirs.contains(sub.lastPathComponent) else { continue }
+                result.append(sub)
+            }
+        }
+        return result
+    }
+
+    func orphanedDownloadBytes() -> Int64 {
+        orphanedDownloadPaths().reduce(Int64(0)) { $0 + Self.directorySize($1, fm: fm) }
+    }
+
+    func clearOrphanedDownloads() {
+        for url in orphanedDownloadPaths() { try? fm.removeItem(at: url) }
     }
 
     private func runChapter(slug: String, title: String, typeLabel: String?, coverURLString: String?, heroURLString: String? = nil, chapter: ChapterItem, branchId: Int?) async {
