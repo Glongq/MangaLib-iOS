@@ -270,6 +270,13 @@ struct ProfileView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.textSecondary)
             }
+            // Последний вход — только если сервер реально его прислал (см.
+            // UserProfile.lastOnlineAt); ничего не выдумываем, если нет.
+            if let lastOnline = profile?.lastOnlineAt {
+                Text("Был в сети \(lastOnline.relativeRussianString)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+            }
             if let about = profile?.about, !about.isEmpty {
                 Text(about).font(.subheadline).foregroundStyle(Theme.textPrimary).padding(.top, 6)
             }

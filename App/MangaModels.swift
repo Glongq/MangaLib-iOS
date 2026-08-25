@@ -123,6 +123,12 @@ struct UserProfile: Decodable {
     /// decodeIfPresent — если сервер его тут не отдаёт, поле останется nil, и
     /// строка "Дата регистрации" в доп. информации просто не покажется.
     let createdAt: Date?
+    /// Последний вход — ключ "last_online_at" ПОДТВЕРЖДЁН перехватом (тот же
+    /// ресурс "user", вложенный в записи дружбы, см. FriendUser) — там он
+    /// присутствовал, просто был null у всех перехваченных пользователей.
+    /// Для /user/{id} отдельно не перехватывался, decodeIfPresent — если
+    /// сервер не отдаёт, строка просто не покажется.
+    let lastOnlineAt: Date?
     /// Закрытый профиль/статистика — сервер отдаёт эти флаги; если профиль
     /// закрыт, показываем заглушку вместо содержимого.
     let canViewProfile: Bool
@@ -143,6 +149,7 @@ struct UserProfile: Decodable {
         case canViewProfile = "can_view_profile"
         case canViewStatistics = "can_view_statistics"
         case createdAt = "created_at"
+        case lastOnlineAt = "last_online_at"
     }
 
     init(from decoder: Decoder) throws {
@@ -170,6 +177,11 @@ struct UserProfile: Decodable {
             createdAt = APIISODate.parse(raw)
         } else {
             createdAt = nil
+        }
+        if let raw = ((try? c.decodeIfPresent(String.self, forKey: .lastOnlineAt)) ?? nil), !raw.isEmpty {
+            lastOnlineAt = APIISODate.parse(raw)
+        } else {
+            lastOnlineAt = nil
         }
     }
 
