@@ -22,14 +22,33 @@ struct CoverGalleryView: View {
 
             TabView(selection: $currentIndex) {
                 ForEach(items.indices, id: \.self) { index in
-                    RemoteImage(url: items[index].cover.fullResURL) { image in
-                        image.resizable().scaledToFit()
-                    } placeholder: {
-                        ProgressView().tint(.white)
-                    } failure: {
-                        Image(systemName: "photo")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.white.opacity(0.6))
+                    ZStack {
+                        // Слабый блюр той же картинки на весь экран — под
+                        // основной (scaledToFit, поэтому по бокам/сверху-снизу
+                        // у некадрированных под экран обложек остаются пустые
+                        // поля) — по прямой просьбе, вместо голого чёрного фона.
+                        // Тот же URL — RemoteImageCache отдаст уже скачанный
+                        // байткод картинки, а не второй отдельный запрос.
+                        RemoteImage(url: items[index].cover.fullResURL) { image in
+                            image.resizable().scaledToFill()
+                        } placeholder: {
+                            Color.clear
+                        } failure: {
+                            Color.clear
+                        }
+                        .blur(radius: 24)
+                        .overlay(Color.black.opacity(0.35))
+                        .clipped()
+
+                        RemoteImage(url: items[index].cover.fullResURL) { image in
+                            image.resizable().scaledToFit()
+                        } placeholder: {
+                            ProgressView().tint(.white)
+                        } failure: {
+                            Image(systemName: "photo")
+                                .font(.system(size: 40))
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .tag(index)
