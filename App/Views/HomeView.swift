@@ -660,10 +660,18 @@ struct HomeView: View {
         }
     }
 
-    /// Размер обложки и оформление текста — как в «Продолжить читать» (те же
-    /// continueReadingCoverWidth/Height и mangaTitleFont, обложка вплотную к
-    /// краю подложки) — по прямой просьбе, раньше здесь была маленькая
-    /// квадратная 48×48 обложка.
+    /// Размер обложки и текстов — как в «Новинки» (см. MangaCardView:
+    /// cover 2:3 от width=108 → 108×162, titleUIFont/typeUIFont), а не как в
+    /// «Продолжить читать», как было раньше — по прямой просьбе.
+    private static let updatesCoverWidth: CGFloat = 108
+    private static let updatesCoverHeight: CGFloat = (updatesCoverWidth * 3 / 2).rounded()
+    /// caption2×1.2 regular — та же формула, что и MangaCardView.typeUIFont.
+    private static var updatesTypeUIFont: UIFont {
+        let base = UIFont.preferredFont(forTextStyle: .caption2)
+        return UIFont.systemFont(ofSize: base.pointSize * 1.2, weight: .regular)
+    }
+    private static var updatesTypeFont: Font { Font(updatesTypeUIFont) }
+
     private func updateRow(_ item: MangaItem) -> some View {
         HStack(spacing: 12) {
             RemoteImage(url: item.cover?.thumbnailURL ?? item.cover?.bestURL) { image in
@@ -673,51 +681,56 @@ struct HomeView: View {
             } failure: {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
-            .frame(width: Self.continueReadingCoverWidth, height: Self.continueReadingCoverHeight)
+            .frame(width: Self.updatesCoverWidth, height: Self.updatesCoverHeight)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
 
-            VStack(alignment: .leading, spacing: 7) {
+            // Название на всю ширину (макс 2 строки), под ним "Том X Глава Y
+            // — Название" (макс 2 строки; только название главы и дата
+            // приглушённые — см. chapterAttributedLine), дата — в самом низу
+            // блока (Spacer перед ней прижимает её вниз).
+            VStack(alignment: .leading, spacing: 4) {
                 Text(item.displayTitle)
                     .font(Self.mangaTitleFont)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                    .frame(height: Self.continueReadingTitleBlockHeight, alignment: .top)
-                Text(chapterLine(for: item))
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
+                chapterAttributedLine(for: item)
+                    .font(Self.updatesTypeFont)
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+                if let date = item.lastItemDate {
+                    Text(date.relativeRussianString)
+                        .font(Self.updatesTypeFont)
+                        .foregroundStyle(Theme.textSecondary)
+                }
             }
-            .padding(.vertical, Self.continueReadingPadding)
-
-            Spacer(minLength: 0)
-
-            if let date = item.lastItemDate {
-                Text(date.relativeRussianString)
-                    .font(.caption2)
-                    .foregroundStyle(Theme.textSecondary)
-            }
+            .padding(.vertical, 10)
         }
-        .padding(.trailing, Self.continueReadingPadding)
+        .padding(.trailing, 12)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private func chapterLine(for item: MangaItem) -> String {
-        guard let chapter = item.latestChapter else { return item.type?.label ?? "" }
+    /// "Том X Глава Y — Название" — Том/Глава обычным цветом (это факт: что
+    /// именно обновилось), а название главы (когда есть, часто пусто) и
+    /// дата — приглушённым textSecondary, по прямой просьбе.
+    private func chapterAttributedLine(for item: MangaItem) -> Text {
+        guard let chapter = item.latestChapter else {
+            return Text(item.type?.label ?? "").foregroundColor(Theme.textSecondary)
+        }
         var parts: [String] = []
         if let volume = chapter.volume, !volume.isEmpty { parts.append("Том \(volume)") }
         if let number = chapter.number, !number.isEmpty { parts.append("Глава \(number)") }
-        var line = parts.joined(separator: " ")
-        // Название главы (metadata.last_item.name) — есть не у всех глав
-        // (часто пусто), но когда есть — показываем его тоже, это и есть
-        // "что именно изменилось", а не только номер.
+        let base = parts.joined(separator: " ")
+        var result = Text(base.isEmpty ? (item.type?.label ?? "") : base)
+            .foregroundColor(base.isEmpty ? Theme.textSecondary : Theme.textPrimary)
         if let name = chapter.name, !name.isEmpty {
-            line = line.isEmpty ? name : "\(line) — \(name)"
+            result = result + Text(" — \(name)").foregroundColor(Theme.textSecondary)
         }
         if item.extraLatestChaptersCount > 0 {
-            line += " + ещё \(item.extraLatestChaptersCount)"
+            result = result + Text(" + ещё \(item.extraLatestChaptersCount)").foregroundColor(Theme.textSecondary)
         }
-        return line.isEmpty ? (item.type?.label ?? "") : line
+        return result
     }
 
     // MARK: Общее
