@@ -1653,14 +1653,6 @@ enum APIISODate {
     static func parse(_ raw: String) -> Date? {
         isoFormatter.date(from: raw) ?? fallbackFormatter.date(from: raw)
     }
-
-    /// Обратное форматирование — нужно, чтобы завернуть NotificationItem.createdAt
-    /// (уже распарсенный Date) обратно в ISO-строку для MangaItem.lastItemAt
-    /// (см. MangaItem.fromNotification) — MangaItem этот же формат сам
-    /// распарсит обратно через lastItemDate, ничего не теряется.
-    static func string(from date: Date) -> String {
-        isoFormatter.string(from: date)
-    }
 }
 
 /// `read_type` для GET /notifications. "unread"/"all" — ПОДТВЕРЖДЕНО реальными
@@ -1853,31 +1845,6 @@ struct NotificationItem: Decodable, Identifiable, Hashable {
 
         let rawDate = ((try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? nil) ?? ""
         createdAt = APIISODate.parse(rawDate) ?? Date()
-    }
-}
-
-extension MangaItem {
-    /// «Все обновления» на вкладке «Читают» (см. HomeViewModel.fetchUpdatesPage)
-    /// строится из /notifications, а не из каталога — media в уведомлении сам
-    /// по себе НЕ содержит last_item/metadata (это отдельные top-level поля
-    /// NotificationItem — chapter/createdAt), поэтому собираем "дополненный"
-    /// MangaItem вручную: media + chapter/createdAt из notif. Только
-    /// category == "chapter" — у остальных категорий (comments/message/…)
-    /// другая, не перехваченная форма data, показывать их как "обновление
-    /// главы" было бы неверно.
-    static func fromNotification(_ notif: NotificationItem) -> MangaItem? {
-        guard notif.category == "chapter", let media = notif.media else { return nil }
-        let chapterMeta = notif.chapter.map {
-            MangaChapterMetadata(volume: $0.volume, number: $0.number, name: $0.name,
-                                  createdAt: APIISODate.string(from: notif.createdAt))
-        }
-        return MangaItem(
-            id: media.id, name: media.name, rusName: media.rusName, engName: media.engName,
-            slug: media.slug, slugURL: media.slugURL, cover: media.cover, rating: media.rating,
-            status: media.status, type: media.type, ageRestriction: media.ageRestriction, site: media.site,
-            lastItemAt: APIISODate.string(from: notif.createdAt),
-            metadata: MangaItemMetadata(lastItem: chapterMeta, latestItems: nil)
-        )
     }
 }
 

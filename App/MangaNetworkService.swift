@@ -183,24 +183,22 @@ final class MangaNetworkService {
 
     /// «Все обновления» на вкладке «Читают» (см. HomeView).
     ///
-    /// РАНЬШЕ: каталог с sort_by=last_chapter_at + fields[]=metadata —
-    /// список тайтлов был верный (порядок подтверждён поведением каталога),
-    /// но сам fields[]=metadata оказался бесполезен: сервер его принимает
-    /// (200, не 422), однако metadata в ответе КАТАЛОГА — это другой объект
-    /// (только anilist/shiki-поля синхронизации), без last_item/latest_items
-    /// вообще — "Том X Глава Y" физически не мог подтянуться этим путём.
-    ///
-    /// ТЕПЕРЬ: переиспользуем ПОДТВЕРЖДЁННЫЙ /notifications (см.
-    /// fetchNotifications — три реальных перехвата, уже используется вкладкой
-    /// «Новое») — там каждый элемент несёт media + chapter (volume/number/
-    /// name) + created_at по отдельности, именно то, что нужно. category ==
-    /// "chapter" — единственная категория, чья форма data реально
-    /// перехвачена как элемент списка (см. MangaItem.fromNotification);
-    /// остальные (comments/message/card/…) отфильтровываются.
+    /// ПОДТВЕРЖДЕНО реальным перехватом (пользователь прислал полное тело
+    /// ответа, page=2): `GET /latest-updates?page=` — отдельный эндпоинт,
+    /// НЕ привязанный к аккаунту (общая лента обновлений по всему сайту,
+    /// не путать с /user-latest-updates у "Мои обновления" и не путать с
+    /// /notifications — та личная, там были бы только свои закладки).
+    /// Форма ответа — обычный MangaItem, с уже включённым по умолчанию
+    /// metadata.latest_items (volume/number/name/created_at) — никакого
+    /// fields[]=metadata не нужно (в отличие от каталога, где это поле
+    /// принимается, но означает другое — только anilist/shiki-синхронизацию,
+    /// без last_item/latest_items вообще). meta.has_next_page присутствует
+    /// и работает как положено (в отличие от /bookmarks, где его нет вообще).
     func fetchLatestUpdates(page: Int = 1) async throws -> CatalogPage {
-        let result = try await fetchNotifications(readType: "all", sortType: "desc", page: page)
-        let items = result.items.compactMap { MangaItem.fromNotification($0) }
-        return CatalogPage(items: items, hasNextPage: result.hasNextPage)
+        let items: [URLQueryItem] = [URLQueryItem(name: "page", value: String(max(page, 1)))]
+        let request = try makeRequest(path: "/latest-updates", queryItems: items)
+        let response: APIListResponse<MangaItem> = try await perform(request)
+        return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
     }
 
     /// «Мои обновления» на вкладке «Читают» — ПОДТВЕРЖДЕНО реальным
