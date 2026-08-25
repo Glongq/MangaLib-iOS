@@ -43,10 +43,20 @@ struct HomeView: View {
         NavigationStack {
             ZStack {
                 Theme.background.ignoresSafeArea()
-                content
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        header
-                    }
+                // Шапка — ОТДЕЛЬНЫМ вью НАД ScrollView в VStack, не через
+                // .safeAreaInset. Раньше была через .safeAreaInset(edge: .top)
+                // на том же ScrollView, что и .refreshable — а это известная
+                // нестыковка SwiftUI/UIKit: .refreshable иногда перехватывает
+                // управление safe area у своего ScrollView, и закреплённый
+                // инсет перестаёт быть закреплённым, скроллится вместе с
+                // контентом (только на ЭТОМ экране был .refreshable — у
+                // Каталога/Закладок его нет, поэтому там safeAreaInset и
+                // работал как надо). Простой VStack(header, content) такой
+                // связки не даёт — шапка гарантированно фиксирована всегда.
+                VStack(spacing: 0) {
+                    header
+                    content
+                }
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: MangaItem.self) { item in
@@ -108,8 +118,8 @@ struct HomeView: View {
     // MARK: Шапка (1в1 визуально как в Каталоге — см. MangaCatalogView.header/
     // searchField; поведение НЕ копируем — заголовок не схлопывается при
     // скролле, а поиск не настоящее поле ввода, просто кнопка-переход на
-    // вкладку «Каталог». Только сам вид и то, что шапка всегда закреплена
-    // сверху через safeAreaInset — как попросили.
+    // вкладку «Каталог». Шапка всегда закреплена сверху (см. body — VStack
+    // над ScrollView, не safeAreaInset).
 
     private var header: some View {
         VStack(spacing: 10) {
