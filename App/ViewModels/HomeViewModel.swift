@@ -39,7 +39,12 @@ final class HomeViewModel: ObservableObject {
     /// показывает их одновременно как страницы горизонтального пейджинга
     /// (см. HomeView), а не как одну вкладку по выбору.
     @Published private(set) var currentlyReadingBySort: [TopViewsSort: [MangaItem]] = [:]
-    @Published private(set) var isLoadingCurrentlyReading = false
+    // Дефолт true (не false) — у ВСЕХ isLoading* флагов на этой странице:
+    // .task, который запускает первую загрузку, стартует не мгновенно в тот
+    // же кадр, что тело View — с false здесь секция на долю секунды вообще
+    // не рисуется (ни контента, ни скелетона), потом внезапно появляется
+    // скелетон. С true скелетон уже на самом первом кадре.
+    @Published private(set) var isLoadingCurrentlyReading = true
     @Published private(set) var currentlyReadingErrorMessage: String?
     @Published var currentlyReadingPeriod: TopViewsPeriod = .day {
         didSet { if oldValue != currentlyReadingPeriod { Task { await loadCurrentlyReading() } } }
@@ -49,17 +54,33 @@ final class HomeViewModel: ObservableObject {
 
     @Published private(set) var collections: [MangaCollection] = []
     @Published private(set) var topActiveUsers: [TopActiveUser] = []
+    @Published private(set) var isLoadingWidgets = true
     @Published private(set) var newest: [MangaItem] = []
+    @Published private(set) var isLoadingNewest = true
 
     // MARK: Последние обновления (беск. скролл вниз)
 
     @Published var updatesTab: HomeUpdatesTab = .all {
-        didSet { if oldValue != updatesTab { scheduleUpdatesReload() } }
+        didSet {
+            guard oldValue != updatesTab else { return }
+            // Сброс СРАЗУ (не дожидаясь ответа) — иначе при переключении
+            // вкладки на экране на мгновение виден список ПРЕДЫДУЩЕЙ вкладки
+            // (например "Все" ещё на экране, пока грузятся "Мои"), что похоже
+            // на баг. Теперь вместо чужих данных сразу показывается скелетон
+            // (см. HomeView.updatesSection — isLoadingUpdates && updates.isEmpty).
+            updates = []
+            scheduleUpdatesReload()
+        }
     }
     /// Общий список и для «Все обновления», и для «Мои обновления» — оба
     /// эндпоинта отдают одну и ту же форму (см. fetchUpdatesPage), сброс/
     /// перезагрузка при смене updatesTab делает reloadUpdates().
     @Published private(set) var updates: [MangaItem] = []
+    /// Только НАЧАЛЬНАЯ загрузка страницы (reloadUpdates) — отдельно от
+    /// isLoadingMoreUpdates (подгрузка следующей страницы при скролле вниз),
+    /// чтобы HomeView мог показать скелетон только пока список ещё пуст, а
+    /// не путать с уже подгруженным списком, который просто дозагружается.
+    @Published private(set) var isLoadingUpdates = true
     @Published private(set) var isLoadingMoreUpdates = false
 
     // MARK: Общее состояние экрана
@@ -194,27 +215,31 @@ final class HomeViewModel: ObservableObject {
     // MARK: Коллекции + топ недели (эндпоинт не подтверждён — см. fetchHomeWidgets)
 
     private func loadWidgets() async {
+        isLoadingWidgets = true
         do {
             let payload = try await service.fetchHomeWidgets()
             collections = payload.collections ?? []
             topActiveUsers = payload.weeklyTopUsers ?? []
         } catch {
-            guard !isCancellation(error) else { return }
+            guard !isCancellation(error) else { isLoadingWidgets = false; return }
             collections = []
             topActiveUsers = []
         }
+        isLoadingWidgets = false
     }
 
     // MARK: Новинки
 
     private func loadNewest() async {
+        isLoadingNewest = true
         do {
             let page = try await service.fetchCatalog(query: "", sort: .added, filter: MangaFilter(), page: 1)
             newest = page.items
         } catch {
-            guard !isCancellation(error) else { return }
+            guard !isCancellation(error) else { isLoadingNewest = false; return }
             newest = []
         }
+        isLoadingNewest = false
     }
 
     // MARK: Последние обновления
@@ -233,15 +258,17 @@ final class HomeViewModel: ObservableObject {
     private func reloadUpdates() async {
         updatesPage = 1
         updatesHasNext = true
+        isLoadingUpdates = true
         do {
             let page = try await fetchUpdatesPage(1)
             updates = page.items
             updatesHasNext = page.hasNextPage
         } catch {
-            guard !isCancellation(error) else { return }
+            guard !isCancellation(error) else { isLoadingUpdates = false; return }
             updates = []
             updatesHasNext = false
         }
+        isLoadingUpdates = false
     }
 
     func loadMoreUpdatesIfNeeded(currentId: Int) {

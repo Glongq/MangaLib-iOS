@@ -23,6 +23,7 @@ struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var bookmarks = BookmarksStore.shared
+    @ObservedObject private var authSession = AuthSession.shared
     /// Экран входа для "Мои обновления" без аккаунта — см. updatesTabBinding.
     @State private var showLoginForUpdates = false
 
@@ -93,25 +94,37 @@ struct HomeView: View {
         // только по .task (при первом открытии) и потянуть-обновить.
     }
 
-    @ViewBuilder
+    /// Больше НЕТ общего "весь экран — один спиннер, пока НЕ пришло вообще
+    /// всё" (isLoading && !didLoadOnce) — по фидбеку это и было причиной
+    /// "интерфейс сыпется, потом собирается": пока грузится, экран был
+    /// пустой, а как только приходили ВСЕ секции разом, они появлялись
+    /// одним рывком, сдвигая друг друга. Теперь ScrollView и все секции на
+    /// местах СРАЗУ — каждая секция сама решает, показать свой скелетон
+    /// (см. *Skeleton ниже) или уже пришедший контент, независимо от
+    /// остальных. Секции, которым нужен вход (Продолжить читать, Мои
+    /// обновления), скелетон не показывают, пока не залогинены — просто
+    /// появляются сами после входа, как и раньше, но ТОЖЕ получают скелетон
+    /// при обновлении (см. continueReadingSection и .refreshable ниже).
     private var content: some View {
-        if viewModel.isLoading && !viewModel.didLoadOnce {
-            ProgressView().tint(Theme.accent)
-        } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    continueReadingSection
-                    currentlyReadingSection
-                    collectionsSection
-                    topActiveUsersSection
-                    newestSection
-                    updatesSection
-                }
-                .padding(.top, 12)
-                .padding(.bottom, 32)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                continueReadingSection
+                currentlyReadingSection
+                collectionsSection
+                topActiveUsersSection
+                newestSection
+                updatesSection
             }
-            .scrollIndicators(.hidden)
-            .refreshable { await viewModel.refresh() }
+            .padding(.top, 12)
+            .padding(.bottom, 32)
+        }
+        .scrollIndicators(.hidden)
+        .refreshable {
+            // Раньше .refreshable вообще не трогал bookmarks — "Продолжить
+            // читать" не обновлялось потянуть-вниз. Теперь оба — параллельно.
+            async let a: Void = viewModel.refresh()
+            async let b: Void = bookmarks.syncHistoryFromServer()
+            _ = await (a, b)
         }
     }
 
@@ -204,6 +217,16 @@ struct HomeView: View {
                     .padding(.horizontal, 16)
                 }
                 .scrollIndicators(.hidden)
+            }
+        } else if authSession.isLoggedIn && bookmarks.isSyncingHistory {
+            // Скелетон ТОЛЬКО пока залогинены и правда идёт загрузка (не
+            // залогинен — секция просто не появляется, как и раньше, ждать
+            // ей нечего). Показывается и на самом первом входе, и на
+            // .refreshable — оба гоняют syncHistoryFromServer().
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("Продолжить читать")
+                    .padding(.horizontal, 16)
+                continueReadingSkeleton
             }
         }
     }
@@ -345,9 +368,7 @@ struct HomeView: View {
                     errorRow(error) { viewModel.retry() }
                         .padding(.horizontal, 16)
                 } else if !hasAnyItems && viewModel.isLoadingCurrentlyReading {
-                    ProgressView().tint(Theme.accent)
-                        .frame(height: Self.currentlyReadingPageHeight)
-                        .frame(maxWidth: .infinity)
+                    currentlyReadingSkeleton
                 } else {
                     currentlyReadingCarousel
                 }
@@ -489,6 +510,12 @@ struct HomeView: View {
                 }
                 .scrollIndicators(.hidden)
             }
+        } else if viewModel.isLoadingWidgets {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("Последние коллекции")
+                    .padding(.horizontal, 16)
+                collectionsSkeleton
+            }
         }
     }
 
@@ -568,6 +595,12 @@ struct HomeView: View {
                 }
                 .scrollIndicators(.hidden)
             }
+        } else if viewModel.isLoadingWidgets {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("Топ активных недели")
+                    .padding(.horizontal, 16)
+                topActiveUsersSkeleton
+            }
         }
     }
 
@@ -645,6 +678,12 @@ struct HomeView: View {
                 }
                 .scrollIndicators(.hidden)
             }
+        } else if viewModel.isLoadingNewest {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("Новинки")
+                    .padding(.horizontal, 16)
+                newestSkeleton
+            }
         }
     }
 
@@ -684,30 +723,27 @@ struct HomeView: View {
 
             // "Все" и "Мои" — теперь оба ПОДТВЕРЖДЁННЫЕ эндпоинты одной формы
             // (см. HomeViewModel.fetchUpdatesPage) — общий ряд для обеих вкладок.
-            LazyVStack(spacing: 10) {
-                ForEach(viewModel.updates) { item in
-                    NavigationLink(value: item) { updateRow(item) }
-                        .buttonStyle(.plain)
-                        .onAppear { viewModel.loadMoreUpdatesIfNeeded(currentId: item.id) }
+            // Скелетон, пока список ещё пуст И идёт именно НАЧАЛЬНАЯ загрузка
+            // (isLoadingUpdates) — не путать с isLoadingMoreUpdates (подгрузка
+            // следующей страницы, спиннер внизу уже готового списка).
+            if viewModel.updates.isEmpty && viewModel.isLoadingUpdates {
+                updatesSkeleton
+            } else {
+                LazyVStack(spacing: 10) {
+                    ForEach(viewModel.updates) { item in
+                        NavigationLink(value: item) { updateRow(item) }
+                            .buttonStyle(.plain)
+                            .onAppear { viewModel.loadMoreUpdatesIfNeeded(currentId: item.id) }
+                    }
+                    if viewModel.isLoadingMoreUpdates {
+                        ProgressView().tint(Theme.accent).frame(maxWidth: .infinity)
+                    }
                 }
-                if viewModel.isLoadingMoreUpdates {
-                    ProgressView().tint(Theme.accent).frame(maxWidth: .infinity)
-                }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
         }
     }
 
-    /// Размер обложки — как в «Продолжить читать», 1:1 (была ×1.5 — с той
-    /// обложкой строка получалась заметно выше текстового блока даже в
-    /// худшем случае (макс. строк везде), и в карточках с меньшим кол-вом
-    /// текста сверху/снизу оставался заметный пустой отступ — обложка
-    /// диктовала высоту подложки, а не текст). При этом размере обложка и
-    /// худший случай текста примерно совпадают по высоте — см.
-    /// updatesRowHeight ниже (сама берёт max, так что не "сломается", если
-    /// на другом размере экрана/шрифта соотношение чуть сместится).
-    private static let updatesCoverWidth: CGFloat = continueReadingCoverWidth
-    private static let updatesCoverHeight: CGFloat = continueReadingCoverHeight
     /// caption2×1.2 regular — та же формула, что и MangaCardView.typeUIFont.
     private static var updatesTypeUIFont: UIFont {
         let base = UIFont.preferredFont(forTextStyle: .caption2)
@@ -715,6 +751,16 @@ struct HomeView: View {
     }
     private static var updatesTypeFont: Font { Font(updatesTypeUIFont) }
     private static let updatesTextSpacing: CGFloat = 4
+
+    /// Размер обложки — как в «Продолжить читать» (1:1), + высота ОДНОЙ
+    /// строки текста (updatesTypeUIFont — тот же шрифт, что у "Том X Глава Y"
+    /// и даты), как попросили — обложка была примерно вровень с худшим
+    /// случаем текста, чуть добавили воздуха. Ширина растёт пропорционально
+    /// высоте, чтобы обложка не исказилась (не растягивали только по высоте).
+    private static var updatesCoverHeightBoost: CGFloat { updatesTypeUIFont.lineHeight.rounded(.up) }
+    private static let updatesCoverHeight: CGFloat = continueReadingCoverHeight + updatesCoverHeightBoost
+    private static let updatesCoverWidth: CGFloat =
+        (updatesCoverHeight * (continueReadingCoverWidth / continueReadingCoverHeight)).rounded()
 
     /// Высота подложки — под ХУДШИЙ случай текста (название в 2 строки +
     /// "Том X Глава Y — Название" в 2 строки + дата), а не константа "от
@@ -794,6 +840,166 @@ struct HomeView: View {
             result = result + Text(" + ещё \(item.extraLatestChaptersCount)").foregroundColor(Theme.textSecondary)
         }
         return result
+    }
+
+    // MARK: Скелетоны загрузки
+
+    /// Плейсхолдер-полоска текста (SkeletonBox нужного размера) — для строк,
+    /// которые в реальном контенте занимает Text (название, ник, дата и
+    /// т.п.), пока данных ещё нет. Тот же shimmer, что и у RemoteImage
+    /// (SkeletonBox), просто в форме текстовой строки, а не обложки.
+    private func skeletonBar(width: CGFloat, height: CGFloat, cornerRadius: CGFloat = 4) -> some View {
+        SkeletonBox()
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+
+    /// Копия макета continueReadingCard — те же размеры обложки/карточки,
+    /// чтобы при подмене на реальный контент ничего не "прыгало".
+    private var continueReadingSkeleton: some View {
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 12) {
+                ForEach(0..<3, id: \.self) { _ in
+                    HStack(spacing: 12) {
+                        SkeletonBox()
+                            .frame(width: Self.continueReadingCoverWidth, height: Self.continueReadingCoverHeight)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        VStack(alignment: .leading, spacing: 7) {
+                            skeletonBar(width: 110, height: 12)
+                            skeletonBar(width: 70, height: 11)
+                            skeletonBar(width: 90, height: 5, cornerRadius: 2.5)
+                        }
+                        .padding(.vertical, Self.continueReadingPadding)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.trailing, Self.continueReadingPadding)
+                    .frame(width: Self.continueReadingCardWidth)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    /// Копия макета currentlyReadingPage (подкатегория + 3 строки) — та же
+    /// высота (currentlyReadingPageHeight), чтобы секция не "прыгала", когда
+    /// придут реальные данные.
+    private var currentlyReadingSkeleton: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            skeletonBar(width: 90, height: Self.currentlyReadingLabelHeight)
+            VStack(spacing: Self.currentlyReadingRowSpacing) {
+                ForEach(0..<3, id: \.self) { _ in
+                    HStack(spacing: 10) {
+                        SkeletonBox()
+                            .frame(width: Self.currentlyReadingCoverSize, height: Self.currentlyReadingCoverSize)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        VStack(alignment: .leading, spacing: 4) {
+                            skeletonBar(width: 150, height: 12)
+                            skeletonBar(width: 70, height: 10)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(height: Self.currentlyReadingCoverSize)
+                }
+            }
+        }
+        .frame(height: Self.currentlyReadingPageHeight)
+        .padding(.horizontal, 16)
+    }
+
+    /// Копия макета collectionCard (заголовок + строка статов + веер обложек).
+    private var collectionsSkeleton: some View {
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 12) {
+                ForEach(0..<3, id: \.self) { _ in
+                    VStack(alignment: .leading, spacing: 10) {
+                        skeletonBar(width: 130, height: 14)
+                        skeletonBar(width: 90, height: 10)
+                        SkeletonBox()
+                            .frame(width: 220 - 28, height: 84)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .padding(14)
+                    .frame(width: 220)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    /// Копия макета topActiveUserCard (аватарка-квадрат + ник + уровень +
+    /// прогресс-бар) — те же размеры (44×44), что у реальной аватарки.
+    private var topActiveUsersSkeleton: some View {
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 12) {
+                ForEach(0..<4, id: \.self) { _ in
+                    HStack(spacing: 10) {
+                        SkeletonBox()
+                            .frame(width: 44, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        VStack(alignment: .leading, spacing: 4) {
+                            skeletonBar(width: 80, height: 11)
+                            skeletonBar(width: 56, height: 9)
+                            skeletonBar(width: 90, height: 4, cornerRadius: 2)
+                        }
+                    }
+                    .padding(10)
+                    .frame(width: 170, alignment: .leading)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+            }
+            .padding(.leading, 16)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    /// Копия макета MangaCardView (обложка 2:3 от ширины 108 + название +
+    /// тип) — те же пропорции, что у реальных карточек «Новинок».
+    private var newestSkeleton: some View {
+        ScrollView(.horizontal) {
+            LazyHStack(alignment: .top, spacing: 12) {
+                ForEach(0..<4, id: \.self) { _ in
+                    VStack(alignment: .leading, spacing: 6) {
+                        SkeletonBox()
+                            .frame(width: 108, height: (108 * 3 / 2).rounded())
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        skeletonBar(width: 90, height: 12)
+                        skeletonBar(width: 60, height: 10)
+                    }
+                    .frame(width: 108)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    /// Копия макета updateRow — та же ширина/высота подложки (updatesRowHeight),
+    /// чтобы список не "прыгал" при подмене на реальные карточки.
+    private var updatesSkeleton: some View {
+        VStack(spacing: 10) {
+            ForEach(0..<4, id: \.self) { _ in
+                HStack(spacing: 12) {
+                    SkeletonBox()
+                        .frame(width: Self.updatesCoverWidth, height: Self.updatesCoverHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    VStack(alignment: .leading, spacing: Self.updatesTextSpacing) {
+                        skeletonBar(width: 170, height: 12)
+                        skeletonBar(width: 130, height: 12)
+                        skeletonBar(width: 70, height: 10)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.trailing, 12)
+                .frame(height: Self.updatesRowHeight)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+        .padding(.horizontal, 16)
     }
 
     // MARK: Общее
