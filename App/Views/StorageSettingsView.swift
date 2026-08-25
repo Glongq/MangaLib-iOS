@@ -10,17 +10,16 @@ import SwiftUI
 ///   в песочнице iOS физически не видят размер других приложений. Считается
 ///   как остаток (весь диск − свободно − то, что реально занимает ЭТО
 ///   приложение) — так же поступает и большинство других приложений с таким
-///   виджетом хранилища.
+///   виджетом хранилища. Полоска показывает РЕАЛЬНУЮ пропорцию от всей
+///   ёмкости диска (включая свободное место — отдельным серым сегментом,
+///   без строки в легенде, по прямой просьбе), а не только занятую часть.
 /// - "Кеш изображений" (RemoteImageLoader.diskCache — обложки, страницы
-///   читалки, всё, что грузится через RemoteImage) и "Кеш запросов"
-///   (URLCache.shared — JSON-ответы API: карточки тайтлов, списки глав и
-///   т.д.) — в референсе это "Кеш изображений"/"Кеш страниц"; здесь
-///   переименовано во второе честно, чтобы не создавать впечатление, что
-///   очищаются именно страницы манги (в этом приложении картинки читалки
-///   уже покрыты первым пунктом).
+///   читалки, всё, что грузится через RemoteImage) и "Кеш страниц"
+///   (по прямой просьбе — то же название, что и в референсе; технически
+///   это URLCache.shared, JSON-ответы API — карточки тайтлов, списки глав
+///   и т.д., а не картинки страниц читалки, они уже покрыты первым пунктом).
 /// - "История поиска" — в этом приложении история поиска пока не ведётся
-///   вообще, поэтому честно 0, без работающей кнопки очистки заглушки ради
-///   заглушки.
+///   вообще, поэтому честно "Нет данных" вместо кнопки очистки.
 /// - "Кеш данных" — очищает ВСЁ кэшированное (оба URLCache + случайные
 ///   временные файлы в Caches/), реальный "может помочь при проблемах".
 /// - "Путь загрузки" — на iOS нет альтернативного места хранения (SD-карта
@@ -33,7 +32,8 @@ import SwiftUI
 ///   загрузки — отдельная, более сложная доработка.
 /// - "Кеш загрузки" — папки-сироты в Downloads/ от отменённых/недокачанных
 ///   загрузок (см. DownloadsManager.orphanedDownloadPaths) — реальный мусор,
-///   безопасно чистится, не трогая ничего из списка "Загрузки".
+///   безопасно чистится, не трогая ничего из списка "Загрузки". Пока их
+///   нет — честно "Нет данных" вместо кнопки очистки нуля байт.
 struct StorageSettingsView: View {
     @ObservedObject private var downloads = DownloadsManager.shared
     @ObservedObject private var themeManager = ThemeManager.shared
@@ -80,15 +80,7 @@ struct StorageSettingsView: View {
     private var storageCard: some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("Хранилище устройства")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Spacer()
-                    Text("Доступно \(Self.byteString(stats.availableCapacity))")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                }
+                cardHeader(title: "Хранилище устройства", value: "Доступно \(Self.byteString(stats.availableCapacity))")
 
                 storageBar
 
@@ -102,30 +94,21 @@ struct StorageSettingsView: View {
 
             Divider().overlay(Theme.separator).padding(.horizontal, 16)
 
-            clearableRow(
-                title: "Кеш изображений",
-                bytes: stats.imageCacheBytes
-            ) {
+            dataRow(title: "Кеш изображений", trailing: .clear(bytes: stats.imageCacheBytes) {
                 RemoteImageLoader.clearImageCache()
                 refresh()
-            }
-            clearableRow(
-                title: "Кеш запросов",
-                subtitle: "Ответы сервера — карточки тайтлов, главы и т.п.",
-                bytes: stats.apiCacheBytes
-            ) {
+            })
+            dataRow(title: "Кеш страниц", trailing: .clear(bytes: stats.apiCacheBytes) {
                 URLCache.shared.removeAllCachedResponses()
                 refresh()
-            }
-            searchHistoryRow
-            clearableRow(
+            })
+            dataRow(title: "История поиска", trailing: .empty)
+            dataRow(
                 title: "Кеш данных",
-                subtitle: "Очищает изображения, запросы и временные файлы — может помочь при различных проблемах",
-                bytes: nil,
+                subtitle: "Очистка может помочь при различных проблемах",
+                trailing: .clear(bytes: nil) { showClearAllCachesConfirm = true },
                 showDivider: false
-            ) {
-                showClearAllCachesConfirm = true
-            }
+            )
         }
         .confirmationDialog("Очистить весь кеш приложения?", isPresented: $showClearAllCachesConfirm, titleVisibility: .visible) {
             Button("Очистить кеш", role: .destructive) {
@@ -136,8 +119,11 @@ struct StorageSettingsView: View {
         }
     }
 
+    /// Полоска — реальная пропорция от ВСЕЙ ёмкости диска: другие
+    /// приложения/скачанные тайтлы/кеш и, отдельным сегментом, свободное
+    /// место (без строки в легенде — по прямой просьбе).
     private var storageBar: some View {
-        let total = max(1, stats.otherAppsBytes + stats.downloadsBytes + stats.cacheBytes)
+        let total = max(1, stats.totalCapacity)
         return GeometryReader { geo in
             HStack(spacing: 3) {
                 Capsule().fill(.blue)
@@ -146,6 +132,8 @@ struct StorageSettingsView: View {
                     .frame(width: geo.size.width * CGFloat(stats.downloadsBytes) / CGFloat(total))
                 Capsule().fill(Theme.textSecondary.opacity(0.6))
                     .frame(width: geo.size.width * CGFloat(stats.cacheBytes) / CGFloat(total))
+                Capsule().fill(Color.gray.opacity(0.25))
+                    .frame(width: geo.size.width * CGFloat(stats.availableCapacity) / CGFloat(total))
             }
         }
         .frame(height: 10)
@@ -160,64 +148,37 @@ struct StorageSettingsView: View {
         }
     }
 
-    /// Честно 0 — истории поиска в приложении пока нет вообще, поэтому без
-    /// работающей кнопки очистки заглушки ради заглушки (см. комментарий у
-    /// структуры выше).
-    private var searchHistoryRow: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("История поиска").foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Text("Нет данных").font(.footnote).foregroundStyle(Theme.textSecondary)
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 48)
-            Divider().overlay(Theme.separator).padding(.horizontal, 16)
-        }
-    }
-
     // MARK: Загрузки
 
     private var downloadsCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Загрузки")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.leading, 4)
+        card {
+            cardHeader(title: "Загрузки", value: "Занято \(Self.byteString(stats.downloadsBytes))")
+                .padding(16)
 
-            card {
-                // На iOS нет альтернативного места хранения — строка
-                // информационная, без перехода (переход подразумевал бы
-                // выбор, которого тут физически не может быть).
-                VStack(spacing: 0) {
-                    HStack {
-                        Text("Путь загрузки").foregroundStyle(Theme.textPrimary)
-                        Spacer()
-                        Text("Хранилище устройства").font(.footnote).foregroundStyle(Theme.textSecondary)
-                    }
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 48)
-                    Divider().overlay(Theme.separator).padding(.horizontal, 16)
-                }
+            Divider().overlay(Theme.separator).padding(.horizontal, 16)
 
-                Toggle(isOn: $downloads.wifiOnlyDownloads) {
-                    Text("Скачивать только через Wi-Fi").foregroundStyle(Theme.textPrimary)
-                }
-                .tint(Theme.accent)
-                .padding(.horizontal, 16)
-                .frame(minHeight: 48)
+            // На iOS нет альтернативного места хранения — строка
+            // информационная, без перехода (переход подразумевал бы выбор,
+            // которого тут физически не может быть).
+            plainRow(title: "Путь загрузки", value: "Хранилище устройства")
 
-                Divider().overlay(Theme.separator).padding(.horizontal, 16)
-
-                clearableRow(
-                    title: "Кеш загрузки",
-                    subtitle: "Остатки отменённых/недокачанных глав",
-                    bytes: stats.orphanedDownloadBytes,
-                    showDivider: false
-                ) {
-                    showClearDownloadsCacheConfirm = true
-                }
+            Toggle(isOn: $downloads.wifiOnlyDownloads) {
+                Text("Скачивать только через Wi-Fi").foregroundStyle(Theme.textPrimary)
             }
+            .tint(Theme.accent)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+
+            Divider().overlay(Theme.separator).padding(.horizontal, 16)
+
+            dataRow(
+                title: "Кеш загрузки",
+                subtitle: "Остатки отменённых/недокачанных глав",
+                trailing: stats.orphanedDownloadBytes > 0
+                    ? .clear(bytes: stats.orphanedDownloadBytes) { showClearDownloadsCacheConfirm = true }
+                    : .empty,
+                showDivider: false
+            )
         }
         .confirmationDialog("Подтвердите действие", isPresented: $showClearDownloadsCacheConfirm, titleVisibility: .visible) {
             Button("Очистить", role: .destructive) {
@@ -239,7 +200,58 @@ struct StorageSettingsView: View {
         .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private func clearableRow(title: String, subtitle: String? = nil, bytes: Int64?, showDivider: Bool = true, action: @escaping () -> Void) -> some View {
+    /// Заголовок карточки (первая строка внутри самой card) — один и тот же
+    /// стиль что у "Хранилище устройства", что у "Загрузки", по прямой
+    /// просьбе сделать эти две надписи 1-в-1.
+    private func cardHeader(title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+        }
+    }
+
+    /// Информационная строка без действия (например "Путь загрузки") — та же
+    /// вертикальная сетка (горизонтальный паддинг 16, вертикальный 14), что
+    /// и у dataRow ниже, чтобы разделители по всей карточке шли на равных
+    /// расстояниях друг от друга.
+    private func plainRow(title: String, value: String, showDivider: Bool = true) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(title).foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Text(value).font(.footnote).foregroundStyle(Theme.textSecondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+
+            if showDivider {
+                Divider().overlay(Theme.separator).padding(.horizontal, 16)
+            }
+        }
+    }
+
+    /// Правая часть dataRow: либо рабочая кнопка-чип "Очистить [X]", либо
+    /// такой же по размеру, но неактивный чип "Нет данных" — для разделов,
+    /// где показывать нечего (История поиска — функциональность пока не
+    /// реализована; Кеш загрузки — мусора реально нет).
+    private enum RowTrailing {
+        case clear(bytes: Int64?, action: () -> Void)
+        case empty
+    }
+
+    /// Строка "название [+ подпись] — чип справа" — единая вертикальная
+    /// сетка (горизонтальный паддинг 16, вертикальный 14) для ВСЕХ строк с
+    /// чипом (Кеш изображений/Кеш страниц/История поиска/Кеш данных/Кеш
+    /// загрузки), чтобы разделители между ними были на равных расстояниях
+    /// друг от друга независимо от того, есть ли у конкретной строки
+    /// подпись вторым слоем — раньше из-за смешения minHeight с
+    /// одно-/двухстрочным содержимым текст в блоках "плавал".
+    private func dataRow(title: String, subtitle: String? = nil, trailing: RowTrailing, showDivider: Bool = true) -> some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -251,22 +263,43 @@ struct StorageSettingsView: View {
                     }
                 }
                 Spacer(minLength: 12)
-                Button(action: action) {
-                    Text(bytes.map { "Очистить \(Self.byteString($0))" } ?? "Очистить")
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                        .padding(.horizontal, 12)
-                        .frame(height: 32)
-                        .background(Theme.surface, in: Capsule())
-                }
+                trailingPill(trailing)
             }
             .padding(.horizontal, 16)
-            .frame(minHeight: 56)
+            .padding(.vertical, 14)
 
             if showDivider {
                 Divider().overlay(Theme.separator).padding(.horizontal, 16)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func trailingPill(_ trailing: RowTrailing) -> some View {
+        switch trailing {
+        case .clear(let bytes, let action):
+            Button(action: action) {
+                Text(bytes.map { "Очистить \(Self.byteString($0))" } ?? "Очистить")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(Theme.surface, in: Capsule())
+            }
+        case .empty:
+            // Тот же размер чипа, что и у "Очистить [X]" — просто
+            // неактивная надпись "Нет данных" (ждёт появления данных).
+            Button {} label: {
+                Text("Нет данных")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(Theme.surface, in: Capsule())
+            }
+            .disabled(true)
         }
     }
 
