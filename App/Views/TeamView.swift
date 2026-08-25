@@ -327,7 +327,7 @@ struct TeamView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Участники").font(.headline).foregroundStyle(Theme.textPrimary)
                 ScrollView(.horizontal) {
-                    LazyHStack(spacing: 8) {
+                    LazyHStack(spacing: 12) {
                         ForEach(vm.members) { member in
                             NavigationLink { ProfileView(userId: member.userId) } label: {
                                 memberChip(member)
@@ -342,16 +342,23 @@ struct TeamView: View {
         }
     }
 
+    /// Раскладка — 1-в-1 HomeView.topActiveUserCard ("Читают" → "Топ активных
+    /// недели"), по прямой просьбе, только со своими данными: вместо
+    /// ранга (N#) и "Уровень N"/полоски прогресса (этого у участника
+    /// команды просто нет) — роль второй строкой.
     private func memberChip(_ member: TeamMemberEntry) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             ZStack {
                 RemoteImage(url: member.avatarURL) { img in
                     img.resizable().scaledToFill()
                 } placeholder: {
-                    Circle().fill(Theme.surface).overlay(Image(systemName: "person.fill").font(.caption2).foregroundStyle(Theme.textSecondary))
+                    SkeletonBox()
+                } failure: {
+                    ZStack { Theme.surfaceElevated; Image(systemName: "person.fill").foregroundStyle(Theme.textSecondary) }
                 }
-                .frame(width: 28, height: 28)
-                .clipShape(Circle())
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipped()
 
                 // Декоративная рамка аватара — ПОДТВЕРЖДЕНО перехватом
                 // (avatar_frame встречается у части участников), поверх, без
@@ -360,13 +367,13 @@ struct TeamView: View {
                     RemoteImage(url: frameURL) { img in
                         img.resizable().scaledToFit()
                     } placeholder: { Color.clear }
-                    .frame(width: 38, height: 38)
+                    .frame(width: 54, height: 54)
                     .allowsHitTesting(false)
                 }
             }
-            .frame(width: 38, height: 38)
+            .frame(width: 44, height: 44)
 
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(member.username)
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(Theme.textPrimary)
@@ -379,9 +386,9 @@ struct TeamView: View {
                 }
             }
         }
-        .padding(.horizontal, 10)
-        .frame(height: 44)
-        .background(Theme.surfaceElevated, in: Capsule())
+        .padding(10)
+        .frame(maxWidth: 210, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     // MARK: Переключатель Тайтлы / Обновления
