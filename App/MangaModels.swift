@@ -383,6 +383,10 @@ struct MangaCover: Decodable {
     let thumbnail: String?
     let `default`: String?
     let md: String?
+    /// Полноразмерный оригинал — есть ТОЛЬКО в ответе /covers (доп. обложки,
+    /// см. MangaCoverGalleryItem ниже), у обычной MangaItem.cover его нет,
+    /// поэтому optional и не участвует в bestURL (не ломает остальные места).
+    let orig: String?
 
     /// Наиболее подходящий URL обложки для отображения в карточке.
     var bestURL: URL? {
@@ -399,6 +403,32 @@ struct MangaCover: Decodable {
     /// default/md обложка (обычно = то же самое, что и md, см. комментарий
     /// у bestURL) не нужна и только тратит трафик/время загрузки.
     var thumbnailURL: URL? { thumbnail.flatMap(URL.init(string:)) }
+
+    /// Максимальное качество — для полноэкранной листалки (см.
+    /// MangaDetailView.coverGalleryViewer): orig, а если его нет — то же,
+    /// что и bestURL.
+    var fullResURL: URL? {
+        if let orig, let url = URL(string: orig) { return url }
+        return bestURL
+    }
+}
+
+// MARK: - Доп. обложки тайтла (GET /manga/{slug}/covers)
+
+/// Галерея пользовательских обложек — ПОДТВЕРЖДЕНО реальным перехваченным
+/// запросом (пользователь прислал полное тело ответа): `GET
+/// /manga/{slug}/covers` → `{"data":[{"id","cover":{...MangaCover-форма,
+/// включая "orig"...},"info","order","user":{...}}]}`. `user` (кто добавил
+/// обложку) в ответе есть, но пока нигде не отображается — если понадобится
+/// атрибуция ("добавил: ник"), можно добавить, декодер её просто
+/// проигнорирует, раз поле не описано здесь. `info` — судя по примеру,
+/// просто порядковый номер строкой (не подтверждённая содержательная
+/// подпись), не показываем как текст.
+struct MangaCoverGalleryItem: Decodable, Identifiable {
+    let id: Int
+    let cover: MangaCover
+    let info: String?
+    let order: Int
 }
 
 /// Фоновая картинка тайтла (MangaDetail.background) — ПОДТВЕРЖДЕНО реальным

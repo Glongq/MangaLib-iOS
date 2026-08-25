@@ -20,6 +20,9 @@ struct MangaDetailView: View {
     @State private var showTitleNames = false
     /// Sheet «Скачать тайтл» — см. DownloadTitleSheet.
     @State private var showDownloadSheet = false
+    /// Полноэкранная листалка доп. обложек (тап по обложке в шапке) — см.
+    /// CoverGalleryView/coverGalleryBadge.
+    @State private var showCoverGallery = false
     /// URL тайтла для «Поделиться» (см. actionMenu) — обычная ссылка на
     /// страницу тайтла на активном сайте.
     private var shareURL: URL? {
@@ -193,6 +196,9 @@ struct MangaDetailView: View {
         .fullScreenCover(item: $readerOpen) { open in
             readerView(for: open.chapter, branchId: open.branchId)
         }
+        .fullScreenCover(isPresented: $showCoverGallery) {
+            CoverGalleryView(items: viewModel.coverGallery)
+        }
         .sheet(isPresented: $showLoginForComment) { LoginView() }
         .sheet(isPresented: $showLoginForSimilarVote) { LoginView() }
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
@@ -326,6 +332,15 @@ struct MangaDetailView: View {
                 .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
                 .overlay(alignment: .topLeading) { bookmarkStatusBadge }
                 .overlay(alignment: .bottomLeading) { coverRatingBadge }
+                .overlay(alignment: .topTrailing) { coverGalleryBadge }
+                // Тап в любое место обложки — полноэкранная листалка доп.
+                // обложек (см. CoverGalleryView), только если галерея реально
+                // не пустая (у большинства тайтлов доп. обложек нет вообще).
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard !viewModel.coverGallery.isEmpty else { return }
+                    showCoverGallery = true
+                }
 
                 titleBlockOverlay
             }
@@ -517,6 +532,29 @@ struct MangaDetailView: View {
                 }
             }
             .lineLimit(1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(.black.opacity(0.55), in: Capsule())
+            .padding(6)
+        }
+    }
+
+    /// Чип "иконка изображения + кол-во доп. обложек" — сверху справа на
+    /// обложке (см. GET /manga/{slug}/covers, MangaDetailViewModel.coverGallery).
+    /// Показывается только если галерея реально не пустая. Тап по всей
+    /// обложке (не только по чипу) открывает полноэкранную листалку — см.
+    /// heroHeader.
+    @ViewBuilder
+    private var coverGalleryBadge: some View {
+        if !viewModel.coverGallery.isEmpty {
+            HStack(spacing: 4) {
+                Image(systemName: "photo.on.rectangle")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white)
+                Text("\(viewModel.coverGallery.count)")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+            }
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(.black.opacity(0.55), in: Capsule())

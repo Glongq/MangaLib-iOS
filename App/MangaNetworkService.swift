@@ -662,6 +662,17 @@ final class MangaNetworkService {
         return response.data
     }
 
+    /// Доп. обложки (пользовательская галерея) — ПОДТВЕРЖДЕНО реальным
+    /// перехваченным запросом (пользователь прислал полное тело ответа):
+    /// `GET /manga/{slug}/covers` → `{"data":[{"id","cover","info","order",
+    /// "user"}]}`. LossyListResponse — один "битый" элемент не должен ронять
+    /// всю галерею.
+    func fetchCoverGallery(slug: String, siteId: Int? = nil) async throws -> [MangaCoverGalleryItem] {
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))/covers", queryItems: [], siteId: siteId)
+        let response: LossyListResponse<MangaCoverGalleryItem> = try await perform(request)
+        return response.data
+    }
+
     /// Статистика тайтла (оценки + распределение по спискам) — ПОДТВЕРЖДЕНО
     /// перехватом: `GET /manga/{slug}/stats` → `{data:{bookmarks, rating}}`.
     func fetchMangaStats(slug: String, siteId: Int? = nil) async throws -> MangaStats {

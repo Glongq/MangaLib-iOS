@@ -71,6 +71,12 @@ final class MangaDetailViewModel: ObservableObject {
     /// показывается, пустой список просто прячет строку.
     @Published private(set) var characters: [Character] = []
 
+    // MARK: Доп. обложки (GET /manga/{slug}/covers — ПОДТВЕРЖДЕНО перехватом,
+    // см. MangaNetworkService.fetchCoverGallery). Опциональный блок, как и
+    // остальные выше — ошибка не показывается, пустой список просто прячет
+    // чип со счётчиком на обложке (см. MangaDetailView.coverGalleryBadge).
+    @Published private(set) var coverGallery: [MangaCoverGalleryItem] = []
+
     // MARK: Статистика (GET /manga/{slug}/stats — ПОДТВЕРЖДЕНО перехватом).
     /// Оценки пользователей + распределение по спискам. Опциональный блок:
     /// ошибка не показывается, при nil блок скрыт.
@@ -133,7 +139,8 @@ final class MangaDetailViewModel: ObservableObject {
         async let similarResult: Void = loadSimilar()
         async let relatedResult: Void = loadRelated()
         async let statsResult: Void = loadStats()
-        let (chaptersError, _, _, _) = await (chaptersResult, similarResult, relatedResult, statsResult)
+        async let coverGalleryResult: Void = loadCoverGallery()
+        let (chaptersError, _, _, _, _) = await (chaptersResult, similarResult, relatedResult, statsResult, coverGalleryResult)
 
         // Показываем общую ошибку только если ничего не удалось загрузить.
         if detail == nil, chapters.isEmpty {
@@ -225,6 +232,15 @@ final class MangaDetailViewModel: ObservableObject {
             // Тихо игнорируем — по той же причине, что и loadSimilar выше:
             // "Связанное" опциональный блок, у большинства тайтлов его вообще
             // нет, ошибка загрузки не должна затенять основной экран.
+        }
+    }
+
+    private func loadCoverGallery() async {
+        do {
+            coverGallery = try await service.fetchCoverGallery(slug: slug, siteId: resolvedSiteId)
+        } catch {
+            // Тихо игнорируем — по той же причине, что и loadSimilar/loadRelated:
+            // опциональный блок, ошибка загрузки не должна затенять основной экран.
         }
     }
 
