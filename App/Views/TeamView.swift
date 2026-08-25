@@ -204,8 +204,8 @@ struct TeamView: View {
     /// команды. ПОДТВЕРЖДЕНО перехватом: стартовое состояние — реальный
     /// GET /favorites/team/{id} (TeamViewModel.loadSubscriptionStatus),
     /// переключение — тот же POST /favorites, что и у колокольчика в чипе
-    /// главы (TeamChipView). Акцентное стекло, пока не подписан; после
-    /// подписки — обычное стекло, текст меняется на "Увед. включены" со
+    /// главы (TeamChipView). Обычное стекло в обоих состояниях (без
+    /// акцента, по прямой просьбе) — текст меняется на "Увед. включены" со
     /// значком колокольчика с галкой.
     private var subscribeButton: some View {
         Button { vm.toggleSubscription() } label: {
@@ -227,10 +227,10 @@ struct TeamView: View {
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
             }
-            .foregroundStyle(vm.isSubscribed ? Theme.textPrimary : .white)
+            .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 16)
             .frame(height: 46)
-            .glassEffect(vm.isSubscribed ? .regular.interactive() : .regular.tint(Theme.accent).interactive(), in: Capsule())
+            .glassEffect(.regular.interactive(), in: Capsule())
         }
         .buttonStyle(.plain)
         .disabled(vm.isTogglingSubscription)
