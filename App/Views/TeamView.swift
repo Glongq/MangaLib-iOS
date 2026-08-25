@@ -18,6 +18,7 @@ struct TeamView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showFilters = false
     @State private var showTeamNames = false
+    @State private var showAllMembers = false
     @State private var profileUser: ProfileUserId?
     @State private var selectedTab: Tab = .titles
     @FocusState private var searchFocused: Bool
@@ -105,6 +106,7 @@ struct TeamView: View {
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
+        .sheet(isPresented: $showAllMembers) { TeamMembersSheet(members: vm.members) }
     }
 
     /// alt_name с сервера — одна строка через запятую ("DIT, дед, деды, …") —
@@ -374,6 +376,11 @@ struct TeamView: View {
     /// неработающими кнопками до переключения вкладки). Количество
     /// участников — отдельным чипом в metaRow выше, поэтому здесь в
     /// заголовке больше не дублируется.
+    /// Первые 10 в горизонтальном скролле, дальше — чип "Показать ещё N"
+    /// (по прямой просьбе, вместо пролистывания всех 200+) — открывает
+    /// TeamMembersSheet с полным списком сеткой.
+    private static let membersInlineLimit = 10
+
     @ViewBuilder
     private var membersSection: some View {
         if !vm.members.isEmpty {
@@ -381,9 +388,15 @@ struct TeamView: View {
                 Text("Участники").font(.headline).foregroundStyle(Theme.textPrimary)
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 12) {
-                        ForEach(vm.members) { member in
+                        ForEach(vm.members.prefix(Self.membersInlineLimit)) { member in
                             Button { profileUser = ProfileUserId(id: member.userId) } label: {
                                 memberChip(member)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        if vm.members.count > Self.membersInlineLimit {
+                            Button { showAllMembers = true } label: {
+                                showMoreMembersChip(remaining: vm.members.count - Self.membersInlineLimit)
                             }
                             .buttonStyle(.plain)
                         }
@@ -395,10 +408,19 @@ struct TeamView: View {
         }
     }
 
-    /// Раскладка — 1-в-1 HomeView.topActiveUserCard ("Читают" → "Топ активных
-    /// недели"), по прямой просьбе, только со своими данными: вместо
-    /// ранга (N#) и "Уровень N"/полоски прогресса (этого у участника
-    /// команды просто нет) — роль второй строкой.
+    private func showMoreMembersChip(remaining: Int) -> some View {
+        HStack(spacing: 6) {
+            Text("Показать ещё \(remaining)")
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(Theme.textPrimary)
+        .padding(.horizontal, 14)
+        .frame(height: Self.metaChipHeight)
+        .background(Theme.surfaceElevated, in: Capsule())
+    }
+
     /// Форма — 1-в-1 TeamChipView (чип команды в списке глав карточки
     /// тайтла): Capsule, Theme.surfaceElevated, паддинг/высота
     /// metaChipHeight, аватар 28×28 круг. Контент — свой (участник, а не
@@ -606,5 +628,96 @@ struct TeamView: View {
                 ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 16)
             }
         }
+    }
+}
+
+/// Полный список участников команды — открывается по "Показать ещё N" в
+/// TeamView.membersSection (по прямой просьбе, вместо горизонтального
+/// пролистывания всех 200+ разом). Сетка 2 колонки (по 50% ширины каждая),
+/// шапка "Участники" + крестик закрытия справа сверху. Свой собственный
+/// profileUser/.sheet(item:) — НЕ переиспользует TeamView.profileUser,
+/// чтобы не пытаться показать два .sheet с одного и того же уровня (этот
+/// сам уже sheet); тап на участнике здесь открывает профиль СВОИМ sheet
+/// поверх этого, а не пытается закрыть текущий и открыть родительский.
+struct TeamMembersSheet: View {
+    let members: [TeamMemberEntry]
+
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var themeManager = ThemeManager.shared
+    @State private var profileUser: ProfileUserId?
+
+    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(members) { member in
+                        Button { profileUser = ProfileUserId(id: member.userId) } label: {
+                            memberCell(member)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(16)
+            }
+            .background(Theme.background.ignoresSafeArea())
+            .navigationTitle("Участники")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+        }
+        .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
+    }
+
+    /// Та же форма, что и memberChip в TeamView (Capsule/Theme.surfaceElevated/
+    /// аватар 28×28), но растянута на всю ширину колонки сетки (а не
+    /// hugging-контент, как в горизонтальном скролле) — иначе длинный
+    /// ник/роль просто раздували бы капсулу вместо обрезки "...".
+    private func memberCell(_ member: TeamMemberEntry) -> some View {
+        HStack(spacing: 8) {
+            ZStack {
+                RemoteImage(url: member.avatarURL) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Circle().fill(Theme.surface)
+                }
+                .frame(width: 28, height: 28)
+                .clipShape(Circle())
+
+                if let frameURL = member.avatarFrameURL {
+                    RemoteImage(url: frameURL) { img in
+                        img.resizable().scaledToFit()
+                    } placeholder: { Color.clear }
+                    .frame(width: 38, height: 38)
+                    .allowsHitTesting(false)
+                }
+            }
+            .frame(width: 38, height: 38)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(member.username)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                if let role = member.rolesString, !role.isEmpty {
+                    Text(role)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 44)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 }
