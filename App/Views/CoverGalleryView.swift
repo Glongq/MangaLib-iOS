@@ -133,7 +133,7 @@ struct CoverGalleryView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .blur(radius: 30)
+        .blur(radius: 20) // было 30, уменьшили в 1.5х по просьбе
         .overlay(Color.black.opacity(0.45))
         .clipped()
         .ignoresSafeArea()
