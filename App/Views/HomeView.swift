@@ -23,6 +23,8 @@ struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var bookmarks = BookmarksStore.shared
+    /// Экран входа для "Мои обновления" без аккаунта — см. updatesTabBinding.
+    @State private var showLoginForUpdates = false
 
     /// Эталонный размер названия тайтла для ЭТОЙ страницы — тот же расчёт,
     /// что и MangaCardView.titleFont (caption1 × 1.2, medium), которым уже
@@ -54,6 +56,13 @@ struct HomeView: View {
             .navigationDestination(for: HistoryEntry.self) { entry in
                 MangaDetailView(slug: entry.media.apiSlug, fallbackTitle: entry.media.displayTitle,
                                  coverURL: entry.media.cover?.bestURL, item: entry.media)
+            }
+            .sheet(isPresented: $showLoginForUpdates, onDismiss: {
+                // Успешный вход — сразу открываем именно ту вкладку,
+                // ради которой пользователь и заходил.
+                if AuthSession.shared.isLoggedIn { viewModel.updatesTab = .mine }
+            }) {
+                LoginView()
             }
         }
         .task {
@@ -631,12 +640,31 @@ struct HomeView: View {
 
     // MARK: Последние обновления
 
+    /// "Все обновления" — /latest-updates, не привязан к аккаунту, работает
+    /// без входа (см. MangaNetworkService.fetchLatestUpdates). "Мои
+    /// обновления" — /user-latest-updates, требует аккаунт: при тапе без
+    /// входа сразу открываем экран входа вместо пустого/ошибочного списка
+    /// (см. updatesTabBinding), а после успешного входа сама переключаем
+    /// вкладку на "Мои" — ровно то, что пользователь и пытался открыть.
+    private var updatesTabBinding: Binding<HomeUpdatesTab> {
+        Binding(
+            get: { viewModel.updatesTab },
+            set: { newValue in
+                if newValue == .mine && !AuthSession.shared.isLoggedIn {
+                    showLoginForUpdates = true
+                    return
+                }
+                viewModel.updatesTab = newValue
+            }
+        )
+    }
+
     private var updatesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("Последние обновления")
                 .padding(.horizontal, 16)
 
-            Picker("", selection: $viewModel.updatesTab) {
+            Picker("", selection: updatesTabBinding) {
                 ForEach(HomeUpdatesTab.allCases) { tab in
                     Text(tab.title).tag(tab)
                 }
