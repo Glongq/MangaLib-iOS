@@ -119,24 +119,42 @@ struct StorageSettingsView: View {
         }
     }
 
-    /// Полоска — реальная пропорция от ВСЕЙ ёмкости диска: другие
-    /// приложения/скачанные тайтлы/кеш и, отдельным сегментом, свободное
-    /// место (без строки в легенде — по прямой просьбе).
+    /// Полоска — реальная пропорция от ВСЕЙ ёмкости диска, единым цельным
+    /// столбиком БЕЗ зазоров между сегментами (другие приложения → скачанные
+    /// тайтлы → кеш идут вплотную друг к другу), с тонкой "палочкой"-границей
+    /// ровно там, где занятое место заканчивается и начинается свободное
+    /// (серый сегмент, без строки в легенде — по прямой просьбе). У любого
+    /// ненулевого сегмента — минимальная видимая ширина: иначе совсем
+    /// маленький объём (доли МБ на фоне сотен ГБ ёмкости) при округлении
+    /// пропорции пропадал бы совсем, а он должен быть виден хоть тонкой
+    /// полоской.
     private var storageBar: some View {
         let total = max(1, stats.totalCapacity)
         return GeometryReader { geo in
-            HStack(spacing: 3) {
-                Capsule().fill(.blue)
-                    .frame(width: geo.size.width * CGFloat(stats.otherAppsBytes) / CGFloat(total))
-                Capsule().fill(.green)
-                    .frame(width: geo.size.width * CGFloat(stats.downloadsBytes) / CGFloat(total))
-                Capsule().fill(Theme.textSecondary.opacity(0.6))
-                    .frame(width: geo.size.width * CGFloat(stats.cacheBytes) / CGFloat(total))
-                Capsule().fill(Color.gray.opacity(0.25))
-                    .frame(width: geo.size.width * CGFloat(stats.availableCapacity) / CGFloat(total))
+            let width = geo.size.width
+            HStack(spacing: 0) {
+                barSegment(.blue, bytes: stats.otherAppsBytes, total: total, fullWidth: width)
+                barSegment(.green, bytes: stats.downloadsBytes, total: total, fullWidth: width)
+                barSegment(Theme.textSecondary.opacity(0.6), bytes: stats.cacheBytes, total: total, fullWidth: width)
+                if stats.usedByApp + stats.otherAppsBytes > 0 && stats.availableCapacity > 0 {
+                    Rectangle().fill(Theme.background).frame(width: 2)
+                }
+                barSegment(Color.gray.opacity(0.25), bytes: stats.availableCapacity, total: total, fullWidth: width)
+                Spacer(minLength: 0)
             }
+            .frame(width: width, height: 10)
+            .clipShape(Capsule())
         }
         .frame(height: 10)
+    }
+
+    /// Минимум 3pt для любого ненулевого сегмента — гарантированно видимая
+    /// тонкая полоска, даже если реальная доля от общей ёмкости диска
+    /// округляется до долей пикселя.
+    private func barSegment(_ color: Color, bytes: Int64, total: Int64, fullWidth: CGFloat) -> some View {
+        let raw = fullWidth * CGFloat(bytes) / CGFloat(total)
+        let width: CGFloat = bytes > 0 ? max(raw, 3) : 0
+        return Rectangle().fill(color).frame(width: width)
     }
 
     private func legendRow(color: Color, title: String, bytes: Int64) -> some View {
@@ -171,11 +189,14 @@ struct StorageSettingsView: View {
 
             Divider().overlay(Theme.separator).padding(.horizontal, 16)
 
+            // Байт тут намеренно не показываем (просто "Очистить"/"Нет
+            // данных") — это тот же самый объём, что уже показан в легенде
+            // хранилища как "Скачанные тайтлы", дублировать цифру незачем.
             dataRow(
                 title: "Кеш загрузки",
                 subtitle: "Остатки отменённых/недокачанных глав",
                 trailing: stats.orphanedDownloadBytes > 0
-                    ? .clear(bytes: stats.orphanedDownloadBytes) { showClearDownloadsCacheConfirm = true }
+                    ? .clear(bytes: nil) { showClearDownloadsCacheConfirm = true }
                     : .empty,
                 showDivider: false
             )
