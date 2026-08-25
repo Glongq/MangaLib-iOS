@@ -53,6 +53,7 @@ struct TeamView: View {
 
                     VStack(alignment: .leading, spacing: 18) {
                         nameAndStats
+                        membersSection
 
                         if let desc = vm.detail?.description, !desc.isEmpty {
                             ExpandableDescription(text: desc)
@@ -188,6 +189,55 @@ struct TeamView: View {
                 .scrollIndicators(.hidden)
             }
         }
+    }
+
+    /// Участники команды — по прямой просьбе должны быть чипами с ролями и
+    /// ссылкой на профиль каждого. РЕАЛИЗОВАНО ЧАСТИЧНО: в перехваченном
+    /// ответе GET /teams/{slug_url} поле "users" содержит ТОЛЬКО роль
+    /// (roles_string) — ни id, ни username, ни аватара ни у одной записи
+    /// нет (все 8 в примере полностью анонимны). Показать, КТО именно
+    /// участник, и тем более дать рабочую ссылку на профиль — нечем: нет
+    /// данных, по которым открыть ProfileView(userId:). Вместо выдуманных
+    /// профилей — честная сводка по ролям с количеством (реальные данные,
+    /// просто без персоналий). Нужен новый перехват (в идеале — самого
+    /// запроса, отдающего участников с id/username), чтобы сделать чипы
+    /// кликабельными, как просили.
+    @ViewBuilder
+    private var membersSection: some View {
+        if !memberRoleGroups.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Участники").font(.headline).foregroundStyle(Theme.textPrimary)
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(memberRoleGroups, id: \.role) { group in
+                            HStack(spacing: 6) {
+                                Image(systemName: "person.fill").font(.caption)
+                                Text(group.count > 1 ? "\(group.role) · \(group.count)" : group.role)
+                                    .font(.footnote.weight(.medium))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(Theme.textPrimary)
+                            .padding(.horizontal, 12)
+                            .frame(height: 36)
+                            .background(Theme.surfaceElevated, in: Capsule())
+                        }
+                    }
+                    .padding(.trailing, 4)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+    }
+
+    private var memberRoleGroups: [(role: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for member in vm.detail?.members ?? [] {
+            let role = member.rolesString ?? "Участник"
+            if counts[role] == nil { order.append(role) }
+            counts[role, default: 0] += 1
+        }
+        return order.map { (role: $0, count: counts[$0] ?? 0) }
     }
 
     private func statColumn(value: String?, label: String) -> some View {

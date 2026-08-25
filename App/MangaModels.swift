@@ -1269,6 +1269,19 @@ struct FavoriteToggleResponse: Decodable {
     }
 }
 
+/// Один участник команды — ПОДТВЕРЖДЕНО перехватом (поле "users" в
+/// GET /teams/{slug_url}): `{roles:[], roles_string:"Участник",
+/// permissions:[], requested_at, order, team_id}`. ВАЖНО: в перехваченном
+/// примере (8 записей) НИ У ОДНОЙ нет id/username/аватара вообще — только
+/// роль. Это значит: показать, КТО именно участник (имя/аватар), и тем
+/// более дать ссылку на его профиль — нечем, таких данных сервер в этом
+/// ответе не отдаёт (см. TeamView.membersSection — рендерит только сводку
+/// по ролям, без ссылок, честно вместо выдуманных профилей).
+struct TeamMember: Decodable {
+    let rolesString: String?
+    enum CodingKeys: String, CodingKey { case rolesString = "roles_string" }
+}
+
 /// Детальная страница переводчика (команды) — ПОДТВЕРЖДЕНО реальным
 /// перехватом `GET /teams/{slug_url}?fields[]=chaptersPerMonth&
 /// fields[]=auto_moderation&fields[]=team_rating&fields[]=ignored_by_user`.
@@ -1288,12 +1301,14 @@ struct TeamDetail: Decodable, Identifiable {
     let website: String?
     let description: String?
     let stats: [TeamStat]
+    let members: [TeamMember]
     let titlesCountBySite: [Int: Int]
 
     enum CodingKeys: String, CodingKey {
         case id, slug, name, cover, background, vk, discord, website, stats, description
         case slugURL = "slug_url"
         case altName = "alt_name"
+        case members = "users"
         case titlesCountDetails = "titles_count_details"
     }
 
@@ -1326,6 +1341,7 @@ struct TeamDetail: Decodable, Identifiable {
         }
 
         stats = ((try? c.decodeIfPresent([TeamStat].self, forKey: .stats)) ?? nil) ?? []
+        members = ((try? c.decodeIfPresent([TeamMember].self, forKey: .members)) ?? nil) ?? []
 
         if let raw = ((try? c.decodeIfPresent([String: Int].self, forKey: .titlesCountDetails)) ?? nil) {
             var m: [Int: Int] = [:]
