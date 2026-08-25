@@ -164,6 +164,14 @@ struct HistoryView: View {
         }
     }
 
+    /// 1в1 как в Закладках/Новое (см. BookmarksView.row/NotificationsView.row)
+    /// по прямой просьбе — тот же размер/соотношение/радиус обложки (эталон
+    /// Каталога, 2:3/16, общая константа BookmarksView.bookmarkCoverWidth/
+    /// Height), обложка вплотную к краю подложки (не по центру с отступом
+    /// 10 со всех сторон, как было), тот же радиус подложки (16, было 18),
+    /// тот же размер текста (.subheadline/.caption2, было
+    /// .subheadline.weight(.medium)/.caption/.caption2 — крупнее и другой
+    /// шрифт), центрирование по высоте вместо .padding(10) со всех сторон.
     private func row(_ entry: HistoryEntry) -> some View {
         HStack(spacing: 12) {
             RemoteImage(url: entry.media.cover?.bestURL) { image in
@@ -173,17 +181,17 @@ struct HistoryView: View {
             } failure: {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
-            .frame(width: 60, height: 84)
+            .frame(width: BookmarksView.bookmarkCoverWidth, height: BookmarksView.bookmarkCoverHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(entry.media.displayTitle)
-                    .font(.subheadline.weight(.medium))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
                 Text("Том \(entry.item.volume), Глава \(entry.item.number)")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(Theme.accent)
                 Text(Self.dateFormatter.string(from: entry.viewAt))
                     .font(.caption2)
@@ -192,8 +200,9 @@ struct HistoryView: View {
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textSecondary)
         }
-        .padding(10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.trailing, 12)
+        .frame(height: BookmarksView.bookmarkCoverHeight)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private static let dateFormatter: DateFormatter = {
