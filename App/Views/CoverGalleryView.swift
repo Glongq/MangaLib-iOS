@@ -47,6 +47,10 @@ extension UIApplication {
 /// - Переход открытия — .navigationTransition(.zoom(...)) (iOS 18+): картинка
 ///   визуально "вырастает" из обложки на карточке тайтла — источник помечен
 ///   .matchedTransitionSource(id:in:) на самой обложке (см. MangaDetailView).
+///   Блюр-фон СИНХРОННО нарастает вместе с этим ростом (не появляется сразу
+///   готовым) — см. isBlurred/background(size:) — а при закрытии так же
+///   плавно спадает, ПЕРЕД тем как реально закрыть экран (см. closeGallery),
+///   т.е. в точности то же самое, просто в обратном порядке, как попросили.
 struct CoverGalleryView: View {
     let images: [URL]
     let backgroundSnapshot: UIImage?
@@ -55,6 +59,11 @@ struct CoverGalleryView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var currentIndex: Int
+    /// Управляет интенсивностью блюра/затемнения фона — false в момент
+    /// появления (пока картинка ещё "летит" от обложки к полному экрану),
+    /// затем анимированно true. При закрытии — обратно к false, и уже
+    /// ПОСЛЕ этого закрытие экрана (см. closeGallery).
+    @State private var isBlurred = false
 
     init(images: [URL], backgroundSnapshot: UIImage?, transitionSourceID: String, transitionNamespace: Namespace.ID) {
         self.images = images
@@ -63,6 +72,10 @@ struct CoverGalleryView: View {
         self.transitionNamespace = transitionNamespace
         _currentIndex = State(initialValue: max(0, images.count - 1))
     }
+
+    /// Длительность фейда блюра — подобрана под примерную длительность
+    /// системного .navigationTransition(.zoom), её саму API не отдаёт.
+    private static let blurFadeDuration: Double = 0.35
 
     var body: some View {
         GeometryReader { proxy in
@@ -80,8 +93,11 @@ struct CoverGalleryView: View {
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .ignoresSafeArea()
+        .onAppear {
+            withAnimation(.easeOut(duration: Self.blurFadeDuration)) { isBlurred = true }
+        }
         .overlay(alignment: .topTrailing) {
-            Button { dismiss() } label: {
+            Button(action: closeGallery) {
                 Image(systemName: "xmark")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
@@ -110,6 +126,17 @@ struct CoverGalleryView: View {
         .navigationTransition(.zoom(sourceID: transitionSourceID, in: transitionNamespace))
     }
 
+    /// Сначала плавно снимаем блюр (та же анимация, что при открытии, в
+    /// обратную сторону), и ТОЛЬКО ПОСЛЕ этого реально закрываем экран —
+    /// иначе dismiss() убрал бы вьюху мгновенно, а обратная анимация блюра
+    /// просто не успела бы отыграть.
+    private func closeGallery() {
+        withAnimation(.easeIn(duration: Self.blurFadeDuration)) { isBlurred = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.blurFadeDuration) {
+            dismiss()
+        }
+    }
+
     @ViewBuilder
     private func background(size: CGSize) -> some View {
         if let backgroundSnapshot {
@@ -117,11 +144,11 @@ struct CoverGalleryView: View {
                 .resizable()
                 .scaledToFill()
                 .frame(width: size.width, height: size.height)
-                .blur(radius: 30)
-                .overlay(Color.black.opacity(0.45))
+                .blur(radius: isBlurred ? 30 : 0)
+                .overlay(Color.black.opacity(isBlurred ? 0.45 : 0))
                 .clipped()
         } else {
-            Color.black
+            Color.black.opacity(isBlurred ? 1 : 0)
         }
     }
 
