@@ -65,13 +65,17 @@ struct CoverGalleryView: View {
             .padding(.top, 54)
         }
         .overlay(alignment: .bottom) {
+            // Тот же стеклянный бабл, что у номера страницы в читалке манги
+            // (см. MangaReaderView.pageBubble) — тот же шрифт/паддинг/капсула,
+            // просто белый текст (в читалке fg зависит от темы страницы, тут
+            // всегда поверх фото/чёрного фона).
             if images.count > 1 {
-                Text("\(currentIndex + 1) / \(images.count)")
-                    .font(.system(size: 13, weight: .semibold))
+                Text("\(currentIndex + 1)/\(images.count)")
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.black.opacity(0.55), in: Capsule())
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .glassEffect(.regular, in: Capsule())
                     .padding(.bottom, 24)
             }
         }
