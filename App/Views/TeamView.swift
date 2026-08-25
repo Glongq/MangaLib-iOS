@@ -60,7 +60,7 @@ struct TeamView: View {
                     heroHeader(avatarSize: cardWidth)
 
                     VStack(alignment: .leading, spacing: 18) {
-                        socialLinks
+                        socialLinks(availableWidth: proxy.size.width - 32)
                         metaRow(availableWidth: proxy.size.width - 32)
                         membersSection
 
@@ -311,29 +311,35 @@ struct TeamView: View {
     /// Ссылки на соцсети (vk/discord/website — все три подтверждены
     /// перехватом), только если реально есть. НЕ стеклянные — по прямой
     /// просьбе, обычная плашка (Theme.surfaceElevated), как у чипов
-    /// метаданных ниже. Своих иконок VK/Discord в приложении нет — generic
-    /// SF Symbols (см. список "что уточнить").
-    @ViewBuilder
-    private var socialLinks: some View {
+    /// метаданных ниже. По центру и ниже/мельче, чем раньше — та же техника
+    /// принудительной ширины, что и у metaRow (см. комментарий там: у
+    /// ScrollView(.horizontal) в осевом направлении контенту предлагается
+    /// неограниченная ширина, поэтому центрирование требует minWidth с
+    /// реальным числом, а не maxWidth: .infinity). Своих иконок VK/Discord в
+    /// приложении нет — generic SF Symbols (см. список "что уточнить").
+    private func socialLinks(availableWidth: CGFloat) -> some View {
         let links = socialLinkItems
-        if !links.isEmpty {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(links, id: \.label) { link in
-                        Link(destination: link.url) {
-                            HStack(spacing: 6) {
-                                Image(systemName: link.icon).font(.footnote.weight(.semibold))
-                                Text(link.label).font(.footnote.weight(.medium)).lineLimit(1)
+        return Group {
+            if !links.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(links, id: \.label) { link in
+                            Link(destination: link.url) {
+                                HStack(spacing: 5) {
+                                    Image(systemName: link.icon).font(.caption2.weight(.semibold))
+                                    Text(link.label).font(.caption2.weight(.medium)).lineLimit(1)
+                                }
+                                .foregroundStyle(Theme.textPrimary)
+                                .padding(.horizontal, 10)
+                                .frame(height: 28)
+                                .background(Theme.surfaceElevated, in: Capsule())
                             }
-                            .foregroundStyle(Theme.textPrimary)
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: Theme.pillControlHeight)
-                            .background(Theme.surfaceElevated, in: Capsule())
                         }
                     }
+                    .frame(minWidth: availableWidth, alignment: .center)
                 }
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         }
     }
 
