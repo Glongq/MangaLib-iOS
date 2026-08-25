@@ -29,28 +29,29 @@ extension UIApplication {
 /// шапке карточки тайтла (см. MangaDetailView.heroHeader/coverGalleryBadge).
 ///
 /// - Стартует с ПОСЛЕДНЕЙ картинки (initialIndex = images.count - 1), не с
-///   первой — по прямой просьбе: последний элемент галереи всегда и есть
-///   ТЕКУЩАЯ обложка тайтла, значит открывать нужно именно с неё ("37/37"),
-///   а свайп дальше — уже вглубь истории обложек.
-/// - Блюр-фон — ОДИН снимок приложения (см. UIView.renderedSnapshot выше),
-///   а не блюр текущей картинки, и ВСЕГДА включён на полную (без своей
-///   анимации нарастания/спада — раньше пробовали анимировать это отдельно
-///   от системного .navigationTransition(.zoom), но два независимых
-///   анимации (системная + наша) не синхронизировались и давали дёрганое
-///   закрытие что кнопкой, что свайпом — "в конце дёргается и выравнивается".
-///   Теперь блюр статичен, всю визуальную работу открытия/закрытия делает
-///   ТОЛЬКО .navigationTransition — она и должна быть единственным источником
-///   движения, тогда дёргаться нечему).
+///   первой — последний элемент галереи всегда и есть ТЕКУЩАЯ обложка
+///   тайтла, значит открывать нужно именно с неё ("37/37").
+/// - Блюр-фон — background(), ОДИН вью-инстанс, СИБЛИНГ у TabView в общем
+///   ZStack (а не что-то внутри каждой страницы) — один и тот же для ВСЕХ
+///   страниц галереи, не пересоздаётся при пролистывании. Внутри — снимок
+///   приложения (см. UIView.renderedSnapshot выше), не блюр текущей
+///   картинки, и всегда включён на полную (без своей анимации нарастания/
+///   спада — отдельная от системного .navigationTransition(.zoom) анимация
+///   не синхронизировалась с ней и давала дёрганое закрытие).
+/// - НИКАКОГО GeometryReader — раньше страницы и фон получали явный размер
+///   через proxy.size из GeometryReader, и это было источником сразу
+///   нескольких проблем: 1) фон иногда не докрывал экран до конца ("блюр не
+///   на всё, снизу какая-то штука недоделанная" — GeometryReader не всегда
+///   успевал пересчитать size синхронно с .ignoresSafeArea()/скрытием home
+///   indicator), 2) свайп между страницами слегка "довозил" в конце
+///   (лишний пересчёт geometry). Теперь и фон, и страницы — просто
+///   .frame(maxWidth: .infinity, maxHeight: .infinity) — тянутся под
+///   реальный размер контейнера НЕПРЕРЫВНО, в каждом кадре анимации, без
+///   отдельного измерения.
 /// - Крестик закрытия — тот же стеклянный кружок, что и у кнопки "..." на
-///   карточке тайтла, но поднят на высоту своей же кнопки (48pt) —
-///   по прямой просьбе.
+///   карточке тайтла, поднят на высоту своей же кнопки (48pt).
 /// - Плейсхолдер картинки, пока грузится — скелетон (SkeletonBox), не
-///   спиннер: тот же приём, что и везде в приложении, плюс — по словам
-///   пользователя — устойчивый одинаковый размер плейсхолдера сглаживает
-///   ощущение "дёрганого" пролистывания между страницами.
-/// - Каждая страница получает ЯВНЫЙ фиксированный размер (proxy.size из
-///   ОДНОГО общего GeometryReader) — устраняет наезд страниц друг на друга
-///   при свайпе, пока картинка ещё грузится.
+///   спиннер — тот же приём, что и везде в приложении.
 struct CoverGalleryView: View {
     let images: [URL]
     let backgroundSnapshot: UIImage?
@@ -70,20 +71,15 @@ struct CoverGalleryView: View {
 
     var body: some View {
         ZStack {
-            GeometryReader { proxy in
-                ZStack {
-                    background(size: proxy.size)
+            background
 
-                    TabView(selection: $currentIndex) {
-                        ForEach(images.indices, id: \.self) { index in
-                            page(images[index], index: index, size: proxy.size)
-                                .tag(index)
-                        }
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
+            TabView(selection: $currentIndex) {
+                ForEach(images.indices, id: \.self) { index in
+                    page(images[index], index: index)
+                        .tag(index)
                 }
-                .frame(width: proxy.size.width, height: proxy.size.height)
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .ignoresSafeArea()
         .overlay(alignment: .topTrailing) {
@@ -119,19 +115,28 @@ struct CoverGalleryView: View {
         .navigationTransition(.zoom(sourceID: transitionSourceID, in: transitionNamespace))
     }
 
+    /// ОДИН общий фон на всю галерею — сиблинг TabView в ZStack выше, не
+    /// часть какой-либо отдельной страницы, поэтому не пересоздаётся и не
+    /// "мигает" при пролистывании. .frame(maxWidth:.infinity,
+    /// maxHeight:.infinity) вместо явного числового размера — гарантированно
+    /// покрывает весь контейнер целиком, включая углы под статус-баром/home
+    /// indicator, без риска не успеть пересчитаться.
     @ViewBuilder
-    private func background(size: CGSize) -> some View {
-        if let backgroundSnapshot {
-            Image(uiImage: backgroundSnapshot)
-                .resizable()
-                .scaledToFill()
-                .frame(width: size.width, height: size.height)
-                .blur(radius: 30)
-                .overlay(Color.black.opacity(0.45))
-                .clipped()
-        } else {
-            Color.black
+    private var background: some View {
+        Group {
+            if let backgroundSnapshot {
+                Image(uiImage: backgroundSnapshot)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color.black
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .blur(radius: 30)
+        .overlay(Color.black.opacity(0.45))
+        .clipped()
+        .ignoresSafeArea()
     }
 
     /// "Окно" — реальный RemoteImage только у текущей страницы и её
@@ -143,7 +148,7 @@ struct CoverGalleryView: View {
     /// медленно"). Соседей держим прогретыми — иначе при свайпе следующая
     /// страница на мгновение была бы пустой, пока стартует загрузка.
     @ViewBuilder
-    private func page(_ url: URL, index: Int, size: CGSize) -> some View {
+    private func page(_ url: URL, index: Int) -> some View {
         let isInWindow = abs(index - currentIndex) <= 1
         Group {
             if isInWindow {
@@ -151,7 +156,6 @@ struct CoverGalleryView: View {
                     img.resizable().scaledToFit()
                 } placeholder: {
                     SkeletonBox()
-                        .frame(width: size.width, height: size.height)
                 } failure: {
                     Image(systemName: "photo")
                         .font(.system(size: 40))
@@ -162,12 +166,12 @@ struct CoverGalleryView: View {
                 Color.clear
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Только контент СВОЕЙ страницы (не сам жест пролистывания
         // TabView — тот уже нативно плавный) плавно проявляется/меняется —
         // раньше плейсхолдер/картинка внутри страницы просто резко
         // подменялись, отсюда и ощущение "резких" свайпов.
         .animation(.easeInOut(duration: 0.2), value: isInWindow)
-        .frame(width: size.width, height: size.height)
     }
 }
 
