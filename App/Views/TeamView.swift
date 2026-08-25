@@ -61,7 +61,7 @@ struct TeamView: View {
 
                     VStack(alignment: .leading, spacing: 18) {
                         socialLinks
-                        metaRow
+                        metaRow(availableWidth: proxy.size.width - 32)
                         membersSection
 
                         if let desc = vm.detail?.description, !desc.isEmpty {
@@ -274,8 +274,13 @@ struct TeamView: View {
     // MARK: Метаданные — те же чипы, что у тайтла (MangaDetailView.infoBlock)
 
     /// Статистика команды + отдельным чипом количество участников (по
-    /// прямой просьбе — "тоже в чипы метаданных вместе").
-    private var metaRow: some View {
+    /// прямой просьбе — "тоже в чипы метаданных вместе"). По центру (в
+    /// отличие от чипов участников ниже, которые "от угла", т.е. слева) —
+    /// availableWidth нужен явно: ScrollView(.horizontal) в осевом
+    /// направлении предлагает контенту НЕОГРАНИЧЕННУЮ ширину, поэтому
+    /// .frame(maxWidth: .infinity) сам по себе тут не центрирует (растёт до
+    /// бесконечности вместо этого) — только minWidth с реальным числом.
+    private func metaRow(availableWidth: CGFloat) -> some View {
         let statItems: [(heading: String, value: String)] = (vm.detail?.stats ?? []).compactMap { stat in
             guard let value = stat.short, let heading = stat.label else { return nil }
             return (heading, value)
@@ -288,6 +293,7 @@ struct TeamView: View {
                     infoBlock(item.heading, value: item.value)
                 }
             }
+            .frame(minWidth: availableWidth, alignment: .center)
         }
         .scrollIndicators(.hidden)
     }
