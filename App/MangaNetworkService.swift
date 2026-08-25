@@ -1437,6 +1437,15 @@ enum MangaImageURL {
         imageServers = merged
     }
 
+    /// CDN страниц 18+-сайтов (SlashLib=2, HentaiLib=4) — ПОДТВЕРЖДЕНО
+    /// перехватом (proxypin, 2026-08-25: `img3.hentaicdn.org//manga/qtut/
+    /// chapters/613537/...page-34_6w55.png`). Ни в fallbackServers, ни в
+    /// реальном /constants.imageServers (тот запрос его вообще не отдал у
+    /// HentaiLib — см. капчу с /constants) этого хоста нет, поэтому без
+    /// отдельной подстановки страницы этих двух сайтов не грузились бы ни
+    /// одним из общих серверов картинок MangaLib/RanobeLib.
+    private static let hentaiImageServer = "https://img3.hentaicdn.org"
+
     /// Все варианты URL страницы (по разным серверам) — для перебора при ошибке загрузки.
     /// Важно: `url` приходит вида «//manga/.../001.jpg» (ведущий двойной слэш) — нормализуем.
     static func pageURLs(for page: PageItem) -> [URL] {
@@ -1467,6 +1476,14 @@ enum MangaImageURL {
             ordered.remove(at: idx)
         }
         ordered.insert(preferred, at: 0)
+
+        // На 18+-сайтах общие сервера картинок не отдадут страницу вообще —
+        // ставим подтверждённый хентай-CDN первым кандидатом, общие
+        // оставляем следом резервом (см. hentaiImageServer выше).
+        if [2, 4].contains(SiteSession.shared.activeSite.rawValue) {
+            ordered.removeAll { $0 == hentaiImageServer }
+            ordered.insert(hentaiImageServer, at: 0)
+        }
 
         return ordered.compactMap { URL(string: $0 + "/" + path) }
     }
