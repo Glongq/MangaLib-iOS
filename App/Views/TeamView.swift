@@ -682,7 +682,11 @@ struct TeamMembersSheet: View {
     /// Та же форма, что и memberChip в TeamView (Capsule/Theme.surfaceElevated/
     /// аватар 28×28), но растянута на всю ширину колонки сетки (а не
     /// hugging-контент, как в горизонтальном скролле) — иначе длинный
-    /// ник/роль просто раздували бы капсулу вместо обрезки "...".
+    /// ник/роль просто раздували бы капсулу вместо обрезки "...". Сам блок
+    /// (аватар+текст) центрирован внутри растянутой капсулы (alignment:
+    /// .center, а не .leading) — по прямой просьбе, чтобы отступы слева и
+    /// справа были одинаковыми, а не аватар впритык к левому краю с большим
+    /// пустым местом справа.
     private func memberCell(_ member: TeamMemberEntry) -> some View {
         HStack(spacing: 8) {
             ZStack {
@@ -719,7 +723,7 @@ struct TeamMembersSheet: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 44)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
         .background(Theme.surfaceElevated, in: Capsule())
     }
 }
