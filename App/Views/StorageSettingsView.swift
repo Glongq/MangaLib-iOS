@@ -40,6 +40,7 @@ struct StorageSettingsView: View {
 
     @State private var stats = Stats()
     @State private var showClearAllCachesConfirm = false
+    @State private var showClearDownloadsCacheConfirm = false
 
     struct Stats {
         var totalCapacity: Int64 = 0
@@ -214,10 +215,18 @@ struct StorageSettingsView: View {
                     bytes: stats.orphanedDownloadBytes,
                     showDivider: false
                 ) {
-                    downloads.clearOrphanedDownloads()
-                    refresh()
+                    showClearDownloadsCacheConfirm = true
                 }
             }
+        }
+        .confirmationDialog("Подтвердите действие", isPresented: $showClearDownloadsCacheConfirm, titleVisibility: .visible) {
+            Button("Очистить", role: .destructive) {
+                downloads.clearOrphanedDownloads()
+                refresh()
+            }
+            Button("Отменить", role: .cancel) {}
+        } message: {
+            Text("Вы действительно хотите очистить кеш загрузки? Отменятся все загрузки на паузе")
         }
     }
 
