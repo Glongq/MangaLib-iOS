@@ -688,11 +688,16 @@ struct HomeView: View {
         }
     }
 
-    /// Размер обложки — «Продолжить читать» ×1.5 (была «как в Новинки»,
-    /// 108×162 — по просьбе уменьшено). Высота и ширина всей подложки —
-    /// см. updatesRowHeight ниже и .frame(maxWidth: .infinity) в updateRow.
-    private static let updatesCoverWidth: CGFloat = (continueReadingCoverWidth * 1.5).rounded()
-    private static let updatesCoverHeight: CGFloat = (continueReadingCoverHeight * 1.5).rounded()
+    /// Размер обложки — как в «Продолжить читать», 1:1 (была ×1.5 — с той
+    /// обложкой строка получалась заметно выше текстового блока даже в
+    /// худшем случае (макс. строк везде), и в карточках с меньшим кол-вом
+    /// текста сверху/снизу оставался заметный пустой отступ — обложка
+    /// диктовала высоту подложки, а не текст). При этом размере обложка и
+    /// худший случай текста примерно совпадают по высоте — см.
+    /// updatesRowHeight ниже (сама берёт max, так что не "сломается", если
+    /// на другом размере экрана/шрифта соотношение чуть сместится).
+    private static let updatesCoverWidth: CGFloat = continueReadingCoverWidth
+    private static let updatesCoverHeight: CGFloat = continueReadingCoverHeight
     /// caption2×1.2 regular — та же формула, что и MangaCardView.typeUIFont.
     private static var updatesTypeUIFont: UIFont {
         let base = UIFont.preferredFont(forTextStyle: .caption2)
