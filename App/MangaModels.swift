@@ -106,6 +106,23 @@ struct UserProfile: Decodable {
     let genderId: Int?
     let level: Int?
     let totalPoints: Int?
+    /// Очки внутри ТЕКУЩЕГО уровня и порог для следующего — те же ключи
+    /// points_info.{current_level_points,max_level_points}, что ПОДТВЕРЖДЕНО
+    /// перехватом у TopActiveUserPoints (агрегат главной, «Топ активных
+    /// недели») — там это тот же points_info у другого пользовательского
+    /// ресурса. Здесь для /user/{id} отдельно НЕ перехватывались, но раз это
+    /// тот же вложенный объект под тем же именем — пробуем те же ключи
+    /// (decodeIfPresent, как и everywhere в этом файле): если сервер их не
+    /// отдаёт на этом эндпоинте, оба останутся nil и блок прогресса просто
+    /// не покажется, ничего не сломается.
+    let currentLevelPoints: Int?
+    let maxLevelPoints: Int?
+    /// Дата регистрации — ключ "created_at" НЕ подтверждён перехватом именно
+    /// для /user/{id} (в fields[] запроса его нет), но это стандартный ключ,
+    /// подтверждённый на других ресурсах этого же API (комментарии, дружба).
+    /// decodeIfPresent — если сервер его тут не отдаёт, поле останется nil, и
+    /// строка "Дата регистрации" в доп. информации просто не покажется.
+    let createdAt: Date?
     /// Закрытый профиль/статистика — сервер отдаёт эти флаги; если профиль
     /// закрыт, показываем заглушку вместо содержимого.
     let canViewProfile: Bool
@@ -113,13 +130,19 @@ struct UserProfile: Decodable {
 
     private struct ImageRef: Decodable { let url: String?; let filename: String? }
     private struct Labeled: Decodable { let id: Int?; let label: String? }
-    private struct PointsInfo: Decodable { let total_points: Int?; let level: Int? }
+    private struct PointsInfo: Decodable {
+        let total_points: Int?
+        let level: Int?
+        let current_level_points: Int?
+        let max_level_points: Int?
+    }
 
     private enum CodingKeys: String, CodingKey {
         case id, username, avatar, background, about, gender
         case pointsInfo = "points_info"
         case canViewProfile = "can_view_profile"
         case canViewStatistics = "can_view_statistics"
+        case createdAt = "created_at"
     }
 
     init(from decoder: Decoder) throws {
@@ -139,8 +162,15 @@ struct UserProfile: Decodable {
         let p = (try? c.decodeIfPresent(PointsInfo.self, forKey: .pointsInfo)) ?? nil
         level = p?.level
         totalPoints = p?.total_points
+        currentLevelPoints = p?.current_level_points
+        maxLevelPoints = p?.max_level_points
         canViewProfile = ((try? c.decodeIfPresent(Bool.self, forKey: .canViewProfile)) ?? nil) ?? true
         canViewStatistics = ((try? c.decodeIfPresent(Bool.self, forKey: .canViewStatistics)) ?? nil) ?? true
+        if let raw = ((try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? nil), !raw.isEmpty {
+            createdAt = APIISODate.parse(raw)
+        } else {
+            createdAt = nil
+        }
     }
 
     /// Относительные пути (плейсхолдер `/static/…` или кастомный) дополняем
@@ -295,6 +325,103 @@ struct UserComment: Decodable, Identifiable {
             subtitle = nil
         }
     }
+}
+
+// MARK: - Дружба (вкладка «Друзья» в профиле)
+
+/// Пользователь внутри записи дружбы — ПОДТВЕРЖДЕНО перехватом (proxypin,
+/// 2026-08-25): `GET /friendship/{userId}` и `GET /friendship?user_id=&
+/// status=1` отдают `user:{id,username,avatar{filename,url},last_online_at,
+/// can_view_profile,...}`.
+struct FriendUser: Decodable, Identifiable, Hashable {
+    let id: Int
+    let username: String
+    let avatarURL: URL?
+
+    /// Заглушка — на случай, если запись дружбы вдруг не прислала вложенного
+    /// "user" (см. FriendshipEntry.init), чтобы декодирование самой записи
+    /// не падало целиком.
+    init(id: Int, username: String, avatarURL: URL?) {
+        self.id = id; self.username = username; self.avatarURL = avatarURL
+    }
+
+    private struct ImageRef: Decodable { let url: String? }
+    private enum CodingKeys: String, CodingKey { case id, username, avatar }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        username = ((try? c.decodeIfPresent(String.self, forKey: .username)) ?? nil) ?? ""
+        let avatarRef = (try? c.decodeIfPresent(ImageRef.self, forKey: .avatar)) ?? nil
+        avatarURL = UserProfile.absoluteURL(avatarRef?.url)
+    }
+
+    static func == (l: FriendUser, r: FriendUser) -> Bool { l.id == r.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+/// Статус дружбы между текущим аккаунтом и `user` записи — ПОДТВЕРЖДЕНО
+/// перехватом: `status:{is_requested,is_awaiting_confirmation,is_friend}`.
+struct FriendshipStatus: Decodable, Hashable {
+    let isRequested: Bool
+    let isAwaitingConfirmation: Bool
+    let isFriend: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case isRequested = "is_requested"
+        case isAwaitingConfirmation = "is_awaiting_confirmation"
+        case isFriend = "is_friend"
+    }
+}
+
+/// Запись дружбы — ПОДТВЕРЖДЕНО перехватом на `GET /friendship/{userId}`,
+/// `GET /friendship?user_id=&status=1` (список друзей) и `PUT
+/// /friendship/{id}`: `{id, user, comment, created_at, status}`. `id` —
+/// id самой записи (нужен для PUT), НЕ id пользователя. Список «Общие
+/// друзья» (`GET /friendship/{userId}/mutual`) в перехваченной капче был
+/// пуст ("data":[]) — форма непустого элемента НЕ подтверждена отдельно,
+/// декодируем той же моделью (тот же ресурс "дружба", тот же путь
+/// /friendship/... — по конвенции этого API остальные его пути отдают
+/// ровно эту форму).
+struct FriendshipEntry: Decodable, Identifiable, Hashable {
+    let id: Int
+    let user: FriendUser
+    let comment: String?
+    let createdAt: Date?
+    let status: FriendshipStatus?
+
+    enum CodingKeys: String, CodingKey { case id, user, comment, status, createdAt = "created_at" }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        user = (try? c.decode(FriendUser.self, forKey: .user)) ?? FriendUser(id: 0, username: "", avatarURL: nil)
+        comment = (try? c.decodeIfPresent(String.self, forKey: .comment)) ?? nil
+        status = (try? c.decodeIfPresent(FriendshipStatus.self, forKey: .status)) ?? nil
+        if let raw = ((try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? nil), !raw.isEmpty {
+            createdAt = APIISODate.parse(raw)
+        } else {
+            createdAt = nil
+        }
+    }
+
+    static func == (l: FriendshipEntry, r: FriendshipEntry) -> Bool { l.id == r.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+// MARK: - Папки закладок другого пользователя («Списки тайтлов» в профиле)
+
+/// Папка закладок — ПОДТВЕРЖДЕНО перехватом `GET /bookmarks/folder/{userId}`:
+/// `{id,name,public,notify,color,textColor,order,count,site_ids}`. Отдельно
+/// от ServerBookmarkFolder (та — ответ создания СВОЕЙ папки, без count/color)
+/// — тут нужны count (сколько тайтлов) и цвет чипа для отображения.
+struct UserBookmarkFolder: Decodable, Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let count: Int
+    let colorHex: String?
+
+    enum CodingKeys: String, CodingKey { case id, name, count, colorHex = "color" }
 }
 
 // MARK: - История чтения (реальный аккаунт)

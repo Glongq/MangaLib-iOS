@@ -25,6 +25,12 @@ struct ProfileView: View {
     /// чёрными (и не затемняем верх), чтобы читались на светлом фоне.
     @State private var bannerTopLight = false
 
+    /// Статус дружбы с ЧУЖИМ профилем (nil на своём — кнопка не показывается).
+    @State private var friendship: FriendshipEntry?
+    @State private var sendingFriendRequest = false
+    @State private var friendRequestMessage: String?
+    @State private var showAdditionalInfo = false
+
     init(userId: Int? = nil) { self.userId = userId }
 
     private var resolvedId: Int? { userId ?? auth.userId }
@@ -67,6 +73,11 @@ struct ProfileView: View {
         .task(id: resolvedId) { await loadProfile() }
         .task(id: statsKey) { await loadStats() }
         .task(id: profile?.backgroundURL) { await computeBannerBrightness() }
+        .task(id: resolvedId) { await loadFriendshipIfNeeded() }
+        .sheet(isPresented: $showAdditionalInfo) {
+            AdditionalInfoSheet(profile: profile)
+                .presentationDetents([.medium, .large])
+        }
     }
 
     /// Замер средней яркости верхней части баннера → выбор цвета надписей.
@@ -157,6 +168,16 @@ struct ProfileView: View {
                                     .glassEffect(.regular.interactive(), in: Capsule())
                             }
                             Spacer(minLength: 0)
+                            // «Щит» — дополнительная информация о пользователе
+                            // (опыт/уровень, дата регистрации, пол) — см.
+                            // AdditionalInfoSheet.
+                            Button { showAdditionalInfo = true } label: {
+                                Image(systemName: "shield.lefthalf.filled")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(topTextColor)
+                                    .frame(width: 46, height: 46)
+                                    .glassEffect(.regular.interactive(), in: Circle())
+                            }
                         }
                     }
 
@@ -252,8 +273,65 @@ struct ProfileView: View {
             if let about = profile?.about, !about.isEmpty {
                 Text(about).font(.subheadline).foregroundStyle(Theme.textPrimary).padding(.top, 6)
             }
+
+            if !isSelf { friendshipRow.padding(.top, 10) }
         }
         .padding(.horizontal, 16)
+    }
+
+    // MARK: Дружба (кнопка «Добавить в друзья» и текущий статус)
+
+    @ViewBuilder
+    private var friendshipRow: some View {
+        let status = friendship?.status
+        HStack(spacing: 10) {
+            if status?.isFriend == true {
+                friendshipLabel("Вы друзья", icon: "checkmark.circle.fill", tint: Theme.accent)
+            } else if status?.isRequested == true {
+                friendshipLabel("Заявка отправлена", icon: "clock", tint: Theme.textSecondary)
+            } else if status?.isAwaitingConfirmation == true {
+                // Заявка ОТ этого пользователя — принять/отклонить не
+                // реализовано: коды status для PUT /friendship/{id} не
+                // подтверждены ни одним перехватом (см. capture 2026-08-25),
+                // рисковать записью в реальный аккаунт наугад не стал.
+                friendshipLabel("Ожидает вашего решения", icon: "person.crop.circle.badge.questionmark", tint: Theme.textSecondary)
+            } else {
+                Button {
+                    Task { await sendFriendRequest() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if sendingFriendRequest {
+                            ProgressView().tint(Theme.textPrimary).controlSize(.small)
+                        } else {
+                            Image(systemName: "person.badge.plus")
+                        }
+                        Text("Добавить в друзья")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, 14)
+                    .frame(height: 36)
+                    .glassEffect(.regular.interactive(), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(sendingFriendRequest)
+            }
+        }
+        if let message = friendRequestMessage {
+            Text(message).font(.caption).foregroundStyle(Theme.textSecondary).padding(.top, 4)
+        }
+    }
+
+    private func friendshipLabel(_ text: String, icon: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).foregroundStyle(tint)
+            Text(text)
+        }
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(Theme.textPrimary)
+        .padding(.horizontal, 14)
+        .frame(height: 36)
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 
     // MARK: Статистика жанров/тегов (цветные чипы, горизонтально)
@@ -307,8 +385,10 @@ struct ProfileView: View {
 
     private var quickButtons: some View {
         VStack(spacing: 10) {
-            // «Списки тайтлов» — переход на вкладку Закладки, папка «Читаю»
-            // (только для своего профиля; чужие списки недоступны).
+            // «Списки тайтлов» — на своём профиле переход в локальную вкладку
+            // Закладки (папка «Читаю»); на чужом — экран с РЕАЛЬНЫМИ папками
+            // закладок этого пользователя (GET /bookmarks/folder/{userId}),
+            // см. UserBookmarksView.
             if isSelf {
                 Button {
                     CatalogNavigator.shared.openBookmarks(folderId: BookmarkFolder.reading.id)
@@ -316,8 +396,8 @@ struct ProfileView: View {
                 } label: {
                     quickRow("Списки тайтлов", "square.stack.3d.up")
                 }.buttonStyle(.plain)
-            } else {
-                NavigationLink { StubListView(title: "Списки тайтлов") } label: {
+            } else if let id = resolvedId {
+                NavigationLink { UserBookmarksView(userId: id) } label: {
                     quickRow("Списки тайтлов", "square.stack.3d.up")
                 }.buttonStyle(.plain)
             }
@@ -326,13 +406,15 @@ struct ProfileView: View {
                 quickRow("Комментарии", "text.bubble")
             }.buttonStyle(.plain)
 
-            NavigationLink { StubListView(title: "Коллекции") } label: {
-                quickRow("Коллекции", "square.stack")
-            }.buttonStyle(.plain)
+            if let id = resolvedId {
+                NavigationLink { UserCollectionsView(userId: id) } label: {
+                    quickRow("Коллекции", "square.stack")
+                }.buttonStyle(.plain)
 
-            NavigationLink { StubListView(title: "Друзья") } label: {
-                quickRow("Друзья", "person.2")
-            }.buttonStyle(.plain)
+                NavigationLink { FriendsView(userId: id) } label: {
+                    quickRow("Друзья", "person.2")
+                }.buttonStyle(.plain)
+            }
 
             NavigationLink { StubListView(title: "Избранное") } label: {
                 quickRow("Избранное", "heart")
@@ -389,9 +471,105 @@ struct ProfileView: View {
         guard let id = resolvedId else { return }
         stats = try? await MangaNetworkService.shared.fetchUserStats(id: id)
     }
+
+    private func loadFriendshipIfNeeded() async {
+        guard !isSelf, let id = resolvedId else { friendship = nil; return }
+        friendship = try? await MangaNetworkService.shared.fetchFriendshipStatus(userId: id)
+    }
+
+    private func sendFriendRequest() async {
+        guard let id = resolvedId, !sendingFriendRequest else { return }
+        sendingFriendRequest = true
+        friendRequestMessage = nil
+        do {
+            friendship = try await MangaNetworkService.shared.sendFriendRequest(recipientId: id)
+        } catch {
+            friendRequestMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        sendingFriendRequest = false
+    }
 }
 
 /// Заглушка для ещё не реализованных разделов профиля.
+/// «Дополнительная информация» — кнопка-щит в шапке профиля. Опыт/уровень,
+/// дата регистрации, пол. НЕ содержит "В составе команд" — ни один
+/// перехваченный запрос (см. журнал разбора network-капч этой сессии) не
+/// вскрыл эндпоинт "команды пользователя", поэтому его тут нет — рисковать
+/// и придумывать путь не стали. Каждая строка показывается, только если
+/// соответствующее поле реально пришло от сервера.
+private struct AdditionalInfoSheet: View {
+    let profile: UserProfile?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if profile?.level != nil || profile?.totalPoints != nil {
+                        experienceCard
+                    }
+                    if let date = profile?.createdAt {
+                        infoRow(icon: "calendar", title: "Дата регистрации", value: Self.dateFormatter.string(from: date))
+                    }
+                    infoRow(icon: "person", title: "Пол",
+                            value: (profile?.genderLabel?.isEmpty == false ? profile?.genderLabel : nil) ?? "Не указан")
+                }
+                .padding(16)
+            }
+            .background(Theme.background.ignoresSafeArea())
+            .navigationTitle("Дополнительная информация")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Готово") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ru_RU")
+        f.dateFormat = "d MMMM yyyy"
+        return f
+    }()
+
+    @ViewBuilder
+    private var experienceCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "star.circle.fill").foregroundStyle(Theme.accent)
+                Text("Опыт").font(.headline).foregroundStyle(Theme.textPrimary)
+            }
+            if let level = profile?.level {
+                Text("Уровень \(level)").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textPrimary)
+            }
+            if let current = profile?.currentLevelPoints, let max = profile?.maxLevelPoints, max > 0 {
+                ProgressView(value: Double(current), total: Double(max)).tint(Theme.accent)
+                Text("\(current) из \(max) до следующего уровня")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+            }
+            if let total = profile?.totalPoints {
+                Text("Всего опыта: \(total)").font(.caption).foregroundStyle(Theme.textSecondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func infoRow(icon: String, title: String, value: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).foregroundStyle(Theme.accent).frame(width: 22)
+            Text(title).font(.subheadline).foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Text(value).font(.subheadline).foregroundStyle(Theme.textSecondary)
+        }
+        .padding(14)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
 private struct StubListView: View {
     let title: String
     var body: some View {

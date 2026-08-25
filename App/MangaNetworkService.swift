@@ -11,6 +11,12 @@ enum NetworkError: LocalizedError {
     case decoding(Error)
     case transport(Error)
     case cancelled
+    /// Сервер ответил ошибкой, но с человекочитаемым сообщением в
+    /// `{"data":{"toast":{"message":...}}}` — ПОДТВЕРЖДЕНО перехватом на
+    /// `POST /friendship` (403, антиспам: "Вы недавно отклонили заявку,
+    /// следующую можно отправить через 30 минут"). Показываем как есть,
+    /// вместо общего "Доступ запрещён".
+    case apiMessage(String)
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +28,7 @@ enum NetworkError: LocalizedError {
         case .decoding(let error):   return "Ошибка разбора ответа: \(error.localizedDescription)"
         case .transport(let error):  return "Сетевая ошибка: \(error.localizedDescription)"
         case .cancelled:             return "Запрос отменён."
+        case .apiMessage(let message): return message
         }
     }
 }
@@ -339,6 +346,102 @@ final class MangaNetworkService {
         let request = try makeRequest(path: "/user/\(id)/stats", queryItems: [])
         let response: APIObjectResponse<UserStats> = try await perform(request)
         return response.data
+    }
+
+    // MARK: Дружба (вкладка «Друзья» в профиле)
+
+    /// Статус дружбы текущего аккаунта с пользователем `userId` — ПОДТВЕРЖДЕНО
+    /// перехватом `GET /friendship/{userId}`.
+    func fetchFriendshipStatus(userId: Int) async throws -> FriendshipEntry {
+        let request = try makeRequest(path: "/friendship/\(userId)", queryItems: [])
+        let response: APIObjectResponse<FriendshipEntry> = try await perform(request)
+        return response.data
+    }
+
+    /// Отправить заявку в друзья — ПОДТВЕРЖДЕНО перехватом `POST /friendship`
+    /// `{"recipient_id": N}`. В капче оба раза словил 403 с антиспам-тостом
+    /// (см. NetworkError.apiMessage) — тело УСПЕШНОГО ответа не перехвачено,
+    /// декодируем его как FriendshipEntry по аналогии с остальными путями
+    /// /friendship/... (везде одна и та же форма записи).
+    @discardableResult
+    func sendFriendRequest(recipientId: Int) async throws -> FriendshipEntry {
+        let request = try makeJSONRequest(path: "/friendship", method: "POST",
+                                           body: FriendRequestPayload(recipient_id: recipientId))
+        let response: APIObjectResponse<FriendshipEntry> = try await performToastAware(request)
+        return response.data
+    }
+
+    private struct FriendRequestPayload: Encodable { let recipient_id: Int }
+
+    /// Список друзей пользователя — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /friendship?page=&user_id=&status=1`.
+    func fetchFriends(userId: Int, page: Int = 1) async throws -> (friends: [FriendshipEntry], hasNextPage: Bool) {
+        let items = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "user_id", value: String(userId)),
+            URLQueryItem(name: "status", value: "1")
+        ]
+        let request = try makeRequest(path: "/friendship", queryItems: items)
+        let response: LossyListResponse<FriendshipEntry> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// Общие друзья с пользователем `userId` — ПОДТВЕРЖДЕНО перехватом пути
+    /// `GET /friendship/{userId}/mutual?page=` (сам список в капче был пуст,
+    /// см. FriendshipEntry).
+    func fetchMutualFriends(userId: Int, page: Int = 1) async throws -> (friends: [FriendshipEntry], hasNextPage: Bool) {
+        let items = [URLQueryItem(name: "page", value: String(max(page, 1)))]
+        let request = try makeRequest(path: "/friendship/\(userId)/mutual", queryItems: items)
+        let response: LossyListResponse<FriendshipEntry> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    // MARK: Коллекции пользователя
+
+    /// Коллекции, созданные пользователем — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /collections?page=&sort_by=newest&sort_type=desc&subscriptions=0&
+    /// user_id=&limit=12` (путь и пустой список — да, форма непустого
+    /// элемента — НЕТ; используем уже подтверждённую на другом эндпоинте
+    /// форму MangaCollection, см. её комментарий).
+    func fetchUserCollections(userId: Int, page: Int = 1) async throws -> (collections: [MangaCollection], hasNextPage: Bool) {
+        let items = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "sort_by", value: "newest"),
+            URLQueryItem(name: "sort_type", value: "desc"),
+            URLQueryItem(name: "subscriptions", value: "0"),
+            URLQueryItem(name: "user_id", value: String(userId)),
+            URLQueryItem(name: "limit", value: "12")
+        ]
+        let request = try makeRequest(path: "/collections", queryItems: items)
+        let response: LossyListResponse<MangaCollection> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    // MARK: Закладки другого пользователя («Списки тайтлов» в чужом профиле)
+
+    /// Папки закладок пользователя — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /bookmarks/folder/{userId}`.
+    func fetchUserBookmarkFolders(userId: Int) async throws -> [UserBookmarkFolder] {
+        let request = try makeRequest(path: "/bookmarks/folder/\(userId)", queryItems: [])
+        let response: LossyListResponse<UserBookmarkFolder> = try await perform(request)
+        return response.data
+    }
+
+    /// Тайтлы в конкретной папке закладок пользователя — ПОДТВЕРЖДЕНО
+    /// перехватом `GET /bookmarks?status=&user_id=&sort_by=name&sort_type=
+    /// desc&page=`, элементы — BookmarkListEntry (та же форма, что и у
+    /// собственных закладок аккаунта, см. её комментарий).
+    func fetchUserBookmarks(userId: Int, folderId: Int, page: Int = 1) async throws -> (items: [BookmarkListEntry], hasNextPage: Bool) {
+        let items = [
+            URLQueryItem(name: "status", value: String(folderId)),
+            URLQueryItem(name: "user_id", value: String(userId)),
+            URLQueryItem(name: "sort_by", value: "name"),
+            URLQueryItem(name: "sort_type", value: "desc"),
+            URLQueryItem(name: "page", value: String(max(page, 1)))
+        ]
+        let request = try makeRequest(path: "/bookmarks", queryItems: items)
+        let response: LossyListResponse<BookmarkListEntry> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
     }
 
     /// Тайтлы из закладок АККАУНТА на сервере — отдельного эндпоинта "мои
@@ -1049,6 +1152,38 @@ final class MangaNetworkService {
             throw NetworkError.server(status: http.statusCode)
         }
 
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw NetworkError.decoding(error)
+        }
+    }
+
+    /// Как perform(_:), но при ошибке сначала пробует достать понятное
+    /// сообщение из `{"data":{"toast":{"message":...}}}` (см.
+    /// NetworkError.apiMessage) — нужно для write-эндпоинтов вроде
+    /// POST /friendship, у которых сервер отвечает антиспам-текстом внутри
+    /// формально ошибочного статус-кода (403).
+    private struct ToastEnvelope: Decodable {
+        struct Toast: Decodable { let message: String? }
+        struct Payload: Decodable { let toast: Toast? }
+        let data: Payload?
+    }
+
+    private func performToastAware<T: Decodable>(_ request: URLRequest) async throws -> T {
+        let (data, http) = try await executeLogged(request)
+        guard (200...299).contains(http.statusCode) else {
+            if let env = try? decoder.decode(ToastEnvelope.self, from: data),
+               let message = env.data?.toast?.message, !message.isEmpty {
+                throw NetworkError.apiMessage(message)
+            }
+            switch http.statusCode {
+            case 403: throw NetworkError.forbidden
+            case 404: throw NetworkError.notFound
+            case 429: throw NetworkError.rateLimited
+            default:  throw NetworkError.server(status: http.statusCode)
+            }
+        }
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
