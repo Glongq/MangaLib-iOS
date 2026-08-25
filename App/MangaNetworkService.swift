@@ -41,8 +41,40 @@ final class MangaNetworkService {
 
     static let shared = MangaNetworkService()
 
-    /// Базовый URL API. Согласно правилам MangaLib — `https://api.cdnlibs.org/api`.
-    private let baseURL = URL(string: "https://api.cdnlibs.org/api")!
+    /// Хост API — НЕ один общий на всю экосистему, как считалось раньше:
+    /// ПОДТВЕРЖДЕНО двумя независимыми перехватами (proxypin, 2026-08-26),
+    /// что "безопасные" сайты (MangaLib=1, RanobeLib=3) реально ходят на
+    /// `api.cdnlibs.org`, а 18+-сайты (SlashLib=2, HentaiLib=4) — на СОВСЕМ
+    /// ДРУГОЙ хост, `hapi.hentaicdn.org`. Первая капча — полный набор вызовов
+    /// HentaiLib (Site-Id: 4, Origin: hentailib.me): комментарии, глава,
+    /// статистика, похожее, закладка, карточка тайтла, каталог, /constants,
+    /// папки закладок, уведомления — ВСЁ на hapi.hentaicdn.org. Вторая,
+    /// более ранняя капча (Site-Id: 2, v2.shlib.life) — туда же. До этого
+    /// момента ВСЕ запросы для активного сайта HentaiLib/SlashLib уходили на
+    /// api.cdnlibs.org, который эти site_id, судя по всему, не обслуживает —
+    /// то есть каталог/карточка/закладки на этих двух сайтах были
+    /// фактически сломаны в приложении.
+    ///
+    /// Картинки отдельно подменять не нужно: URL обложки приходит прямо в
+    /// JSON-ответе (см. MangaCover.bestURL) — раз ответ пришёл с
+    /// hapi.hentaicdn.org, там уже правильный хост картинок
+    /// (cover.hentaicdn.org, тоже подтверждено перехватом).
+    private static func apiHost(forSite siteId: Int) -> String {
+        switch siteId {
+        case 2, 4: return "hapi.hentaicdn.org"
+        default:   return "api.cdnlibs.org"
+        }
+    }
+
+    /// `siteId` — эффективный сайт ЭТОГО запроса (явный override у
+    /// makeRequest, см. его комментарий про Site-Id) либо активный сайт
+    /// (SiteSession), если override не передан — та же логика, что уже
+    /// применяется к заголовку Site-Id в defaultHeaders/makeRequest, просто
+    /// теперь она же определяет ХОСТ, а не только заголовок.
+    private func baseURL(siteId: Int? = nil) -> URL {
+        let site = siteId ?? SiteSession.shared.activeSite.rawValue
+        return URL(string: "https://\(Self.apiHost(forSite: site))/api")!
+    }
 
     private let session: URLSession
     private let decoder: JSONDecoder
@@ -1016,7 +1048,7 @@ final class MangaNetworkService {
         // Собираем URL из строки, чтобы избежать percent-encoding разделителей пути
         // (appendingPathComponent мог кодировать «/» и ломать путь → 404).
         let normalizedPath = path.hasPrefix("/") ? path : "/" + path
-        guard var components = URLComponents(string: baseURL.absoluteString + normalizedPath) else {
+        guard var components = URLComponents(string: baseURL(siteId: siteId).absoluteString + normalizedPath) else {
             throw NetworkError.invalidURL
         }
         // URLComponents сам выполняет percent-encoding значений (в т.ч. кириллицы).
@@ -1039,7 +1071,7 @@ final class MangaNetworkService {
     /// /bookmarks, в отличие от makeRequest выше (только GET, без тела).
     private func makeJSONRequest<Body: Encodable>(path: String, method: String, body: Body) throws -> URLRequest {
         let normalizedPath = path.hasPrefix("/") ? path : "/" + path
-        guard let url = URL(string: baseURL.absoluteString + normalizedPath) else {
+        guard let url = URL(string: baseURL().absoluteString + normalizedPath) else {
             throw NetworkError.invalidURL
         }
         var request = URLRequest(url: url)
@@ -1058,7 +1090,7 @@ final class MangaNetworkService {
     /// с boundary.
     private func makeMultipartRequest(path: String, fieldName: String, filename: String, mimeType: String, data: Data) -> URLRequest {
         let normalizedPath = path.hasPrefix("/") ? path : "/" + path
-        let url = URL(string: baseURL.absoluteString + normalizedPath) ?? baseURL
+        let url = URL(string: baseURL().absoluteString + normalizedPath) ?? baseURL()
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         for (field, value) in defaultHeaders {
