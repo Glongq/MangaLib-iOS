@@ -36,6 +36,10 @@ struct AppSettingsView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var debugTokenInput = ""
     @State private var showLogoutConfirm = false
+    // Сворачиваемые разделы ("Профиль"/"Приложение"/"Помощь"/"Прочее") — та же
+    // система, что и в боковом меню (см. SideMenuView.expandedSections). По
+    // умолчанию все развёрнуты.
+    @State private var expandedSections: Set<String> = ["Профиль", "Приложение", "Помощь", "Прочее"]
 
     var body: some View {
         if embedded {
@@ -54,20 +58,6 @@ struct AppSettingsView: View {
                     card {
                         infoRow(title: "Версия", value: AppVersionInfo.display)
                         infoRow(title: "Активный сайт", value: siteSession.activeSite.displayName, showDivider: false)
-                    }
-
-                    card {
-                        Toggle(isOn: $themeManager.isDarkTheme) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Тёмная тема").foregroundStyle(Theme.textPrimary)
-                                Text("Выключи для белой темы. Не влияет на тему читалки — она настраивается отдельно.")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                        }
-                        .tint(Theme.accent)
-                        .padding(.horizontal, 16)
-                        .frame(minHeight: 48)
                     }
 
                     card {
@@ -100,7 +90,7 @@ struct AppSettingsView: View {
 
                     settingsSection("Приложение") {
                         storageSettingsRow
-                        settingsRow(icon: "paintbrush", title: "Персонализация")
+                        personalizationRow
                         settingsRow(icon: "arrow.triangle.2.circlepath", title: "Проверить обновления", showDivider: false)
                     }
 
@@ -155,46 +145,64 @@ struct AppSettingsView: View {
         .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    /// Заголовок группы пунктов ("Профиль"/"Приложение"/"Помощь"/"Прочее") +
-    /// сама группа в одной card — эталонные скругления/подложка те же, что и
-    /// у "Версия"/"Активный сайт" выше (Theme.surfaceElevated, radius 16).
+    /// Сворачиваемая группа пунктов ("Профиль"/"Приложение"/"Помощь"/"Прочее")
+    /// — та же система, что и в боковом меню (см. SideMenuView.collapsibleCard/
+    /// sectionHeader): заголовок с стрелкой вверх/вниз внутри самой card, а
+    /// не отдельной подписью над ней, по прямой просьбе сделать одинаково.
     private func settingsSection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.leading, 4)
-            card(content: content)
+        let expanded = expandedSections.contains(title)
+        return card {
+            sectionHeader(title, expanded: expanded)
+            if expanded {
+                sectionDivider
+                content()
+            }
         }
+    }
+
+    private func sectionHeader(_ title: String, expanded: Bool) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                if expanded { expandedSections.remove(title) } else { expandedSections.insert(title) }
+            }
+        } label: {
+            HStack {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var sectionDivider: some View {
+        Divider().overlay(Theme.separator).padding(.horizontal, 16)
     }
 
     /// Один пункт настроек — переход внутрь пока ведёт на StubView (тот же
     /// приём, что и у остальных ещё не реализованных разделов приложения,
     /// см. RootView.stubRequest/SideMenuView) — заменим на реальный экран,
-    /// когда раздел будет готов.
+    /// когда раздел будет готов. Размер/цвет иконки, отступы и текст — как у
+    /// row() в SideMenuView (иконка вторичного цвета, без акцента — акцент
+    /// там используется только для реально активных/выбранных состояний).
     private func settingsRow(icon: String, title: String, showDivider: Bool = true) -> some View {
         VStack(spacing: 0) {
             NavigationLink {
                 StubView(title: title)
             } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: icon)
-                        .font(.system(size: 16))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 24)
-                    Text(title).foregroundStyle(Theme.textPrimary)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 48)
+                settingsRowLabel(icon: icon, title: title)
             }
             .buttonStyle(.plain)
 
             if showDivider {
-                Divider().overlay(Theme.separator).padding(.leading, 52)
+                Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14)
             }
         }
     }
@@ -207,24 +215,47 @@ struct AppSettingsView: View {
             NavigationLink {
                 StorageSettingsView()
             } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "internaldrive")
-                        .font(.system(size: 16))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 24)
-                    Text("Данные и память").foregroundStyle(Theme.textPrimary)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 48)
+                settingsRowLabel(icon: "internaldrive", title: "Данные и память")
             }
             .buttonStyle(.plain)
 
-            Divider().overlay(Theme.separator).padding(.leading, 52)
+            Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14)
         }
+    }
+
+    /// "Персонализация" — реальный экран с переехавшим сюда тумблером тёмной
+    /// темы (остальное наполнение экрана — позже).
+    private var personalizationRow: some View {
+        VStack(spacing: 0) {
+            NavigationLink {
+                PersonalizationSettingsView()
+            } label: {
+                settingsRowLabel(icon: "paintbrush", title: "Персонализация")
+            }
+            .buttonStyle(.plain)
+
+            Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14)
+        }
+    }
+
+    /// Содержимое строки пункта настроек — вынесено отдельно, чтобы обычные
+    /// (StubView) и особые (StorageSettingsView/PersonalizationSettingsView)
+    /// пункты выглядели гарантированно идентично.
+    private func settingsRowLabel(icon: String, title: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 24)
+            Text(title).foregroundStyle(Theme.textPrimary)
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary.opacity(0.6))
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
     }
 
     /// "Выход из аккаунта" — ОТДЕЛЬНАЯ красная плашка (не строка внутри
