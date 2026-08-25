@@ -390,19 +390,20 @@ struct TeamView: View {
     /// недели"), по прямой просьбе, только со своими данными: вместо
     /// ранга (N#) и "Уровень N"/полоски прогресса (этого у участника
     /// команды просто нет) — роль второй строкой.
+    /// Форма — 1-в-1 TeamChipView (чип команды в списке глав карточки
+    /// тайтла): Capsule, Theme.surfaceElevated, паддинг/высота
+    /// metaChipHeight, аватар 28×28 круг. Контент — свой (участник, а не
+    /// команда): ник + роль вместо названия команды + колокольчика.
     private func memberChip(_ member: TeamMemberEntry) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             ZStack {
                 RemoteImage(url: member.avatarURL) { img in
                     img.resizable().scaledToFill()
                 } placeholder: {
-                    SkeletonBox()
-                } failure: {
-                    ZStack { Theme.surfaceElevated; Image(systemName: "person.fill").foregroundStyle(Theme.textSecondary) }
+                    Circle().fill(Theme.surface)
                 }
-                .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .clipped()
+                .frame(width: 28, height: 28)
+                .clipShape(Circle())
 
                 // Декоративная рамка аватара — ПОДТВЕРЖДЕНО перехватом
                 // (avatar_frame встречается у части участников), поверх, без
@@ -411,15 +412,15 @@ struct TeamView: View {
                     RemoteImage(url: frameURL) { img in
                         img.resizable().scaledToFit()
                     } placeholder: { Color.clear }
-                    .frame(width: 54, height: 54)
+                    .frame(width: 38, height: 38)
                     .allowsHitTesting(false)
                 }
             }
-            .frame(width: 44, height: 44)
+            .frame(width: 38, height: 38)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(member.username)
-                    .font(.footnote.weight(.medium))
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 if let role = member.rolesString, !role.isEmpty {
@@ -430,9 +431,9 @@ struct TeamView: View {
                 }
             }
         }
-        .padding(10)
-        .frame(maxWidth: 210, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 10)
+        .frame(height: Self.metaChipHeight)
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 
     // MARK: Переключатель Тайтлы / Обновления
