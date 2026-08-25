@@ -689,8 +689,9 @@ struct MangaDetailView: View {
     // Высота чипа teamChip (см. ниже, раздел "Главы") — аватар 28pt +
     // вертикальный паддинг 8×2 = 44. Общая константа, чтобы чипы метаданных
     // и переводчиков совпадали по высоте пиксель в пиксель, а не примерно —
-    // как попросили выровнять.
-    private static let metaChipHeight: CGFloat = 44
+    // как попросили выровнять. fileprivate (не private) — нужна и в
+    // TeamChipView ниже (отдельная struct в этом же файле, см. её объявление).
+    fileprivate static let metaChipHeight: CGFloat = 44
 
     @ViewBuilder
     private func infoBlock(_ heading: String, value: String) -> some View {
@@ -1612,28 +1613,7 @@ struct MangaDetailView: View {
     }
 
     private func teamChip(_ team: ChapterTeam) -> some View {
-        HStack(spacing: 8) {
-            RemoteImage(url: team.avatarURL) { img in
-                img.resizable().scaledToFill()
-            } placeholder: {
-                Circle().fill(Theme.surface)
-            }
-            .frame(width: 28, height: 28)
-            .clipShape(Circle())
-
-            Text(team.name)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
-
-            // Колокольчик — подписка на уведомления команды (ЗАГЛУШКА, API позже).
-            Image(systemName: "bell")
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-        }
-        .padding(.horizontal, 10)
-        .frame(height: Self.metaChipHeight)
-        .background(Theme.surfaceElevated, in: Capsule())
+        TeamChipView(team: team)
     }
 
     /// Блок одной главы: если у неё ≥2 веток (команд) — заголовок + под-строки
@@ -2359,6 +2339,78 @@ struct MangaDetailView: View {
         case "18": return .init(text: label, tint: .red)
         case "16": return .init(text: label, tint: .orange)
         default: return nil // 12+, 6+, "Нет" и т.п. — не показываем.
+        }
+    }
+}
+
+/// Чип команды перевода в списке глав — аватар + имя + колокольчик подписки.
+/// Отдельная struct (не просто @ViewBuilder-функция, как раньше) — колокольчику
+/// нужно своё локальное состояние (подписан/грузится).
+///
+/// Колокольчик — РЕАЛЬНАЯ подписка, не заглушка: `POST /favorites
+/// {source_id, source_type:"team"}` — ПОДТВЕРЖДЕНО перехватом. Но перехвачен
+/// был только сценарий "подписаться" (ответ `is_subscribed:true`) — отдельного
+/// запроса на ОТПИСКУ в перехвате не было, и текущее состояние подписки
+/// нигде заранее не отдаётся (ни в ветке главы, ни в GET /teams/{slug}), так
+/// что: 1) колокольчик всегда стартует "не подписан" (пустой), даже если
+/// пользователь на самом деле уже подписан — узнать это заранее нечем;
+/// 2) тап каждый раз шлёт ТОТ ЖЕ запрос, а новое состояние берётся из ответа
+/// (is_subscribed), а не предполагается — если сервер эндпоинт не
+/// переключает, а только подписывает, повторный тап на уже подписанного
+/// ничего не отпишет (сервер просто вернёт is_subscribed:true) — это стоит
+/// проверить на реальном устройстве.
+struct TeamChipView: View {
+    let team: ChapterTeam
+
+    @State private var isSubscribed = false
+    @State private var isToggling = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            RemoteImage(url: team.avatarURL) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                Circle().fill(Theme.surface)
+            }
+            .frame(width: 28, height: 28)
+            .clipShape(Circle())
+
+            Text(team.name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+
+            Button { toggle() } label: {
+                Group {
+                    if isToggling {
+                        ProgressView().scaleEffect(0.6)
+                    } else {
+                        Image(systemName: isSubscribed ? "bell.fill" : "bell")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(isSubscribed ? Theme.accent : Theme.textSecondary)
+                .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .disabled(isToggling)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: MangaDetailView.metaChipHeight)
+        .background(Theme.surfaceElevated, in: Capsule())
+    }
+
+    private func toggle() {
+        guard !isToggling else { return }
+        isToggling = true
+        Task {
+            do {
+                let result = try await MangaNetworkService.shared.toggleFavorite(sourceId: team.id, sourceType: "team")
+                isSubscribed = result.isSubscribed
+            } catch {
+                // Тихо игнорируем — колокольчик просто останется в прежнем состоянии.
+            }
+            isToggling = false
         }
     }
 }

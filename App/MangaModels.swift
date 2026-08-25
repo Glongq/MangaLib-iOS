@@ -1244,6 +1244,31 @@ struct TeamStat: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey { case value, short, label, tag }
 }
 
+/// Ответ подписки/отписки на команду-переводчика — ПОДТВЕРЖДЕНО перехватом
+/// `POST /favorites {source_id, source_type:"team"}` →
+/// `{data:{is_subscribed,source_type,source_id,relation},
+/// meta:{stats:{value,formated,short,label,tag}}}`. Тот же формат stat, что
+/// и TeamStat выше — переиспользован для meta.stats (счётчик подписчиков
+/// после переключения). См. TeamChipView.toggle() — только "подписаться"
+/// подтверждено перехватом, отписка не проверена отдельно.
+struct FavoriteToggleResponse: Decodable {
+    let isSubscribed: Bool
+    let subscribersStat: TeamStat?
+
+    private struct DataPart: Decodable { let isSubscribed: Bool?; enum CodingKeys: String, CodingKey { case isSubscribed = "is_subscribed" } }
+    private struct MetaPart: Decodable { let stats: TeamStat? }
+
+    enum CodingKeys: String, CodingKey { case data, meta }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = (try? c.decodeIfPresent(DataPart.self, forKey: .data)) ?? nil
+        let m = (try? c.decodeIfPresent(MetaPart.self, forKey: .meta)) ?? nil
+        isSubscribed = d?.isSubscribed ?? false
+        subscribersStat = m?.stats
+    }
+}
+
 /// Детальная страница переводчика (команды) — ПОДТВЕРЖДЕНО реальным
 /// перехватом `GET /teams/{slug_url}?fields[]=chaptersPerMonth&
 /// fields[]=auto_moderation&fields[]=team_rating&fields[]=ignored_by_user`.

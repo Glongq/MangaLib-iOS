@@ -788,6 +788,22 @@ final class MangaNetworkService {
         return response.data
     }
 
+    /// Подписка/отписка на команду-переводчика — ПОДТВЕРЖДЕНО перехватом
+    /// `POST /favorites {source_id, source_type}` → `{data:{is_subscribed},
+    /// meta:{stats}}`. См. FavoriteToggleResponse и TeamChipView.toggle() —
+    /// перехвачен только сценарий "подписаться"; для отписки шлётся тот же
+    /// запрос, реальное новое состояние берётся из ответа, а не предполагается.
+    func toggleFavorite(sourceId: Int, sourceType: String) async throws -> FavoriteToggleResponse {
+        let body = FavoritePayload(source_id: sourceId, source_type: sourceType)
+        let request = try makeJSONRequest(path: "/favorites", method: "POST", body: body)
+        return try await perform(request)
+    }
+
+    private struct FavoritePayload: Encodable {
+        let source_id: Int
+        let source_type: String
+    }
+
     /// Голос "+"/"-" за рекомендацию из "Похожего" — ПОДТВЕРЖДЕНО реальным
     /// перехватом: `POST /similar/{id}/vote`, тело `{"vote":1}` для "+",
     /// `{"vote":0}` для "-"; ответ — АКТУАЛЬНЫЕ up/down/user целиком (не
