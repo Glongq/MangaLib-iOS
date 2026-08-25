@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// Страница переводчика (команды) — по прямой просьбе собрана из двух
-/// существующих экранов: шапка (аватар слева в формате обложки 2:3 +
-/// хиро-фон сзади, затемнённый так же, как в профиле пользователя, справа —
-/// соцсети вместо счётчиков "создано тайтлов/…") взята из ProfileView (см.
-/// AccountInfoView.swift), а метаданные/описание/список тайтлов с поиском,
-/// фильтрами и сортировкой — из CharacterView (тот же паттерн, тот же
-/// каталожный запрос, только target_model=team вместо character).
+/// Страница переводчика (команды) — шапка теперь 1-в-1 как в карточке
+/// тайтла (см. MangaDetailView.heroHeader): растягивающийся хиро-фон,
+/// плавающая обложка-аватар (2:3, как обычная обложка тайтла), название
+/// поверх, своя стеклянная кнопка "назад" вместо системной шапки (её нет
+/// вообще), и там же, где у тайтла "..." — кнопка подписки на уведомления.
+/// Метаданные — те же чипы, что и у тайтла (infoBlock), включая отдельным
+/// чипом количество участников. Список тайтлов с поиском/фильтрами/
+/// сортировкой — из CharacterView (тот же паттерн, target_model=team).
 struct TeamView: View {
     let slugURL: String
     let fallbackName: String?
@@ -14,16 +15,24 @@ struct TeamView: View {
 
     @StateObject private var vm: TeamViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
+    @Environment(\.dismiss) private var dismiss
     @State private var showFilters = false
     @State private var selectedTab: Tab = .titles
     @FocusState private var searchFocused: Bool
 
     private let gridColumnsCount = 3
     private let gridSpacing: CGFloat = 12
-    /// Эталон обложки 2:3 (см. Theme.coverAspectRatio/coverCornerRadius) — по
-    /// прямой просьбе: аватар команды в формате обложки, а не круглый, как у
-    /// пользователя.
-    private let avatarWidth: CGFloat = 108
+
+    /// Размер/отступы/радиус — СТРОГО те же значения, что у обложки в
+    /// MangaDetailView.heroHeader (heroCoverSize/heroCoverTitleSpacing/
+    /// heroCoverTopOffset/радиус 12) — по прямой просьбе "полностью как в
+    /// карточке тайтла", а не эталон Theme.coverCornerRadius(16) отсюда.
+    private static let heroAvatarSize = CGSize(width: 88 * 1.3 * 1.3, height: 132 * 1.3 * 1.3)
+    private static let heroTitleSpacing: CGFloat = 10
+    private static let heroAvatarTopOffset: CGFloat = 120
+    /// Та же величина, что и MangaDetailView.metaChipHeight — своя копия,
+    /// т.к. та константа fileprivate к своему файлу.
+    private static let metaChipHeight: CGFloat = 44
 
     private enum Tab: String, CaseIterable, Identifiable {
         case titles = "Тайтлы"
@@ -48,11 +57,12 @@ struct TeamView: View {
             )
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    header(width: proxy.size.width)
+                VStack(alignment: .leading, spacing: 0) {
+                    heroHeader
 
                     VStack(alignment: .leading, spacing: 18) {
-                        nameAndStats
+                        metaRow
+                        socialLinks
                         membersSection
 
                         if let desc = vm.detail?.description, !desc.isEmpty {
@@ -71,16 +81,16 @@ struct TeamView: View {
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.top, 14)
+                    .padding(.top, 18)
                     .padding(.bottom, 90)
                 }
             }
             .scrollIndicators(.hidden)
+            .coordinateSpace(name: "teamScroll")
+            .background(Theme.background)
+            .toolbar(.hidden, for: .navigationBar)
             .ignoresSafeArea(edges: .top)
         }
-        .background(Theme.background.ignoresSafeArea())
-        .navigationTitle(vm.detail?.name ?? fallbackName ?? "Переводчик")
-        .navigationBarTitleDisplayMode(.inline)
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
         .sheet(isPresented: $showFilters) {
@@ -88,71 +98,204 @@ struct TeamView: View {
         }
     }
 
-    // MARK: Шапка (хиро-фон + аватар 2:3 + соцсети)
+    // MARK: Шапка (1-в-1 MangaDetailView.heroHeader)
 
-    private func header(width: CGFloat) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            RemoteImage(url: vm.detail?.background?.bestURL) { img in
-                img.resizable().scaledToFill()
-            } placeholder: { Theme.surfaceElevated } failure: { Theme.surfaceElevated }
-            .frame(width: width, height: 230)
-            .clipped()
-            // То же затемнение, что и у баннера профиля (см. ProfileView.
-            // bannerGradient) — здесь без адаптивной яркости (там она нужна
-            // была для читаемости своего оверлея "Готово"/заголовка поверх
-            // баннера; тут заголовок — обычный системный navigationTitle).
-            .overlay(
-                LinearGradient(colors: [.black.opacity(0.42), .black.opacity(0.22), .black.opacity(0.6)],
-                               startPoint: .top, endPoint: .bottom)
-            )
+    private var heroHeader: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Color.clear.frame(height: Self.heroAvatarTopOffset)
 
-            HStack(alignment: .bottom, spacing: 14) {
-                RemoteImage(url: vm.detail?.cover?.bestURL ?? coverURL) { img in
-                    img.resizable().scaledToFill()
+            VStack(alignment: .leading, spacing: Self.heroTitleSpacing) {
+                RemoteImage(url: vm.detail?.cover?.bestURL ?? coverURL, priority: URLSessionTask.highPriority) { image in
+                    image.resizable().scaledToFill()
                 } placeholder: {
                     SkeletonBox()
                 } failure: {
-                    ZStack { Theme.surfaceElevated; Image(systemName: "person.2.fill").font(.title2).foregroundStyle(Theme.textSecondary) }
+                    ZStack { Theme.surfaceElevated; Image(systemName: "person.2.fill").foregroundStyle(Theme.textSecondary) }
                 }
-                .frame(width: avatarWidth, height: (avatarWidth * Theme.coverAspectRatio).rounded())
-                .clipShape(RoundedRectangle(cornerRadius: Theme.coverCornerRadius, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Theme.coverCornerRadius, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
-                .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+                .frame(width: Self.heroAvatarSize.width, height: Self.heroAvatarSize.height)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
 
-                Spacer(minLength: 0)
-
-                socialLinks
+                titleBlockOverlay
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
+            .padding(.leading, 16)
         }
-        .frame(height: 230)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .top) {
+            // Та же "тянущаяся шапка" под rubber-band overscroll, что и у
+            // тайтла — см. подробный комментарий в MangaDetailView.heroHeader.
+            GeometryReader { proxy in
+                let minY = proxy.frame(in: .named("teamScroll")).minY
+                let stretch = max(0, minY)
+                let realBG = vm.detail?.background?.bestURL
+                let effectiveURL = realBG ?? vm.detail?.cover?.bestURL ?? coverURL
+
+                Group {
+                    if let effectiveURL {
+                        RemoteImage(url: effectiveURL, priority: URLSessionTask.highPriority) { image in
+                            image.resizable().scaledToFill()
+                        } placeholder: {
+                            SkeletonBox()
+                        } failure: {
+                            Theme.surfaceElevated
+                        }
+                    } else {
+                        Theme.background
+                    }
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height + stretch)
+                .overlay(Color.black.opacity(0.1))
+                // Блюр — только для запасной картинки (обложка вместо
+                // настоящего фона команды), как и у тайтла.
+                .blur(radius: realBG != nil ? 0 : 5)
+                .clipped()
+                .overlay(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0.0),
+                            .init(color: .clear, location: 0.28),
+                            .init(color: Theme.background.opacity(0.35), location: 0.5),
+                            .init(color: Theme.background.opacity(0.75), location: 0.72),
+                            .init(color: Theme.background, location: 1.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .offset(y: -stretch)
+            }
+        }
+        .overlay(alignment: .topLeading) { backButton }
+        .overlay(alignment: .topTrailing) { subscribeButton }
     }
 
-    /// Справа, где у пользователя в профиле "Создано тайтлов/Загружено
-    /// глав/Кол-во комментариев" — по прямой просьбе здесь ссылки на
-    /// соцсети, только если реально есть (vk/discord/website — все три
-    /// подтверждены перехватом). Своих иконок VK/Discord в приложении нет —
-    /// текстовые плашки с названием площадки, как временное решение (см.
-    /// список "что уточнить").
+    private var titleBlockOverlay: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(vm.detail?.name ?? fallbackName ?? "")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let altName = vm.detail?.altName, !altName.isEmpty {
+                Text(altName).font(.footnote).foregroundStyle(Theme.textSecondary).lineLimit(1)
+            }
+        }
+        .padding(.trailing, 16)
+    }
+
+    /// Своя стеклянная кнопка "назад" вместо системной шапки — по прямой
+    /// просьбе убрать шапку целиком, оставив только её. 1-в-1
+    /// MangaDetailView.heroHeader (тот же стиль/позиция).
+    private var backButton: some View {
+        Button { dismiss() } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: 48, height: 48)
+                .glassEffect(.regular, in: Circle())
+        }
+        .padding(.leading, 16)
+        .padding(.top, 54)
+    }
+
+    /// Там, где у тайтла кнопка "..." — здесь подписка на уведомления
+    /// команды. ПОДТВЕРЖДЕНО перехватом: стартовое состояние — реальный
+    /// GET /favorites/team/{id} (TeamViewModel.loadSubscriptionStatus),
+    /// переключение — тот же POST /favorites, что и у колокольчика в чипе
+    /// главы (TeamChipView). Акцентное стекло, пока не подписан; после
+    /// подписки — обычное стекло, текст меняется на "Увед. включены" со
+    /// значком колокольчика с галкой.
+    private var subscribeButton: some View {
+        Button { vm.toggleSubscription() } label: {
+            HStack(spacing: 6) {
+                if vm.isTogglingSubscription {
+                    ProgressView().scaleEffect(0.7)
+                } else if vm.isSubscribed {
+                    ZStack {
+                        Image(systemName: "bell.fill")
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.green)
+                            .offset(x: 7, y: -7)
+                    }
+                } else {
+                    Image(systemName: "bell")
+                }
+                Text(vm.isSubscribed ? "Увед. включены" : "Подписаться")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(vm.isSubscribed ? Theme.textPrimary : .white)
+            .padding(.horizontal, 16)
+            .frame(height: 46)
+            .glassEffect(vm.isSubscribed ? .regular.interactive() : .regular.tint(Theme.accent).interactive(), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(vm.isTogglingSubscription)
+        .padding(.trailing, 16)
+        .padding(.top, 54)
+    }
+
+    // MARK: Метаданные — те же чипы, что у тайтла (MangaDetailView.infoBlock)
+
+    /// Статистика команды + отдельным чипом количество участников (по
+    /// прямой просьбе — "тоже в чипы метаданных вместе").
+    private var metaRow: some View {
+        let statItems: [(heading: String, value: String)] = (vm.detail?.stats ?? []).compactMap { stat in
+            guard let value = stat.short, let heading = stat.label else { return nil }
+            return (heading, value)
+        }
+        let items = vm.members.isEmpty ? statItems : statItems + [(heading: "Участников", value: "\(vm.members.count)")]
+
+        return ScrollView(.horizontal) {
+            HStack(spacing: 10) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    infoBlock(item.heading, value: item.value)
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func infoBlock(_ heading: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(heading).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1)
+            Text(value).font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+        }
+        .padding(.horizontal, 18)
+        .frame(height: Self.metaChipHeight)
+        .background(Theme.surfaceElevated, in: Capsule())
+    }
+
+    /// Ссылки на соцсети (vk/discord/website — все три подтверждены
+    /// перехватом), только если реально есть. Раньше жили в углу шапки —
+    /// теперь там кнопка подписки (см. subscribeButton), поэтому перенесены
+    /// сюда, тем же стилем "пилюль", что и у поиска/фильтров ниже. Своих
+    /// иконок VK/Discord в приложении нет — generic SF Symbols (см. список
+    /// "что уточнить").
     @ViewBuilder
     private var socialLinks: some View {
         let links = socialLinkItems
         if !links.isEmpty {
-            VStack(alignment: .trailing, spacing: 8) {
-                ForEach(links, id: \.label) { link in
-                    Link(destination: link.url) {
-                        HStack(spacing: 6) {
-                            Image(systemName: link.icon).font(.caption.weight(.semibold))
-                            Text(link.label).font(.caption.weight(.semibold)).lineLimit(1)
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(links, id: \.label) { link in
+                        Link(destination: link.url) {
+                            HStack(spacing: 6) {
+                                Image(systemName: link.icon).font(.footnote.weight(.semibold))
+                                Text(link.label).font(.footnote.weight(.medium)).lineLimit(1)
+                            }
+                            .foregroundStyle(Theme.textPrimary)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: Theme.pillControlHeight)
+                            .glassEffect(.regular.interactive(), in: Capsule())
                         }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(.ultraThinMaterial, in: Capsule())
                     }
                 }
             }
+            .scrollIndicators(.hidden)
         }
     }
 
@@ -170,64 +313,19 @@ struct TeamView: View {
         return result
     }
 
-    // MARK: Имя + метаданные (как в карточке персонажа)
-
-    private var nameAndStats: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let altName = vm.detail?.altName, !altName.isEmpty {
-                Text(altName).font(.subheadline).foregroundStyle(Theme.textSecondary)
-            }
-            if !(vm.detail?.stats ?? []).isEmpty {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 20) {
-                        ForEach(vm.detail?.stats ?? []) { stat in
-                            statColumn(value: stat.short, label: stat.label ?? "")
-                        }
-                    }
-                    .padding(.trailing, 4)
-                }
-                .scrollIndicators(.hidden)
-            }
-            subscribeButton
-        }
-    }
-
-    /// Подписаться/отписаться от переводчика — ПОДТВЕРЖДЕНО перехватом:
-    /// стартовое состояние тянется реальным GET /favorites/team/{id}
-    /// (TeamViewModel.loadSubscriptionStatus), переключение — тем же
-    /// POST /favorites, что и у колокольчика в чипе главы (TeamChipView).
-    private var subscribeButton: some View {
-        Button { vm.toggleSubscription() } label: {
-            HStack(spacing: 6) {
-                if vm.isTogglingSubscription {
-                    ProgressView().scaleEffect(0.7).tint(vm.isSubscribed ? Theme.textPrimary : .white)
-                } else {
-                    Image(systemName: vm.isSubscribed ? "checkmark" : "bell")
-                }
-                Text(vm.isSubscribed ? "Вы подписаны" : "Подписаться")
-                    .font(.subheadline.weight(.semibold))
-            }
-            .foregroundStyle(vm.isSubscribed ? Theme.textPrimary : .white)
-            .padding(.horizontal, 16)
-            .frame(height: 38)
-            .background(vm.isSubscribed ? AnyShapeStyle(Theme.surfaceElevated) : AnyShapeStyle(Theme.accent), in: Capsule())
-        }
-        .buttonStyle(.plain)
-        .disabled(vm.isTogglingSubscription)
-        .padding(.top, 2)
-    }
-
     /// Участники команды — по прямой просьбе чипы с ролью и ссылкой на
     /// профиль. ПОДТВЕРЖДЕНО отдельным эндпоинтом GET /teams/{slug}/users
     /// (не путать с анонимным полем "users" внутри самого GET /teams/{slug} —
     /// там только роль без id/имени, поэтому оно вообще не декодируется, см.
     /// TeamMemberEntry). Тап открывает ProfileView(userId:) — тот же экран
-    /// профиля, что и везде в приложении.
+    /// профиля, что и везде в приложении. Количество участников — теперь
+    /// отдельным чипом в metaRow выше (см. комментарий там), поэтому здесь
+    /// в заголовке больше не дублируется.
     @ViewBuilder
     private var membersSection: some View {
         if !vm.members.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Участники (\(vm.members.count))").font(.headline).foregroundStyle(Theme.textPrimary)
+                Text("Участники").font(.headline).foregroundStyle(Theme.textPrimary)
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 8) {
                         ForEach(vm.members) { member in
@@ -284,19 +382,6 @@ struct TeamView: View {
         .padding(.horizontal, 10)
         .frame(height: 44)
         .background(Theme.surfaceElevated, in: Capsule())
-    }
-
-    private func statColumn(value: String?, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(value ?? "—")
-                .font(.headline.weight(.bold))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
-        }
     }
 
     // MARK: Переключатель Тайтлы / Обновления
