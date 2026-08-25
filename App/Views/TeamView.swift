@@ -188,38 +188,53 @@ struct TeamView: View {
                 }
                 .scrollIndicators(.hidden)
             }
+            subscribeButton
         }
     }
 
-    /// Участники команды — по прямой просьбе должны быть чипами с ролями и
-    /// ссылкой на профиль каждого. РЕАЛИЗОВАНО ЧАСТИЧНО: в перехваченном
-    /// ответе GET /teams/{slug_url} поле "users" содержит ТОЛЬКО роль
-    /// (roles_string) — ни id, ни username, ни аватара ни у одной записи
-    /// нет (все 8 в примере полностью анонимны). Показать, КТО именно
-    /// участник, и тем более дать рабочую ссылку на профиль — нечем: нет
-    /// данных, по которым открыть ProfileView(userId:). Вместо выдуманных
-    /// профилей — честная сводка по ролям с количеством (реальные данные,
-    /// просто без персоналий). Нужен новый перехват (в идеале — самого
-    /// запроса, отдающего участников с id/username), чтобы сделать чипы
-    /// кликабельными, как просили.
+    /// Подписаться/отписаться от переводчика — ПОДТВЕРЖДЕНО перехватом:
+    /// стартовое состояние тянется реальным GET /favorites/team/{id}
+    /// (TeamViewModel.loadSubscriptionStatus), переключение — тем же
+    /// POST /favorites, что и у колокольчика в чипе главы (TeamChipView).
+    private var subscribeButton: some View {
+        Button { vm.toggleSubscription() } label: {
+            HStack(spacing: 6) {
+                if vm.isTogglingSubscription {
+                    ProgressView().scaleEffect(0.7).tint(vm.isSubscribed ? Theme.textPrimary : .white)
+                } else {
+                    Image(systemName: vm.isSubscribed ? "checkmark" : "bell")
+                }
+                Text(vm.isSubscribed ? "Вы подписаны" : "Подписаться")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(vm.isSubscribed ? Theme.textPrimary : .white)
+            .padding(.horizontal, 16)
+            .frame(height: 38)
+            .background(vm.isSubscribed ? AnyShapeStyle(Theme.surfaceElevated) : AnyShapeStyle(Theme.accent), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(vm.isTogglingSubscription)
+        .padding(.top, 2)
+    }
+
+    /// Участники команды — по прямой просьбе чипы с ролью и ссылкой на
+    /// профиль. ПОДТВЕРЖДЕНО отдельным эндпоинтом GET /teams/{slug}/users
+    /// (не путать с анонимным полем "users" внутри самого GET /teams/{slug} —
+    /// там только роль без id/имени, поэтому оно вообще не декодируется, см.
+    /// TeamMemberEntry). Тап открывает ProfileView(userId:) — тот же экран
+    /// профиля, что и везде в приложении.
     @ViewBuilder
     private var membersSection: some View {
-        if !memberRoleGroups.isEmpty {
+        if !vm.members.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Участники").font(.headline).foregroundStyle(Theme.textPrimary)
+                Text("Участники (\(vm.members.count))").font(.headline).foregroundStyle(Theme.textPrimary)
                 ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(memberRoleGroups, id: \.role) { group in
-                            HStack(spacing: 6) {
-                                Image(systemName: "person.fill").font(.caption)
-                                Text(group.count > 1 ? "\(group.role) · \(group.count)" : group.role)
-                                    .font(.footnote.weight(.medium))
-                                    .lineLimit(1)
+                    LazyHStack(spacing: 8) {
+                        ForEach(vm.members) { member in
+                            NavigationLink { ProfileView(userId: member.userId) } label: {
+                                memberChip(member)
                             }
-                            .foregroundStyle(Theme.textPrimary)
-                            .padding(.horizontal, 12)
-                            .frame(height: 36)
-                            .background(Theme.surfaceElevated, in: Capsule())
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.trailing, 4)
@@ -229,15 +244,32 @@ struct TeamView: View {
         }
     }
 
-    private var memberRoleGroups: [(role: String, count: Int)] {
-        var counts: [String: Int] = [:]
-        var order: [String] = []
-        for member in vm.detail?.members ?? [] {
-            let role = member.rolesString ?? "Участник"
-            if counts[role] == nil { order.append(role) }
-            counts[role, default: 0] += 1
+    private func memberChip(_ member: TeamMemberEntry) -> some View {
+        HStack(spacing: 8) {
+            RemoteImage(url: member.avatarURL) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                Circle().fill(Theme.surface).overlay(Image(systemName: "person.fill").font(.caption2).foregroundStyle(Theme.textSecondary))
+            }
+            .frame(width: 28, height: 28)
+            .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(member.username)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                if let role = member.rolesString, !role.isEmpty {
+                    Text(role)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
+            }
         }
-        return order.map { (role: $0, count: counts[$0] ?? 0) }
+        .padding(.horizontal, 10)
+        .frame(height: 44)
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 
     private func statColumn(value: String?, label: String) -> some View {

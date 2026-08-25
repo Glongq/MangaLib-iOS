@@ -1244,13 +1244,50 @@ struct TeamStat: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey { case value, short, label, tag }
 }
 
+/// Один участник команды с РЕАЛЬНЫМИ данными — ПОДТВЕРЖДЕНО перехватом
+/// ОТДЕЛЬНОГО эндпоинта `GET /teams/{slug_url}/users` (не путать с полем
+/// "users" внутри GET /teams/{slug_url} — там участники анонимны, только
+/// роль, без id/username/аватара вообще — decode того эндпоинта не делаем,
+/// раз этот, отдельный, отдаёт то же самое, но с реальными данными):
+/// `{data:[{user:{id,username,avatar:{filename,url}}, roles:[{id,label}],
+/// roles_string, order}]}`. Именно этот эндпоинт нужен для кликабельных
+/// чипов участников с переходом на профиль.
+struct TeamMemberEntry: Decodable, Identifiable {
+    let userId: Int
+    let username: String
+    let avatarURL: URL?
+    let rolesString: String?
+
+    private struct UserRef: Decodable {
+        let id: Int
+        let username: String
+        let avatar: AvatarRef?
+    }
+    private struct AvatarRef: Decodable { let url: String? }
+
+    enum CodingKeys: String, CodingKey { case user, rolesString = "roles_string" }
+
+    var id: Int { userId }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let user = (try? c.decodeIfPresent(UserRef.self, forKey: .user)) ?? nil
+        userId = user?.id ?? 0
+        username = user?.username ?? "Без имени"
+        avatarURL = UserProfile.absoluteURL(user?.avatar?.url)
+        rolesString = (try? c.decodeIfPresent(String.self, forKey: .rolesString)) ?? nil
+    }
+}
+
 /// Ответ подписки/отписки на команду-переводчика — ПОДТВЕРЖДЕНО перехватом
 /// `POST /favorites {source_id, source_type:"team"}` →
 /// `{data:{is_subscribed,source_type,source_id,relation},
-/// meta:{stats:{value,formated,short,label,tag}}}`. Тот же формат stat, что
-/// и TeamStat выше — переиспользован для meta.stats (счётчик подписчиков
-/// после переключения). См. TeamChipView.toggle() — только "подписаться"
-/// подтверждено перехватом, отписка не проверена отдельно.
+/// meta:{stats:{value,formated,short,label,tag}}}` — toggle подтверждён
+/// РАБОЧИМ в ОБЕ стороны новым перехватом (было под сомнением, теперь нет).
+/// Тот же тип переиспользован и для `GET /favorites/{source_type}/{id}`
+/// (проверка ТЕКУЩЕГО статуса без переключения, ПОДТВЕРЖДЕНО перехватом —
+/// ответ той же формы, просто без meta) — см.
+/// MangaNetworkService.fetchFavoriteStatus.
 struct FavoriteToggleResponse: Decodable {
     let isSubscribed: Bool
     let subscribersStat: TeamStat?
@@ -1267,19 +1304,6 @@ struct FavoriteToggleResponse: Decodable {
         isSubscribed = d?.isSubscribed ?? false
         subscribersStat = m?.stats
     }
-}
-
-/// Один участник команды — ПОДТВЕРЖДЕНО перехватом (поле "users" в
-/// GET /teams/{slug_url}): `{roles:[], roles_string:"Участник",
-/// permissions:[], requested_at, order, team_id}`. ВАЖНО: в перехваченном
-/// примере (8 записей) НИ У ОДНОЙ нет id/username/аватара вообще — только
-/// роль. Это значит: показать, КТО именно участник (имя/аватар), и тем
-/// более дать ссылку на его профиль — нечем, таких данных сервер в этом
-/// ответе не отдаёт (см. TeamView.membersSection — рендерит только сводку
-/// по ролям, без ссылок, честно вместо выдуманных профилей).
-struct TeamMember: Decodable {
-    let rolesString: String?
-    enum CodingKeys: String, CodingKey { case rolesString = "roles_string" }
 }
 
 /// Детальная страница переводчика (команды) — ПОДТВЕРЖДЕНО реальным
@@ -1301,14 +1325,12 @@ struct TeamDetail: Decodable, Identifiable {
     let website: String?
     let description: String?
     let stats: [TeamStat]
-    let members: [TeamMember]
     let titlesCountBySite: [Int: Int]
 
     enum CodingKeys: String, CodingKey {
         case id, slug, name, cover, background, vk, discord, website, stats, description
         case slugURL = "slug_url"
         case altName = "alt_name"
-        case members = "users"
         case titlesCountDetails = "titles_count_details"
     }
 
@@ -1341,7 +1363,6 @@ struct TeamDetail: Decodable, Identifiable {
         }
 
         stats = ((try? c.decodeIfPresent([TeamStat].self, forKey: .stats)) ?? nil) ?? []
-        members = ((try? c.decodeIfPresent([TeamMember].self, forKey: .members)) ?? nil) ?? []
 
         if let raw = ((try? c.decodeIfPresent([String: Int].self, forKey: .titlesCountDetails)) ?? nil) {
             var m: [Int: Int] = [:]

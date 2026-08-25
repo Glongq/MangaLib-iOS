@@ -2348,17 +2348,11 @@ struct MangaDetailView: View {
 /// нужно своё локальное состояние (подписан/грузится).
 ///
 /// Колокольчик — РЕАЛЬНАЯ подписка, не заглушка: `POST /favorites
-/// {source_id, source_type:"team"}` — ПОДТВЕРЖДЕНО перехватом. Но перехвачен
-/// был только сценарий "подписаться" (ответ `is_subscribed:true`) — отдельного
-/// запроса на ОТПИСКУ в перехвате не было, и текущее состояние подписки
-/// нигде заранее не отдаётся (ни в ветке главы, ни в GET /teams/{slug}), так
-/// что: 1) колокольчик всегда стартует "не подписан" (пустой), даже если
-/// пользователь на самом деле уже подписан — узнать это заранее нечем;
-/// 2) тап каждый раз шлёт ТОТ ЖЕ запрос, а новое состояние берётся из ответа
-/// (is_subscribed), а не предполагается — если сервер эндпоинт не
-/// переключает, а только подписывает, повторный тап на уже подписанного
-/// ничего не отпишет (сервер просто вернёт is_subscribed:true) — это стоит
-/// проверить на реальном устройстве.
+/// {source_id, source_type:"team"}` — ПОДТВЕРЖДЕНО перехватом, toggle
+/// работает в обе стороны (повторным перехватом подтверждена и отписка).
+/// Стартовое состояние при появлении чипа подтягивается реальным
+/// `GET /favorites/team/{id}` (см. .task ниже) — тоже ПОДТВЕРЖДЕНО
+/// перехватом, больше не "всегда стартует не подписан".
 struct TeamChipView: View {
     let team: ChapterTeam
 
@@ -2398,6 +2392,12 @@ struct TeamChipView: View {
         .padding(.horizontal, 10)
         .frame(height: MangaDetailView.metaChipHeight)
         .background(Theme.surfaceElevated, in: Capsule())
+        .task {
+            // Реальный стартовый статус — ПОДТВЕРЖДЕНО перехватом
+            // GET /favorites/team/{id} (см. MangaNetworkService.fetchFavoriteStatus).
+            guard let result = try? await MangaNetworkService.shared.fetchFavoriteStatus(sourceId: team.id, sourceType: "team") else { return }
+            isSubscribed = result.isSubscribed
+        }
     }
 
     private func toggle() {

@@ -15,6 +15,14 @@ final class TeamViewModel: ObservableObject {
     @Published private(set) var isLoadingDetail = false
     @Published private(set) var detailError: String?
 
+    // Участники (ПОДТВЕРЖДЕНО отдельным эндпоинтом GET /teams/{slug}/users —
+    // см. MangaNetworkService.fetchTeamMembers) и подписка (ПОДТВЕРЖДЕНО
+    // GET /favorites/team/{id} для реального стартового статуса + тот же
+    // POST /favorites, что и у TeamChipView, для переключения).
+    @Published private(set) var members: [TeamMemberEntry] = []
+    @Published private(set) var isSubscribed = false
+    @Published private(set) var isTogglingSubscription = false
+
     // Грид тайтлов.
     @Published var query: String = "" {
         didSet { if oldValue != query { scheduleReload(debounced: true) } }
@@ -79,7 +87,10 @@ final class TeamViewModel: ObservableObject {
 
     func loadIfNeeded() async {
         guard !didLoadOnce, !isLoading else { return }
-        await loadDetail()
+        async let detailTask: Void = loadDetail()
+        async let membersTask: Void = loadMembers()
+        async let subscriptionTask: Void = loadSubscriptionStatus()
+        _ = await (detailTask, membersTask, subscriptionTask)
         if let best = availableSites.max(by: { (titlesCount(for: $0) ?? 0) < (titlesCount(for: $1) ?? 0) }) {
             let target = SiteFilter.site(best)
             if siteFilter != target { siteFilter = target; return }
@@ -97,6 +108,27 @@ final class TeamViewModel: ObservableObject {
             detailError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         isLoadingDetail = false
+    }
+
+    /// Молчаливый провал (как loadSimilar/loadRelated у тайтла) — список
+    /// участников не критичен для остального экрана.
+    private func loadMembers() async {
+        members = (try? await service.fetchTeamMembers(slugURL: slugURL)) ?? []
+    }
+
+    private func loadSubscriptionStatus() async {
+        guard let result = try? await service.fetchFavoriteStatus(sourceId: teamId, sourceType: "team") else { return }
+        isSubscribed = result.isSubscribed
+    }
+
+    func toggleSubscription() {
+        guard !isTogglingSubscription else { return }
+        isTogglingSubscription = true
+        Task {
+            defer { isTogglingSubscription = false }
+            guard let result = try? await service.toggleFavorite(sourceId: teamId, sourceType: "team") else { return }
+            isSubscribed = result.isSubscribed
+        }
     }
 
     func apply(filter newFilter: MangaFilter) {

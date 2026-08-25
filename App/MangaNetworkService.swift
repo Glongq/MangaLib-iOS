@@ -790,18 +790,43 @@ final class MangaNetworkService {
 
     /// Подписка/отписка на команду-переводчика — ПОДТВЕРЖДЕНО перехватом
     /// `POST /favorites {source_id, source_type}` → `{data:{is_subscribed},
-    /// meta:{stats}}`. См. FavoriteToggleResponse и TeamChipView.toggle() —
-    /// перехвачен только сценарий "подписаться"; для отписки шлётся тот же
-    /// запрос, реальное новое состояние берётся из ответа, а не предполагается.
+    /// meta:{stats}}`. Toggle РАБОТАЕТ в обе стороны — ПОДТВЕРЖДЕНО повторным
+    /// перехватом (см. FavoriteToggleResponse): реальное новое состояние
+    /// всегда берётся из ответа, а не предполагается.
     func toggleFavorite(sourceId: Int, sourceType: String) async throws -> FavoriteToggleResponse {
         let body = FavoritePayload(source_id: sourceId, source_type: sourceType)
         let request = try makeJSONRequest(path: "/favorites", method: "POST", body: body)
         return try await perform(request)
     }
 
+    /// Текущий статус подписки (без переключения) — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /favorites/{source_type}/{source_id}` → `{data:{is_subscribed,...}}`
+    /// (та же форма, что и у POST /favorites выше, просто без meta). Нужен,
+    /// чтобы колокольчик/кнопка подписки при открытии сразу показывали
+    /// РЕАЛЬНОЕ состояние, а не всегда стартовали с "не подписан".
+    func fetchFavoriteStatus(sourceId: Int, sourceType: String) async throws -> FavoriteToggleResponse {
+        let request = try makeRequest(path: "/favorites/\(sourceType)/\(sourceId)", queryItems: [])
+        return try await perform(request)
+    }
+
     private struct FavoritePayload: Encodable {
         let source_id: Int
         let source_type: String
+    }
+
+    /// Участники команды с РЕАЛЬНЫМИ данными (id/username/аватар) —
+    /// ПОДТВЕРЖДЕНО перехватом ОТДЕЛЬНОГО эндпоинта
+    /// `GET /teams/{slug_url}/users` → `{data:[TeamMemberEntry-форма]}`, без
+    /// пагинации (весь список одним ответом, даже у команд на 200+ человек —
+    /// ПОДТВЕРЖДЕНО реальным перехватом такой большой команды). LossyListResponse
+    /// на случай единичных битых записей; записи без userId (совсем без
+    /// вложенного "user") дополнительно отфильтровываются — decode для них не
+    /// падает (там сплошные try?), но показывать чип без id/имени/аватара
+    /// незачем — не на что было бы переходить.
+    func fetchTeamMembers(slugURL: String) async throws -> [TeamMemberEntry] {
+        let request = try makeRequest(path: "/teams/\(encodePath(slugURL))/users", queryItems: [])
+        let response: LossyListResponse<TeamMemberEntry> = try await perform(request)
+        return response.data.filter { $0.userId != 0 }
     }
 
     /// Голос "+"/"-" за рекомендацию из "Похожего" — ПОДТВЕРЖДЕНО реальным
