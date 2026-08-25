@@ -27,6 +27,15 @@ final class ThemeManager: ObservableObject {
         static let isDarkTheme = "app_is_dark_theme"
     }
 
+    /// Ретранслятор смены активного сайта (см. Theme.accent — теперь зависит
+    /// от SiteSession.shared.activeSite). Экраны по всему приложению уже
+    /// объявляют `@ObservedObject private var themeManager = ThemeManager.
+    /// shared` именно ради пересчёта body при изменении Theme.* (см.
+    /// комментарий над классом) — подписавшись здесь ОДИН раз и вручную
+    /// рассылая objectWillChange, получаем реактивность акцентного цвета
+    /// везде бесплатно, без правки каждого экрана по отдельности.
+    private var siteCancellable: AnyCancellable?
+
     private init() {
         if let stored = defaults.object(forKey: Keys.isDarkTheme) as? Bool {
             isDarkTheme = stored
@@ -34,6 +43,13 @@ final class ThemeManager: ObservableObject {
             isDarkTheme = true // по умолчанию тёмная тема
         }
         Theme.isDark = isDarkTheme
+
+        siteCancellable = SiteSession.shared.$activeSite
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
     }
 }
 
@@ -50,8 +66,19 @@ enum Theme {
     static var surface: Color { isDark ? Dark.surface : Light.surface }
     /// Фон приподнятых элементов (поля ввода, чипсы).
     static var surfaceElevated: Color { isDark ? Dark.surfaceElevated : Light.surfaceElevated }
-    /// Акцентный цвет (кнопки, активные иконки) — один и тот же в обеих темах.
-    static let accent = Color(red: 1.0, green: 0.55, blue: 0.12)             // #FF8C1F (оранжевый)
+    /// Акцентный цвет (кнопки, активные иконки) — свой на каждый сайт
+    /// экосистемы (по прямой просьбе), один и тот же в обеих темах
+    /// оформления (тёмная/светлая). AnimeLib сознательно не поддержан этим
+    /// приложением (см. LibSite.swift), поэтому её цвет (#7E58C2) сюда не
+    /// добавлен — просто нет соответствующего case.
+    static var accent: Color {
+        switch SiteSession.shared.activeSite {
+        case .mangalib:  return Color(red: 1.0000, green: 0.5647, blue: 0.0000)  // #FF9000
+        case .slashlib:  return Color(red: 0.8471, green: 0.1059, blue: 0.3725)  // #D81B5F
+        case .hentailib: return Color(red: 0.9569, green: 0.2627, blue: 0.2118)  // #F44336
+        case .ranobelib: return Color(red: 0.1216, green: 0.5922, blue: 0.9569)  // #1F97F4
+        }
+    }
     /// Основной текст.
     static var textPrimary: Color { isDark ? Dark.textPrimary : Light.textPrimary }
     /// Второстепенный текст.
