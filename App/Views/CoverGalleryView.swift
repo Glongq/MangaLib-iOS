@@ -94,7 +94,16 @@ struct CoverGalleryView: View {
         }
         .ignoresSafeArea()
         .onAppear {
-            withAnimation(.easeOut(duration: Self.blurFadeDuration)) { isBlurred = true }
+            // withAnimation ПРЯМО в onAppear не анимировался (блюр
+            // появлялся сразу, "не в реальном времени") — .onAppear здесь
+            // срабатывает ВНУТРИ той же системной транзакции, что и сам
+            // .navigationTransition(.zoom), и она эту анимацию просто
+            // перекрывала/схлопывала. DispatchQueue.main.async откладывает
+            // старт на следующий тик run loop — уже ВНЕ этой транзакции —
+            // и анимация реально проигрывается плавно.
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: Self.blurFadeDuration)) { isBlurred = true }
+            }
         }
         .overlay(alignment: .topTrailing) {
             Button(action: closeGallery) {
