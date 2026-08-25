@@ -1,8 +1,8 @@
 import Foundation
 
-/// Один результат «Спец фильтра» — тайтл + сколько из ВЫБРАННЫХ жанров/тегов
-/// у него реально нашлось (может быть меньше общего числа выбранного — в
-/// этом весь смысл, см. SpecialFilterStore).
+/// Один результат «Спец фильтра» — тайтл + сколько из выбранных в обычных
+/// Фильтрах каталога жанров/тегов у него реально нашлось (может быть меньше
+/// общего числа выбранного — в этом весь смысл, см. SpecialFilterStore).
 struct SpecialFilterResult {
     let item: MangaItem
     let matchCount: Int
@@ -12,32 +12,32 @@ struct SpecialFilterResult {
 /// жанрам/тегам, которого на сервере на практике нет (см. комментарий в
 /// SpecialFilterStore и в MangaNetworkService.fetchCatalog про
 /// tags_soft_search). Сервер отдаёт по genres[]/tags[] строго AND — все
-/// переданные id должны совпасть. Чтобы получить "сначала максимум
-/// совпадений, потом чуть меньше, но не пусто" — делаем несколько запросов с
-/// убывающими подмножествами выбранных id: сперва весь набор целиком, затем
-/// все варианты "минус один", затем "минус два" и так далее, помечая каждый
-/// найденный тайтл САМЫМ БОЛЬШИМ числом совпадений, с которым он встретился.
-/// Жёсткие исключения (excluded) в переборе не участвуют — они всегда идут
-/// минус-фильтром в КАЖДЫЙ запрос, как и в обычном каталоге.
+/// переданные id должны совпасть. Сам выбор жанров/тегов НЕ свой — берётся
+/// прямо из обычного MangaFilter (те же Фильтры каталога, что и всегда), это
+/// только альтернативный способ ЕГО применить. Чтобы получить "сначала
+/// максимум совпадений, потом чуть меньше, но не пусто" — делаем несколько
+/// запросов с убывающими подмножествами выбранных id: сперва весь набор
+/// целиком, затем все варианты "минус один", затем "минус два" и так далее,
+/// помечая каждый найденный тайтл САМЫМ БОЛЬШИМ числом совпадений, с которым
+/// он встретился. Жёсткие исключения (excluded) в переборе не участвуют —
+/// они всегда идут минус-фильтром в КАЖДЫЙ запрос, как и в обычном каталоге.
 @MainActor
 enum SpecialFilterEngine {
 
     /// Перебор подмножеств размера threshold растёт как C(n, threshold) —
-    /// при большом n и низком threshold это может быть много запросов;
-    /// ограничиваем общий бюджет и останавливаемся раньше, если результатов
-    /// уже достаточно для одного экрана каталога с запасом на скролл.
+    /// при большом n и низком threshold это может быть много запросов; чтобы
+    /// не взрывалось от случайно набранного огромного выбора в обычных
+    /// Фильтрах, берём в расчёт не больше первых maxItems выбранных id.
+    static let maxItems = 6
     private static let maxRequests = 40
     private static let targetResultCount = 90
 
     static func search(service: MangaNetworkService, query: String, sort: SortOption, sortType: String,
-                        baseFilter: MangaFilter, selection: SpecialFilterStore) async throws -> [SpecialFilterResult] {
+                        baseFilter: MangaFilter) async throws -> [SpecialFilterResult] {
         struct Choice: Hashable { let isGenre: Bool; let id: Int }
-        let all = selection.genres.included.map { Choice(isGenre: true, id: $0) }
-            + selection.tags.included.map { Choice(isGenre: false, id: $0) }
-        // Защита от комбинаторного взрыва — UI (SpecialFilterSettingsView)
-        // и так не даёт выбрать больше SpecialFilterStore.maxSelection, но
-        // подстрахуемся и здесь на случай рассинхрона данных.
-        let items = Array(all.prefix(SpecialFilterStore.maxSelection))
+        let all = baseFilter.genres.included.map { Choice(isGenre: true, id: $0) }
+            + baseFilter.tags.included.map { Choice(isGenre: false, id: $0) }
+        let items = Array(all.prefix(maxItems))
         guard !items.isEmpty else { return [] }
 
         var best: [Int: SpecialFilterResult] = [:]
@@ -52,11 +52,11 @@ enum SpecialFilterEngine {
                 var f = baseFilter
                 f.genres = TriStateSelection(
                     included: Set(subset.filter(\.isGenre).map(\.id)),
-                    excluded: selection.genres.excluded
+                    excluded: baseFilter.genres.excluded
                 )
                 f.tags = TriStateSelection(
                     included: Set(subset.filter { !$0.isGenre }.map(\.id)),
-                    excluded: selection.tags.excluded
+                    excluded: baseFilter.tags.excluded
                 )
 
                 // Единичный сбой конкретного подмножества не должен ронять

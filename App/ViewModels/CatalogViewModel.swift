@@ -103,6 +103,13 @@ final class CatalogViewModel: ObservableObject {
         reloadNow()
     }
 
+    /// «Спец фильтр» реально влияет на поиск только если включён флагом (см.
+    /// SpecialFilterStore) И в обычных Фильтрах каталога выбрано хотя бы 2
+    /// жанра/тега — с одним пунктом ранжировать нечего, это обычный фильтр.
+    var isSpecialFilterActive: Bool {
+        SpecialFilterStore.shared.isEnabled && filter.genres.included.count + filter.tags.included.count >= 2
+    }
+
     /// Вызывается, когда на экране появляется один из последних элементов.
     func loadMoreIfNeeded(currentItem item: MangaItem) {
         guard let index = results.firstIndex(of: item) else { return }
@@ -134,15 +141,14 @@ final class CatalogViewModel: ObservableObject {
         page = 1
         hasNextPage = true
         do {
-            if SpecialFilterStore.shared.isActive {
+            if isSpecialFilterActive {
                 // «Спец фильтр» сам отдаёт готовый ранжированный список одним
                 // махом (см. SpecialFilterEngine) — не постранично с сервера,
                 // поэтому дальнейший бесконечный скролл (loadMore) в этом
                 // режиме просто не включается: hasNextPage = false.
                 let type = sortDescending ? "desc" : "asc"
                 let ranked = try await SpecialFilterEngine.search(
-                    service: service, query: query, sort: sort, sortType: type,
-                    baseFilter: filter, selection: SpecialFilterStore.shared
+                    service: service, query: query, sort: sort, sortType: type, baseFilter: filter
                 )
                 guard !Task.isCancelled else { return }
                 results = ranked.map(\.item)

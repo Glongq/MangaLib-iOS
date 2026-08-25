@@ -179,7 +179,14 @@ struct MangaCatalogView: View {
             Button {
                 showFilters = true
             } label: {
-                controlLabel(icon: "slider.horizontal.3", text: "Фильтры", badge: viewModel.filter.activeCount)
+                // Иконка меняется на "wand.and.stars", когда «Спец фильтр»
+                // (см. AppSettingsView/SpecialFilterStore) реально сработал
+                // на текущей выборке жанров/тегов — иначе неочевидно, что
+                // каталог сейчас не строго AND, а ранжированный поиск.
+                controlLabel(
+                    icon: viewModel.isSpecialFilterActive ? "wand.and.stars" : "slider.horizontal.3",
+                    text: "Фильтры", badge: viewModel.filter.activeCount
+                )
             }
 
             Menu {

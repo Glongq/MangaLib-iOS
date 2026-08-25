@@ -260,9 +260,10 @@ struct AppSettingsView: View {
     }
 
     /// "Спец фильтр" — реальный экран (SpecialFilterSettingsView), с "Вкл"
-    /// справа вместо привычной стрелки, когда режим реально активен (см.
-    /// SpecialFilterStore.isActive — включён И выбрано ≥2 пунктов), чтобы
-    /// не забыть, что каталог сейчас работает не как обычно.
+    /// справа вместо привычной стрелки, когда флаг включён (сам выбор
+    /// жанров/тегов — по-прежнему в Фильтрах каталога, см.
+    /// SpecialFilterStore), чтобы не забыть, что каталог сейчас может
+    /// работать не как обычно.
     private var specialFilterRow: some View {
         VStack(spacing: 0) {
             NavigationLink {
@@ -275,7 +276,7 @@ struct AppSettingsView: View {
                         .frame(width: 24)
                     Text("Спец фильтр").foregroundStyle(Theme.textPrimary)
                     Spacer(minLength: 0)
-                    if specialFilterStore.isActive {
+                    if specialFilterStore.isEnabled {
                         Text("Вкл")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(Theme.background)
