@@ -2074,6 +2074,29 @@ enum NotificationReadFilter: String, CaseIterable, Identifiable {
     }
 }
 
+/// `notification_type` для GET /notifications — "all" и "chapter"
+/// ПОДТВЕРЖДЕНЫ перехватом прямо в URL (proxypin, 2026-08-26). Остальные
+/// значения — та же таксономия категорий, что уже подтверждена на
+/// /notifications/count (см. NotificationCategoryCounts: chapter_player/
+/// episode/comments/message/card/other) — по аналогии по тому же ресурсу,
+/// не перехвачены отдельно как значения ИМЕННО этого параметра.
+enum NotificationTypeFilter: String, CaseIterable, Identifiable {
+    case all, chapter, chapter_player, episode, comments, message, card, other
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: return "Все"
+        case .chapter: return "Новые главы"
+        case .chapter_player: return "Плеер"
+        case .episode: return "Эпизоды"
+        case .comments: return "Комментарии"
+        case .message: return "Сообщения"
+        case .card: return "Карточки"
+        case .other: return "Другое"
+        }
+    }
+}
+
 /// `sort_type` для GET /notifications — ПОДТВЕРЖДЕНО перехватом (значение
 /// "desc" реально встречалось в URL; "asc" — по той же паре, что и у
 /// /comments sort_type, см. MangaNetworkService.fetchComments).
@@ -2388,6 +2411,55 @@ struct MangaCollection: Decodable, Identifiable {
 struct MangaCollectionVotes: Decodable, Hashable {
     let up: Int
     let down: Int
+}
+
+// MARK: - Отзывы на тайтл (GET /reviews?reviewable_type=manga&reviewable_id=)
+
+/// Отзыв на тайтл — ПОДТВЕРЖДЕНО реальным перехватом (proxypin, 2026-08-26):
+/// `{id,model,title,content:{ProseMirror doc},views,comments_count,user,
+/// rating:[{label,value}],status,type,evaluation,votes:{up,down,user},
+/// metadata,site_id,created_at,updated_at}`. `content` — та же форма
+/// rich-текста, что и у описания тайтла (см. SummaryDoc).
+struct MangaReview: Decodable, Identifiable {
+    let id: Int
+    let title: String
+    let contentText: String
+    let views: Int
+    let commentsCount: Int
+    let user: FriendUser
+    let rating: [ReviewRatingEntry]
+    let votes: SimilarVotes?
+    let createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, content, views, user, rating, votes
+        case commentsCount = "comments_count"
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        title = ((try? c.decodeIfPresent(String.self, forKey: .title)) ?? nil) ?? ""
+        let doc = (try? c.decodeIfPresent(SummaryDoc.self, forKey: .content)) ?? nil
+        contentText = doc?.plainText ?? ""
+        views = ((try? c.decodeIfPresent(Int.self, forKey: .views)) ?? nil) ?? 0
+        commentsCount = ((try? c.decodeIfPresent(Int.self, forKey: .commentsCount)) ?? nil) ?? 0
+        user = (try? c.decode(FriendUser.self, forKey: .user)) ?? FriendUser(id: 0, username: "", avatarURL: nil)
+        rating = ((try? c.decodeIfPresent([ReviewRatingEntry].self, forKey: .rating)) ?? nil) ?? []
+        votes = (try? c.decodeIfPresent(SimilarVotes.self, forKey: .votes)) ?? nil
+        if let raw = ((try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? nil), !raw.isEmpty {
+            createdAt = APIISODate.parse(raw)
+        } else {
+            createdAt = nil
+        }
+    }
+}
+
+struct ReviewRatingEntry: Decodable, Identifiable, Hashable {
+    let label: String
+    let value: Int
+    var id: String { label }
 }
 
 /// Участник «Топ активных недели» — ПОДТВЕРЖДЕНО реальным перехватом (тот же

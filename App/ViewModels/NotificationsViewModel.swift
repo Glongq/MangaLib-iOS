@@ -32,6 +32,12 @@ final class NotificationsViewModel: ObservableObject {
             Task { await refresh() }
         }
     }
+    @Published var typeFilter: NotificationTypeFilter = .all {
+        didSet {
+            guard oldValue != typeFilter else { return }
+            Task { await refresh() }
+        }
+    }
 
     private var page = 1
     private let service: MangaNetworkService
@@ -69,7 +75,8 @@ final class NotificationsViewModel: ObservableObject {
     private func loadList(page requestedPage: Int, append: Bool) async {
         do {
             let result = try await service.fetchNotifications(
-                readType: readFilter.rawValue, sortType: sortOrder.rawValue, page: requestedPage
+                readType: readFilter.rawValue, sortType: sortOrder.rawValue,
+                notificationType: typeFilter.rawValue, page: requestedPage
             )
             if append {
                 items.append(contentsOf: result.items)

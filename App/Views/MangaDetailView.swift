@@ -767,6 +767,30 @@ struct MangaDetailView: View {
         }
     }
 
+    /// Отзывы — ПОДТВЕРЖДЕНО перехватом `GET /reviews?reviewable_type=manga&
+    /// reviewable_id=`, см. MangaReviewsView. Отдельным пушнутым экраном (не
+    /// ещё одной вкладкой внутри и так большого MangaDetailView), тот же
+    /// подход, что уже применён для Друзей/Коллекций/Списков в профиле.
+    @ViewBuilder
+    private var reviewsEntryRow: some View {
+        if let mangaId = viewModel.detail?.id {
+            NavigationLink {
+                MangaReviewsView(mangaId: mangaId, mangaTitle: title, siteId: viewModel.resolvedSiteId)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "text.bubble").font(.subheadline).foregroundStyle(Theme.accent)
+                    Text("Отзывы").font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textSecondary)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     @ViewBuilder
     private func ratingStatsBlock(_ group: StatGroup?) -> some View {
         if let entries = group?.stats, !entries.isEmpty {
@@ -1412,6 +1436,7 @@ struct MangaDetailView: View {
             similarSection
             charactersSection
             statsSection
+            reviewsEntryRow
 
             if viewModel.detail == nil && !viewModel.isLoading {
                 VStack(alignment: .leading, spacing: 10) {

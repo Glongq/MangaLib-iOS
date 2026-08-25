@@ -201,29 +201,25 @@ final class MangaNetworkService {
         appendTri(&items, "genres", filter.genres)
         appendTri(&items, "tags", filter.tags)
 
-        // «Строгое совпадение» — реальное имя параметра ПОДТВЕРЖДЕНО перехватом
-        // (proxypin, 2026-08-26, каталог HentaiLib): `genres_soft_search=1` /
-        // `tags_soft_search=1`, а НЕ `genres_and`/`tags_and`, как было раньше
-        // (тот вариант — чистая догадка, ни разу не встретился ни в одной
-        // капче за всю сессию; сервер молча игнорировал неизвестный параметр,
-        // так что тумблер "Строгое совпадение" фактически не работал вообще —
-        // ни на MangaLib, ни на других сайтах, просто это было незаметно,
-        // потому что сервер и без него отдавал какие-то результаты).
-        // Полярность (наличие параметра, а не его значение — сервер именно
-        // так его и видел в капче: у одного запроса ключ `tags_soft_search`
-        // в URL присутствовал, у следующего с ТЕМИ ЖЕ genres/tags — просто
-        // отсутствовал целиком, значения "0" нигде не встретилось): при
-        // СТРОГОМ совпадении параметр не шлём вообще (точное совпадение),
-        // иначе — шлём "=1" (это и есть прежнее поведение по умолчанию).
-        // Чистого A/B-перехвата с явным переключением чекбокса в UI не
-        // было — если после реального теста окажется, что полярность
-        // перепутана, достаточно поменять местами условия ниже.
-        if !filter.genres.included.isEmpty && !filter.genresStrict {
-            items.append(URLQueryItem(name: "genres_soft_search", value: "1"))
-        }
-        if !filter.tags.included.isEmpty && !filter.tagsStrict {
-            items.append(URLQueryItem(name: "tags_soft_search", value: "1"))
-        }
+        // «Строгое совпадение» — ключи genres_soft_search/tags_soft_search
+        // РЕАЛЬНЫЕ (в отличие от прежней чистой догадки genres_and/tags_and,
+        // которая ни разу не встретилась ни в одной капче), но связь именно
+        // со "Строгим совпадением" ОПРОВЕРГНУТА прямым сравнением (proxypin,
+        // 2026-08-26): та же пара тегов (tags[0]=13&tags[1]=120) отправлена
+        // подряд ДЕСЯТЬЮ разными запросами (все варианты сортировки в
+        // каталоге) — параметр отсутствует ВСЕГДА. Другая пара тегов в этой
+        // же сессии (356+286) — параметр присутствует ВСЕГДА. То есть это не
+        // тумблер, переключаемый пользователем на лету (иначе он бы то
+        // появлялся, то исчезал в рамках одной и той же пары тегов при
+        // смене сортировки) — похоже на побочный эффект ТОГО, как именно
+        // сайт добавил тег в выборку (через текстовый поиск по названию —
+        // тогда soft/нечёткое совпадение остаётся приклеенным к тегу — или
+        // напрямую кликом по списку). У нашего приложения такого различия
+        // нет (мы всегда просто передаём id тега), так что осмысленно
+        // повторить это поведение нечем — и раз реального эффекта параметра
+        // на результаты мы тоже не видели, безопаснее его вообще не слать.
+        // "Строгое совпадение" в фильтрах сейчас ничего на сервер не шлёт —
+        // считать нерабочим до новых данных.
         appendTri(&items, "caution", filter.ageRatings)
         appendTri(&items, "types", filter.types)
         appendTri(&items, "format", filter.formats)
@@ -1028,19 +1024,36 @@ final class MangaNetworkService {
         return response.data
     }
 
+    // MARK: - Отзывы на тайтл
+
+    /// `GET /reviews?page=&sort_by=newest&reviewable_type=manga&reviewable_id=` —
+    /// ПОДТВЕРЖДЕНО перехватом (proxypin, 2026-08-26, HentaiLib).
+    func fetchReviews(mangaId: Int, page: Int = 1, siteId: Int? = nil) async throws -> (reviews: [MangaReview], hasNextPage: Bool) {
+        let items = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "sort_by", value: "newest"),
+            URLQueryItem(name: "reviewable_type", value: "manga"),
+            URLQueryItem(name: "reviewable_id", value: String(mangaId))
+        ]
+        let request = try makeRequest(path: "/reviews", queryItems: items, siteId: siteId)
+        let response: LossyListResponse<MangaReview> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
     // MARK: - Уведомления
 
-    /// `GET /notifications?notification_type=all&page=&read_type=&sort_type=` —
-    /// ПОДТВЕРЖДЕНО реальным перехватом (три devtools-файла от пользователя).
-    /// `notification_type` зафиксирован как "all" — отдельный фильтр по
-    /// категориям (chapter/comments/message/card/...) в этом раунде не
-    /// запрашивался, оставлен как есть, раз подтверждённое значение — "all".
-    /// Ни в одном перехвате нет meta для этого эндпоинта — как и у fetchHistory,
+    /// `GET /notifications?notification_type=&page=&read_type=&sort_type=` —
+    /// ПОДТВЕРЖДЕНО реальным перехватом. `notification_type` раньше был
+    /// зафиксирован на "all" — ПОДТВЕРЖДЕНО перехватом (proxypin,
+    /// 2026-08-26), что реально принимает и "chapter" (см.
+    /// NotificationTypeFilter — остальные значения по аналогии с уже
+    /// подтверждённой таксономией /notifications/count). Ни в одном
+    /// перехвате нет meta для этого эндпоинта — как и у fetchHistory,
     /// используем эвристику "непустая страница = вероятно есть ещё" через
     /// LossyListResponse.meta (там уже есть fallback на !data.isEmpty).
-    func fetchNotifications(readType: String, sortType: String, page: Int = 1) async throws -> (items: [NotificationItem], hasNextPage: Bool) {
+    func fetchNotifications(readType: String, sortType: String, notificationType: String = "all", page: Int = 1) async throws -> (items: [NotificationItem], hasNextPage: Bool) {
         let items: [URLQueryItem] = [
-            URLQueryItem(name: "notification_type", value: "all"),
+            URLQueryItem(name: "notification_type", value: notificationType),
             URLQueryItem(name: "page", value: String(max(page, 1))),
             URLQueryItem(name: "read_type", value: readType),
             URLQueryItem(name: "sort_type", value: sortType)

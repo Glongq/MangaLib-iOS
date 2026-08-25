@@ -106,6 +106,13 @@ struct NotificationsView: View {
                 }
             }
             .pickerStyle(.inline)
+            Divider()
+            Picker("Категория", selection: $viewModel.typeFilter) {
+                ForEach(NotificationTypeFilter.allCases) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+            .pickerStyle(.inline)
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "line.3.horizontal.decrease.circle")
