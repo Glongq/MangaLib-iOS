@@ -503,6 +503,7 @@ struct TeamView: View {
         }
     }
 
+    /// НЕ стеклянный — по прямой просьбе (обычная плашка Theme.surfaceElevated).
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
@@ -519,7 +520,7 @@ struct TeamView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 
     private var siteMenu: some View {
@@ -552,6 +553,7 @@ struct TeamView: View {
         }
     }
 
+    /// НЕ стеклянный — по прямой просьбе (обычная плашка Theme.surfaceElevated).
     private func pill(icon: String, text: String?, badge: Int = 0) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon).font(.footnote.weight(.semibold))
@@ -569,7 +571,7 @@ struct TeamView: View {
         .foregroundStyle(Theme.textPrimary)
         .padding(.horizontal, 14)
         .frame(minHeight: Theme.pillControlHeight)
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 
     private static func siteLabel(_ s: LibSite) -> String {
