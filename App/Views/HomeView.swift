@@ -752,15 +752,14 @@ struct HomeView: View {
     private static var updatesTypeFont: Font { Font(updatesTypeUIFont) }
     private static let updatesTextSpacing: CGFloat = 4
 
-    /// Размер обложки — как в «Продолжить читать» (1:1), + высота ОДНОЙ
-    /// строки текста (updatesTypeUIFont — тот же шрифт, что у "Том X Глава Y"
-    /// и даты), как попросили — обложка была примерно вровень с худшим
-    /// случаем текста, чуть добавили воздуха. Ширина растёт пропорционально
-    /// высоте, чтобы обложка не исказилась (не растягивали только по высоте).
+    /// Высота — как была (см. историю: «Продолжить читать» + высота одной
+    /// строки текста, чуть добавили воздуха). Ширина ПЕРЕСЧИТАНА под эталон
+    /// (Theme.coverAspectRatio = 2:3, как в Каталоге/Новинках) — раньше
+    /// бралась от соотношения continueReadingCover (≈67:94, не 2:3), теперь
+    /// от высоты в обратную сторону: width = height / 1.5, высота не менялась.
     private static var updatesCoverHeightBoost: CGFloat { updatesTypeUIFont.lineHeight.rounded(.up) }
     private static let updatesCoverHeight: CGFloat = continueReadingCoverHeight + updatesCoverHeightBoost
-    private static let updatesCoverWidth: CGFloat =
-        (updatesCoverHeight * (continueReadingCoverWidth / continueReadingCoverHeight)).rounded()
+    private static let updatesCoverWidth: CGFloat = (updatesCoverHeight / Theme.coverAspectRatio).rounded()
 
     /// Высота подложки — под ХУДШИЙ случай текста (название в 2 строки +
     /// "Том X Глава Y — Название" в 2 строки + дата), а не константа "от
