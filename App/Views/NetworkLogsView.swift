@@ -167,12 +167,13 @@ struct NetworkLogsView: View {
         .padding(12)
         .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(Rectangle())
-        // Тап по карточке МИМО текстовых блоков (заголовок — свой Button на
-        // схлопывание, каждый текстовый блок — свой Button на копирование
-        // именно себя, см. detailBlock) — копирует запись целиком. Button
-        // внутри перехватывает тап раньше, чем он дойдёт досюда, поэтому
-        // конфликта с ними нет — сработает только там, где под пальцем
-        // действительно ничего кликабельного нет (паддинги, подписи блоков).
+        // Тап по карточке МИМО текста лога (заголовок — свой Button на
+        // схлопывание, тело лога — .textSelection(.enabled) в detailBlock,
+        // сам перехватывает тап на себе) — копирует запись целиком.
+        // Вложенные жесты (Button/textSelection) перехватывают тап раньше,
+        // чем он дойдёт досюда, поэтому конфликта с ними нет — сработает
+        // только там, где под пальцем ничего кликабельного/выделяемого нет
+        // (паддинги, подписи блоков).
         .onTapGesture {
             copyToClipboard(text: copyText(for: entry))
         }
@@ -186,27 +187,23 @@ struct NetworkLogsView: View {
         }
     }
 
-    /// Раньше здесь стоял .textSelection(.enabled) — ручное выделение
-    /// драгом слишком неудобно для длинных JSON-тел (см. фидбек — приходили
-    /// куски текста, рваные посередине слова, похоже на копирование через
-    /// скриншот+OCR, а не через приложение). Теперь один тап по блоку
-    /// копирует его целиком — простой и надёжный жест вместо выделения.
+    /// По уточнению: именно текст ЛОГА (тело запроса/ответа/ошибки) должен
+    /// выделяться как обычный текст (драг + системное меню «Скопировать»),
+    /// а не копироваться целиком одним тапом — .textSelection(.enabled), а
+    /// не Button. Тап "мимо текста, но внутри карточки" (см. entryRow.
+    /// onTapGesture) по-прежнему копирует запись целиком.
     private func detailBlock(title: String, text: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
-            Button {
-                copyToClipboard(text: text)
-            } label: {
-                Text(text)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-            .buttonStyle(.plain)
+            Text(text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Theme.textPrimary)
+                .textSelection(.enabled)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
     }
 
