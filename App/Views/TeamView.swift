@@ -18,6 +18,7 @@ struct TeamView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showFilters = false
     @State private var showTeamNames = false
+    @State private var profileUser: ProfileUserId?
     @State private var selectedTab: Tab = .titles
     @FocusState private var searchFocused: Bool
 
@@ -103,6 +104,7 @@ struct TeamView: View {
             TitleNamesSheet(rusName: vm.detail?.name ?? fallbackName, originalName: nil, engName: nil, otherNames: teamOtherNames)
                 .presentationDetents([.medium, .large])
         }
+        .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
     }
 
     /// alt_name с сервера — одна строка через запятую ("DIT, дед, деды, …") —
@@ -361,10 +363,17 @@ struct TeamView: View {
     /// профиль. ПОДТВЕРЖДЕНО отдельным эндпоинтом GET /teams/{slug}/users
     /// (не путать с анонимным полем "users" внутри самого GET /teams/{slug} —
     /// там только роль без id/имени, поэтому оно вообще не декодируется, см.
-    /// TeamMemberEntry). Тап открывает ProfileView(userId:) — тот же экран
-    /// профиля, что и везде в приложении. Количество участников — теперь
-    /// отдельным чипом в metaRow выше (см. комментарий там), поэтому здесь
-    /// в заголовке больше не дублируется.
+    /// TeamMemberEntry). Тап открывает ProfileView(userId:) — ЧЕРЕЗ
+    /// .sheet(item:), а не NavigationLink-пуш: ProfileView везде в
+    /// приложении (см. MangaDetailView.profileUser) открывается как sheet —
+    /// у него своя внутренняя NavigationStack и кастомный dismiss()/toolbar-
+    /// hidden хедер, рассчитанные именно на модальную презентацию. Пуш его
+    /// через NavigationLink здесь был единственным местом-исключением и
+    /// ломал стек навигации (см. баг-репорт: после перехода из карточки
+    /// команды в профиль участника приложение вышибало на вкладку "Читают" с
+    /// неработающими кнопками до переключения вкладки). Количество
+    /// участников — отдельным чипом в metaRow выше, поэтому здесь в
+    /// заголовке больше не дублируется.
     @ViewBuilder
     private var membersSection: some View {
         if !vm.members.isEmpty {
@@ -373,7 +382,7 @@ struct TeamView: View {
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 12) {
                         ForEach(vm.members) { member in
-                            NavigationLink { ProfileView(userId: member.userId) } label: {
+                            Button { profileUser = ProfileUserId(id: member.userId) } label: {
                                 memberChip(member)
                             }
                             .buttonStyle(.plain)
