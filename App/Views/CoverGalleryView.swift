@@ -31,26 +31,26 @@ extension UIApplication {
 /// - Стартует с ПОСЛЕДНЕЙ картинки (initialIndex = images.count - 1), не с
 ///   первой — по прямой просьбе: последний элемент галереи всегда и есть
 ///   ТЕКУЩАЯ обложка тайтла, значит открывать нужно именно с неё ("37/37"),
-///   а свайп дальше — уже вглубь истории обложек. Дальше — обычный
-///   двусторонний свайп TabView(.page), отдельной логики направления не
-///   нужно: от последнего индекса можно свайпнуть в обе стороны как обычно.
+///   а свайп дальше — уже вглубь истории обложек.
 /// - Блюр-фон — ОДИН снимок приложения (см. UIView.renderedSnapshot выше),
-///   а не блюр текущей картинки.
-/// - Крестик закрытия — та же позиция (padding.trailing 16/padding.top 54) и
-///   тот же стеклянный кружок, что и у кнопки "..." на карточке тайтла.
-///   ВАЖНО: .ignoresSafeArea() должен стоять ДО .overlay() (а не после) —
-///   иначе overlay считает позицию от урезанного safe-area фрейма, а не от
-///   истинного края экрана.
+///   а не блюр текущей картинки, и ВСЕГДА включён на полную (без своей
+///   анимации нарастания/спада — раньше пробовали анимировать это отдельно
+///   от системного .navigationTransition(.zoom), но два независимых
+///   анимации (системная + наша) не синхронизировались и давали дёрганое
+///   закрытие что кнопкой, что свайпом — "в конце дёргается и выравнивается".
+///   Теперь блюр статичен, всю визуальную работу открытия/закрытия делает
+///   ТОЛЬКО .navigationTransition — она и должна быть единственным источником
+///   движения, тогда дёргаться нечему).
+/// - Крестик закрытия — тот же стеклянный кружок, что и у кнопки "..." на
+///   карточке тайтла, но поднят на высоту своей же кнопки (48pt) —
+///   по прямой просьбе.
+/// - Плейсхолдер картинки, пока грузится — скелетон (SkeletonBox), не
+///   спиннер: тот же приём, что и везде в приложении, плюс — по словам
+///   пользователя — устойчивый одинаковый размер плейсхолдера сглаживает
+///   ощущение "дёрганого" пролистывания между страницами.
 /// - Каждая страница получает ЯВНЫЙ фиксированный размер (proxy.size из
 ///   ОДНОГО общего GeometryReader) — устраняет наезд страниц друг на друга
 ///   при свайпе, пока картинка ещё грузится.
-/// - Переход открытия — .navigationTransition(.zoom(...)) (iOS 18+): картинка
-///   визуально "вырастает" из обложки на карточке тайтла — источник помечен
-///   .matchedTransitionSource(id:in:) на самой обложке (см. MangaDetailView).
-///   Блюр-фон СИНХРОННО нарастает вместе с этим ростом (не появляется сразу
-///   готовым) — см. isBlurred/background(size:) — а при закрытии так же
-///   плавно спадает, ПЕРЕД тем как реально закрыть экран (см. closeGallery),
-///   т.е. в точности то же самое, просто в обратном порядке, как попросили.
 struct CoverGalleryView: View {
     let images: [URL]
     let backgroundSnapshot: UIImage?
@@ -59,11 +59,6 @@ struct CoverGalleryView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var currentIndex: Int
-    /// Управляет интенсивностью блюра/затемнения фона — false в момент
-    /// появления (пока картинка ещё "летит" от обложки к полному экрану),
-    /// затем анимированно true. При закрытии — обратно к false, и уже
-    /// ПОСЛЕ этого закрытие экрана (см. closeGallery).
-    @State private var isBlurred = false
 
     init(images: [URL], backgroundSnapshot: UIImage?, transitionSourceID: String, transitionNamespace: Namespace.ID) {
         self.images = images
@@ -73,17 +68,7 @@ struct CoverGalleryView: View {
         _currentIndex = State(initialValue: max(0, images.count - 1))
     }
 
-    /// Длительность фейда блюра — подобрана под примерную длительность
-    /// системного .navigationTransition(.zoom), её саму API не отдаёт.
-    private static let blurFadeDuration: Double = 0.35
-
     var body: some View {
-        // ZStack снаружи, GeometryReader — ТОЛЬКО внутри, для размера
-        // страниц. .ignoresSafeArea()/.overlay() навешаны на этот внешний
-        // ZStack (как heroHeader в MangaDetailView — обычный VStack, а не
-        // сам GeometryReader), а не на сам GeometryReader — раньше крестик
-        // всё равно был не там же, где "..." на карточке тайтла, даже с
-        // теми же цифрами паддинга; такая структура надёжнее.
         ZStack {
             GeometryReader { proxy in
                 ZStack {
@@ -101,20 +86,11 @@ struct CoverGalleryView: View {
             }
         }
         .ignoresSafeArea()
-        .onAppear {
-            // withAnimation ПРЯМО в onAppear не анимировался (блюр
-            // появлялся сразу, "не в реальном времени") — .onAppear здесь
-            // срабатывает ВНУТРИ той же системной транзакции, что и сам
-            // .navigationTransition(.zoom), и она эту анимацию просто
-            // перекрывала/схлопывала. DispatchQueue.main.async откладывает
-            // старт на следующий тик run loop — уже ВНЕ этой транзакции —
-            // и анимация реально проигрывается плавно.
-            DispatchQueue.main.async {
-                withAnimation(.easeOut(duration: Self.blurFadeDuration)) { isBlurred = true }
-            }
-        }
         .overlay(alignment: .topTrailing) {
-            Button(action: closeGallery) {
+            // .padding(.top, 6) = 54 (позиция "..." на карточке тайтла) - 48
+            // (высота самой кнопки) — "подними на высоту, которую сам крестик
+            // занимает".
+            Button { dismiss() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
@@ -122,7 +98,7 @@ struct CoverGalleryView: View {
                     .glassEffect(.regular, in: Circle())
             }
             .padding(.trailing, 16)
-            .padding(.top, 54)
+            .padding(.top, 6)
         }
         .overlay(alignment: .bottom) {
             // Тот же стеклянный бабл, что у номера страницы в читалке манги
@@ -143,17 +119,6 @@ struct CoverGalleryView: View {
         .navigationTransition(.zoom(sourceID: transitionSourceID, in: transitionNamespace))
     }
 
-    /// Сначала плавно снимаем блюр (та же анимация, что при открытии, в
-    /// обратную сторону), и ТОЛЬКО ПОСЛЕ этого реально закрываем экран —
-    /// иначе dismiss() убрал бы вьюху мгновенно, а обратная анимация блюра
-    /// просто не успела бы отыграть.
-    private func closeGallery() {
-        withAnimation(.easeIn(duration: Self.blurFadeDuration)) { isBlurred = false }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.blurFadeDuration) {
-            dismiss()
-        }
-    }
-
     @ViewBuilder
     private func background(size: CGSize) -> some View {
         if let backgroundSnapshot {
@@ -161,11 +126,11 @@ struct CoverGalleryView: View {
                 .resizable()
                 .scaledToFill()
                 .frame(width: size.width, height: size.height)
-                .blur(radius: isBlurred ? 30 : 0)
-                .overlay(Color.black.opacity(isBlurred ? 0.45 : 0))
+                .blur(radius: 30)
+                .overlay(Color.black.opacity(0.45))
                 .clipped()
         } else {
-            Color.black.opacity(isBlurred ? 1 : 0)
+            Color.black
         }
     }
 
@@ -185,7 +150,8 @@ struct CoverGalleryView: View {
                 RemoteImage(url: url) { img in
                     img.resizable().scaledToFit()
                 } placeholder: {
-                    ProgressView().tint(.white)
+                    SkeletonBox()
+                        .frame(width: size.width, height: size.height)
                 } failure: {
                     Image(systemName: "photo")
                         .font(.system(size: 40))
