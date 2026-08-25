@@ -677,17 +677,18 @@ struct HomeView: View {
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text(item.displayTitle)
                     .font(Self.mangaTitleFont)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(height: Self.continueReadingTitleBlockHeight, alignment: .top)
                 Text(chapterLine(for: item))
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(2)
             }
-            .padding(.vertical, 10)
+            .padding(.vertical, Self.continueReadingPadding)
 
             Spacer(minLength: 0)
 
