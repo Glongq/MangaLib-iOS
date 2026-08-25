@@ -115,14 +115,10 @@ final class MangaNetworkService {
     /// (страница персонажа фильтрует по одному типу контента). `targetId`+
     /// `targetModel` — фильтр «тайтлы, где есть эта сущность» (персонаж и т.п.),
     /// ПОДТВЕРЖДЕНО перехватом `?target_id=1221&target_model=character`.
-    /// `extraFields` — дополнительные значения `fields[]` сверх стандартного
-    /// набора (напр. "metadata" — см. fetchLatestUpdates). Пустой массив по
-    /// умолчанию не меняет поведение существующих вызовов ни на бит.
     func fetchCatalog(query: String, sort: SortOption, filter: MangaFilter, page: Int = 1,
                       sortByOverride: String? = nil, sortType: String = "desc",
                       siteIds: [Int]? = nil,
-                      targetId: Int? = nil, targetModel: String? = nil,
-                      extraFields: [String] = []) async throws -> CatalogPage {
+                      targetId: Int? = nil, targetModel: String? = nil) async throws -> CatalogPage {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "fields[]", value: "rate"),
             URLQueryItem(name: "fields[]", value: "rate_avg"),
@@ -130,9 +126,6 @@ final class MangaNetworkService {
             URLQueryItem(name: "fields[]", value: "releaseDate"),
             URLQueryItem(name: "page", value: String(max(page, 1)))
         ]
-        for field in extraFields {
-            items.append(URLQueryItem(name: "fields[]", value: field))
-        }
         let sites = siteIds ?? SiteSession.shared.effectiveSearchSites.map(\.rawValue)
         for site in sites {
             items.append(URLQueryItem(name: "site_id[]", value: String(site)))
@@ -188,26 +181,26 @@ final class MangaNetworkService {
         return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
     }
 
-    /// «Последние обновления» на вкладке «Читают» (см. HomeView) — тот же
-    /// каталог, отсортированный по дате последней главы (SortOption.updated →
-    /// sort_by=last_chapter_at, ПОДТВЕРЖДЕНО реальным поведением каталога).
+    /// «Все обновления» на вкладке «Читают» (см. HomeView).
     ///
-    /// `fields[]=metadata` — ПОДТВЕРЖДЕНО перехватом, что сервер принимает
-    /// его без ошибки (200, не 422), но объект metadata в ответе КАТАЛОГА —
-    /// это НЕ то же самое, что metadata в /bookmarks или в агрегате главной:
-    /// тут только anilist/shiki-поля синхронизации (anilist_status_updated_at
-    /// и т.п.), без last_item/latest_items вообще. То есть "Том X Глава Y" у
-    /// "Все обновления" сейчас в принципе не может подтянуться этим полем —
-    /// нужно либо другое значение fields[], либо другой эндпоинт (ещё не
-    /// подтверждено, нужен реальный перехват страницы "Обновления" на сайте).
-    /// 422-фолбэк ниже оставлен на случай будущих изменений API — сам он
-    /// сейчас НЕ срабатывает (сервер этот конкретный запрос принимает).
+    /// РАНЬШЕ: каталог с sort_by=last_chapter_at + fields[]=metadata —
+    /// список тайтлов был верный (порядок подтверждён поведением каталога),
+    /// но сам fields[]=metadata оказался бесполезен: сервер его принимает
+    /// (200, не 422), однако metadata в ответе КАТАЛОГА — это другой объект
+    /// (только anilist/shiki-поля синхронизации), без last_item/latest_items
+    /// вообще — "Том X Глава Y" физически не мог подтянуться этим путём.
+    ///
+    /// ТЕПЕРЬ: переиспользуем ПОДТВЕРЖДЁННЫЙ /notifications (см.
+    /// fetchNotifications — три реальных перехвата, уже используется вкладкой
+    /// «Новое») — там каждый элемент несёт media + chapter (volume/number/
+    /// name) + created_at по отдельности, именно то, что нужно. category ==
+    /// "chapter" — единственная категория, чья форма data реально
+    /// перехвачена как элемент списка (см. MangaItem.fromNotification);
+    /// остальные (comments/message/card/…) отфильтровываются.
     func fetchLatestUpdates(page: Int = 1) async throws -> CatalogPage {
-        do {
-            return try await fetchCatalog(query: "", sort: .updated, filter: MangaFilter(), page: page, extraFields: ["metadata"])
-        } catch NetworkError.server(let status) where status == 422 {
-            return try await fetchCatalog(query: "", sort: .updated, filter: MangaFilter(), page: page)
-        }
+        let result = try await fetchNotifications(readType: "all", sortType: "desc", page: page)
+        let items = result.items.compactMap { MangaItem.fromNotification($0) }
+        return CatalogPage(items: items, hasNextPage: result.hasNextPage)
     }
 
     /// «Мои обновления» на вкладке «Читают» — ПОДТВЕРЖДЕНО реальным

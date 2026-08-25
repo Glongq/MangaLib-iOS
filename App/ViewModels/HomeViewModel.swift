@@ -230,12 +230,25 @@ final class HomeViewModel: ObservableObject {
         }
     }
 
+    /// Первое вхождение каждого id, порядок сохранён — для «Все обновления»
+    /// (см. fetchLatestUpdates) один и тот же тайтл теперь реально может
+    /// встретиться в одной странице ДВАЖДЫ (две отдельные главы = два
+    /// отдельных уведомления), а MangaItem.id/Identifiable — это id тайтла,
+    /// не уведомления. /notifications уже отсортирован по дате (sort_type=
+    /// desc), поэтому первое вхождение — самое свежее, ровно то, что нужно
+    /// показать одной строкой на тайтл (как и «Мои обновления»/старый
+    /// каталог-подход — там дублей по построению не было).
+    private func firstOccurrencePerID(_ items: [MangaItem]) -> [MangaItem] {
+        var seen = Set<Int>()
+        return items.filter { seen.insert($0.id).inserted }
+    }
+
     private func reloadUpdates() async {
         updatesPage = 1
         updatesHasNext = true
         do {
             let page = try await fetchUpdatesPage(1)
-            updates = page.items
+            updates = firstOccurrencePerID(page.items)
             updatesHasNext = page.hasNextPage
         } catch {
             guard !isCancellation(error) else { return }
@@ -255,7 +268,8 @@ final class HomeViewModel: ObservableObject {
         do {
             let page = try await fetchUpdatesPage(next)
             let existing = Set(updates.map(\.id))
-            updates.append(contentsOf: page.items.filter { !existing.contains($0.id) })
+            let newItems = firstOccurrencePerID(page.items).filter { !existing.contains($0.id) }
+            updates.append(contentsOf: newItems)
             updatesPage = next
             updatesHasNext = page.hasNextPage
         } catch {
