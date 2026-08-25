@@ -78,19 +78,27 @@ struct CoverGalleryView: View {
     private static let blurFadeDuration: Double = 0.35
 
     var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                background(size: proxy.size)
+        // ZStack снаружи, GeometryReader — ТОЛЬКО внутри, для размера
+        // страниц. .ignoresSafeArea()/.overlay() навешаны на этот внешний
+        // ZStack (как heroHeader в MangaDetailView — обычный VStack, а не
+        // сам GeometryReader), а не на сам GeometryReader — раньше крестик
+        // всё равно был не там же, где "..." на карточке тайтла, даже с
+        // теми же цифрами паддинга; такая структура надёжнее.
+        ZStack {
+            GeometryReader { proxy in
+                ZStack {
+                    background(size: proxy.size)
 
-                TabView(selection: $currentIndex) {
-                    ForEach(images.indices, id: \.self) { index in
-                        page(images[index], index: index, size: proxy.size)
-                            .tag(index)
+                    TabView(selection: $currentIndex) {
+                        ForEach(images.indices, id: \.self) { index in
+                            page(images[index], index: index, size: proxy.size)
+                                .tag(index)
+                        }
                     }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(width: proxy.size.width, height: proxy.size.height)
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .ignoresSafeArea()
         .onAppear {
