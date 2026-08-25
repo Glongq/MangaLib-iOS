@@ -47,7 +47,7 @@ final class HomeViewModel: ObservableObject {
     @Published private(set) var isLoadingCurrentlyReading = true
     @Published private(set) var currentlyReadingErrorMessage: String?
     @Published var currentlyReadingPeriod: TopViewsPeriod = .day {
-        didSet { if oldValue != currentlyReadingPeriod { Task { await loadCurrentlyReading() } } }
+        didSet { if oldValue != currentlyReadingPeriod { scheduleCurrentlyReadingReload() } }
     }
 
     // MARK: Коллекции / топ недели / новинки
@@ -104,6 +104,15 @@ final class HomeViewModel: ObservableObject {
     /// победил". Теперь, как и у reloadTask, предыдущая задача отменяется
     /// перед стартом новой.
     private var updatesTask: Task<Void, Never>?
+    /// Аналогично updatesTask, но для "Сейчас читают" — раньше смена
+    /// currentlyReadingPeriod запускала голый Task{} без отмены: если
+    /// пользователь успевал переключить период И активный сайт почти
+    /// одновременно (или просто дважды быстро сменить период), два
+    /// параллельных loadCurrentlyReading() могли ответить в обратном
+    /// порядке — более старый (для уже неактуального периода/сайта)
+    /// отвечал ПОЗЖЕ и затирал свежие данные устаревшими. Теперь, как и у
+    /// reloadTask/updatesTask, предыдущая задача отменяется перед стартом новой.
+    private var currentlyReadingTask: Task<Void, Never>?
     /// Тайтлы «Продолжить читать», для которых уже идёт/прошёл фоновый
     /// докачивание totalChapters — не долбим сервер повторно при каждом
     /// перерисовывании карточки (см. loadChapterCountIfNeeded).
@@ -156,11 +165,12 @@ final class HomeViewModel: ObservableObject {
 
     private func reloadAll() async {
         isLoading = true
-        async let a: Void = loadCurrentlyReading()
+        let a = scheduleCurrentlyReadingReload()
         async let b: Void = loadWidgets()
         async let c: Void = loadNewest()
         let d = scheduleUpdatesReload()
-        _ = await (a, b, c)
+        await a.value
+        _ = await (b, c)
         await d.value
         guard !Task.isCancelled else { isLoading = false; return }
         didLoadOnce = true
@@ -177,6 +187,18 @@ final class HomeViewModel: ObservableObject {
         updatesTask?.cancel()
         let task = Task { await reloadUpdates() }
         updatesTask = task
+        return task
+    }
+
+    /// Отменяет предыдущую задачу "Сейчас читают" (если ещё не ответила) и
+    /// запускает новую — используется и при смене currentlyReadingPeriod, и
+    /// внутри reloadAll() (смена сайта), чтобы обе точки входа
+    /// координировались через одну и ту же задачу (см. currentlyReadingTask).
+    @discardableResult
+    private func scheduleCurrentlyReadingReload() -> Task<Void, Never> {
+        currentlyReadingTask?.cancel()
+        let task = Task { await loadCurrentlyReading() }
+        currentlyReadingTask = task
         return task
     }
 
@@ -230,10 +252,22 @@ final class HomeViewModel: ObservableObject {
 
     // MARK: Новинки
 
+    /// siteIds передаём ЯВНО (только активный сайт) — без этого fetchCatalog
+    /// по умолчанию берёт SiteSession.effectiveSearchSites (активный сайт +
+    /// ЛЮБЫЕ дополнительно отмеченные для поиска сайты, отдельная настройка,
+    /// не связанная с переключателем активного сайта). Раньше «Новинки» на
+    /// вкладке «Читают» — единственная секция здесь, использующая
+    /// fetchCatalog, — могла тихо подмешивать тайтлы с ДРУГИХ сайтов, если у
+    /// пользователя отмечены галочки мультипоиска: переключаешь активный
+    /// сайт, а раздел всё равно показывает не только его. Остальные секции
+    /// вкладки (сейчас читают/виджеты/обновления) и так завязаны только на
+    /// активный сайт через заголовок Site-Id — теперь «Новинки» ведёт себя
+    /// так же.
     private func loadNewest() async {
         isLoadingNewest = true
         do {
-            let page = try await service.fetchCatalog(query: "", sort: .added, filter: MangaFilter(), page: 1)
+            let page = try await service.fetchCatalog(query: "", sort: .added, filter: MangaFilter(), page: 1,
+                                                        siteIds: [SiteSession.shared.activeSite.rawValue])
             newest = page.items
         } catch {
             guard !isCancellation(error) else { isLoadingNewest = false; return }
