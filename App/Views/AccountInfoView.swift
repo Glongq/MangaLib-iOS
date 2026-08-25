@@ -270,10 +270,12 @@ struct ProfileView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.textSecondary)
             }
-            // Последний вход — только если сервер реально его прислал (см.
-            // UserProfile.lastOnlineAt); ничего не выдумываем, если нет.
-            if let lastOnline = profile?.lastOnlineAt {
-                Text("Был в сети \(lastOnline.relativeRussianString)")
+            // "Последний вход" — именно login_streak.lastLoginAt (когда
+            // реально логинился), а не lastOnlineAt (когда что-то делал —
+            // обновляется чаще и не то же самое, см. комментарии в
+            // UserProfile). Показываем, только если сервер реально прислал.
+            if let lastLogin = profile?.lastLoginAt {
+                Text("Последний вход \(lastLogin.relativeRussianString)")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
             }
@@ -520,6 +522,9 @@ private struct AdditionalInfoSheet: View {
                     }
                     infoRow(icon: "person", title: "Пол",
                             value: (profile?.genderLabel?.isEmpty == false ? profile?.genderLabel : nil) ?? "Не указан")
+                    if let teams = profile?.teams, !teams.isEmpty {
+                        teamsSection(teams)
+                    }
                 }
                 .padding(16)
             }
@@ -574,6 +579,53 @@ private struct AdditionalInfoSheet: View {
         }
         .padding(14)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    /// «В составе команд» — ПОДТВЕРЖДЕНО перехватом (ключ "teams" реально
+    /// есть в /user/{id}, см. UserProfile.teams), хотя у самого
+    /// перехваченного пользователя список был пуст — поэтому секция
+    /// показывается только когда команды реально есть.
+    private func teamsSection(_ teams: [ChapterTeam]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("В составе команд").font(.headline).foregroundStyle(Theme.textPrimary)
+            VStack(spacing: 8) {
+                ForEach(teams) { team in
+                    if let slugURL = team.slugURL {
+                        NavigationLink {
+                            TeamView(slugURL: slugURL, fallbackName: team.name, coverURL: team.avatarURL)
+                        } label: {
+                            teamRow(team)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        teamRow(team)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func teamRow(_ team: ChapterTeam) -> some View {
+        HStack(spacing: 10) {
+            RemoteImage(url: team.avatarURL) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                ZStack { Theme.surfaceElevated; Image(systemName: "person.3.fill").font(.caption).foregroundStyle(Theme.textSecondary) }
+            } failure: {
+                ZStack { Theme.surfaceElevated; Image(systemName: "person.3.fill").font(.caption).foregroundStyle(Theme.textSecondary) }
+            }
+            .frame(width: 32, height: 32)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            Text(team.name).font(.subheadline).foregroundStyle(Theme.textPrimary).lineLimit(1)
+            Spacer(minLength: 0)
+            if team.slugURL != nil {
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(Theme.textSecondary)
+            }
+        }
     }
 }
 

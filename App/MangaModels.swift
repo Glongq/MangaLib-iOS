@@ -85,9 +85,15 @@ struct CurrentUser: Decodable {
 
 // MARK: - Профиль пользователя
 
-/// Профиль — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}?fields[]=about&gender&
-/// background&points…`: `{id, username, avatar{url}, background{url,filename},
-/// about, gender{label}, points_info{level,total_points,…}, …}`.
+/// Профиль — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}?fields[]=background&
+/// roles&points&ban_info&gender&created_at&about&teams&
+/// premium_background_id&login_streak&previous_usernames` (proxypin,
+/// 2026-08-26, полный набор полей): `{id, username, avatar{url},
+/// background{url,filename}, about, gender{id,label}, last_online_at,
+/// created_at, ban_info, points_info{level,total_points,
+/// current_level_points,max_level_points,point_percent_progress,top},
+/// teams[], roles[], login_streak{last_login_at,login_streak,
+/// max_login_streak}, previous_usernames[], premium{enabled}, …}`.
 struct UserProfile: Decodable {
     let id: Int
     let username: String
@@ -117,18 +123,31 @@ struct UserProfile: Decodable {
     /// не покажется, ничего не сломается.
     let currentLevelPoints: Int?
     let maxLevelPoints: Int?
-    /// Дата регистрации — ключ "created_at" НЕ подтверждён перехватом именно
-    /// для /user/{id} (в fields[] запроса его нет), но это стандартный ключ,
-    /// подтверждённый на других ресурсах этого же API (комментарии, дружба).
-    /// decodeIfPresent — если сервер его тут не отдаёт, поле останется nil, и
-    /// строка "Дата регистрации" в доп. информации просто не покажется.
+    /// Готовый процент прогресса до следующего уровня — ПОДТВЕРЖДЕНО
+    /// перехватом (`point_percent_progress`), считать самим по
+    /// current/max не нужно.
+    let pointPercentProgress: Double?
+    /// Дата регистрации — ПОДТВЕРЖДЕНО перехватом (proxypin, 2026-08-26).
     let createdAt: Date?
-    /// Последний вход — ключ "last_online_at" ПОДТВЕРЖДЁН перехватом (тот же
-    /// ресурс "user", вложенный в записи дружбы, см. FriendUser) — там он
-    /// присутствовал, просто был null у всех перехваченных пользователей.
-    /// Для /user/{id} отдельно не перехватывался, decodeIfPresent — если
-    /// сервер не отдаёт, строка просто не покажется.
+    /// Последняя активность ("online") — ПОДТВЕРЖДЁН перехватом ключ
+    /// "last_online_at" на этом же ресурсе — обновляется намного чаще
+    /// login_streak.lastLoginAt (в реальном перехвате отличались на
+    /// несколько часов), это скорее "последний раз что-то делал", а не
+    /// "последний раз логинился". См. lastLoginAt ниже — для UI "Последний
+    /// вход" используем именно его.
     let lastOnlineAt: Date?
+    /// Последний ВХОД (не активность) — ПОДТВЕРЖДЕНО перехватом
+    /// `login_streak.last_login_at` (формат "yyyy-MM-dd HH:mm:ss", БЕЗ "T" —
+    /// другой формат даты, чем everywhere else в этом файле, отдельный
+    /// парсер ниже). Это и есть смысловой ответ на "когда был последний вход".
+    let lastLoginAt: Date?
+    /// Команды, в которых состоит пользователь — ПОДТВЕРЖДЕНО перехватом
+    /// (ключ "teams" в /user/{id} реально есть), но у перехваченного
+    /// пользователя массив был пуст — форма НЕПУСТОГО элемента не
+    /// подтверждена отдельно для ЭТОГО эндпоинта. Переиспользуем
+    /// ChapterTeam (та же форма ресурса "команда" — {id,name,cover,
+    /// slug_url} — подтверждена в /teams, у главы, в уведомлениях).
+    let teams: [ChapterTeam]
     /// Закрытый профиль/статистика — сервер отдаёт эти флаги; если профиль
     /// закрыт, показываем заглушку вместо содержимого.
     let canViewProfile: Bool
@@ -141,15 +160,18 @@ struct UserProfile: Decodable {
         let level: Int?
         let current_level_points: Int?
         let max_level_points: Int?
+        let point_percent_progress: Double?
     }
+    private struct LoginStreak: Decodable { let last_login_at: String? }
 
     private enum CodingKeys: String, CodingKey {
-        case id, username, avatar, background, about, gender
+        case id, username, avatar, background, about, gender, teams
         case pointsInfo = "points_info"
         case canViewProfile = "can_view_profile"
         case canViewStatistics = "can_view_statistics"
         case createdAt = "created_at"
         case lastOnlineAt = "last_online_at"
+        case loginStreak = "login_streak"
     }
 
     init(from decoder: Decoder) throws {
@@ -171,6 +193,8 @@ struct UserProfile: Decodable {
         totalPoints = p?.total_points
         currentLevelPoints = p?.current_level_points
         maxLevelPoints = p?.max_level_points
+        pointPercentProgress = p?.point_percent_progress
+        teams = ((try? c.decodeIfPresent([ChapterTeam].self, forKey: .teams)) ?? nil) ?? []
         canViewProfile = ((try? c.decodeIfPresent(Bool.self, forKey: .canViewProfile)) ?? nil) ?? true
         canViewStatistics = ((try? c.decodeIfPresent(Bool.self, forKey: .canViewStatistics)) ?? nil) ?? true
         if let raw = ((try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? nil), !raw.isEmpty {
@@ -183,7 +207,30 @@ struct UserProfile: Decodable {
         } else {
             lastOnlineAt = nil
         }
+        let streak = (try? c.decodeIfPresent(LoginStreak.self, forKey: .loginStreak)) ?? nil
+        if let raw = streak?.last_login_at, !raw.isEmpty {
+            lastLoginAt = Self.loginDateFormatter.date(from: raw)
+        } else {
+            lastLoginAt = nil
+        }
     }
+
+    /// "2026-08-25 06:49:46" — ПОДТВЕРЖДЁН формат СТРОКИ login_streak.
+    /// last_login_at (пробел вместо "T", без миллисекунд/зоны — отличается
+    /// от ISO8601 остального API, свой форматтер). Часовой пояс этой строки
+    /// НЕ подтверждён (в отличие от остальных дат API, которые всегда
+    /// ISO8601 с явным "Z"=UTC) — предполагаем UTC как наиболее вероятный
+    /// вариант (общее соглашение для остального этого же API), но это
+    /// именно предположение: если после реального теста дата "Последний
+    /// вход" будет на несколько часов не совпадать с ожиданием — дело в
+    /// этом часовом поясе.
+    private static let loginDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return f
+    }()
 
     /// Относительные пути (плейсхолдер `/static/…` или кастомный) дополняем
     /// хостом обложек; абсолютные — как есть.
@@ -2310,10 +2357,10 @@ enum TopViewsPeriod: String, CaseIterable, Identifiable {
 }
 
 /// Подборка ("коллекция") — ПОДТВЕРЖДЕНО реальным перехватом (агрегат
-/// главной страницы, два файла от пользователя), но сам путь ЭТОГО списка
-/// отдельным эндпоинтом — НЕТ (в дампах виден только вложенным в агрегат
-/// главной, см. MangaNetworkService.fetchHomeWidgets). `previews` — до трёх
-/// обложек тайтлов внутри подборки, та же форма, что MangaCover.
+/// главной страницы, а также отдельным `GET /collections?limit=&page=&
+/// sort_by=newest` — proxypin, 2026-08-26, без user_id — общая лента
+/// коллекций сайта). `previews` — до трёх обложек тайтлов внутри подборки,
+/// та же форма, что MangaCover.
 /// Не Hashable: MangaCover (см. previews ниже) сам не Hashable, а нигде в
 /// HomeView коллекции не кладутся в Set/используются как значение таба —
 /// хватает Identifiable для ForEach.
@@ -2323,13 +2370,18 @@ struct MangaCollection: Decodable, Identifiable {
     let views: Int?
     let favoritesCount: Int?
     let itemsCount: Int?
+    /// Комментариев к коллекции — ПОДТВЕРЖДЕНО перехватом (comments_count).
+    let commentsCount: Int?
+    /// 18+-пометка коллекции — ПОДТВЕРЖДЕНО перехватом (adult).
+    let adult: Bool?
     let votes: MangaCollectionVotes?
     let previews: [MangaCover]?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, views, previews, votes
+        case id, name, views, previews, votes, adult
         case favoritesCount = "favorites_count"
         case itemsCount = "items_count"
+        case commentsCount = "comments_count"
     }
 }
 

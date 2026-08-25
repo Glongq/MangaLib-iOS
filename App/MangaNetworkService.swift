@@ -327,8 +327,19 @@ final class MangaNetworkService {
     }
 
     /// Профиль пользователя — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}?fields[]=…`.
+    /// Список полей — объединение двух реальных перехватов: изначального
+    /// (about/gender/background/avatar_frame_id/premium_background_id/points)
+    /// и более полного (proxypin, 2026-08-26: background/roles/points/
+    /// ban_info/gender/created_at/about/teams/premium_background_id/
+    /// login_streak/previous_usernames) — добавлены created_at/teams/
+    /// login_streak (нужны UserProfile.createdAt/teams/lastLoginAt), roles/
+    /// ban_info/previous_usernames тоже реальные поля, но пока не
+    /// декодируются — сервер их просто вернёт, лишним не помешает.
     func fetchUserProfile(id: Int) async throws -> UserProfile {
-        let items = ["about", "gender", "background", "avatar_frame_id", "premium_background_id", "points"]
+        let items = [
+            "about", "gender", "background", "avatar_frame_id", "premium_background_id", "points",
+            "created_at", "teams", "login_streak", "roles", "ban_info", "previous_usernames"
+        ]
             .map { URLQueryItem(name: "fields[]", value: $0) }
         let request = try makeRequest(path: "/user/\(id)", queryItems: items)
         let response: APIObjectResponse<UserProfile> = try await perform(request)

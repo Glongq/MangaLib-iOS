@@ -76,15 +76,25 @@ struct UserCollectionsView: View {
 
     private func collectionCard(_ collection: MangaCollection) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(collection.name)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
+            HStack(spacing: 6) {
+                Text(collection.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                if collection.adult == true {
+                    Text("18+")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Color.red, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
+            }
 
             HStack(spacing: 14) {
                 if let views = collection.views { statLabel(icon: "eye", value: views) }
                 if let itemsCount = collection.itemsCount { statLabel(icon: "square.stack", value: itemsCount) }
                 if let favoritesCount = collection.favoritesCount { statLabel(icon: "bookmark", value: favoritesCount) }
+                if let commentsCount = collection.commentsCount { statLabel(icon: "text.bubble", value: commentsCount) }
             }
             if let votes = collection.votes {
                 statLabel(icon: "star.fill", value: votes.up, secondary: votes.down)
