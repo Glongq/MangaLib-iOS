@@ -110,6 +110,10 @@ struct ProfileView: View {
 
     // MARK: Закрытый профиль
 
+    /// .frame(maxWidth/maxHeight: .infinity) — родительский ZStack в body
+    /// выровнен по .topLeading (нужно для баннера/шапки в обычном
+    /// состоянии), без явного растяжения этот блок прижимался к левому
+    /// верхнему углу вместо центра экрана.
     private var closedState: some View {
         VStack(spacing: 14) {
             Image(systemName: "lock.fill").font(.largeTitle).foregroundStyle(Theme.textSecondary)
@@ -117,6 +121,7 @@ struct ProfileView: View {
             Text(profile?.username ?? "").font(.subheadline).foregroundStyle(Theme.textSecondary)
         }
         .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: Шапка (баннер + аватар + топ-статистика)
