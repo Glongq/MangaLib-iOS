@@ -42,6 +42,9 @@ struct HomeView: View {
             ZStack {
                 Theme.background.ignoresSafeArea()
                 content
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        header
+                    }
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: MangaItem.self) { item in
@@ -78,7 +81,6 @@ struct HomeView: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    quickSearchBar
                     continueReadingSection
                     currentlyReadingSection
                     collectionsSection
@@ -94,7 +96,25 @@ struct HomeView: View {
         }
     }
 
-    // MARK: Быстрый поиск
+    // MARK: Шапка (1в1 визуально как в Каталоге — см. MangaCatalogView.header/
+    // searchField; поведение НЕ копируем — заголовок не схлопывается при
+    // скролле, а поиск не настоящее поле ввода, просто кнопка-переход на
+    // вкладку «Каталог». Только сам вид и то, что шапка всегда закреплена
+    // сверху через safeAreaInset — как попросили.
+
+    private var header: some View {
+        VStack(spacing: 10) {
+            Text("Читают")
+                .font(.system(size: 29, weight: .bold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            quickSearchBar
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 2)
+        .padding(.bottom, 10)
+    }
 
     /// Тапом уходим на вкладку «Каталог» (там и живёт реальный поиск, см.
     /// MangaCatalogView) — тот же мост, что уже используют жанры/теги из
@@ -108,13 +128,11 @@ struct HomeView: View {
                 Text("Быстрый поиск").foregroundStyle(Theme.textSecondary)
                 Spacer(minLength: 0)
             }
-            .font(.subheadline)
-            .padding(.horizontal, 14)
-            .frame(height: 44)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .glassEffect(.regular.interactive(), in: Capsule())
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 16)
     }
 
     // MARK: Продолжить читать
@@ -500,14 +518,17 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 10) {
                 sectionHeader("Топ активных недели")
                     .padding(.horizontal, 16)
-                // Без горизонтальных отступов по просьбе — карточки
-                // выравниваются по самому левому краю экрана, без зазора.
+                // Левый отступ (16) вернули — без него чипы съезжали левее
+                // заголовка секции над ними, выглядело как рассинхрон
+                // выравнивания. Справа по-прежнему без отступа — карточки
+                // могут доходить до самого края экрана.
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 12) {
                         ForEach(Array(viewModel.topActiveUsers.enumerated()), id: \.element.id) { index, user in
                             topActiveUserCard(user, rank: index + 1)
                         }
                     }
+                    .padding(.leading, 16)
                 }
                 .scrollIndicators(.hidden)
             }
