@@ -1249,21 +1249,28 @@ struct TeamStat: Decodable, Identifiable {
 /// "users" внутри GET /teams/{slug_url} — там участники анонимны, только
 /// роль, без id/username/аватара вообще — decode того эндпоинта не делаем,
 /// раз этот, отдельный, отдаёт то же самое, но с реальными данными):
-/// `{data:[{user:{id,username,avatar:{filename,url}}, roles:[{id,label}],
-/// roles_string, order}]}`. Именно этот эндпоинт нужен для кликабельных
-/// чипов участников с переходом на профиль.
+/// `{data:[{user:{id,username,avatar:{filename,url},avatar_frame:{orig,lg,
+/// md,sm}}, roles:[{id,label}], roles_string, order}]}`. avatar_frame —
+/// ПОДТВЕРЖДЕНО перехватом (встречается у части участников; относительный
+/// путь, как и у плейсхолдера фона, — достраивается тем же
+/// UserProfile.absoluteURL) — декоративная рамка поверх аватара, см.
+/// TeamView.memberChip.
 struct TeamMemberEntry: Decodable, Identifiable {
     let userId: Int
     let username: String
     let avatarURL: URL?
+    let avatarFrameURL: URL?
     let rolesString: String?
 
     private struct UserRef: Decodable {
         let id: Int
         let username: String
         let avatar: AvatarRef?
+        let avatarFrame: FrameRef?
+        enum CodingKeys: String, CodingKey { case id, username, avatar, avatarFrame = "avatar_frame" }
     }
     private struct AvatarRef: Decodable { let url: String? }
+    private struct FrameRef: Decodable { let md: String?; let orig: String? }
 
     enum CodingKeys: String, CodingKey { case user, rolesString = "roles_string" }
 
@@ -1275,6 +1282,7 @@ struct TeamMemberEntry: Decodable, Identifiable {
         userId = user?.id ?? 0
         username = user?.username ?? "Без имени"
         avatarURL = UserProfile.absoluteURL(user?.avatar?.url)
+        avatarFrameURL = UserProfile.absoluteURL(user?.avatarFrame?.md ?? user?.avatarFrame?.orig)
         rolesString = (try? c.decodeIfPresent(String.self, forKey: .rolesString)) ?? nil
     }
 }

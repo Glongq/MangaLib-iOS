@@ -246,13 +246,27 @@ struct TeamView: View {
 
     private func memberChip(_ member: TeamMemberEntry) -> some View {
         HStack(spacing: 8) {
-            RemoteImage(url: member.avatarURL) { img in
-                img.resizable().scaledToFill()
-            } placeholder: {
-                Circle().fill(Theme.surface).overlay(Image(systemName: "person.fill").font(.caption2).foregroundStyle(Theme.textSecondary))
+            ZStack {
+                RemoteImage(url: member.avatarURL) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Circle().fill(Theme.surface).overlay(Image(systemName: "person.fill").font(.caption2).foregroundStyle(Theme.textSecondary))
+                }
+                .frame(width: 28, height: 28)
+                .clipShape(Circle())
+
+                // Декоративная рамка аватара — ПОДТВЕРЖДЕНО перехватом
+                // (avatar_frame встречается у части участников), поверх, без
+                // обрезки (рамки — прозрачный PNG чуть шире самого аватара).
+                if let frameURL = member.avatarFrameURL {
+                    RemoteImage(url: frameURL) { img in
+                        img.resizable().scaledToFit()
+                    } placeholder: { Color.clear }
+                    .frame(width: 38, height: 38)
+                    .allowsHitTesting(false)
+                }
             }
-            .frame(width: 28, height: 28)
-            .clipShape(Circle())
+            .frame(width: 38, height: 38)
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(member.username)
