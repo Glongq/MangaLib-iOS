@@ -119,20 +119,28 @@ struct HomeView: View {
     /// Тапом уходим на вкладку «Каталог» (там и живёт реальный поиск, см.
     /// MangaCatalogView) — тот же мост, что уже используют жанры/теги из
     /// карточки тайтла (см. CatalogNavigator.switchRequest в RootView).
+    ///
+    /// Настоящий (хоть и нерабочий) TextField вместо Text — раньше здесь
+    /// стоял обычный Text с тем же паддингом/капсулой, но визуально всё
+    /// равно немного отличался от searchField в Каталоге: у TextField своя
+    /// внутренняя метрика высоты/базовой линии, не идентичная Text. Теперь
+    /// это тот же самый компонент, просто .allowsHitTesting(false) —
+    /// не редактируется и не получает фокус, тап уходит на всю капсулу.
     private var quickSearchBar: some View {
-        Button {
-            CatalogNavigator.shared.openCatalog(filter: MangaFilter())
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
-                Text("Быстрый поиск").foregroundStyle(Theme.textSecondary)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .glassEffect(.regular.interactive(), in: Capsule())
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
+            TextField("", text: .constant(""),
+                      prompt: Text("Быстрый поиск").foregroundColor(Theme.textSecondary))
+                .foregroundStyle(Theme.textPrimary)
+                .allowsHitTesting(false)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .contentShape(Capsule())
+        .onTapGesture {
+            CatalogNavigator.shared.openCatalog(filter: MangaFilter())
+        }
     }
 
     // MARK: Продолжить читать

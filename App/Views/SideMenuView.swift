@@ -105,7 +105,10 @@ struct SideMenuView: View {
                     }
                     .scrollIndicators(.hidden)
                     // Тот же приём, что в Каталоге/Закладках — onScrollGeometryChange
-                    // вместо самодельного GeometryReader-датчика.
+                    // вместо самодельного GeometryReader-датчика. В отличие от
+                    // них — по прямой просьбе — развёрнутое состояние
+                    // возвращается ТОЛЬКО у самого верха (newOffset <= 0), а
+                    // не при любом небольшом скролле вверх.
                     .onScrollGeometryChange(for: CGFloat.self) { geo in
                         geo.contentOffset.y
                     } action: { _, newOffset in
@@ -116,8 +119,6 @@ struct SideMenuView: View {
                             setHeaderCollapsed(false)
                         } else if delta > 6 {
                             setHeaderCollapsed(true)
-                        } else if delta < -6 {
-                            setHeaderCollapsed(false)
                         }
                     }
                 }
@@ -155,19 +156,16 @@ struct SideMenuView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .transition(.blurFade)
             } else {
-                HStack(spacing: 12) {
-                    Image(systemName: "book.closed.fill")
-                        .font(.title2)
-                        .foregroundStyle(Theme.accent)
-                    Text("Меню")
-                        .font(.system(size: 29, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Spacer(minLength: 0)
-                }
-                .transition(.blurFade)
+                // Без иконки — просто текст, как в шапках Каталога/Закладок
+                // (тот же паддинг 16, то же left-aligned .frame(maxWidth: .infinity)).
+                Text("Меню")
+                    .font(.system(size: 29, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(.blurFade)
             }
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 16)
         .padding(.vertical, 14)
     }
 
