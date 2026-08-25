@@ -44,20 +44,22 @@ struct HomeView: View {
         NavigationStack {
             ZStack {
                 Theme.background.ignoresSafeArea()
-                // Шапка — ОТДЕЛЬНЫМ вью НАД ScrollView в VStack, не через
-                // .safeAreaInset. Раньше была через .safeAreaInset(edge: .top)
-                // на том же ScrollView, что и .refreshable — а это известная
-                // нестыковка SwiftUI/UIKit: .refreshable иногда перехватывает
-                // управление safe area у своего ScrollView, и закреплённый
-                // инсет перестаёт быть закреплённым, скроллится вместе с
-                // контентом (только на ЭТОМ экране был .refreshable — у
-                // Каталога/Закладок его нет, поэтому там safeAreaInset и
-                // работал как надо). Простой VStack(header, content) такой
-                // связки не даёт — шапка гарантированно фиксирована всегда.
-                VStack(spacing: 0) {
-                    header
-                    content
-                }
+                // Снова .safeAreaInset(edge: .top) — 1в1 тот же механизм
+                // позиционирования шапки, что и в Каталоге/Закладках/Новое
+                // (см. MangaCatalogView/BookmarksView/NotificationsView.body),
+                // как прямо попросили: "положение как в каталог уведомления
+                // закладках", не самодельный VStack-костыль. Раньше именно
+                // эта связка (safeAreaInset + .refreshable НА ОДНОМ И ТОМ ЖЕ
+                // ScrollView) скроллила шапку вместе с контентом — теперь
+                // .refreshable снаружи ВСЕЙ связки content+safeAreaInset, а не
+                // внутри content на самом ScrollView (см. content ниже).
+                content
+                    .safeAreaInset(edge: .top, spacing: 0) { header }
+                    .refreshable {
+                        async let a: Void = viewModel.refresh()
+                        async let b: Void = bookmarks.syncHistoryFromServer()
+                        _ = await (a, b)
+                    }
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: MangaItem.self) { item in
@@ -104,7 +106,10 @@ struct HomeView: View {
     /// остальных. Секции, которым нужен вход (Продолжить читать, Мои
     /// обновления), скелетон не показывают, пока не залогинены — просто
     /// появляются сами после входа, как и раньше, но ТОЖЕ получают скелетон
-    /// при обновлении (см. continueReadingSection и .refreshable ниже).
+    /// при обновлении (см. continueReadingSection и .refreshable в body).
+    ///
+    /// .refreshable НЕ здесь (не на самом ScrollView) — см. комментарий в
+    /// body про safeAreaInset.
     private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -119,20 +124,12 @@ struct HomeView: View {
             .padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
-        .refreshable {
-            // Раньше .refreshable вообще не трогал bookmarks — "Продолжить
-            // читать" не обновлялось потянуть-вниз. Теперь оба — параллельно.
-            async let a: Void = viewModel.refresh()
-            async let b: Void = bookmarks.syncHistoryFromServer()
-            _ = await (a, b)
-        }
     }
 
-    // MARK: Шапка (1в1 визуально как в Каталоге — см. MangaCatalogView.header/
-    // searchField; поведение НЕ копируем — заголовок не схлопывается при
-    // скролле, а поиск не настоящее поле ввода, просто кнопка-переход на
-    // вкладку «Каталог». Шапка всегда закреплена сверху (см. body — VStack
-    // над ScrollView, не safeAreaInset).
+    // MARK: Шапка (1в1 визуально И механически как в Каталоге — см.
+    // MangaCatalogView.header/searchField/body: .safeAreaInset(edge: .top).
+    // Поведение не копируем — заголовок не схлопывается при скролле, а
+    // поиск не настоящее поле ввода, просто кнопка-переход на «Каталог».
 
     private var header: some View {
         VStack(spacing: 10) {
