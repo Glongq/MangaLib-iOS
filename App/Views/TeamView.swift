@@ -408,12 +408,16 @@ struct TeamView: View {
         }
     }
 
+    /// Иконка ПЕРЕД текстом — как и везде в чипах-пилюлях этого экрана (см.
+    /// pill()/memberChip: иконка/аватар всегда первые) — было наоборот
+    /// (текст, потом стрелка), из-за чего чип визуально не совпадал по
+    /// положению контента с остальными чипами ряда.
     private func showMoreMembersChip(remaining: Int) -> some View {
         HStack(spacing: 6) {
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold))
             Text("Показать ещё \(remaining)")
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
-            Image(systemName: "chevron.right").font(.caption.weight(.semibold))
         }
         .foregroundStyle(Theme.textPrimary)
         .padding(.horizontal, 14)
