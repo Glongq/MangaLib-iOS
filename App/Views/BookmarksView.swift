@@ -301,6 +301,16 @@ struct BookmarksView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isHeaderAnimating = false }
     }
 
+    /// Соотношение сторон и закругление обложки — эталон Каталог/Новинки
+    /// (см. MangaCardView.cover: 2:3, radius 16), раньше здесь было 78×109
+    /// (≈5:7, чуть уже) и radius 12 — рассинхрон с остальным приложением.
+    /// Увеличена и вплотную к краю подложки (была с отступом 10 со всех
+    /// сторон, как у обычного .padding()) — тот же приём, что у
+    /// continueReadingCard/updateRow: паддинг только у текстовой колонки и
+    /// справа, радиус обложки = радиусу подложки (16, было 18) — угол в угол.
+    static let bookmarkCoverWidth: CGFloat = 80
+    static let bookmarkCoverHeight: CGFloat = (bookmarkCoverWidth * 3 / 2).rounded()
+
     private func row(_ bm: BookmarkedTitle) -> some View {
         HStack(spacing: 12) {
             RemoteImage(url: bm.coverURL.flatMap(URL.init(string:))) { image in
@@ -310,10 +320,9 @@ struct BookmarksView: View {
             } failure: {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
-            // 1.3x увеличенная обложка (было 60x84).
-            .frame(width: 78, height: 109)
+            .frame(width: Self.bookmarkCoverWidth, height: Self.bookmarkCoverHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             // Единый бэйдж оценки (см. RatingChip) — тот же стиль/цвет, что и
             // в каталоге/карточке тайтла, теперь и в закладках.
             .overlay(alignment: .topTrailing) { RatingChip(rating: bm.rating) }
@@ -344,8 +353,9 @@ struct BookmarksView: View {
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textSecondary)
         }
-        .padding(10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.trailing, 12)
+        .frame(height: Self.bookmarkCoverHeight)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 

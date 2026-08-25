@@ -205,20 +205,26 @@ struct NotificationsView: View {
 
     // MARK: Строка уведомления
 
+    /// Размер подложки/обложки — тот же, что и в Закладках (см.
+    /// BookmarksView.bookmarkCoverWidth/Height, единый источник, чтобы не
+    /// разъехались) — по прямой просьбе "сделать таким же, как в закладках".
+    /// Структура текста (3 строки: текст/команды/дата) не менялась —
+    /// изменилось только выравнивание: HStack без alignment: .top (был
+    /// прижат к верху) — теперь центрируется по высоте подложки, как и
+    /// попросили ("выравнивание высоты к центру подложки").
     @ViewBuilder
     private func row(_ item: NotificationItem) -> some View {
-        let core = HStack(alignment: .top, spacing: 12) {
+        let core = HStack(spacing: 12) {
             RemoteImage(url: item.media?.cover?.bestURL) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surfaceElevated)
+                SkeletonBox()
             } failure: {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surfaceElevated)
-                    .overlay(Image(systemName: "bell.fill").foregroundStyle(Theme.textSecondary))
+                ZStack { Theme.surfaceElevated; Image(systemName: "bell.fill").foregroundStyle(Theme.textSecondary) }
             }
-            // Тот же размер обложки, что и в Истории (60×84) — единый вид карточек списка.
-            .frame(width: 60, height: 84)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .frame(width: BookmarksView.bookmarkCoverWidth, height: BookmarksView.bookmarkCoverHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipped()
 
             VStack(alignment: .leading, spacing: 4) {
                 // maxWidth: .infinity — иначе Text меряет себя по идеальной
@@ -245,7 +251,8 @@ struct NotificationsView: View {
                     .foregroundStyle(Theme.textSecondary)
             }
         }
-        .padding(12)
+        .padding(.trailing, 12)
+        .frame(height: BookmarksView.bookmarkCoverHeight)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
         if let media = item.media {

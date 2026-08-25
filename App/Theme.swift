@@ -65,6 +65,28 @@ enum Theme {
     /// одинаковой высоты, независимо от разницы в шрифтах/паддингах между
     /// экранами.
     static let pillControlHeight: CGFloat = 44
+    /// ЭТАЛОН обложки тайтла на будущее — соотношение сторон 2:3 (высота =
+    /// ширина × 1.5) и радиус скругления 16, как в Каталоге/Новинках (см.
+    /// MangaCardView.cover — там `frame(width:, height: (width*3/2).rounded())`
+    /// + `RoundedRectangle(cornerRadius: 16)`). По просьбе зафиксировано
+    /// здесь как справочная константа — реального рефакторинга ПОКА нет,
+    /// сделаем отдельным проходом позже. Закладки/Новое уже приведены (см.
+    /// BookmarksView.bookmarkCoverWidth/Height, NotificationsView.row).
+    ///
+    /// Инвентаризация мест с ДРУГИМ радиусом у обложки тайтла (снятая
+    /// grep'ом по .clipShape(RoundedRectangle(cornerRadius:)) сразу после
+    /// RemoteImage(url:) — возможно неполная, но как отправная точка):
+    /// - CharacterView.swift:74 — 18
+    /// - DownloadTitleSheet.swift:146, HistoryView.swift:178,
+    ///   MangaDetailView.swift:325, MyCommentsView.swift:118 — 12
+    /// - DownloadsView.swift:93, HomeView.swift:567 (collectionPreviewStack) — 8
+    /// - HomeView.swift:438 (currentlyReadingRow), MangaDetailView.swift:845 — 14
+    /// - HomeView.swift:617 (topActiveUserCard, аватарка — не обложка тайтла,
+    ///   под этот эталон не подпадает) — 12
+    /// Уже на эталоне (16): AccountInfoView:166, BookmarksView:324,
+    /// HomeView:266/790, MangaDetailView:921/1073, NotificationsView:226.
+    static let coverCornerRadius: CGFloat = 16
+    static let coverAspectRatio: CGFloat = 1.5 // height / width
 
     /// Фиксированная тёмная палитра (в стиле MangaLib) — значения НЕ меняются
     /// в зависимости от Theme.isDark. Кроме самого Theme (когда isDark ==
