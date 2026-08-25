@@ -281,6 +281,59 @@ final class MangaNetworkService {
         return response.data
     }
 
+    /// Загрузка картинки во временное хранилище перед сохранением профиля —
+    /// ПОДТВЕРЖДЕНО перехватом `POST /upload/image/avatar` (URL и ФОРМАТ
+    /// ОТВЕТА подтверждены; поле имени файла в самом multipart-запросе —
+    /// НЕТ, перехвачен был только ответ, не тело запроса). "image" — по
+    /// распространённой конвенции таких API, требует проверки на реальном
+    /// устройстве: если сервер вернёт ошибку валидации, значит имя поля
+    /// другое и его нужно поправить здесь.
+    func uploadAvatarImage(_ data: Data, filename: String, mimeType: String) async throws -> UploadedImage {
+        let request = makeMultipartRequest(path: "/upload/image/avatar", fieldName: "image",
+                                            filename: filename, mimeType: mimeType, data: data)
+        let response: APIObjectResponse<UploadedImage> = try await perform(request)
+        return response.data
+    }
+
+    /// Сохранение блока "Информация" профиля — ПОДТВЕРЖДЕНО перехватом
+    /// `PATCH /user/{id}` с телом `{update_type:"info", avatar, cover,
+    /// username, gender, about}`. avatar/cover — либо filename из
+    /// uploadAvatarImage(_:filename:mimeType:) выше (новая картинка), либо
+    /// НЕИЗМЕНЁННОЕ текущее значение (чтобы не затереть его null), либо nil
+    /// (явно убрать — ПОДТВЕРЖДЕНО, null = "без аватара/фона").
+    func updateProfileInfo(userId: Int, avatarFilename: String?, coverFilename: String?,
+                            username: String, genderId: Int, about: String) async throws -> UserProfile {
+        let body = ProfileInfoUpdateBody(avatar: avatarFilename, cover: coverFilename,
+                                          username: username, gender: genderId, about: about)
+        let request = try makeJSONRequest(path: "/user/\(userId)", method: "PATCH", body: body)
+        let response: APIObjectResponse<UserProfile> = try await perform(request)
+        return response.data
+    }
+
+    /// Ручное Encodable (не синтезированное) — важно: `encode(_:forKey:)`, а
+    /// НЕ `encodeIfPresent`, иначе nil у avatar/cover пропал бы из JSON
+    /// целиком вместо того, чтобы попасть туда как явный `null` — а именно
+    /// такой формат зафиксирован перехватом настоящего запроса.
+    private struct ProfileInfoUpdateBody: Encodable {
+        let avatar: String?
+        let cover: String?
+        let username: String
+        let gender: Int
+        let about: String
+
+        private enum CodingKeys: String, CodingKey { case updateType = "update_type", avatar, cover, username, gender, about }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode("info", forKey: .updateType)
+            try c.encode(avatar, forKey: .avatar)
+            try c.encode(cover, forKey: .cover)
+            try c.encode(username, forKey: .username)
+            try c.encode(gender, forKey: .gender)
+            try c.encode(about, forKey: .about)
+        }
+    }
+
     /// Статистика профиля — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}/stats`.
     func fetchUserStats(id: Int) async throws -> UserStats {
         let request = try makeRequest(path: "/user/\(id)/stats", queryItems: [])
@@ -839,6 +892,31 @@ final class MangaNetworkService {
         }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
+        return request
+    }
+
+    /// multipart/form-data запрос — для загрузки картинок (см.
+    /// uploadAvatarImage выше). В отличие от makeRequest/makeJSONRequest не
+    /// проставляет "Content-Type: application/json", у него свой заголовок
+    /// с boundary.
+    private func makeMultipartRequest(path: String, fieldName: String, filename: String, mimeType: String, data: Data) -> URLRequest {
+        let normalizedPath = path.hasPrefix("/") ? path : "/" + path
+        let url = URL(string: baseURL.absoluteString + normalizedPath) ?? baseURL
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        for (field, value) in defaultHeaders {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
         return request
     }
 

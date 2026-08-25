@@ -79,7 +79,7 @@ struct AppSettingsView: View {
                     // готовности. Единственное исключение — "Выход из
                     // аккаунта" ниже: он настоящий, реально разлогинивает.
                     settingsSection("Профиль") {
-                        settingsRow(icon: "info.circle", title: "Информация")
+                        profileInfoRow
                         settingsRow(icon: "bell", title: "Уведомления")
                         settingsRow(icon: "eye.slash", title: "Игнор-лист")
                         settingsRow(icon: "lock.shield", title: "Безопасность и вход")
@@ -208,6 +208,21 @@ struct AppSettingsView: View {
             if showDivider {
                 Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14)
             }
+        }
+    }
+
+    /// "Информация" — реальный экран (ProfileInfoEditView), а не StubView:
+    /// аватар/ник/пол/о себе, PATCH-эндпоинт профиля подтверждён перехватом.
+    private var profileInfoRow: some View {
+        VStack(spacing: 0) {
+            NavigationLink {
+                ProfileInfoEditView()
+            } label: {
+                settingsRowLabel(icon: "info.circle", title: "Информация")
+            }
+            .buttonStyle(.plain)
+
+            Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14)
         }
     }
 

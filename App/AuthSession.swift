@@ -100,8 +100,11 @@ final class AuthSession: ObservableObject {
     }
 
     /// `GET /auth/me` → ник + аватар. Ошибки молча игнорируем (например,
-    /// протухший токен) — профиль просто останется таким, каким был.
-    private func refreshProfile() {
+    /// протухший токен) — профиль просто останется таким, каким был. Не
+    /// private — вызывается и извне после сохранения "Информации" профиля
+    /// (см. ProfileInfoEditView.save), чтобы ник/аватар в боковом меню
+    /// обновились сразу, без перезапуска приложения.
+    func refreshProfile() {
         Task { [weak self] in
             guard let self, let user = try? await MangaNetworkService.shared.fetchCurrentUser() else { return }
             await MainActor.run {

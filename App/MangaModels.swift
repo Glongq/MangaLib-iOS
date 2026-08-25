@@ -93,8 +93,17 @@ struct UserProfile: Decodable {
     let username: String
     let avatarURL: URL?
     let backgroundURL: URL?
+    /// "Сырые" имена файлов (не полный URL) — то, что сервер ждёт обратно в
+    /// PATCH /user/{id} при сохранении (см. ProfileInfoEditView). nil у
+    /// avatar/backgroundFilename при выставленной "заглушке" placeholder —
+    /// значит "аватара/фона реально нет" (ПОДТВЕРЖДЕНО пользователем).
+    let avatarFilename: String?
+    let backgroundFilename: String?
     let about: String?
     let genderLabel: String?
+    /// Числовой id пола (1=Женский, 2=Мужской — ПОДТВЕРЖДЕНО перехватом) —
+    /// нужен для редактирования (genderLabel — только для отображения).
+    let genderId: Int?
     let level: Int?
     let totalPoints: Int?
     /// Закрытый профиль/статистика — сервер отдаёт эти флаги; если профиль
@@ -103,7 +112,7 @@ struct UserProfile: Decodable {
     let canViewStatistics: Bool
 
     private struct ImageRef: Decodable { let url: String?; let filename: String? }
-    private struct Labeled: Decodable { let label: String? }
+    private struct Labeled: Decodable { let id: Int?; let label: String? }
     private struct PointsInfo: Decodable { let total_points: Int?; let level: Int? }
 
     private enum CodingKeys: String, CodingKey {
@@ -117,10 +126,16 @@ struct UserProfile: Decodable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = (try? c.decode(Int.self, forKey: .id)) ?? 0
         username = (try? c.decode(String.self, forKey: .username)) ?? ""
-        avatarURL = Self.absoluteURL(((try? c.decodeIfPresent(ImageRef.self, forKey: .avatar)) ?? nil)?.url)
-        backgroundURL = Self.absoluteURL(((try? c.decodeIfPresent(ImageRef.self, forKey: .background)) ?? nil)?.url)
+        let avatarRef = (try? c.decodeIfPresent(ImageRef.self, forKey: .avatar)) ?? nil
+        let backgroundRef = (try? c.decodeIfPresent(ImageRef.self, forKey: .background)) ?? nil
+        avatarURL = Self.absoluteURL(avatarRef?.url)
+        backgroundURL = Self.absoluteURL(backgroundRef?.url)
+        avatarFilename = avatarRef?.filename
+        backgroundFilename = backgroundRef?.filename
         about = (try? c.decodeIfPresent(String.self, forKey: .about)) ?? nil
-        genderLabel = ((try? c.decodeIfPresent(Labeled.self, forKey: .gender)) ?? nil)?.label
+        let genderRef = (try? c.decodeIfPresent(Labeled.self, forKey: .gender)) ?? nil
+        genderLabel = genderRef?.label
+        genderId = genderRef?.id
         let p = (try? c.decodeIfPresent(PointsInfo.self, forKey: .pointsInfo)) ?? nil
         level = p?.level
         totalPoints = p?.total_points
@@ -135,6 +150,16 @@ struct UserProfile: Decodable {
         if s.hasPrefix("http") { return URL(string: s) }
         return URL(string: "https://cover.cdnlibs.org" + (s.hasPrefix("/") ? s : "/" + s))
     }
+}
+
+/// Ответ загрузки картинки во временное хранилище — ПОДТВЕРЖДЕНО перехватом
+/// `POST /upload/image/avatar` → `{data:{name, extension, filename, url,
+/// path}}`. `filename` — то самое значение, которое потом уходит в PATCH
+/// /user/{id} как поле avatar/cover, чтобы реально привязать картинку к
+/// профилю (см. MangaNetworkService.uploadAvatarImage/updateProfileInfo).
+struct UploadedImage: Decodable {
+    let filename: String
+    let url: String?
 }
 
 /// Статистика профиля — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}/stats`:
