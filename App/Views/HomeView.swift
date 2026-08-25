@@ -157,9 +157,14 @@ struct HomeView: View {
                     // прямо сейчас (см. BookmarksStore.clearContinueReading) —
                     // не удаляет ни историю, ни закладку на сервере, реального
                     // подтверждённого эндпоинта под "очистить" ещё нет.
+                    // Тот же плоский чип с подложкой, что у periodMenu в
+                    // «Сейчас читают» — по прямой просьбе, единый стиль.
                     Button("Очистить") { bookmarks.clearContinueReading() }
                         .font(.footnote.weight(.medium))
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, 12)
+                        .frame(height: 32)
+                        .background(Theme.surfaceElevated, in: Capsule())
                 }
                 .padding(.horizontal, 16)
                 ScrollView(.horizontal) {
@@ -439,7 +444,8 @@ struct HomeView: View {
             .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 12)
             .frame(height: 32)
-            .glassEffect(.regular.interactive(), in: Capsule())
+            // Плоский чип с подложкой вместо стекла — по прямой просьбе.
+            .background(Theme.surfaceElevated, in: Capsule())
         }
     }
 
