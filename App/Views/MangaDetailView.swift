@@ -100,6 +100,11 @@ struct MangaDetailView: View {
     /// FranchiseRef уже Identifiable (id франшизы), отдельный обёрточный
     /// тип не нужен.
     @State private var franchiseTarget: FranchiseRef?
+    /// Открытый автор/художник/издательство (тап по чипу, см.
+    /// authorsChips/publisherChips) — DirectoryEntity сама по себе не несёт
+    /// признак "какой это вид" (people/publisher), нужен тот же .kind при
+    /// пуше DirectoryDetailView, поэтому обёрнуто в PersonNavTarget.
+    @State private var personTarget: PersonNavTarget?
 
     /// Отключить комментарии в читалке — ПОКА ЗАГЛУШКА, как явно попросили:
     /// переключатель есть и сохраняется, но ридер комментарии не показывает
@@ -241,6 +246,14 @@ struct MangaDetailView: View {
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
         .navigationDestination(item: $franchiseTarget) { ref in
             FranchiseView(slugURL: ref.slugURL, fallbackName: ref.name)
+        }
+        .navigationDestination(item: $personTarget) { target in
+            DirectoryDetailView(
+                kind: target.isPublisher ? .publisher : .people,
+                slugURL: target.entity.slugURL,
+                fallbackName: target.entity.displayName,
+                coverURL: target.entity.coverURL
+            )
         }
         .sheet(isPresented: $showTitleNames) {
             TitleNamesSheet(
@@ -1446,6 +1459,24 @@ struct MangaDetailView: View {
                 }
             }
 
+            // Авторы/художники и издательство — та же идея, что и у франшизы:
+            // свои отдельные подкатегории (не вмешаны в жанры/теги), тап
+            // пушит DirectoryDetailView (см. personTarget/authorsChips/
+            // publisherChips). Авторы и художники объединены в одну секцию
+            // (дубликаты по id убраны — иногда это один и тот же человек).
+            if !authorsChips.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    blockTitle("Авторы")
+                    CollapsibleChips(items: authorsChips)
+                }
+            }
+            if !publisherChips.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    blockTitle("Издательство")
+                    CollapsibleChips(items: publisherChips)
+                }
+            }
+
             // Порядок ниже — как явно попросили: Связанное ВСЕГДА выше
             // Похожего, оба опциональны и просто скрываются (см.
             // relatedSection/similarSection), если списки пустые.
@@ -1979,6 +2010,7 @@ struct MangaDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 24)
             } else {
+                stickyCommentCard
                 commentsHeader
                 composeBar
 
@@ -2110,6 +2142,32 @@ struct MangaDetailView: View {
                     .frame(maxWidth: .infinity, minHeight: 34)
                     .background(Theme.surfaceElevated, in: Capsule())
             }
+        }
+    }
+
+    /// Закреплённый командой перевода/модератором комментарий (см.
+    /// MangaNetworkService.fetchStickyComment) — своя карточка НАД обычной
+    /// лентой, с булавкой + подписью "Закреплённый комментарий" сверху-справа
+    /// (по прямой просьбе; обычным layout-рядом, а не .overlay — при длинном
+    /// нике в шапке комментария оверлей мог бы наехать на текст).
+    @ViewBuilder
+    private var stickyCommentCard: some View {
+        if let sticky = viewModel.stickyComment {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 4) {
+                    Spacer(minLength: 0)
+                    Image(systemName: "pin.fill")
+                        .font(.caption2)
+                        .rotationEffect(.degrees(45))
+                    Text("Закреплённый комментарий")
+                        .font(.caption2.weight(.medium))
+                }
+                .foregroundStyle(Theme.accent)
+
+                commentRow(sticky)
+            }
+            .padding(12)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
@@ -2379,6 +2437,27 @@ struct MangaDetailView: View {
         return .init(text: ref.name, tint: Theme.accent, onTap: { franchiseTarget = ref })
     }
 
+    /// Авторы + художники объединены (дубликаты по id убраны — иногда это
+    /// один и тот же человек в обоих списках). См. MangaDetail.authors/artists.
+    private var authorsChips: [CollapsibleChips.Item] {
+        var seen = Set<Int>()
+        let people = (viewModel.detail?.authors ?? []) + (viewModel.detail?.artists ?? [])
+        return people.filter { seen.insert($0.id).inserted }.map { p in
+            CollapsibleChips.Item(text: p.displayName, onTap: {
+                personTarget = PersonNavTarget(isPublisher: false, entity: p)
+            })
+        }
+    }
+
+    /// См. MangaDetail.publisher.
+    private var publisherChips: [CollapsibleChips.Item] {
+        (viewModel.detail?.publisher ?? []).map { p in
+            CollapsibleChips.Item(text: p.displayName, onTap: {
+                personTarget = PersonNavTarget(isPublisher: true, entity: p)
+            })
+        }
+    }
+
     /// Чип возрастного рейтинга для блока "Жанры и теги" — как попросили:
     /// 18+ красным (текст + обводка), 16+ таким же образом оранжевым, а
     /// 12+/6+/"Нет"/отсутствие рейтинга вообще не показываются (nil).
@@ -2465,6 +2544,19 @@ struct TeamChipView: View {
             isToggling = false
         }
     }
+}
+
+/// Цель перехода на автора/художника/издательство (см.
+/// MangaDetailView.personTarget/authorsChips/publisherChips) — DirectoryEntity
+/// сама по себе не несёт признак "это издательство, а не человек", нужен ещё
+/// .kind при пуше DirectoryDetailView.
+private struct PersonNavTarget: Identifiable, Hashable {
+    let isPublisher: Bool
+    let entity: DirectoryEntity
+    var id: Int { entity.id }
+
+    static func == (l: PersonNavTarget, r: PersonNavTarget) -> Bool { l.id == r.id && l.isPublisher == r.isPublisher }
+    func hash(into hasher: inout Hasher) { hasher.combine(id); hasher.combine(isPublisher) }
 }
 
 #Preview {

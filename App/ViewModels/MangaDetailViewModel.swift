@@ -53,6 +53,11 @@ final class MangaDetailViewModel: ObservableObject {
     @Published private(set) var isPostingComment = false
     @Published private(set) var commentSort: CommentSort = .new
     private var commentsPage = 1
+    /// Закреплённый комментарий (см. MangaNetworkService.fetchStickyComment) —
+    /// грузится один раз параллельно с обычной лентой, не зависит от
+    /// сортировки/пагинации (см. loadCommentsIfNeeded).
+    @Published private(set) var stickyComment: Comment?
+    private var hasLoadedSticky = false
 
     // MARK: Похожее (GET /manga/{slug}/similar, POST /similar/{id}/vote —
     // ПОДТВЕРЖДЕНО перехватом, см. MangaNetworkService.fetchSimilar/voteSimilar).
@@ -278,7 +283,15 @@ final class MangaDetailViewModel: ObservableObject {
     /// (потянуть-обновить/кнопка "Повторить").
     func loadCommentsIfNeeded() async {
         guard !hasLoadedComments, !isLoadingComments else { return }
-        await loadComments()
+        async let commentsTask: Void = loadComments()
+        async let stickyTask: Void = loadStickyCommentIfNeeded()
+        _ = await (commentsTask, stickyTask)
+    }
+
+    private func loadStickyCommentIfNeeded() async {
+        guard !hasLoadedSticky, let mangaId = detail?.id else { return }
+        hasLoadedSticky = true
+        stickyComment = try? await service.fetchStickyComment(postId: mangaId, siteId: resolvedSiteId)
     }
 
     /// Серверная сортировка (подтверждена перехватом): Новые — id/desc,

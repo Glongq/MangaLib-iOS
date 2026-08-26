@@ -716,6 +716,22 @@ final class MangaNetworkService {
         return (response.comments, response.hasNextPage)
     }
 
+    /// Закреплённый комментарий тайтла — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /comments/sticky?post_id=&post_type=manga` → `{"data":[Comment-
+    /// форма, + sticky_info/relation_type/relation_id]}` — те же поля, что и
+    /// в обычных /comments, поэтому переиспользуем Comment как есть (лишние
+    /// ключи decoder просто игнорирует). `data` — массив, но на практике
+    /// закреплён максимум один комментарий — берём первый.
+    func fetchStickyComment(postId: Int, postType: String = "manga", siteId: Int? = nil) async throws -> Comment? {
+        let items = [
+            URLQueryItem(name: "post_id", value: String(postId)),
+            URLQueryItem(name: "post_type", value: postType)
+        ]
+        let request = try makeRequest(path: "/comments/sticky", queryItems: items, siteId: siteId)
+        let response: APIListResponse<Comment> = try await perform(request)
+        return response.data.first
+    }
+
     /// `POST /comments` — ПОДТВЕРЖДЕНО реальным перехваченным запросом (см.
     /// "comments Отправка.txt", 201 Created): ответ реально возвращает
     /// созданный комментарий целиком (та же форма, что и в списке, см.
@@ -871,7 +887,12 @@ final class MangaNetworkService {
             // "franchise" — ПОДТВЕРЖДЕНО реальным перехваченным запросом (см.
             // MangaDetail.franchise/FranchiseRef) — чип-подкатегория франшизы
             // на карточке тайтла.
-            URLQueryItem(name: "fields[]", value: "franchise")
+            URLQueryItem(name: "fields[]", value: "franchise"),
+            // "artists"/"publisher" — ПОДТВЕРЖДЕНО тем же перехватом, что и
+            // franchise/authors (см. MangaDetail.artists/publisher) —
+            // художники и издательство тайтла отдельными подкатегориями.
+            URLQueryItem(name: "fields[]", value: "artists"),
+            URLQueryItem(name: "fields[]", value: "publisher")
         ]
         let request = try makeRequest(path: "/manga/\(encodePath(slug))", queryItems: items, siteId: siteId)
         return try await performOptionalData(request)
@@ -1009,6 +1030,56 @@ final class MangaNetworkService {
         let request = try makeRequest(path: "/teams/\(encodePath(slugURL))/users", queryItems: [])
         let response: LossyListResponse<TeamMemberEntry> = try await perform(request)
         return response.data.filter { $0.userId != 0 }
+    }
+
+    // MARK: Каталожные сущности (команды/персонажи/люди/издательства)
+
+    /// Список одного вида каталожной сущности — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /teams`, `GET /character`, `GET /people`, `GET /publisher` (см.
+    /// DirectoryKind/DirectoryEntity). `q` — по той же логике "не
+    /// подтверждено конкретно здесь, но по аналогии с остальными списковыми
+    /// эндпоинтами", что и в fetchFranchises.
+    func fetchDirectory(kind: DirectoryKind, page: Int, sortBy: String, sortType: String, query: String) async throws -> (items: [DirectoryEntity], hasNextPage: Bool) {
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "sort_by", value: sortBy),
+            URLQueryItem(name: "sort_type", value: sortType)
+        ]
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
+        let request = try makeRequest(path: kind.apiPath, queryItems: items)
+        let response: APIListResponse<DirectoryEntity> = try await perform(request)
+        return (response.data, !response.data.isEmpty)
+    }
+
+    /// Одна каталожная сущность — ПОДТВЕРЖДЕНО перехватом `GET /people/{id}--
+    /// {slug}` и `GET /publisher/{id}--{slug}` (Команды/Персонажи используют
+    /// СВОИ отдельные, уже реализованные эндпоинты — fetchTeamDetail/
+    /// fetchCharacterDetail — этот метод для People/Publisher).
+    func fetchDirectoryDetail(kind: DirectoryKind, slugURL: String) async throws -> DirectoryEntity {
+        let request = try makeRequest(path: "\(kind.apiPath)/\(encodePath(slugURL))", queryItems: [])
+        let response: APIObjectResponse<DirectoryEntity> = try await perform(request)
+        return response.data
+    }
+
+    // MARK: Пользователи (справочник, Меню → Каталог → Пользователи)
+
+    /// Список аккаунтов — ПОДТВЕРЖДЕНО перехватом `GET /user?page=&sort_by=
+    /// id&sort_type=desc` (+ вариант `filter=weekly-top`). Форма СОВСЕМ другая,
+    /// чем у DirectoryEntity — это учётные записи, не контент-сущности (нет
+    /// model/subscription/stats), см. DirectoryUserEntry.
+    func fetchUsers(page: Int, filter: String?, query: String) async throws -> (items: [DirectoryUserEntry], hasNextPage: Bool) {
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "sort_by", value: "id"),
+            URLQueryItem(name: "sort_type", value: "desc")
+        ]
+        if let filter { items.append(URLQueryItem(name: "filter", value: filter)) }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
+        let request = try makeRequest(path: "/user", queryItems: items)
+        let response: APIListResponse<DirectoryUserEntry> = try await perform(request)
+        return (response.data, !response.data.isEmpty)
     }
 
     // MARK: Франшизы

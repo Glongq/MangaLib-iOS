@@ -50,7 +50,10 @@ struct SideMenuView: View {
     // профиля её не касается, поэтому не нужно поднимать выше в RootView.
     // История/Настройки/Загрузки теперь не sheet, а обычные PUSH-переходы внутри
     // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
-    private enum MenuRoute: Hashable { case history, settings, downloads, comments, franchises }
+    private enum MenuRoute: Hashable {
+        case history, settings, downloads, comments, franchises
+        case teams, characters, people, publishers, users
+    }
     // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
     // NavigationLink(value:) ВНУТРИ этих экранов (например, History →
     // тайтл, см. HistoryView.navigationDestination(for: HistoryEntry.self))
@@ -132,6 +135,11 @@ struct SideMenuView: View {
                 case .downloads:  DownloadsView(embedded: true)
                 case .comments:   MyCommentsView(embedded: true)
                 case .franchises: FranchiseListView()
+                case .teams:      DirectoryListView(kind: .team)
+                case .characters: DirectoryListView(kind: .character)
+                case .people:     DirectoryListView(kind: .people)
+                case .publishers: DirectoryListView(kind: .publisher)
+                case .users:      UserListView()
                 }
             }
         }
@@ -305,12 +313,12 @@ struct SideMenuView: View {
             })
             row("Сейчас читают", icon: "flame")
             row("Коллекции", icon: "square.stack")
-            row("Команды", icon: "person.3")
-            row("Люди", icon: "person.crop.rectangle")
-            row("Персонажи", icon: "face.smiling")
+            row("Команды", icon: "person.3", action: { path.append(MenuRoute.teams) })
+            row("Люди", icon: "person.crop.rectangle", action: { path.append(MenuRoute.people) })
+            row("Персонажи", icon: "face.smiling", action: { path.append(MenuRoute.characters) })
             row("Франшизы", icon: "sparkles", action: { path.append(MenuRoute.franchises) })
-            row("Издательства", icon: "building.2")
-            row("Пользователи", icon: "person.crop.circle", showDivider: false)
+            row("Издательства", icon: "building.2", action: { path.append(MenuRoute.publishers) })
+            row("Пользователи", icon: "person.crop.circle", showDivider: false, action: { path.append(MenuRoute.users) })
         }
     }
 

@@ -1087,7 +1087,13 @@ struct MangaDetail: Decodable, Identifiable {
     let summary: String?
     let genres: [NamedEntity]?
     let tags: [NamedEntity]?
-    let authors: [NamedEntity]?
+    /// Авторы/художники/издательство — ПОДТВЕРЖДЕНО перехватом: те же
+    /// объекты, что и в списках /people и /publisher (см. DirectoryEntity),
+    /// просто embedded прямо в ответ тайтла. artists/publisher требуют
+    /// явного fields[]=artists/fields[]=publisher (см. fetchMangaDetailRawData).
+    let authors: [DirectoryEntity]?
+    let artists: [DirectoryEntity]?
+    let publisher: [DirectoryEntity]?
     /// Альтернативные названия ("I Alone Level-Up", "Соло Левелинг", ...) —
     /// показываются в sheet по тапу на название (см. TitleNamesSheet).
     /// ЗАГЛУШКА/на будущее: точный ключ реальным перехватом НЕ подтверждён,
@@ -1163,7 +1169,7 @@ struct MangaDetail: Decodable, Identifiable {
     var backgroundURL: URL? { background?.bestURL ?? cover?.bestURL }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, cover, background, rating, status, type, site, summary, genres, tags, authors, views, format, moderated, franchise
+        case id, name, slug, cover, background, rating, status, type, site, summary, genres, tags, authors, artists, publisher, views, format, moderated, franchise
         case otherNames = "otherNames"
         case otherNamesSnake = "other_names"
         case ageRestriction = "ageRestriction"
@@ -1207,7 +1213,9 @@ struct MangaDetail: Decodable, Identifiable {
         summary = [summaryValue, descriptionValue].compactMap { $0 }.first { !$0.isEmpty }
         genres = try? c.decodeIfPresent([NamedEntity].self, forKey: .genres) ?? nil
         tags = try? c.decodeIfPresent([NamedEntity].self, forKey: .tags) ?? nil
-        authors = try? c.decodeIfPresent([NamedEntity].self, forKey: .authors) ?? nil
+        authors = try? c.decodeIfPresent([DirectoryEntity].self, forKey: .authors) ?? nil
+        artists = try? c.decodeIfPresent([DirectoryEntity].self, forKey: .artists) ?? nil
+        publisher = try? c.decodeIfPresent([DirectoryEntity].self, forKey: .publisher) ?? nil
         otherNames = Self.decodeStringList(c, .otherNames, .otherNamesSnake)
         // Подтверждено реальным JSON: [{"id":6,"name":"Веб"}] — ключ "name",
         // как у жанров/тегов. FlexibleLabelEntity также пробует "label"
@@ -1633,6 +1641,118 @@ struct Franchise: Decodable, Identifiable, Hashable {
 
     static func == (lhs: Franchise, rhs: Franchise) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+// MARK: - Общие "каталожные" сущности (команды/персонажи/люди/издательства)
+
+/// Общая форма для команд/персонажей/людей(авторов)/издательств —
+/// ПОДТВЕРЖДЕНО перехватом на списках `GET /teams`, `GET /character`,
+/// `GET /people`, `GET /publisher`, А ТАКЖЕ как embedded-поля тайтла
+/// (`authors`/`artists`/`publisher` у `GET /manga/{slug}`, та же форма один
+/// в один). Не каждое поле есть у каждого вида: teams в списке БЕЗ
+/// subscription/titles_count_details/rus_name/alt_name (у них отдельный
+/// подтверждённый способ проверки подписки, см. TeamViewModel), publisher
+/// без alt_name — всё это Optional и просто отсутствует, где сервер не
+/// прислал. Персонаж — единственный, для кого фактическая подписка (POST
+/// /favorites) НЕ подтверждена перехватом, хотя поле subscription в его
+/// списке ЕСТЬ (см. DirectoryKind.character/sourceType == nil — сознательно
+/// не даём переключать то, что не проверено).
+struct DirectoryEntity: Decodable, Identifiable, Hashable {
+    let id: Int
+    let slugURL: String
+    let model: String
+    let name: String
+    let rusName: String?
+    let altName: String?
+    let coverURL: URL?
+    var isSubscribed: Bool
+    let stats: [TeamStat]
+    /// site_id → число тайтлов, где не пусто (1=манга,2=слэш,3=новеллы,4=хентай,5=аниме).
+    let titlesCountBySite: [Int: Int]
+    /// Описание ("dsc") — только в детальном ответе, тот же ProseMirror/
+    /// TipTap формат, что и у CharacterDetail.description (та же логика
+    /// разбора: сперва SummaryDoc, затем универсальный AnyJSON запасным
+    /// вариантом).
+    let description: String?
+
+    var displayName: String { rusName?.isEmpty == false ? rusName! : name }
+    var titlesCount: Int? { stats.first { $0.tag == "titles" }?.value }
+    var subscribersCount: Int? { stats.first { $0.tag == "subscribes" }?.value }
+
+    private struct Subscription: Decodable {
+        let isSubscribed: Bool?
+        enum CodingKeys: String, CodingKey { case isSubscribed = "is_subscribed" }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, slug, model, name, stats, subscription, cover, dsc
+        case slugURL = "slug_url"
+        case rusName = "rus_name"
+        case altName = "alt_name"
+        case titlesCountDetails = "titles_count_details"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        let slug = (try? c.decode(String.self, forKey: .slug)) ?? ""
+        slugURL = ((try? c.decodeIfPresent(String.self, forKey: .slugURL)) ?? nil) ?? slug
+        model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? ""
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        rusName = (try? c.decodeIfPresent(String.self, forKey: .rusName)) ?? nil
+        altName = (try? c.decodeIfPresent(String.self, forKey: .altName)) ?? nil
+        coverURL = ((try? c.decodeIfPresent(MangaCover.self, forKey: .cover)) ?? nil)?.bestURL
+        let subscription = (try? c.decodeIfPresent(Subscription.self, forKey: .subscription)) ?? nil
+        isSubscribed = subscription?.isSubscribed ?? false
+        stats = ((try? c.decodeIfPresent([TeamStat].self, forKey: .stats)) ?? nil) ?? []
+
+        if let raw = ((try? c.decodeIfPresent([String: Int].self, forKey: .titlesCountDetails)) ?? nil) {
+            var m: [Int: Int] = [:]
+            for (k, v) in raw { if let ik = Int(k) { m[ik] = v } }
+            titlesCountBySite = m
+        } else {
+            titlesCountBySite = [:]
+        }
+
+        var desc: String? = nil
+        if let doc = (try? c.decodeIfPresent(SummaryDoc.self, forKey: .dsc)) ?? nil {
+            let t = doc.plainText
+            if !t.isEmpty { desc = t }
+        }
+        if desc == nil, let generic = (try? c.decodeIfPresent(AnyJSON.self, forKey: .dsc)) ?? nil {
+            let t = generic.extractReadableText()
+            if !t.isEmpty { desc = t }
+        }
+        description = desc
+    }
+
+    static func == (lhs: DirectoryEntity, rhs: DirectoryEntity) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+/// Один аккаунт в справочнике пользователей — ПОДТВЕРЖДЕНО перехватом
+/// `GET /user?page=&sort_by=id&sort_type=desc`: `{id, username, avatar:
+/// {filename,url}, last_online_at, can_view_profile, created_at,
+/// login_streak, premium}`. Совсем другая форма, чем у DirectoryEntity — это
+/// учётная запись, а не контент-сущность (нет model/subscription/stats).
+struct DirectoryUserEntry: Decodable, Identifiable, Hashable {
+    let id: Int
+    let username: String
+    let avatarURL: URL?
+    let isPremium: Bool
+
+    private struct ImageRef: Decodable { let url: String? }
+    private struct PremiumRef: Decodable { let enabled: Bool? }
+    private enum CodingKeys: String, CodingKey { case id, username, avatar, premium }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        username = ((try? c.decodeIfPresent(String.self, forKey: .username)) ?? nil) ?? ""
+        let avatarRef = (try? c.decodeIfPresent(ImageRef.self, forKey: .avatar)) ?? nil
+        avatarURL = UserProfile.absoluteURL(avatarRef?.url)
+        isPremium = ((try? c.decodeIfPresent(PremiumRef.self, forKey: .premium)) ?? nil)?.enabled ?? false
+    }
 }
 
 /// Ссылка на франшизу тайтла — ПОДТВЕРЖДЕНО перехватом `GET /manga/{slug}?
