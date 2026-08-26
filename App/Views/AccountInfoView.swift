@@ -237,13 +237,15 @@ struct ProfileView: View {
                 .foregroundStyle(topTextColor)
                 .shadow(color: (subScreen == nil && !bannerTopLight ? Color.black : Color.clear).opacity(0.4), radius: 2)
                 .id(subScreen)
-                .transition(.blurFade)
+                .transition(.blurFade(radius: 8))
 
             HStack {
                 Button {
                     if subScreen != nil {
-                        goingForward = false
-                        withAnimation(.easeInOut(duration: 0.3)) { subScreen = nil }
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            goingForward = false
+                            subScreen = nil
+                        }
                     } else {
                         showAdditionalInfo = true
                     }
@@ -253,7 +255,7 @@ struct ProfileView: View {
                         .foregroundStyle(topTextColor)
                         .frame(width: 46, height: 46)
                         .id(subScreen)
-                        .transition(.blurFade)
+                        .transition(.blurFade(radius: 8))
                 }
                 .glassEffect(.regular.interactive(), in: Circle())
 
@@ -267,7 +269,7 @@ struct ProfileView: View {
                         .glassEffect(.regular.interactive(), in: Capsule())
                 }
                 .opacity(subScreen == nil ? 1 : 0)
-                .blur(radius: subScreen == nil ? 0 : 12)
+                .blur(radius: subScreen == nil ? 0 : 8)
                 .allowsHitTesting(subScreen == nil)
             }
         }
@@ -344,8 +346,10 @@ struct ProfileView: View {
     }
 
     private func openSubScreen(_ screen: ProfileSubScreen) {
-        goingForward = true
-        withAnimation(.easeInOut(duration: 0.3)) { subScreen = screen }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            goingForward = true
+            subScreen = screen
+        }
     }
 
     private var avatarPlaceholder: some View {

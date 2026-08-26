@@ -149,9 +149,15 @@ extension AnyTransition {
     /// "Закладки"/"Уведомления", панели Фильтры/Сортировка), а не просто
     /// переключают модификатор на уже присутствующей вьюхе, поэтому нужен
     /// настоящий AnyTransition, а не .blur() напрямую.
-    static var blurFade: AnyTransition {
+    static var blurFade: AnyTransition { blurFade() }
+
+    /// Та же анимация с настраиваемым радиусом — по умолчанию 12 (как было
+    /// у всех существующих мест), но, например, у мелких элементов шапки
+    /// профиля (см. AccountInfoView.topBar) полный радиус выглядел слишком
+    /// тяжело при частом переключении — там используется меньший.
+    static func blurFade(radius: CGFloat = 12) -> AnyTransition {
         .modifier(
-            active: BlurFadeModifier(blur: 12, opacity: 0),
+            active: BlurFadeModifier(blur: radius, opacity: 0),
             identity: BlurFadeModifier(blur: 0, opacity: 1)
         )
     }
