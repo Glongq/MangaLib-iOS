@@ -82,6 +82,27 @@ struct PersonalizationSettingsView: View {
                         .tint(Theme.accent)
                         .padding(.horizontal, 16)
                         .frame(minHeight: 52)
+
+                        Divider().overlay(Theme.separator).padding(.leading, 16)
+
+                        // Отдельный, независимый тумблер — не альтернатива
+                        // светлой/тёмной теме (та выше), а "ещё темнее" ПОВЕРХ
+                        // уже тёмной: чистый чёрный фон вместо #0E0F13 и т.д.
+                        // (см. Theme.OLED). На белой теме визуально ничего не
+                        // меняет — выключен (disabled), пока тёмная тема выключена.
+                        Toggle(isOn: $themeManager.isOLEDTheme) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("OLED-режим")
+                                    .foregroundStyle(themeManager.isDarkTheme ? Theme.textPrimary : Theme.textSecondary)
+                                Text("Делает тёмную тему ещё темнее — фон почти чистый чёрный.")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                        .tint(Theme.accent)
+                        .disabled(!themeManager.isDarkTheme)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 52)
                     }
 
                     card {
@@ -124,12 +145,12 @@ struct PersonalizationSettingsView: View {
 
     // MARK: Количество карточек в ряд
 
-    /// Сколько карточек в ряд показывать в сетках приложения — 1-4 или
-    /// "Авто". ПОКА только параметр (сохраняется, визуализируется), сам
-    /// грид каталога/подборок его ещё не читает — по прямой просьбе
-    /// ("это позже реализуем функционально, пока как параметр просто").
+    /// Сколько карточек в ряд показывать в сетках приложения — 2-4 или
+    /// "Авто" (по прямой просьбе вариант "1" убран). ПОКА только параметр
+    /// (сохраняется, визуализируется), сам грид каталога/подборок его ещё
+    /// не читает — "это позже реализуем функционально, пока как параметр просто".
     private enum CardsPerRow: Int, CaseIterable, Identifiable {
-        case one = 1, two = 2, three = 3, four = 4, auto = 0
+        case two = 2, three = 3, four = 4, auto = 0
 
         var id: Int { rawValue }
         var label: String { self == .auto ? "Авто" : "\(rawValue)" }

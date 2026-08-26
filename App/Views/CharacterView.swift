@@ -51,6 +51,7 @@ struct CharacterView: View {
     }
 
     var body: some View {
+        ZStack(alignment: .topLeading) {
         GeometryReader { proxy in
             let cardWidth = MangaCardView.gridCardWidth(
                 totalWidth: proxy.size.width,
@@ -84,20 +85,17 @@ struct CharacterView: View {
             .coordinateSpace(name: "characterScroll")
             .background(Theme.background)
             .ignoresSafeArea(edges: .top)
-            // РЕАЛЬНЫЙ системный navigation bar (не .toolbar(.hidden...), как
-            // было) — прозрачный, без заголовка. Та же причина, что и в
-            // MangaDetailView/TeamView: полностью скрытый бар ломал
-            // интерактивный свайп-назад с экранов с .searchable() (напр.
-            // DirectoryListView) — "просвечивал" поиск сквозь эту карточку.
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar {
-                // placement: .navigation — см. тот же фикс и объяснение в
-                // MangaDetailView.body (.topBarLeading + navigationBarBackButtonHidden
-                // не гасил системную кнопку "назад" надёжно — задваивалась).
-                ToolbarItem(placement: .navigation) { backButton }
-            }
         }
+
+        backButton
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+        }
+        // Свой back поверх hero вместо системной navigation bar — см.
+        // подробную историю решения в комментарии у того же фикса в
+        // MangaDetailView.body (три раунда багов с задвоением системной
+        // кнопки "назад" при реальном toolbar-баре).
+        .toolbar(.hidden, for: .navigationBar)
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
         .sheet(isPresented: $showFilters) {
@@ -111,6 +109,9 @@ struct CharacterView: View {
             TitleNamesSheet(rusName: vm.detail?.rusName, originalName: vm.detail?.name ?? fallbackName, engName: nil, otherNames: [])
                 .presentationDetents([.medium, .large])
         }
+        // Интерактивный свайп-жест «назад» выключен — та же причина, что и
+        // в MangaDetailView (см. DisableInteractivePopGesture).
+        .background(DisableInteractivePopGesture())
     }
 
     // MARK: Шапка (1-в-1 TeamView.heroHeader)

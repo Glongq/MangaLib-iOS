@@ -22,9 +22,22 @@ final class ThemeManager: ObservableObject {
         }
     }
 
+    /// Второй, независимый тумблер (см. PersonalizationSettingsView) — делает
+    /// УЖЕ тёмную тему ещё темнее (фон почти чистый чёрный, экономия
+    /// заряда/выше контраст на OLED-экранах), а не альтернативу тёмной/белой
+    /// теме. На белой теме визуально ничего не меняет (см. Theme.background и
+    /// т.д. — OLED-палитра подставляется только когда isDark == true).
+    @Published var isOLEDTheme: Bool {
+        didSet {
+            Theme.isOLED = isOLEDTheme
+            defaults.set(isOLEDTheme, forKey: Keys.isOLEDTheme)
+        }
+    }
+
     private let defaults = UserDefaults.standard
     private enum Keys {
         static let isDarkTheme = "app_is_dark_theme"
+        static let isOLEDTheme = "app_is_oled_theme"
     }
 
     /// Ретранслятор смены активного сайта (см. Theme.accent — теперь зависит
@@ -42,7 +55,9 @@ final class ThemeManager: ObservableObject {
         } else {
             isDarkTheme = true // по умолчанию тёмная тема
         }
+        isOLEDTheme = defaults.bool(forKey: Keys.isOLEDTheme) // по умолчанию выключено
         Theme.isDark = isDarkTheme
+        Theme.isOLED = isOLEDTheme
 
         siteCancellable = SiteSession.shared.$activeSite
             .dropFirst()
@@ -59,13 +74,18 @@ enum Theme {
     /// Текущий режим — синхронизируется с ThemeManager.shared.isDarkTheme при
     /// каждом изменении настройки, а также при старте приложения.
     static var isDark: Bool = true
+    /// Второй, независимый флаг (см. ThemeManager.isOLEDTheme) — "ещё темнее"
+    /// поверх тёмной темы. Ни на что не влияет, пока isDark == false (см.
+    /// background/surface/surfaceElevated ниже — OLED-палитра подставляется
+    /// только внутри ветки isDark).
+    static var isOLED: Bool = false
 
     /// Основной фон приложения.
-    static var background: Color { isDark ? Dark.background : Light.background }
+    static var background: Color { isDark ? (isOLED ? OLED.background : Dark.background) : Light.background }
     /// Фон поверхностей (карточки, панели, бары).
-    static var surface: Color { isDark ? Dark.surface : Light.surface }
+    static var surface: Color { isDark ? (isOLED ? OLED.surface : Dark.surface) : Light.surface }
     /// Фон приподнятых элементов (поля ввода, чипсы).
-    static var surfaceElevated: Color { isDark ? Dark.surfaceElevated : Light.surfaceElevated }
+    static var surfaceElevated: Color { isDark ? (isOLED ? OLED.surfaceElevated : Dark.surfaceElevated) : Light.surfaceElevated }
     /// Акцентный цвет (кнопки, активные иконки) — свой на каждый сайт
     /// экосистемы (по прямой просьбе), один и тот же в обеих темах
     /// оформления (тёмная/светлая). AnimeLib сознательно не поддержан этим
@@ -128,6 +148,17 @@ enum Theme {
         static let textSecondary = Color(red: 0.596, green: 0.615, blue: 0.667)   // #989DAA
         static let separator = Color.white.opacity(0.08)
         static let skeleton = Color.white.opacity(0.06)
+    }
+
+    /// OLED-вариант тёмной палитры (см. ThemeManager.isOLEDTheme) — только
+    /// фоны/подложки СИЛЬНО темнее (background — чистый чёрный, а не
+    /// #0E0F13/#191B21/#25272F, как в Dark), текст/разделители/скелетон —
+    /// те же, что и в Dark (см. Theme.textPrimary и т.д. — они читают только
+    /// isDark, не isOLED, значит остаются общими для обоих тёмных вариантов).
+    enum OLED {
+        static let background = Color.black                                      // #000000
+        static let surface = Color(red: 0.043, green: 0.043, blue: 0.051)        // #0B0B0D
+        static let surfaceElevated = Color(red: 0.078, green: 0.078, blue: 0.090) // #141417
     }
 
     /// Белая палитра.

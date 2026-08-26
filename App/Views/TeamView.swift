@@ -51,6 +51,7 @@ struct TeamView: View {
     }
 
     var body: some View {
+        ZStack(alignment: .top) {
         GeometryReader { proxy in
             let cardWidth = MangaCardView.gridCardWidth(
                 totalWidth: proxy.size.width,
@@ -92,22 +93,15 @@ struct TeamView: View {
             .coordinateSpace(name: "teamScroll")
             .background(Theme.background)
             .ignoresSafeArea(edges: .top)
-            // РЕАЛЬНЫЙ системный navigation bar (не .toolbar(.hidden...), как
-            // было) — прозрачный, без заголовка. См. подробное объяснение у
-            // того же фикса в MangaDetailView.body: скрытый бар целиком ломал
-            // интерполяцию navigation bar при интерактивном свайпе-назад с
-            // экранов с .searchable() (напр. DirectoryListView) — "просвечивал"
-            // поиск сквозь эту карточку во время жеста.
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar {
-                // placement: .navigation — см. тот же фикс и объяснение в
-                // MangaDetailView.body (.topBarLeading + navigationBarBackButtonHidden
-                // не гасил системную кнопку "назад" надёжно — задваивалась).
-                ToolbarItem(placement: .navigation) { backButton }
-                ToolbarItem(placement: .topBarTrailing) { subscribeButton }
-            }
         }
+
+        pinnedTopBar
+        }
+        // Свой back/подписка поверх hero вместо системной navigation bar —
+        // см. подробную историю решения (три раунда багов с задвоением
+        // системной кнопки "назад" при реальном toolbar-баре) в комментарии
+        // у того же фикса в MangaDetailView.body.
+        .toolbar(.hidden, for: .navigationBar)
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
         .sheet(isPresented: $showFilters) {
@@ -123,6 +117,22 @@ struct TeamView: View {
         }
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
         .sheet(isPresented: $showAllMembers) { TeamMembersSheet(members: vm.members) }
+        // Интерактивный свайп-жест «назад» выключен — та же причина, что и
+        // в MangaDetailView (см. DisableInteractivePopGesture).
+        .background(DisableInteractivePopGesture())
+    }
+
+    /// Кнопки "назад"/подписка — отдельный слой поверх скролла, единая
+    /// HStack-строка (общая ось выравнивания по высоте), не toolbar (см.
+    /// историю решения у .toolbar(.hidden...) выше).
+    private var pinnedTopBar: some View {
+        HStack {
+            backButton
+            Spacer(minLength: 0)
+            subscribeButton
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
     }
 
     /// alt_name с сервера — одна строка через запятую ("DIT, дед, деды, …") —
