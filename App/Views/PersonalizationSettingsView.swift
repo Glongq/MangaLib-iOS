@@ -10,9 +10,7 @@ struct PersonalizationSettingsView: View {
         ZStack {
             Theme.background.ignoresSafeArea()
             ScrollView {
-                // 20→40 — вдвое больше, тот же принцип, что и в
-                // SideMenuView/AppSettingsView, по прямой просьбе.
-                VStack(spacing: 40) {
+                VStack(spacing: 20) {
                     card {
                         Toggle(isOn: $themeManager.isDarkTheme) {
                             VStack(alignment: .leading, spacing: 2) {
