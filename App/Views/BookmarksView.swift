@@ -30,13 +30,15 @@ struct BookmarksView: View {
                 Theme.background.ignoresSafeArea()
                 titlesList
             }
-            // Родной системный поиск — 1-в-1 как в Персонажи/Франшизы/
-            // Пользователи/Каталоге (см. те же файлы): сам выезжает сверху,
-            // свой Cancel, своя анимация — высоту менять нельзя, это
-            // контролирует iOS. Раньше здесь был самодельный всегда видимый
-            // TextField в стеклянной капсуле со своим схлопыванием заголовка.
+            // Родной системный поиск (сам выезжает сверху, свой Cancel, своя
+            // анимация — высоту менять нельзя, это контролирует iOS) +
+            // .large — эталон App Store (см. тот же приём в MangaCatalogView):
+            // крупный заголовок без фона в покое, системный блюр проявляется
+            // при первом скролле, заголовок схлопывается в маленький.
+            // Раньше здесь был самодельный всегда видимый TextField в
+            // стеклянной капсуле со своим схлопыванием заголовка.
             .navigationTitle("Закладки")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .searchable(text: $query, prompt: "Поиск в «\(selectedName)»")
             .onAppear { applyPendingFolder() }
             .onChange(of: catalogNav.openBookmarksRequest) { _, _ in applyPendingFolder() }

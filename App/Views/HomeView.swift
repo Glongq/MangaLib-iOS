@@ -44,24 +44,29 @@ struct HomeView: View {
         NavigationStack {
             ZStack {
                 Theme.background.ignoresSafeArea()
-                // Снова .safeAreaInset(edge: .top) — 1в1 тот же механизм
-                // позиционирования шапки, что и в Каталоге/Закладках/Новое
-                // (см. MangaCatalogView/BookmarksView/NotificationsView.body),
-                // как прямо попросили: "положение как в каталог уведомления
-                // закладках", не самодельный VStack-костыль. Раньше именно
-                // эта связка (safeAreaInset + .refreshable НА ОДНОМ И ТОМ ЖЕ
-                // ScrollView) скроллила шапку вместе с контентом — теперь
-                // .refreshable снаружи ВСЕЙ связки content+safeAreaInset, а не
-                // внутри content на самом ScrollView (см. content ниже).
+                // quickSearchBar — единственное, что осталось от старой
+                // шапки: заголовок теперь родной .navigationTitle/.large (см.
+                // ниже), капсула-переход садится под ним через safeAreaInset,
+                // тот же приём, что и раньше, просто без соседнего Text.
                 content
-                    .safeAreaInset(edge: .top, spacing: 0) { header }
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        quickSearchBar
+                            .padding(.horizontal, 16)
+                            .padding(.top, 2)
+                            .padding(.bottom, 10)
+                    }
                     .refreshable {
                         async let a: Void = viewModel.refresh()
                         async let b: Void = bookmarks.syncHistoryFromServer()
                         _ = await (a, b)
                     }
             }
-            .toolbar(.hidden, for: .navigationBar)
+            // App Store-эталон (см. тот же приём в MangaCatalogView/
+            // BookmarksView/NotificationsView): крупный заголовок без фона в
+            // покое, системный блюр проявляется при первом скролле,
+            // заголовок схлопывается в маленький.
+            .navigationTitle("Читают")
+            .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(slug: item.apiSlug, fallbackTitle: item.displayTitle,
                                  coverURL: item.cover?.bestURL, item: item)
@@ -126,25 +131,7 @@ struct HomeView: View {
         .scrollIndicators(.hidden)
     }
 
-    // MARK: Шапка (свой заголовок + капсула-переход на поиск в Каталоге).
-    // Каталог/Закладки теперь используют родной .searchable() (см. те же
-    // файлы) — здесь оставлено как есть (по прямой просьбе, позже здесь
-    // будет отдельный глобальный поиск): заголовок не схлопывается при
-    // скролле, а капсула — не настоящее поле ввода, просто кнопка-переход.
-
-    private var header: some View {
-        VStack(spacing: 10) {
-            Text("Читают")
-                .font(.system(size: 29, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            quickSearchBar
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 2)
-        .padding(.bottom, 10)
-    }
+    // MARK: Капсула-переход на поиск в Каталоге
 
     /// Тапом уходим на вкладку «Каталог» (там и живёт реальный поиск, см.
     /// MangaCatalogView) — тот же мост, что уже используют жанры/теги из

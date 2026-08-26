@@ -14,9 +14,9 @@ struct NotificationsView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
-    // Схлопывание шапки при скролле — тот же механизм, что в Каталоге/
-    // Закладках: вниз — заголовок "Уведомления" и кнопка сортировки прячутся;
-    // вверх (хоть чуть-чуть) — возвращаются.
+    // Схлопывание кнопки сортировки при скролле вниз (вверх — хоть чуть-чуть
+    // — возвращается). Заголовок теперь родной .navigationTitle/.large (см.
+    // body) — как в Каталоге/Закладках — его эта логика больше не касается.
     @State private var headerCollapsed = false
     @State private var lastScrollOffset: CGFloat = 0
     @State private var isHeaderAnimating = false
@@ -26,9 +26,13 @@ struct NotificationsView: View {
             ZStack {
                 Theme.background.ignoresSafeArea()
                 content
-                    .safeAreaInset(edge: .top, spacing: 0) { header }
             }
-            .toolbar(.hidden, for: .navigationBar)
+            // App Store-эталон (см. тот же приём в MangaCatalogView/
+            // BookmarksView): крупный заголовок без фона в покое, системный
+            // блюр проявляется при первом скролле, заголовок схлопывается в
+            // маленький — целиком системное поведение, доп. кода не нужно.
+            .navigationTitle("Уведомления")
+            .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(
                     slug: item.apiSlug, fallbackTitle: item.displayTitle,
@@ -62,21 +66,6 @@ struct NotificationsView: View {
     }
 
     // MARK: Шапка
-
-    @ViewBuilder
-    private var header: some View {
-        // Заголовок крупнее (title3 20 → ×1.2 → ×1.2 ≈ 29pt) и прижат влево-вверх.
-        if !headerCollapsed {
-            Text("Уведомления")
-                .font(.system(size: 29, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 10)
-                .transition(.blurFade)
-        }
-    }
 
     private func setHeaderCollapsed(_ value: Bool) {
         guard headerCollapsed != value else { return }
