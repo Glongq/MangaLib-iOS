@@ -142,6 +142,7 @@ struct MangaDetailView: View {
     /// требует авторизации так же, как и комментарии; отдельный флаг вместо
     /// переиспользования showLoginForComment, т.к. источник действия другой.
     @State private var showLoginForSimilarVote = false
+    @State private var showRatingSheet = false
     /// Открытый профиль автора комментария (тап по нику/аватарке).
     @State private var profileUser: ProfileUserId?
     /// Открытая франшиза (тап по чипу-подкатегории, см. franchiseChip) —
@@ -299,6 +300,9 @@ struct MangaDetailView: View {
         .sheet(isPresented: $showLoginForComment) { LoginView() }
         .sheet(isPresented: $showLoginForSimilarVote) { LoginView() }
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
+        .sheet(isPresented: $showRatingSheet) {
+            RatingSheet(viewModel: viewModel)
+        }
         .navigationDestination(item: $franchiseTarget) { ref in
             FranchiseView(slugURL: ref.slugURL, fallbackName: ref.name)
         }
@@ -943,34 +947,42 @@ struct MangaDetailView: View {
         }
     }
 
+    /// Тап по всему виджету открывает RatingSheet (оценка 1-10 звёзд, см.
+    /// showRatingSheet) — по прямой просьбе.
     @ViewBuilder
     private func ratingStatsBlock(_ group: StatGroup?) -> some View {
         if let entries = group?.stats, !entries.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    blockTitle("Оценки пользователей")
-                    Spacer(minLength: 0)
-                    if let r = viewModel.detail?.rating {
-                        HStack(spacing: 6) {
-                            Image(systemName: "star.fill").font(.subheadline).foregroundStyle(Theme.accent)
-                            Text(r.average ?? r.averageFormated ?? "—")
-                                .font(.headline).foregroundStyle(Theme.textPrimary)
-                            if let v = r.votes {
-                                Text(Self.shortCount(v)).font(.footnote).foregroundStyle(Theme.textSecondary)
+            Button {
+                showRatingSheet = true
+            } label: {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        blockTitle("Оценки пользователей")
+                        Spacer(minLength: 0)
+                        if let r = viewModel.detail?.rating {
+                            HStack(spacing: 6) {
+                                Image(systemName: "star.fill").font(.subheadline).foregroundStyle(Theme.accent)
+                                Text(r.average ?? r.averageFormated ?? "—")
+                                    .font(.headline).foregroundStyle(Theme.textPrimary)
+                                if let v = r.votes {
+                                    Text(Self.shortCount(v)).font(.footnote).foregroundStyle(Theme.textSecondary)
+                                }
                             }
                         }
                     }
-                }
-                VStack(spacing: 9) {
-                    ForEach(entries) { e in
-                        statRow(leading: { ratingLeading(e.label) },
-                                leadingWidth: 40,
-                                percent: e.percent,
-                                color: Self.ratingColor(for: e.label),
-                                value: e.value)
+                    VStack(spacing: 9) {
+                        ForEach(entries) { e in
+                            statRow(leading: { ratingLeading(e.label) },
+                                    leadingWidth: 40,
+                                    percent: e.percent,
+                                    color: Self.ratingColor(for: e.label),
+                                    value: e.value)
+                        }
                     }
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
     }
 
@@ -1048,7 +1060,9 @@ struct MangaDetailView: View {
         return percent > 0 ? max(w, 5) : 0
     }
 
-    private static func ratingColor(for label: String) -> Color {
+    /// Не private — тот же цвет распределения переиспользует RatingSheet
+    /// (см. её большой кружок с выбранной оценкой), единый источник правды.
+    static func ratingColor(for label: String) -> Color {
         guard let score = Int(label) else { return Theme.accent }
         // 1 → оранжевый, 10 → зелёный (плавный переход по hue).
         let t = Double(min(max(score, 1), 10) - 1) / 9.0

@@ -667,6 +667,10 @@ struct MangaRating: Decodable {
     let average: String?
     let averageFormated: String?
     let votes: Int?
+    /// Оценка ТЕКУЩЕГО пользователя (1-10) — ПОДТВЕРЖДЕНО перехватом ответа
+    /// `POST /manga/rate` (`{"data":{"average","averageFormated","votes",
+    /// "user":8}}`), используется чтобы предзаполнить выбор в RatingSheet.
+    let user: Int?
 
     /// Числовое значение рейтинга (например, 8.5).
     var value: Double? {

@@ -1176,6 +1176,27 @@ final class MangaNetworkService {
         return response.data
     }
 
+    /// Оценка тайтла (звёзды 1-10) — ПОДТВЕРЖДЕНО реальным перехватом:
+    /// `POST /manga/rate`, тело `{"score":Int,"rateable_id":Int,
+    /// "rateable_type":"manga"}`. Ответ — АКТУАЛЬНЫЙ агрегат (average/
+    /// averageFormated/votes/user), тот же формат, что MangaDetail.rating —
+    /// подставляем в UI, не перезагружая всю карточку вручную (см.
+    /// MangaDetailViewModel.submitRating). Ошибка (например 403 "нужно
+    /// прочитать минимум 1 главу...") приходит с человекочитаемым текстом в
+    /// `{"data":{"toast":{"message":...}}}` — отсюда performToastAware.
+    func rateManga(id: Int, score: Int, siteId: Int? = nil) async throws -> MangaRating {
+        let payload = RateMangaPayload(score: score, rateable_id: id, rateable_type: "manga")
+        let request = try makeJSONRequest(path: "/manga/rate", method: "POST", body: payload, siteId: siteId)
+        let response: APIObjectResponse<MangaRating> = try await performToastAware(request)
+        return response.data
+    }
+
+    private struct RateMangaPayload: Encodable {
+        let score: Int
+        let rateable_id: Int
+        let rateable_type: String
+    }
+
     // MARK: - Отзывы на тайтл
 
     /// `GET /reviews?page=&sort_by=newest&reviewable_type=manga&reviewable_id=` —

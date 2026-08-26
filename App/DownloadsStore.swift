@@ -487,7 +487,10 @@ final class DownloadsManager: ObservableObject {
     }
 
     /// Показать тост и убрать его через пару секунд (если его не сменил новый).
-    private func showBanner(_ text: String) {
+    /// Internal (не private) — этим же тостом («Загрузка начата» и т.п., см.
+    /// RootView.DownloadToast) пользуются и другие экраны для своих
+    /// уведомлений, не только сама загрузка (см. RatingSheet).
+    func showBanner(_ text: String) {
         let b = Banner(text: text)
         banner = b
         Task {

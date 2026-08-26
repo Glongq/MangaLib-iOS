@@ -351,6 +351,20 @@ final class MangaDetailViewModel: ObservableObject {
         }
     }
 
+    /// Отправляет оценку тайтлу (1-10 звёзд, см. RatingSheet) — POST
+    /// /manga/rate. Сервер отдаёт в ответе только АГРЕГАТ (average/votes),
+    /// без обновлённого распределения по звёздам (stats.rating.stats) — вместо
+    /// ручного мёржа проще и надёжнее инвалидировать кэш и тихо перезагрузить
+    /// карточку целиком (force: true), тогда и средний балл, и распределение
+    /// сразу актуальны. Бросает ошибку дальше — RatingSheet сам решает, как
+    /// её показать (см. DownloadsManager.showBanner).
+    func submitRating(_ score: Int) async throws {
+        guard let mangaId = detail?.id else { return }
+        _ = try await service.rateManga(id: mangaId, score: score, siteId: resolvedSiteId)
+        MangaDetailCache.shared.invalidate(slug: slug)
+        await load(force: true)
+    }
+
     /// Сортировка глав по возрастанию тома, затем номера главы.
     private func sortChapters(_ items: [ChapterItem]) -> [ChapterItem] {
         items.sorted { lhs, rhs in
