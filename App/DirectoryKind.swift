@@ -49,12 +49,15 @@ struct DirectoryKind {
         defaultSort: DirectorySortOption(apiValue: "likes_count", title: "По лайкам")
     )
 
+    // Не хватало "По тайтлам" (titles_count) — по прямой просьбе добавлено,
+    // та же аналогия, что и у Людей ниже.
     static let character = DirectoryKind(
         apiPath: "/character", sourceType: nil, title: "Персонажи", placeholderIcon: "face.smiling",
         targetModel: "character",
         sortOptions: [
-            DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам"),
-            DirectorySortOption(apiValue: "name", title: "По названию")
+            DirectorySortOption(apiValue: "name", title: "По названию"),
+            DirectorySortOption(apiValue: "titles_count", title: "По тайтлам"),
+            DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам")
         ],
         defaultSort: DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам")
     )
