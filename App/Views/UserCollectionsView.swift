@@ -28,6 +28,10 @@ struct UserCollectionsView: View {
         .task { await vm.loadIfNeeded() }
     }
 
+    /// Позиция кнопки "назад" и заголовка — та же, что и в шапке "Профиль"
+    /// (см. AccountInfoView.header: padding.top 14) — раньше здесь было 8,
+    /// тот же не замеченный явно, но тот же самый перекос, что и у
+    /// Комментариев/Друзей/Списков тайтлов рядом в том же меню профиля.
     private var header: some View {
         ZStack {
             Text("Коллекции").font(.headline).foregroundStyle(Theme.textPrimary)
@@ -43,7 +47,7 @@ struct UserCollectionsView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .padding(.top, 14)
         .padding(.bottom, 10)
     }
 

@@ -24,15 +24,25 @@ struct UserBookmarksView: View {
                 if vm.folders.isEmpty {
                     emptyOrLoadingFolders
                 } else {
-                    folderChips
                     content
                 }
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        // Папки — внизу, тем же приёмом safeAreaInset, что и переключатели в
+        // "Друзья"/"Комментарии" (tabBar/controlsBar), а не отдельной строкой
+        // сразу под шапкой, как было — единообразно с остальными вкладками
+        // профиля (по прямой просьбе).
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !vm.folders.isEmpty { folderChips }
+        }
         .task { await vm.loadFoldersIfNeeded() }
     }
 
+    /// Позиция кнопки "назад" и заголовка — та же, что и в шапке "Профиль"
+    /// (см. AccountInfoView.header: padding.top 14) — раньше здесь было 8,
+    /// заметно выше, чем в "Готово"/аватаре на самом профиле, из-за чего при
+    /// переходе с профиля сюда шапка визуально "прыгала" вверх.
     private var header: some View {
         ZStack {
             Text("Списки тайтлов").font(.headline).foregroundStyle(Theme.textPrimary)
@@ -48,7 +58,7 @@ struct UserBookmarksView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .padding(.top, 14)
         .padding(.bottom, 10)
     }
 
@@ -68,10 +78,11 @@ struct UserBookmarksView: View {
             HStack(spacing: 8) {
                 ForEach(vm.folders) { folder in folderChip(folder) }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
         }
         .scrollIndicators(.hidden)
-        .padding(.bottom, 10)
+        .padding(.top, 4)
+        .padding(.bottom, 20)
     }
 
     private func folderChip(_ folder: UserBookmarkFolder) -> some View {

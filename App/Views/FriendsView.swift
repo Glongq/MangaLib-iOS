@@ -35,6 +35,8 @@ struct FriendsView: View {
 
     // MARK: Шапка
 
+    /// Позиция кнопки "назад" и заголовка — та же, что и в шапке "Профиль"
+    /// (см. AccountInfoView.header: padding.top 14) — раньше здесь было 8.
     private var header: some View {
         ZStack {
             Text("Друзья").font(.headline).foregroundStyle(Theme.textPrimary)
@@ -50,7 +52,7 @@ struct FriendsView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .padding(.top, 14)
         .padding(.bottom, 10)
     }
 
