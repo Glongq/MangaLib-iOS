@@ -2811,8 +2811,13 @@ private struct MergedCreditsChip: View {
 /// прямой просьбе), а под именами — подпись роли (sheetTitle: "Автор"/
 /// "Авторы"/"Художник"/"Художники"/"Издательство"/"Издатели"), по аналогии
 /// с "Автор и художник" у MergedCreditsChip (раньше была только ник/имя без
-/// подписи роли). Тап ВСЕГДА открывает лист со всеми (даже если человек
-/// один — единообразное поведение, по прямой просьбе "лист всегда").
+/// подписи роли).
+///
+/// Один человек в группе — сразу полноценная карточка (NavigationLink, как
+/// у MergedCreditsChip), БЕЗ промежуточного листа выбора: раньше лист
+/// открывался всегда "для единообразия", даже на одного человека — по
+/// прямой просьбе убрано, лист нужен только когда реально есть из чего
+/// выбирать (2+ человека).
 private struct CreditsChip: View {
     let people: [DirectoryEntity]
     let kind: DirectoryKind
@@ -2824,27 +2829,41 @@ private struct CreditsChip: View {
     private var remaining: Int { people.count - shown.count }
 
     var body: some View {
-        Button { showSheet = true } label: {
-            HStack(spacing: 8) {
-                avatarsStack
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(namesLabel)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                    Text(sheetTitle)
-                        .font(.caption2)
-                        .foregroundStyle(Theme.textSecondary)
+        Group {
+            if people.count == 1, let person = people.first {
+                NavigationLink {
+                    DirectoryDetailView(kind: kind, slugURL: person.slugURL, fallbackName: person.displayName, coverURL: person.coverURL)
+                } label: {
+                    chipLabel
+                }
+            } else {
+                Button { showSheet = true } label: {
+                    chipLabel
+                }
+                .sheet(isPresented: $showSheet) {
+                    CreditsSheet(title: sheetTitle, people: people, kind: kind)
                 }
             }
-            .padding(.horizontal, 10)
-            .frame(height: 44)
-            .background(Theme.surfaceElevated, in: Capsule())
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $showSheet) {
-            CreditsSheet(title: sheetTitle, people: people, kind: kind)
+    }
+
+    private var chipLabel: some View {
+        HStack(spacing: 8) {
+            avatarsStack
+            VStack(alignment: .leading, spacing: 0) {
+                Text(namesLabel)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                Text(sheetTitle)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+            }
         }
+        .padding(.horizontal, 10)
+        .frame(height: 44)
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 
     private var avatarsStack: some View {
@@ -2864,14 +2883,19 @@ private struct CreditsChip: View {
 }
 
 /// Лист выбора одного из группы (Авторы/Художники/Издатели) — та же сетка в
-/// 2 колонки, что и TeamMembersSheet (участники команды), тап пушит
-/// DirectoryDetailView.
+/// 2 колонки, что и TeamMembersSheet (участники команды). Тап по человеку —
+/// НЕ NavigationLink-пуш (это протолкнуло бы полноценную DirectoryDetailView
+/// внутрь ЭТОГО ЖЕ маленького, подогнанного по контенту листа — см.
+/// sheetHeight, отсюда и была жалоба "открывается в том же маленьком щите"),
+/// а отдельный полноразмерный .sheet(item:) поверх — тот же приём, что и у
+/// TeamMembersSheet.profileUser/ProfileView.
 private struct CreditsSheet: View {
     let title: String
     let people: [DirectoryEntity]
     let kind: DirectoryKind
 
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedPerson: DirectoryEntity?
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -2896,8 +2920,8 @@ private struct CreditsSheet: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(people) { person in
-                        NavigationLink {
-                            DirectoryDetailView(kind: kind, slugURL: person.slugURL, fallbackName: person.displayName, coverURL: person.coverURL)
+                        Button {
+                            selectedPerson = person
                         } label: {
                             personCell(person)
                         }
@@ -2921,6 +2945,11 @@ private struct CreditsSheet: View {
         }
         .presentationDetents([.height(sheetHeight)])
         .presentationDragIndicator(.visible)
+        .sheet(item: $selectedPerson) { person in
+            NavigationStack {
+                DirectoryDetailView(kind: kind, slugURL: person.slugURL, fallbackName: person.displayName, coverURL: person.coverURL)
+            }
+        }
     }
 
     private func personCell(_ person: DirectoryEntity) -> some View {

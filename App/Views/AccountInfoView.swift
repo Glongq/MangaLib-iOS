@@ -110,7 +110,20 @@ struct ProfileView: View {
                 topBar
             }
             .ignoresSafeArea(edges: .top)
-            .toolbar(.hidden, for: .navigationBar)
+            // РЕАЛЬНЫЙ (просто прозрачный) navigation bar — не .toolbar(.hidden...),
+            // как было. Причина та же, что и у аналогичного фикса в
+            // MangaDetailView/TeamView/CharacterView/DirectoryDetailView:
+            // когда КОРЕНЬ NavigationStack полностью прячет бар, а ПУШНУТЫЙ
+            // экран (например, MangaDetailView из «Списки тайтлов», TeamView
+            // из избранных команд) показывает свой настоящий бар с toolbar-
+            // кнопками, — эти кнопки визуально задваивались/наезжали друг на
+            // друга (жаловались: "две кнопки друг на друга налаживаются").
+            // topBar здесь (шапка профиля со щитом/"Готово") — ОТДЕЛЬНЫЙ
+            // ручной слой (см. выше), от системного бара вообще не зависит —
+            // с ним ничего не меняется, просто у самого бара больше нет
+            // рассинхронизации с тем, что показывают пушнутые экраны.
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
         }
         .task(id: resolvedId) { await loadProfile() }
         .task(id: statsKey) { await loadStats() }
