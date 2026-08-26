@@ -3,11 +3,11 @@ import SwiftUI
 /// Экран персонажа — тот же "полный стиль", что и у страницы переводчика
 /// (см. TeamView), по прямой просьбе, только со своими данными: хиро-фон +
 /// плавающая обложка-аватар (2:3, размер = карточка тайтла в гриде ниже) по
-/// центру экрана, кнопка "назад" — toolbar-элемент над прозрачным системным
-/// navigation bar (см. .toolbar в body, та же схема, что в TeamView/
-/// MangaDetailView), название по центру с тапом на sheet со всеми
-/// названиями, метаданные чипами, описание, список тайтлов с поиском/
-/// фильтрами/сортировкой.
+/// центру экрана, кнопка "назад" — обычная СИСТЕМНАЯ над прозрачным (но НЕ
+/// скрытым) navigation bar (см. историю в App/InteractivePopGesture.swift —
+/// своя кнопка поверх баннера четыре раза подряд давала разные баги),
+/// название по центру с тапом на sheet со всеми названиями, метаданные
+/// чипами, описание, список тайтлов с поиском/фильтрами/сортировкой.
 ///
 /// Чего у персонажа НЕТ (в отличие от команды) — соответствующие блоки
 /// TeamView просто отсутствуют здесь, а не имитируются пустыми:
@@ -28,7 +28,6 @@ struct CharacterView: View {
 
     @StateObject private var vm: CharacterViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
-    @Environment(\.dismiss) private var dismiss
     @State private var showFilters = false
     @State private var showCharacterNames = false
     @FocusState private var searchFocused: Bool
@@ -51,7 +50,6 @@ struct CharacterView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
         GeometryReader { proxy in
             let cardWidth = MangaCardView.gridCardWidth(
                 totalWidth: proxy.size.width,
@@ -86,16 +84,12 @@ struct CharacterView: View {
             .background(Theme.background)
             .ignoresSafeArea(edges: .top)
         }
-
-        backButton
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-        }
-        // Свой back поверх hero вместо системной navigation bar — см.
-        // подробную историю решения в комментарии у того же фикса в
-        // MangaDetailView.body (три раунда багов с задвоением системной
-        // кнопки "назад" при реальном toolbar-баре).
-        .toolbar(.hidden, for: .navigationBar)
+        // Обычный системный бар, просто с прозрачным фоном — БЕЗ попытки
+        // скрыть/заменить автоматическую кнопку "назад" (см. подробную
+        // причину в MangaDetailView.body). Пусто справа — своей кнопки
+        // подписки/меню у персонажа нет (см. doc-comment файла).
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
         .sheet(isPresented: $showFilters) {
@@ -109,9 +103,6 @@ struct CharacterView: View {
             TitleNamesSheet(rusName: vm.detail?.rusName, originalName: vm.detail?.name ?? fallbackName, engName: nil, otherNames: [])
                 .presentationDetents([.medium, .large])
         }
-        // Интерактивный свайп-жест «назад» выключен — та же причина, что и
-        // в MangaDetailView (см. DisableInteractivePopGesture).
-        .background(DisableInteractivePopGesture())
     }
 
     // MARK: Шапка (1-в-1 TeamView.heroHeader)
@@ -206,20 +197,6 @@ struct CharacterView: View {
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { showCharacterNames = true }
-    }
-
-    /// Кнопка "назад" — настоящий toolbar-элемент (см. .toolbar в body), тот
-    /// же стиль/размер, что и TeamView.backButton/MangaDetailView. Кнопки на
-    /// месте "..."/подписки здесь нет — эндпоинт подписки на персонажа нигде
-    /// не подтверждён (см. комментарий у структуры).
-    private var backButton: some View {
-        Button { dismiss() } label: {
-            Image(systemName: "chevron.left")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: 44, height: 44)
-        }
-        .glassEffect(.regular.interactive(), in: Circle())
     }
 
     // MARK: Метаданные — чипы (как у тайтла/команды), по центру

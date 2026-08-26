@@ -32,7 +32,6 @@ struct MangaDetailView: View {
     @ObservedObject private var bookmarks = BookmarksStore.shared
     @ObservedObject private var downloads = DownloadsManager.shared
     @ObservedObject private var themeManager = ThemeManager.shared
-    @Environment(\.dismiss) private var dismiss
 
     private let fallbackTitle: String
     private let coverURL: URL?
@@ -187,7 +186,6 @@ struct MangaDetailView: View {
     private var title: String { viewModel.detail?.displayTitle ?? listItem?.displayTitle ?? fallbackTitle }
 
     var body: some View {
-        ZStack(alignment: .top) {
         ScrollView {
           ScrollViewReader { scrollProxy in
             VStack(alignment: .leading, spacing: 0) {
@@ -238,31 +236,29 @@ struct MangaDetailView: View {
         // баннер под этот отступ вместо того, чтобы показывать пустой зазор.
         .coordinateSpace(name: "detailScroll")
         .background(Theme.background)
-        // Баннер уходит под статус-бар, как в референсе — только на самом
-        // ScrollView (не на внешнем ZStack, см. body), чтобы pinnedTopBar
-        // сам оставался в системном safe area, без ручной константы под
-        // статус-бар/Dynamic Island.
+        // Баннер уходит под статус-бар, как в референсе.
         .ignoresSafeArea(edges: .top)
-
-        pinnedTopBar
+        // ПРОСТАЯ схема вместо кастомной кнопки поверх баннера (см. историю в
+        // App/InteractivePopGesture.swift): обычный системный navigation bar,
+        // просто с прозрачным фоном (баннер бесшовно уходит под статус-бар,
+        // как и раньше) — БЕЗ единой попытки скрыть/заменить автоматическую
+        // системную кнопку "назад". Именно попытки её скрыть/подменить
+        // (кастомной кнопкой в overlay ИЛИ в toolbar) четыре раза подряд
+        // давали разные баги — задвоение, просвечивание поиска при pop,
+        // "улетевшие" кнопки. Тот же принцип уже работает без единого
+        // инцидента в AppSettingsView/HistoryView/DownloadsView/FranchiseView
+        // — нигде из них нет своей кнопки "назад", только настоящая системная.
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    actionMenuItems
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
         }
-        // Свой back/"..." поверх hero (см. pinnedTopBar) вместо системной
-        // navigation bar. ИСТОРИЯ (после трёх раундов багов подряд):
-        // пробовали дать экрану РЕАЛЬНЫЙ (просто прозрачный) navigation bar
-        // с настоящими toolbar-кнопками — рассчитывали закрыть баг
-        // "просвечивание поиска при интерактивном свайпе-назад" (см. ниже).
-        // Кнопки при этом каждый раз задваивались по-разному (то поверх
-        // друг друга слева, то системная "фантомная" кнопка "назад"
-        // вылезала СПРАВА за кнопкой подписки) — системная автоматическая
-        // кнопка "назад" не гасится надёжно НИ .navigationBarBackButtonHidden,
-        // НИ placement: .navigation, если экран получает toolbar-кнопки
-        // впервые в стеке. Возврат к полностью скрытому бару — единственный
-        // вариант без единого случая задвоения за всё время работы над
-        // этим экраном. Баг с поиском вместо этого чинится отключением
-        // самого интерактивного жеста (см. .background(DisableInteractivePopGesture())
-        // в конце body) — кнопка "назад" остаётся единственным способом
-        // уйти с экрана, зато без глитчей вообще.
-        .toolbar(.hidden, for: .navigationBar)
         .task { if viewModel.detail == nil { await viewModel.load() } }
         // Показ hero-картинки (см. heroHeader/updateHero): как только карточка
         // загрузилась — если у неё есть настоящий background (или хотя бы
@@ -333,51 +329,10 @@ struct MangaDetailView: View {
             // Открывается сразу до верха.
             .presentationDetents([.large])
         }
-        // Интерактивный свайп-жест «назад» ВЫКЛЮЧЕН (см. DisableInteractivePopGesture) —
-        // именно он вызывал просвечивание поля поиска экрана-источника сквозь
-        // эту карточку во время перетаскивания (см. комментарий у .toolbar
-        // (.hidden...) выше). Кнопка "назад" в pinnedTopBar — единственный,
-        // но зато полностью надёжный способ уйти с экрана.
-        .background(DisableInteractivePopGesture())
-    }
-
-    /// Кнопки "назад"/"..." — отдельный слой ПОВЕРХ ScrollView (не toolbar,
-    /// см. историю решения у .toolbar(.hidden...) в body), поэтому не уезжают
-    /// при скролле независимо от способа входа на экран. Обе — в ОДНОЙ
-    /// HStack-строке (общая ось выравнивания по высоте), 44×44,
-    /// .interactive() стекло — тот же стандарт, что и у прочих
-    /// зафиксированных шапок в приложении (ProfileView.topBar/HistoryView).
-    private var pinnedTopBar: some View {
-        HStack {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 44, height: 44)
-            }
-            .glassEffect(.regular.interactive(), in: Circle())
-
-            Spacer(minLength: 0)
-
-            Menu {
-                actionMenuItems
-            } label: {
-                Label {
-                    EmptyView()
-                } icon: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(width: 44, height: 44)
-                        .compositingGroup()
-                        .glassEffect(.regular.interactive(), in: Circle())
-                }
-            }
-            .menuStyle(.borderlessButton)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .fadeInOnAppear()
+        // Жест «назад» свайпом из левой половины экрана (системный
+        // интерактивный переход — во время свайпа виден предыдущий экран).
+        // См. InteractivePopGesture. Только на карточке тайтла.
+        .background(InteractivePopGesture())
     }
 
     // MARK: Hero-баннер + выступающая обложка
@@ -401,7 +356,7 @@ struct MangaDetailView: View {
     /// считалось как heroBaseHeight-высота_обложки-spacing (=167) — из-за чего
     /// обложка «приколачивалась» к самому низу баннера и выглядела съехавшей
     /// вниз. Теперь это НЕЗАВИСИМАЯ фиксированная величина: гарантированный
-    /// зазор под статус-баром/кнопками pinnedTopBar сверху (см. body).
+    /// зазор под системным navigation bar сверху (см. body).
     /// Обложка стоит СТРОГО на этой высоте независимо от длины названия (оно
     /// ниже обложки и на неё не наезжает), баннер естественно растёт под
     /// название — один проход, без @State/PreferenceKey.
@@ -437,8 +392,8 @@ struct MangaDetailView: View {
     /// Полноширинный баннер + название тайтла поверх него + сама обложка,
     /// выступающая ниже его нижнего края — тот же приём, что и в реальных
     /// читалках (обложка не теряется в мелком размере рядом с текстом, а
-    /// становится акцентом шапки). Кнопки "назад"/"..." — отдельный слой
-    /// поверх (см. pinnedTopBar в body), не часть этого view.
+    /// становится акцентом шапки). Кнопка "назад" — обычная системная,
+    /// "..." — настоящий ToolbarItem (см. body), не часть этого view.
     ///
     /// ВАЖНО (архитектура после двух багов подряд): раньше картинка-фон была
     /// ГЛАВНЫМ элементом с явным .frame(height: heroBaseHeight+titleBlockHeight),

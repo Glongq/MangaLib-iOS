@@ -3,11 +3,10 @@ import SwiftUI
 /// Страница переводчика (команды) — шапка теперь 1-в-1 как в карточке
 /// тайтла (см. MangaDetailView.heroHeader): растягивающийся хиро-фон,
 /// плавающая обложка-аватар (2:3, как обычная обложка тайтла), название
-/// поверх. Кнопки "назад"/подписки — настоящие toolbar-элементы поверх
-/// прозрачного системного navigation bar (см. .toolbar в body — та же схема,
-/// что и в MangaDetailView, и по той же причине: полностью скрытый бар ломал
-/// интерактивный свайп-назад с экранов с .searchable(), напр. DirectoryListView).
-/// Метаданные — те же чипы, что и у тайтла (infoBlock), включая отдельным
+/// поверх. Кнопка "назад" — обычная СИСТЕМНАЯ (см. историю в
+/// App/InteractivePopGesture.swift — своя кнопка поверх баннера четыре раза
+/// подряд давала разные баги), подписка — настоящий ToolbarItem справа над
+/// прозрачным (но НЕ скрытым) navigation bar. Метаданные — те же чипы, что и у тайтла (infoBlock), включая отдельным
 /// чипом количество участников. Список тайтлов с поиском/фильтрами/
 /// сортировкой — из CharacterView (тот же паттерн, target_model=team).
 struct TeamView: View {
@@ -17,7 +16,6 @@ struct TeamView: View {
 
     @StateObject private var vm: TeamViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
-    @Environment(\.dismiss) private var dismiss
     @State private var showFilters = false
     @State private var showTeamNames = false
     @State private var showAllMembers = false
@@ -51,7 +49,6 @@ struct TeamView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
         GeometryReader { proxy in
             let cardWidth = MangaCardView.gridCardWidth(
                 totalWidth: proxy.size.width,
@@ -94,14 +91,14 @@ struct TeamView: View {
             .background(Theme.background)
             .ignoresSafeArea(edges: .top)
         }
-
-        pinnedTopBar
+        // Обычный системный бар, просто с прозрачным фоном — БЕЗ попытки
+        // скрыть/заменить автоматическую кнопку "назад" (см. подробную
+        // причину в MangaDetailView.body).
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { subscribeButton }
         }
-        // Свой back/подписка поверх hero вместо системной navigation bar —
-        // см. подробную историю решения (три раунда багов с задвоением
-        // системной кнопки "назад" при реальном toolbar-баре) в комментарии
-        // у того же фикса в MangaDetailView.body.
-        .toolbar(.hidden, for: .navigationBar)
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
         .sheet(isPresented: $showFilters) {
@@ -117,22 +114,6 @@ struct TeamView: View {
         }
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
         .sheet(isPresented: $showAllMembers) { TeamMembersSheet(members: vm.members) }
-        // Интерактивный свайп-жест «назад» выключен — та же причина, что и
-        // в MangaDetailView (см. DisableInteractivePopGesture).
-        .background(DisableInteractivePopGesture())
-    }
-
-    /// Кнопки "назад"/подписка — отдельный слой поверх скролла, единая
-    /// HStack-строка (общая ось выравнивания по высоте), не toolbar (см.
-    /// историю решения у .toolbar(.hidden...) выше).
-    private var pinnedTopBar: some View {
-        HStack {
-            backButton
-            Spacer(minLength: 0)
-            subscribeButton
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
     }
 
     /// alt_name с сервера — одна строка через запятую ("DIT, дед, деды, …") —
@@ -244,18 +225,6 @@ struct TeamView: View {
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { showTeamNames = true }
-    }
-
-    /// Кнопка "назад" — настоящий toolbar-элемент (см. .toolbar в body), тот
-    /// же стиль/размер (44×44, .interactive() стекло), что и в MangaDetailView.
-    private var backButton: some View {
-        Button { dismiss() } label: {
-            Image(systemName: "chevron.left")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: 44, height: 44)
-        }
-        .glassEffect(.regular.interactive(), in: Circle())
     }
 
     /// Там, где у тайтла кнопка "..." — здесь подписка на уведомления
