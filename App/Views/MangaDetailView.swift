@@ -258,6 +258,12 @@ struct MangaDetailView: View {
         // pinnedHeader/init стал не нужен и убран, вместе с pinnedTopBar).
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
+        // Без этого система ДОБАВЛЯЕТ свою автоматическую кнопку "назад"
+        // РЯДОМ с нашей toolbar-кнопкой (см. ниже) — раз бар теперь реальный
+        // (не .toolbar(.hidden...), как было), NavigationStack сам считает,
+        // что бару нужна стандартная back-кнопка, и рисует вторую поверх
+        // нашей стеклянной. Именно это увидели как "вторая лишняя кнопка".
+        .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button { dismiss() } label: {
@@ -2869,6 +2875,22 @@ private struct CreditsSheet: View {
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
+    /// Высота листа — по содержимому (сетка людей), а не системный .large на
+    /// весь экран, как было. Считается АНАЛИТИЧЕСКИ из people.count (число
+    /// строк сетки × высота ячейки), а не измерением через GeometryReader —
+    /// такой пересчёт `.presentationDetents` УЖЕ ПОСЛЕ показа листа хрупкий в
+    /// SwiftUI (см. тот же баг и фикс в RatingSheet: лист переставал
+    /// открываться нормально, оказывался на пару пикселей ниже экрана).
+    /// Здесь всё известно заранее (people.count), так что нужды в измерении
+    /// вообще нет — высота фиксируется один раз, до показа листа.
+    private var sheetHeight: CGFloat {
+        let rows = max(1, Int(ceil(Double(people.count) / 2.0)))
+        let gridHeight = CGFloat(rows) * 44 + CGFloat(max(0, rows - 1)) * 12
+        // 50 — inline navigation bar листа, 32 — .padding(16) сетки сверху/
+        // снизу, 20 — запас под safe area/жест закрытия снизу.
+        return 50 + 32 + gridHeight + 20
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -2897,6 +2919,8 @@ private struct CreditsSheet: View {
                 }
             }
         }
+        .presentationDetents([.height(sheetHeight)])
+        .presentationDragIndicator(.visible)
     }
 
     private func personCell(_ person: DirectoryEntity) -> some View {

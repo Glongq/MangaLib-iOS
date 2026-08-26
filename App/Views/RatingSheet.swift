@@ -15,13 +15,17 @@ import SwiftUI
 /// Без крестика — закрывается свайпом вниз/тапом мимо (стандартный жест
 /// листа, drag-индикатор сверху и так на это намекает) — как попросили.
 /// Высота листа — РОВНО по содержимому (не системный .medium с пустым
-/// хвостом снизу): измеряем реальную высоту через GeometryReader+
-/// PreferenceKey (единственный надёжный способ узнать intrinsic-размер
-/// вида в SwiftUI — готового API "detent по содержимому" нет) и отдаём её в
-/// `.presentationDetents([.height(...)])`. Контент прижат к верху
-/// (`.frame(alignment: .top)`), а не центрируется по высоте листа — та же
-/// причина: раньше .medium давал лишнюю высоту, и содержимое "плавало"
-/// по центру этой лишней высоты.
+/// хвостом снизу), но ФИКСИРОВАННЫМ числом, а не через GeometryReader+
+/// PreferenceKey, как было в первой версии: контент здесь целиком
+/// статический (без переменной длины текста, влияющей на число строк), а
+/// динамический пересчёт `.presentationDetents` ПОСЛЕ того, как лист уже
+/// показан, — известная хрупкая штука в SwiftUI (обновление детента
+/// постфактум не всегда переинвалидируется чисто) — именно из-за неё лист
+/// переставал открываться нормально (оказывался на пару пикселей ниже
+/// экрана). 360 — с запасом под содержимое (реальная сумма высот/паддингов
+/// ≈310-320) для крупных категорий Dynamic Type.
+private let ratingSheetHeight: CGFloat = 360
+
 struct RatingSheet: View {
 
     @ObservedObject var viewModel: MangaDetailViewModel
@@ -29,10 +33,6 @@ struct RatingSheet: View {
 
     @State private var selected: Int?
     @State private var isSubmitting = false
-    /// Стартовое значение — приблизительная высота контента, чтобы лист не
-    /// открывался с нулевой/чужой высотой на первом кадре и не "прыгал"
-    /// заметно после первого измерения (см. HeightPreferenceKey ниже).
-    @State private var contentHeight: CGFloat = 330
 
     init(viewModel: MangaDetailViewModel) {
         self.viewModel = viewModel
@@ -65,18 +65,8 @@ struct RatingSheet: View {
             actionButtons
         }
         .padding(20)
-        // background — ДО .frame(maxHeight: .infinity) ниже: GeometryReader
-        // тут меряет натуральную высоту самого VStack+padding, а не уже
-        // растянутого на весь лист контейнера (иначе измерялась бы высота
-        // листа, а не контента, — самоссылающийся результат).
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(key: HeightPreferenceKey.self, value: geo.size.height)
-            }
-        )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onPreferenceChange(HeightPreferenceKey.self) { contentHeight = $0 }
-        .presentationDetents([.height(contentHeight)])
+        .presentationDetents([.height(ratingSheetHeight)])
         .presentationDragIndicator(.visible)
         .presentationBackground(Theme.background)
         .interactiveDismissDisabled(isSubmitting)
@@ -150,12 +140,5 @@ struct RatingSheet: View {
                 dismiss()
             }
         }
-    }
-}
-
-private struct HeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }

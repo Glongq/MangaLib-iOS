@@ -76,6 +76,9 @@ struct DirectoryDetailView: View {
             // (напр. DirectoryListView) — "просвечивал" поиск сквозь карточку.
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
+            // Без этого система добавляет свою автоматическую кнопку "назад"
+            // рядом с нашей (см. тот же фикс в MangaDetailView.body).
+            .navigationBarBackButtonHidden(true)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { backButton }
                 ToolbarItem(placement: .topBarTrailing) {
