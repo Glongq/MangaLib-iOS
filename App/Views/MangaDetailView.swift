@@ -78,6 +78,12 @@ struct MangaDetailView: View {
     @State private var spoilerMode = false
     @State private var spoilerLabelDraft = "спойлер"
     @State private var showLoginForComment = false
+    /// Фокус полей ввода комментария (сам текст ИЛИ подпись спойлера, см.
+    /// composeBar) — общий Bool на оба поля, нужен только чтобы понять, что
+    /// клавиатура сейчас открыта, и свернуть её тапом по любому "пустому"
+    /// месту вкладки «Комментарии» (см. commentsTab.onTapGesture), а не
+    /// только системным свайпом/кнопкой "Done".
+    @FocusState private var commentFieldFocused: Bool
 
     // MARK: Комментарии — доп. состояние UI (не сетевое, живёт только в этом View)
 
@@ -2016,6 +2022,15 @@ struct MangaDetailView: View {
             }
         }
         .task { if !commentsDisabledOnCard { await viewModel.loadCommentsIfNeeded() } }
+        // Тап по любому "пустому" месту вкладки — свернуть клавиатуру, если
+        // сейчас пишем комментарий/подпись спойлера (см. composeBar). Кнопки/
+        // текстфилды сами уже занимают приоритет (это ловит только тапы МИМО
+        // них — обычное поведение вложенных SwiftUI-жестов), заново открыть
+        // клавиатуру можно тапом по самому полю ввода.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if commentFieldFocused { commentFieldFocused = false }
+        }
         .sheet(isPresented: $showCommentSettings) {
             CommentSettingsSheet(
                 disabledInReader: $commentsDisabledInReader,
@@ -2161,6 +2176,7 @@ struct MangaDetailView: View {
                         .padding(.horizontal, 14)
                         .frame(minHeight: 34)
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .focused($commentFieldFocused)
 
                     let trimmed = commentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                     Button {
@@ -2170,6 +2186,7 @@ struct MangaDetailView: View {
                         commentDraft = ""
                         replyingTo = nil
                         spoilerMode = false
+                        commentFieldFocused = false
                         Task {
                             let ok = await viewModel.postComment(text: text, spoilerLabel: label, replyingTo: parent)
                             if !ok { commentDraft = text }
@@ -2208,6 +2225,7 @@ struct MangaDetailView: View {
                         .frame(minHeight: 30)
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
                         .transition(.move(edge: .top).combined(with: .opacity))
+                        .focused($commentFieldFocused)
                 }
             }
         } else {

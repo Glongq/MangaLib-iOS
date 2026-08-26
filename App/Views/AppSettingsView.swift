@@ -36,6 +36,10 @@ struct AppSettingsView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var specialFilterStore = SpecialFilterStore.shared
     @State private var debugTokenInput = ""
+    /// Фокус поля Bearer-токена (см. debugAuthCard) — только чтобы понять,
+    /// что клавиатура открыта, и свернуть её тапом по пустому месту экрана
+    /// (см. content.onTapGesture), по аналогии с MangaDetailView.
+    @FocusState private var debugTokenFocused: Bool
     @State private var showLogoutConfirm = false
     // Сворачиваемые разделы ("Профиль"/"Приложение"/"Помощь"/"Прочее") — та же
     // система, что и в боковом меню (см. SideMenuView.expandedSections). По
@@ -125,6 +129,12 @@ struct AppSettingsView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 20)
                 .padding(.bottom, 24)
+                // Тап по пустому месту — свернуть клавиатуру, если сейчас
+                // вводим debug-токен (см. debugAuthCard/debugTokenFocused).
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if debugTokenFocused { debugTokenFocused = false }
+                }
             }
         }
         .navigationTitle("Настройки")
@@ -376,12 +386,14 @@ struct AppSettingsView: View {
                     .padding(.horizontal, 12)
                     .frame(minHeight: 40)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .focused($debugTokenFocused)
 
                 let trimmed = debugTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
                 Button {
                     guard !trimmed.isEmpty else { return }
                     AuthSession.shared.login(token: trimmed, username: nil)
                     debugTokenInput = ""
+                    debugTokenFocused = false
                 } label: {
                     Text("Войти по токену").frame(maxWidth: .infinity, minHeight: 40)
                 }

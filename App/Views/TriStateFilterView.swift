@@ -27,6 +27,10 @@ struct TriStateFilterView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var search = ""
+    /// Фокус поля поиска — показывает иконку "свернуть клавиатуру" слева от
+    /// легенды Включить/Исключить в подвале (см. footer), пока клавиатура
+    /// открыта; тап по иконке снимает фокус и убирает её саму.
+    @FocusState private var searchFocused: Bool
 
     init(title: String, options: [FilterOption], selection: Binding<TriStateSelection>, strict: Binding<Bool?> = .constant(nil)) {
         self.title = title
@@ -67,6 +71,7 @@ struct TriStateFilterView: View {
                 TextField("", text: $search,
                           prompt: Text("Поиск по названию").foregroundColor(Theme.textSecondary))
                     .foregroundStyle(Theme.textPrimary)
+                    .focused($searchFocused)
                 if !search.isEmpty {
                     Button { search = "" } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary)
@@ -177,6 +182,22 @@ struct TriStateFilterView: View {
 
     private var footer: some View {
         HStack {
+            // Иконка "свернуть клавиатуру" — показывается только пока
+            // реально открыта (поиск в фокусе), слева от легенды
+            // Включить/Исключить; тап по ней снимает фокус, сама иконка
+            // тут же пропадает вместе с клавиатурой.
+            if searchFocused {
+                Button {
+                    searchFocused = false
+                } label: {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 4)
+            }
+
             legend(color: .green, text: "Включить")
             legend(color: .red, text: "Исключить")
             Spacer()
