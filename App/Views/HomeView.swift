@@ -245,7 +245,7 @@ struct HomeView: View {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
             .frame(width: Self.continueReadingCoverWidth, height: Self.continueReadingCoverHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .clipped()
 
             VStack(alignment: .leading, spacing: 7) {
@@ -267,7 +267,7 @@ struct HomeView: View {
         }
         .padding(.trailing, Self.continueReadingPadding)
         .frame(width: Self.continueReadingCardWidth)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     /// "Глава 5 — 3 из 14" — номер главы + позиция/всего, когда общее число
@@ -417,7 +417,7 @@ struct HomeView: View {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
             .frame(width: Self.currentlyReadingCoverSize, height: Self.currentlyReadingCoverSize)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .clipped()
 
             VStack(alignment: .leading, spacing: 2) {
@@ -521,7 +521,7 @@ struct HomeView: View {
         }
         .padding(14)
         .frame(width: 220)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private func statLabel(icon: String, value: Int, secondary: Int? = nil) -> some View {
@@ -546,7 +546,7 @@ struct HomeView: View {
                     Theme.surfaceElevated
                 }
                 .frame(width: 60, height: 84)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .rotationEffect(.degrees(Double(index) * 4 - 4))
                 .offset(x: CGFloat(index) * 26)
                 .clipped()
@@ -605,7 +605,7 @@ struct HomeView: View {
                 ZStack { Theme.surfaceElevated; Image(systemName: "person.fill").foregroundStyle(Theme.textSecondary) }
             }
             .frame(width: 44, height: 44)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .clipped()
             .overlay(alignment: .topLeading) {
                 Text("\(rank)#")
@@ -642,7 +642,7 @@ struct HomeView: View {
         // символов) просто обрежется многоточием (.lineLimit(1) у Text
         // выше), а не растянет чип.
         .frame(maxWidth: 210, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     // MARK: Новинки
@@ -777,7 +777,7 @@ struct HomeView: View {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
             .frame(width: Self.updatesCoverWidth, height: Self.updatesCoverHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .clipped()
 
             // Название (макс 2 строки), под ним "Том X Глава Y — Название"
@@ -807,7 +807,7 @@ struct HomeView: View {
         .padding(.trailing, 12)
         .frame(height: Self.updatesRowHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     /// "Том X Глава Y — Название" — Том/Глава обычным цветом (это факт: что
@@ -853,7 +853,7 @@ struct HomeView: View {
                     HStack(spacing: 12) {
                         SkeletonBox()
                             .frame(width: Self.continueReadingCoverWidth, height: Self.continueReadingCoverHeight)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                         VStack(alignment: .leading, spacing: 7) {
                             skeletonBar(width: 110, height: 12)
                             skeletonBar(width: 70, height: 11)
@@ -864,7 +864,7 @@ struct HomeView: View {
                     }
                     .padding(.trailing, Self.continueReadingPadding)
                     .frame(width: Self.continueReadingCardWidth)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                 }
             }
             .padding(.horizontal, 16)
@@ -883,7 +883,7 @@ struct HomeView: View {
                     HStack(spacing: 10) {
                         SkeletonBox()
                             .frame(width: Self.currentlyReadingCoverSize, height: Self.currentlyReadingCoverSize)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                         VStack(alignment: .leading, spacing: 4) {
                             skeletonBar(width: 150, height: 12)
                             skeletonBar(width: 70, height: 10)
@@ -908,11 +908,11 @@ struct HomeView: View {
                         skeletonBar(width: 90, height: 10)
                         SkeletonBox()
                             .frame(width: 220 - 28, height: 84)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     }
                     .padding(14)
                     .frame(width: 220)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                 }
             }
             .padding(.horizontal, 16)
@@ -929,7 +929,7 @@ struct HomeView: View {
                     HStack(spacing: 10) {
                         SkeletonBox()
                             .frame(width: 44, height: 44)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                         VStack(alignment: .leading, spacing: 4) {
                             skeletonBar(width: 80, height: 11)
                             skeletonBar(width: 56, height: 9)
@@ -938,7 +938,7 @@ struct HomeView: View {
                     }
                     .padding(10)
                     .frame(width: 170, alignment: .leading)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                 }
             }
             .padding(.leading, 16)
@@ -955,7 +955,7 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         SkeletonBox()
                             .frame(width: 108, height: (108 * 3 / 2).rounded())
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                         skeletonBar(width: 90, height: 12)
                         skeletonBar(width: 60, height: 10)
                     }
@@ -975,7 +975,7 @@ struct HomeView: View {
                 HStack(spacing: 12) {
                     SkeletonBox()
                         .frame(width: Self.updatesCoverWidth, height: Self.updatesCoverHeight)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     VStack(alignment: .leading, spacing: Self.updatesTextSpacing) {
                         skeletonBar(width: 170, height: 12)
                         skeletonBar(width: 130, height: 12)
@@ -986,7 +986,7 @@ struct HomeView: View {
                 .padding(.trailing, 12)
                 .frame(height: Self.updatesRowHeight)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             }
         }
         .padding(.horizontal, 16)
