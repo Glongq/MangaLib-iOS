@@ -44,8 +44,12 @@ struct HomeView: View {
     /// Экран входа для "Мои обновления" без аккаунта — см. updatesTabBinding.
     @State private var showLoginForUpdates = false
     /// Текст в .searchable() — реально никуда не отправляется, поле служит
-    /// только "воротами" на вкладку Каталог (см. searchActivationProbe).
+    /// только "воротами" на вкладку Каталог (см. SearchActivationRedirect).
     @State private var searchQuery = ""
+    /// Открытие профиля пользователя тапом по карточке в «Топ активных
+    /// недели» — тот же ProfileUserId + .sheet(item:), что и в
+    /// FriendsView/MangaReviewsView (см. ProfileUserId в AccountInfoView.swift).
+    @State private var profileUser: ProfileUserId?
 
     /// Эталонный размер названия тайтла для ЭТОЙ страницы — тот же расчёт,
     /// что и MangaCardView.titleFont (caption1 × 1.2, medium), которым уже
@@ -97,6 +101,9 @@ struct HomeView: View {
                 if AuthSession.shared.isLoggedIn { viewModel.updatesTab = .mine }
             }) {
                 LoginView()
+            }
+            .sheet(item: $profileUser) { pu in
+                ProfileView(userId: pu.id).preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
             }
         }
         .task {
@@ -580,6 +587,15 @@ struct HomeView: View {
     }
 
     private func topActiveUserCard(_ user: TopActiveUser, rank: Int) -> some View {
+        Button {
+            profileUser = ProfileUserId(id: user.id)
+        } label: {
+            topActiveUserCardContent(user, rank: rank)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func topActiveUserCardContent(_ user: TopActiveUser, rank: Int) -> some View {
         HStack(spacing: 10) {
             RemoteImage(url: user.avatarURL) { image in
                 image.resizable().scaledToFill()
