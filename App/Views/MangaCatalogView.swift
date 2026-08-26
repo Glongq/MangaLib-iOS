@@ -6,13 +6,14 @@ struct MangaCatalogView: View {
     @StateObject private var viewModel = CatalogViewModel()
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var showFilters = false
-    @FocusState private var searchFocused: Bool
     /// Путь навигации — нужен, чтобы при тапе по жанру/тегу в уже открытой
     /// карточке вернуться к корню каталога (см. onReceive switchRequest).
     @State private var navPath = NavigationPath()
 
-    // Схлопывание шапки при скролле: вниз — заголовок и Фильтры/Сортировка
-    // прячутся, поиск занимает их место; вверх (хоть чуть-чуть) — всё возвращается.
+    // Схлопывание Фильтры/Сортировка при скролле вниз (вверх — хоть чуть-чуть
+    // — возвращается). Поиск и заголовок теперь родной .searchable()/
+    // .navigationTitle (см. body) — как в Персонажи/Франшизы/Пользователи —
+    // их системная анимация/сворачивание этой логики не касается.
     @State private var headerCollapsed = false
     @State private var lastScrollOffset: CGFloat = 0
     // Пока идёт анимация схлопывания, само изменение высоты шапки на мгновение
@@ -35,29 +36,18 @@ struct MangaCatalogView: View {
             ZStack {
                 Theme.background.ignoresSafeArea()
 
-                // Никакой общей подложки под шапкой — заголовок голый текст,
-                // а у поиска остаётся ЕГО СОБСТВЕННЫЙ материал (как был),
-                // просто без общей панели позади всех.
                 content
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        header
-                    }
-                    .overlay {
-                        // Пока активна клавиатура поиска, первый тап по чему угодно
-                        // в сетке (например по манге) должен ТОЛЬКО закрыть клавиатуру,
-                        // а не сразу переходить в тайтл. Прозрачный, но кликабельный
-                        // слой поверх сетки перехватывает этот первый тап; как только
-                        // фокус снят, слой исчезает и тапы снова доходят до карточек.
-                        if searchFocused {
-                            Color.black.opacity(0.0001)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    searchFocused = false
-                                }
-                        }
-                    }
             }
-            .toolbar(.hidden, for: .navigationBar)
+            // Родной системный поиск — 1-в-1 как в Персонажи/Франшизы/
+            // Пользователи (DirectoryListView/FranchiseListView/UserListView):
+            // сам выезжает сверху, свой Cancel, своя анимация — высоту менять
+            // нельзя, это контролирует iOS. Раньше здесь был самодельный
+            // всегда видимый TextField в стеклянной капсуле со своим
+            // схлопыванием заголовка — заменено этим же стандартом, что и
+            // остальной каталог-раздел приложения.
+            .navigationTitle("Каталог")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $viewModel.query, prompt: "Поиск по названию")
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(
                     slug: item.apiSlug,
@@ -80,8 +70,8 @@ struct MangaCatalogView: View {
             // экране ПОВЕРХ любого пуша (карточки тайтла и т.д.), потому что
             // технически была соседом стека, а не частью его корневого
             // экрана — отсюда баг "Фильтры/Сортировка не пропадают на
-            // карточке тайтла". Прячутся при скролле вниз — тот же
-            // headerCollapsed, что и у заголовка "Каталог".
+            // карточке тайтла". Прячутся при скролле вниз (см. headerCollapsed/
+            // onScrollGeometryChange у content ниже).
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !headerCollapsed {
                     controlsBar
@@ -129,47 +119,6 @@ struct MangaCatalogView: View {
         if popToRoot { navPath = NavigationPath() }
         viewModel.apply(filter: f)
         return true
-    }
-
-    // MARK: Шапка (без общей подложки)
-
-    private var header: some View {
-        VStack(spacing: 10) {
-            if !headerCollapsed {
-                Text("Каталог")
-                    .font(.system(size: 29, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.blurFade)
-            }
-
-            searchField
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 2)
-        .padding(.bottom, 10)
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
-            TextField("", text: $viewModel.query,
-                      prompt: Text("Поиск по названию").foregroundColor(Theme.textSecondary))
-                .foregroundStyle(Theme.textPrimary)
-                .focused($searchFocused)
-                .submitLabel(.search)
-            if !viewModel.query.isEmpty {
-                Button {
-                    viewModel.query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        // Собственное стекло поля — не трогаю, как просили.
-        .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     // MARK: Фильтры / Сортировка

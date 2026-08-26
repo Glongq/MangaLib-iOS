@@ -11,21 +11,6 @@ struct BookmarksView: View {
     @State private var showNewFolder = false
     @State private var newFolderName = ""
     @State private var query = ""
-    @FocusState private var searchFocused: Bool
-
-    // Схлопывание шапки при скролле — тот же механизм, что в Каталоге:
-    // вниз — заголовок "Закладки" прячется, поиск занимает его место;
-    // вверх (хоть чуть-чуть) — возвращается.
-    @State private var headerCollapsed = false
-    @State private var lastScrollOffset: CGFloat = 0
-    // Пока идёт анимация схлопывания/разворота, само изменение высоты шапки
-    // (заголовок исчезает/появляется) на мгновение сдвигает contentOffset
-    // ScrollView — это НЕ реальный скролл пользователя, но наш обработчик
-    // видел его как "скрольнули вверх" и тут же откатывал схлопывание назад,
-    // из-за чего заголовок дёргался ("трясло") вместо того, чтобы просто
-    // спокойно спрятаться. Пока isHeaderAnimating — игнорируем входящие
-    // события скролла целиком.
-    @State private var isHeaderAnimating = false
 
     /// Тайтл, который сейчас редактируется через долгое нажатие на строку
     /// (см. row() ниже, .contextMenu) — открывает тот же AddToFolderSheet,
@@ -44,18 +29,15 @@ struct BookmarksView: View {
             ZStack {
                 Theme.background.ignoresSafeArea()
                 titlesList
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        header
-                    }
-                    .overlay {
-                        if searchFocused {
-                            Color.black.opacity(0.0001)
-                                .contentShape(Rectangle())
-                                .onTapGesture { searchFocused = false }
-                        }
-                    }
             }
-            .toolbar(.hidden, for: .navigationBar)
+            // Родной системный поиск — 1-в-1 как в Персонажи/Франшизы/
+            // Пользователи/Каталоге (см. те же файлы): сам выезжает сверху,
+            // свой Cancel, своя анимация — высоту менять нельзя, это
+            // контролирует iOS. Раньше здесь был самодельный всегда видимый
+            // TextField в стеклянной капсуле со своим схлопыванием заголовка.
+            .navigationTitle("Закладки")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, prompt: "Поиск в «\(selectedName)»")
             .onAppear { applyPendingFolder() }
             .onChange(of: catalogNav.openBookmarksRequest) { _, _ in applyPendingFolder() }
             .navigationDestination(for: BookmarkedTitle.self) { bm in
@@ -102,49 +84,6 @@ struct BookmarksView: View {
         // открытии вкладки, если есть сессия — см. BookmarksStore.syncFromServer.
         // Без сессии ничего не делает (просто локальный список, как раньше).
         .task { await store.syncFromServer() }
-    }
-
-    // MARK: Шапка (без общей подложки — просто текст сверху)
-
-    private var header: some View {
-        VStack(spacing: 10) {
-            if !headerCollapsed {
-                Text("Закладки")
-                    .font(.system(size: 29, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.blurFade)
-            }
-            searchField
-        }
-        // 16 — единое выравнивание по краям с Каталогом (эталон, см.
-        // MangaCatalogView.header) и «Читают» (HomeView.header). Полоска
-        // подкатегорий внизу и главная панель остаются на 20 — это другое,
-        // отдельно обоснованное выравнивание (см. комментарий там).
-        .padding(.horizontal, 16)
-        .padding(.top, 2)
-        .padding(.bottom, 10)
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
-            // Плейсхолдер отражает текущую выбранную подкатегорию — «Поиск в
-            // «Все»»/«Поиск в «Читаю»» и т.д.
-            TextField("", text: $query,
-                      prompt: Text("Поиск в «\(selectedName)»").foregroundColor(Theme.textSecondary))
-                .foregroundStyle(Theme.textPrimary)
-                .focused($searchFocused)
-                .submitLabel(.search)
-            if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     private var currentTitles: [BookmarkedTitle] {
@@ -274,31 +213,8 @@ struct BookmarksView: View {
                 // 90→120 — увеличили ещё немного.
                 .padding(.bottom, 120)
             }
-            // Тот же механизм схлопывания шапки, что в Каталоге, плюс защита
-            // от дребезга — см. isHeaderAnimating выше.
-            .onScrollGeometryChange(for: CGFloat.self) { geo in
-                geo.contentOffset.y
-            } action: { _, newOffset in
-                defer { lastScrollOffset = newOffset }
-                guard !isHeaderAnimating else { return }
-                let delta = newOffset - lastScrollOffset
-                if newOffset <= 0 {
-                    setHeaderCollapsed(false)
-                } else if delta > 6 {
-                    setHeaderCollapsed(true)
-                } else if delta < -6 {
-                    setHeaderCollapsed(false)
-                }
-            }
             .scrollIndicators(.hidden)
         }
-    }
-
-    private func setHeaderCollapsed(_ value: Bool) {
-        guard headerCollapsed != value else { return }
-        isHeaderAnimating = true
-        withAnimation(.easeInOut(duration: 0.22)) { headerCollapsed = value }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isHeaderAnimating = false }
     }
 
     /// Соотношение сторон и закругление обложки — эталон Каталог/Новинки
