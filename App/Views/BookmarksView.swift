@@ -239,7 +239,7 @@ struct BookmarksView: View {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
             .frame(width: Self.bookmarkCoverWidth, height: Self.bookmarkCoverHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
             // Единый бэйдж оценки (см. RatingChip) — тот же стиль/цвет, что и
             // в каталоге/карточке тайтла, теперь и в закладках.
@@ -276,7 +276,7 @@ struct BookmarksView: View {
         }
         .padding(.trailing, 12)
         .frame(height: Self.bookmarkCoverHeight)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 

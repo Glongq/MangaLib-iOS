@@ -219,7 +219,7 @@ struct NotificationsView: View {
                 ZStack { Theme.surfaceElevated; Image(systemName: "bell.fill").foregroundStyle(Theme.textSecondary) }
             }
             .frame(width: BookmarksView.bookmarkCoverWidth, height: BookmarksView.bookmarkCoverHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
 
             VStack(alignment: .leading, spacing: 4) {
@@ -249,7 +249,7 @@ struct NotificationsView: View {
         }
         .padding(.trailing, 12)
         .frame(height: BookmarksView.bookmarkCoverHeight)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
         if let media = item.media {
             NavigationLink(value: media) { core }

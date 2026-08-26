@@ -136,9 +136,7 @@ struct MangaCardView: View {
                 // арифметическое следствие того же числа width, что и у
                 // всех остальных карточек ряда.
                 .frame(width: width, height: (width * 3 / 2).rounded())
-                // 24 — единый радиус обложек по всему приложению (как в
-                // Меню/карточке тайтла), по прямой просьбе.
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .topLeading) { statusBadge }
                 .overlay(alignment: .topTrailing) { ratingBadge }
 
