@@ -1374,7 +1374,9 @@ struct ZoomableImageScrollView: UIViewRepresentable {
             spinner?.startAnimating()
             let key = currentKey
             loadTask = Task { [weak self] in
-                let img = await RemoteImageLoader.fetchImage(candidates: candidates)
+                // Видимая страница — высокий сетевой приоритет, чтобы не
+                // ждать наравне с молча качающимися вперёд preload()-страницами.
+                let img = await RemoteImageLoader.fetchImage(candidates: candidates, priority: URLSessionTask.highPriority)
                 await MainActor.run {
                     guard let self, self.currentKey == key else { return }
                     self.spinner?.stopAnimating()
@@ -1496,7 +1498,9 @@ struct VerticalPageImage: View {
             }
         }
         .task(id: candidates.first) {
-            image = await RemoteImageLoader.fetchImage(candidates: candidates)
+            // Видимая страница — высокий сетевой приоритет (см. комментарий
+            // у fetchImage в RemoteImage.swift).
+            image = await RemoteImageLoader.fetchImage(candidates: candidates, priority: URLSessionTask.highPriority)
         }
     }
 }

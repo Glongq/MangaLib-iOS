@@ -146,7 +146,16 @@ final class RemoteImageLoader: ObservableObject {
     /// Загрузка UIImage для UIKit-вьюх (нативный зум-скролл в читалке, см.
     /// ZoomableImageScrollView): тот же кэш, те же заголовки и та же поддержка
     /// локальных файлов (file://), что и у SwiftUI-варианта.
-    static func fetchImage(candidates: [URL]) async -> UIImage? {
+    ///
+    /// `priority` — URLSessionTask.priority (см. fetchData выше). Страница,
+    /// которую читатель видит ПРЯМО СЕЙЧАС (см. вызовы в MangaReaderView —
+    /// оба режима читалки передают URLSessionTask.highPriority), должна
+    /// реально обгонять в очереди сети те же несколько страниц, что молча
+    /// качает preload() вперёд — раньше все они были равны по сетевому
+    /// приоритету (preload отличался только Swift Task priority .utility,
+    /// который на порядок очереди самой сети не влияет), из-за чего текущая
+    /// страница могла ждать наравне с "про запас".
+    static func fetchImage(candidates: [URL], priority: Float? = nil) async -> UIImage? {
         guard let key = candidates.first else { return nil }
         if let cached = RemoteImageCache.shared.image(for: key) { return cached }
         for url in candidates {
@@ -159,7 +168,7 @@ final class RemoteImageLoader: ObservableObject {
                 continue
             }
             do {
-                let (data, response) = try await session.data(from: url)
+                let (data, response) = try await fetchData(from: url, priority: priority)
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { continue }
                 guard let img = await decodeImage(data: data) else { continue }
                 RemoteImageCache.shared.insert(img, for: key)
