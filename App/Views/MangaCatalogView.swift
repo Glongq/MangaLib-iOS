@@ -33,23 +33,26 @@ struct MangaCatalogView: View {
 
     var body: some View {
         NavigationStack(path: $navPath) {
-            ZStack {
-                Theme.background.ignoresSafeArea()
-
-                content
-            }
-            // .large подтверждённо раздувал отступ сверху (известный баг
-            // связки TabView + .large на iOS 26) — по факту тестирования
-            // на устройстве нужное компактное положение (заголовок+поиск
-            // высоко, поиск НИКОГДА не прячется) — это ровно то, что даёт
-            // .inline. Блюр на скролле (scrollEdgeEffectStyle) — системный
-            // эффект под любой navigationBarTitleDisplayMode, от .large не
-            // зависит, должен остаться. displayMode: .always у
-            // .searchable — явно держит поле поиска видимым постоянно, не
-            // даёт ему схлопнуться/спрятаться при скролле.
+            // ЭКСПЕРИМЕНТ против раздутого отступа под .large: раньше фон
+            // и контент были двумя РАВНОПРАВНЫМИ слоями в общем ZStack —
+            // возможно, из-за этого система не может однозначно опознать
+            // ScrollView внутри content как "главный" скролл экрана, на
+            // который вешается большой заголовок (в iOS 26 заголовок
+            // технически привязывается именно к скроллящемуся контенту, см.
+            // предыдущие комментарии в этом файле). Теперь content —
+            // единственный/безусловный корень, фон — просто модификатор.
+            content
+                .background { Theme.background.ignoresSafeArea() }
+            // .inline + displayMode: .always (прошлый эксперимент) убрал
+            // нужное схлопывание/исчезновение заголовка и поиска при
+            // скролле совсем — это оказалось лишним: схлопывание — как раз
+            // то, что нужно, проблема ТОЛЬКО в стартовой (нескроленной)
+            // позиции. Возвращено на .large + обычный .searchable() без
+            // явного placement — как было до серии экспериментов с
+            // отступом. Сам раздутый отступ в покое ещё не решён.
             .navigationTitle("Каталог")
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $viewModel.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Поиск по названию")
+            .navigationBarTitleDisplayMode(.large)
+            .searchable(text: $viewModel.query, prompt: "Поиск по названию")
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(
                     slug: item.apiSlug,
