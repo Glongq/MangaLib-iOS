@@ -49,7 +49,13 @@ struct MangaCatalogView: View {
             // стеклянной капсуле со своим схлопыванием заголовка.
             .navigationTitle("Каталог")
             .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $viewModel.query, prompt: "Поиск по названию")
+            // ЭКСПЕРИМЕНТ против раздутого отступа: явный placement вместо
+            // .automatic — задокументированы баги, где .searchable() внутри
+            // TabView неоднозначно резолвит своё место (то ли под навбаром,
+            // то ли снизу у таб-бара по-новому в iOS 26) и, похоже, может
+            // защитно резервировать лишнее место. .navigationBarDrawer —
+            // явно "классическое" место под заголовком, без двусмысленности.
+            .searchable(text: $viewModel.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Поиск по названию")
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(
                     slug: item.apiSlug,
