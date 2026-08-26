@@ -45,6 +45,12 @@ struct ProfileView: View {
     /// через push, эффекта не было вообще). Поэтому раздел теперь просто
     /// подменяет контент под ОБЩЕЙ, постоянной шапкой (topBar) вместо пуша.
     @State private var subScreen: ProfileSubScreen?
+    /// Направление смены контента (см. subScreen) — вперёд (открыли раздел)
+    /// или назад (вернулись в профиль): по прямой просьбе контент должен не
+    /// просто растворяться/проявляться на месте, а "перелистываться" —
+    /// новая страница едет СПРАВА и вытесняет старую (уезжающую влево) при
+    /// открытии раздела, и наоборот при возврате (см. contentTransition).
+    @State private var goingForward = true
 
     enum ProfileSubScreen: Hashable {
         case bookmarks, comments, collections, friends
@@ -100,10 +106,12 @@ struct ProfileView: View {
                         .scrollIndicators(.hidden)
                     }
                 }
-                // Тот же блюр-переход, что и у иконки/заголовка в topBar
-                // (см. AnyTransition.blurFade) — по прямой просьбе, а не
-                // просто прозрачность.
-                .transition(.blurFade)
+                // "Перелистывание" вместо простого растворения — по прямой
+                // просьбе (было .blurFade, выглядело как резкое пропадание/
+                // появление): новая страница едет с той стороны, откуда
+                // логически появляется (справа — открыли раздел, слева —
+                // вернулись), старая уезжает в противоположную сторону.
+                .transition(contentTransition)
 
                 // topBar — ОТДЕЛЬНЫМ слоем поверх (не часть прокручиваемого
                 // heroBanner, как раньше), т.к. должен оставаться ОДНОЙ и той
@@ -188,6 +196,16 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// См. goingForward — направление задаёт, с какой стороны едет новая
+    /// страница и куда уезжает старая (см. body.contentTransition).
+    private var contentTransition: AnyTransition {
+        goingForward
+            ? .asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
+                           removal: .move(edge: .leading).combined(with: .opacity))
+            : .asymmetric(insertion: .move(edge: .leading).combined(with: .opacity),
+                           removal: .move(edge: .trailing).combined(with: .opacity))
+    }
+
     // MARK: Шапка (постоянная topBar поверх + баннер/аватар/статистика под ней)
 
     /// Высота topBar (46 кнопка + 14 отступ сверху + 12 снизу) — heroBanner
@@ -224,6 +242,7 @@ struct ProfileView: View {
             HStack {
                 Button {
                     if subScreen != nil {
+                        goingForward = false
                         withAnimation(.easeInOut(duration: 0.3)) { subScreen = nil }
                     } else {
                         showAdditionalInfo = true
@@ -325,6 +344,7 @@ struct ProfileView: View {
     }
 
     private func openSubScreen(_ screen: ProfileSubScreen) {
+        goingForward = true
         withAnimation(.easeInOut(duration: 0.3)) { subScreen = screen }
     }
 
