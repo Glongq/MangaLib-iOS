@@ -258,14 +258,16 @@ struct MangaDetailView: View {
         // pinnedHeader/init стал не нужен и убран, вместе с pinnedTopBar).
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
-        // Без этого система ДОБАВЛЯЕТ свою автоматическую кнопку "назад"
-        // РЯДОМ с нашей toolbar-кнопкой (см. ниже) — раз бар теперь реальный
-        // (не .toolbar(.hidden...), как было), NavigationStack сам считает,
-        // что бару нужна стандартная back-кнопка, и рисует вторую поверх
-        // нашей стеклянной. Именно это увидели как "вторая лишняя кнопка".
-        .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            // placement: .navigation — а не .topBarLeading + отдельный
+            // .navigationBarBackButtonHidden(true), как было. Та комбинация
+            // не гасила системную автоматическую кнопку "назад" НАДЁЖНО —
+            // она всё равно иногда рисовалась ВТОРЫМ полупрозрачным кругом
+            // поверх нашего (задвоение подтверждено на устройстве
+            // скриншотом). .navigation — это буквально та же роль/слот, что
+            // и у системной back-кнопки, а не соседний слот рядом с ней —
+            // занимая его напрямую, конкурировать не с чем.
+            ToolbarItem(placement: .navigation) {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 17, weight: .semibold))
