@@ -59,7 +59,9 @@ struct AppSettingsView: View {
             Theme.background.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 20) {
+                // 20→40 — вдвое больше отступ между карточками-разделами, по
+                // прямой просьбе (тот же принцип, что и в SideMenuView).
+                VStack(spacing: 40) {
                     card {
                         infoRow(title: "Версия", value: AppVersionInfo.display)
                         infoRow(title: "Активный сайт", value: siteSession.activeSite.displayName, showDivider: false)
