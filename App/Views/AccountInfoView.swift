@@ -30,6 +30,10 @@ struct ProfileView: View {
     @State private var sendingFriendRequest = false
     @State private var friendRequestMessage: String?
     @State private var showAdditionalInfo = false
+    /// Повторный тап по "Заявка отправлена" — запрашивает подтверждение
+    /// отмены (см. friendshipRow/cancelFriendRequest).
+    @State private var showCancelFriendRequestConfirm = false
+    @State private var cancellingFriendRequest = false
 
     init(userId: Int? = nil) { self.userId = userId }
 
@@ -77,6 +81,13 @@ struct ProfileView: View {
         .sheet(isPresented: $showAdditionalInfo) {
             AdditionalInfoSheet(profile: profile)
                 .presentationDetents([.medium, .large])
+        }
+        // Системный центрированный alert (не шторка снизу) — по прямой просьбе.
+        .alert("Отменить заявку?", isPresented: $showCancelFriendRequestConfirm) {
+            Button("Да", role: .destructive) { Task { await cancelFriendRequest() } }
+            Button("Нет", role: .cancel) {}
+        } message: {
+            Text("Вы уверены, что хотели отменить заявку?")
         }
     }
 
@@ -297,7 +308,19 @@ struct ProfileView: View {
             if status?.isFriend == true {
                 friendshipLabel("Вы друзья", icon: "checkmark.circle.fill", tint: Theme.accent)
             } else if status?.isRequested == true {
-                friendshipLabel("Заявка отправлена", icon: "clock", tint: Theme.textSecondary)
+                // Повторный тап — предложить отменить заявку (см.
+                // showCancelFriendRequestConfirm/cancelFriendRequest).
+                Button {
+                    showCancelFriendRequestConfirm = true
+                } label: {
+                    if cancellingFriendRequest {
+                        friendshipLabel("Отмена...", icon: "clock", tint: Theme.textSecondary)
+                    } else {
+                        friendshipLabel("Заявка отправлена", icon: "clock", tint: Theme.textSecondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(cancellingFriendRequest)
             } else if status?.isAwaitingConfirmation == true {
                 // Заявка ОТ этого пользователя — принять/отклонить не
                 // реализовано: коды status для PUT /friendship/{id} не
@@ -496,6 +519,19 @@ struct ProfileView: View {
             friendRequestMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         sendingFriendRequest = false
+    }
+
+    private func cancelFriendRequest() async {
+        guard let id = resolvedId, !cancellingFriendRequest else { return }
+        cancellingFriendRequest = true
+        friendRequestMessage = nil
+        do {
+            try await MangaNetworkService.shared.cancelFriendRequest(userId: id)
+            friendship = nil
+        } catch {
+            friendRequestMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        cancellingFriendRequest = false
     }
 }
 

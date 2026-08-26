@@ -427,6 +427,18 @@ final class MangaNetworkService {
 
     private struct FriendRequestPayload: Encodable { let recipient_id: Int }
 
+    /// Отменить отправленную заявку (или разорвать уже принятую дружбу) —
+    /// эндпоинт НЕ подтверждён прямым перехватом (отмену/удаление друга ни
+    /// разу не поймали в капчах), это разумное предположение по аналогии с
+    /// уже подтверждённым `GET /friendship/{userId}` — тот же REST-ресурс,
+    /// адресуется id ЦЕЛЕВОГО пользователя (не id самой записи дружбы), так
+    /// что здесь `DELETE /friendship/{userId}`. Если сервер ожидает другую
+    /// форму — поправить по факту первого реального перехвата.
+    func cancelFriendRequest(userId: Int) async throws {
+        let request = try makeRequest(path: "/friendship/\(userId)", queryItems: [], method: "DELETE")
+        try await performVoid(request)
+    }
+
     /// Список друзей пользователя — ПОДТВЕРЖДЕНО перехватом
     /// `GET /friendship?page=&user_id=&status=1`.
     func fetchFriends(userId: Int, page: Int = 1) async throws -> (friends: [FriendshipEntry], hasNextPage: Bool) {
