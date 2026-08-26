@@ -13,6 +13,11 @@ struct MangaDetailView: View {
     private let fallbackTitle: String
     private let coverURL: URL?
     private let listItem: MangaItem?
+    /// true — экран открыт из профиля через щит-меню (см. UserBookmarksView/
+    /// MyCommentsView: pinnedHeader: !showsOwnHeader), кнопки "назад"/"..." тогда
+    /// зафиксированы отдельным слоем поверх скролла (см. pinnedTopBar), а не
+    /// уезжают вместе с heroHeader, как при обычном входе (каталог/поиск и т.п.).
+    private let pinnedHeader: Bool
 
     @State private var tab: Tab = .about
     /// Показ sheet со всеми названиями тайтла (по тапу на название в шапке) —
@@ -149,7 +154,8 @@ struct MangaDetailView: View {
 
     enum Tab: Hashable { case about, chapters, comments }
 
-    init(slug: String, fallbackTitle: String = "", coverURL: URL? = nil, item: MangaItem? = nil) {
+    init(slug: String, fallbackTitle: String = "", coverURL: URL? = nil, item: MangaItem? = nil,
+         pinnedHeader: Bool = false) {
         // siteId берём из элемента (каталог/поиск/похожее/связанное/персонаж) —
         // тайтл может жить на другом сайте, чем активный, и без правильного
         // Site-Id карточка отдаёт 404 (пропадает описание).
@@ -157,11 +163,13 @@ struct MangaDetailView: View {
         self.fallbackTitle = fallbackTitle
         self.coverURL = coverURL
         self.listItem = item
+        self.pinnedHeader = pinnedHeader
     }
 
     private var title: String { viewModel.detail?.displayTitle ?? listItem?.displayTitle ?? fallbackTitle }
 
     var body: some View {
+        ZStack(alignment: .top) {
         ScrollView {
           ScrollViewReader { scrollProxy in
             VStack(alignment: .leading, spacing: 0) {
@@ -212,10 +220,19 @@ struct MangaDetailView: View {
         // баннер под этот отступ вместо того, чтобы показывать пустой зазор.
         .coordinateSpace(name: "detailScroll")
         .background(Theme.background)
-        // Свой back-button поверх hero (см. heroHeader) вместо системной
-        // navigation bar — баннер уходит под статус-бар, как в референсе.
-        .toolbar(.hidden, for: .navigationBar)
+        // Баннер уходит под статус-бар, как в референсе — только на самом
+        // ScrollView (не на внешнем ZStack, см. body), чтобы pinnedTopBar
+        // (когда есть) сам оставался в системном safe area, без ручной
+        // константы под статус-бар/Dynamic Island.
         .ignoresSafeArea(edges: .top)
+
+        if pinnedHeader {
+            pinnedTopBar
+        }
+        }
+        // Свой back-button поверх hero (см. heroHeader/pinnedTopBar) вместо
+        // системной navigation bar.
+        .toolbar(.hidden, for: .navigationBar)
         .task { if viewModel.detail == nil { await viewModel.load() } }
         // Показ hero-картинки (см. heroHeader/updateHero): как только карточка
         // загрузилась — если у неё есть настоящий background (или хотя бы
@@ -492,16 +509,21 @@ struct MangaDetailView: View {
             // Стрелка вместо крестика + стеклянный фон (как в остальном
             // приложении), вместо .ultraThinMaterial. Добавлена ПОСЛЕДНЕЙ
             // среди overlay-ев — поэтому всегда поверх названия/обложки.
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 48, height: 48)
-                    .glassEffect(.regular, in: Circle())
+            // Только при обычном входе (не через щит-меню профиля) — иначе
+            // кнопки зафиксированы отдельным слоем поверх скролла, см.
+            // pinnedTopBar/pinnedHeader.
+            if !pinnedHeader {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .frame(width: 48, height: 48)
+                        .glassEffect(.regular, in: Circle())
+                }
+                .padding(.leading, 16)
+                .padding(.top, 54) // ниже статус-бара, баннер уходит под него целиком
+                .fadeInOnAppear()
             }
-            .padding(.leading, 16)
-            .padding(.top, 54) // ниже статус-бара, баннер уходит под него целиком
-            .fadeInOnAppear()
         }
         .overlay(alignment: .topTrailing) {
             // Кнопка "..." — стандартное системное Menu (стеклянный список iOS
@@ -515,17 +537,75 @@ struct MangaDetailView: View {
             // обернуть содержимое в Label(title:icon:) вместо голого Image
             // (Menu переходит на icon-only layout) + .compositingGroup() перед
             // glassEffect, чтобы Menu считал вставки по уже готовому,
-            // "плоскому" слою, а не по промежуточному.
-            Menu {
-                if let shareURL {
-                    ShareLink(item: shareURL) {
-                        Label("Поделиться", systemImage: "square.and.arrow.up")
+            // "плоскому" слою, а не по промежуточному. Только при обычном
+            // входе — см. комментарий у back-кнопки выше.
+            if !pinnedHeader {
+                Menu {
+                    actionMenuItems
+                } label: {
+                    Label {
+                        EmptyView()
+                    } icon: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                            .frame(width: 48, height: 48)
+                            .compositingGroup()
+                            .glassEffect(.regular, in: Circle())
                     }
                 }
-                Button { /* ЗАГЛУШКА */ } label: { Label("Редактирование глав", systemImage: "square.and.pencil") }
-                Button { /* ЗАГЛУШКА */ } label: { Label("Добавить главы", systemImage: "plus") }
-                Button { /* ЗАГЛУШКА */ } label: { Label("Редактирование тайтла", systemImage: "pencil") }
-                Button { showDownloadSheet = true } label: { Label("Скачать тайтл", systemImage: "arrow.down.circle") }
+                .menuStyle(.borderlessButton)
+                .padding(.trailing, 16)
+                .padding(.top, 54)
+                .fadeInOnAppear()
+            }
+        }
+    }
+
+    /// Пункты меню "..." шапки тайтла — общий источник для обычного (overlay
+    /// на heroHeader) и зафиксированного (pinnedTopBar) вариантов, чтобы не
+    /// дублировать список при добавлении pinnedTopBar.
+    @ViewBuilder
+    private var actionMenuItems: some View {
+        if let shareURL {
+            ShareLink(item: shareURL) {
+                Label("Поделиться", systemImage: "square.and.arrow.up")
+            }
+        }
+        Button { /* ЗАГЛУШКА */ } label: { Label("Редактирование глав", systemImage: "square.and.pencil") }
+        Button { /* ЗАГЛУШКА */ } label: { Label("Добавить главы", systemImage: "plus") }
+        Button { /* ЗАГЛУШКА */ } label: { Label("Редактирование тайтла", systemImage: "pencil") }
+        Button { showDownloadSheet = true } label: { Label("Скачать тайтл", systemImage: "arrow.down.circle") }
+    }
+
+    /// Зафиксированная шапка (назад + "...") — только когда карточка открыта из
+    /// профиля через щит-меню (см. pinnedHeader/init, устанавливается в
+    /// UserBookmarksView/MyCommentsView через pinnedHeader: !showsOwnHeader). В
+    /// отличие от обычного входа (каталог/поиск и т.п., см. heroHeader.overlay
+    /// выше) кнопки здесь — ОТДЕЛЬНЫЙ слой ПОВЕРХ ScrollView (тот же приём, что
+    /// и ProfileView.topBar в AccountInfoView.swift), а не overlay НА
+    /// heroHeader, который сам едет со скроллом — поэтому не уезжают при
+    /// скролле карточки. Обе кнопки — в ОДНОЙ HStack-строке (а не в двух
+    /// независимых overlay в разных углах, как в обычном режиме) — именно это,
+    /// а не сам Menu/Label фикс выше, устраняет разъезд по высоте: раньше
+    /// высота каждой кнопки считалась независимо от угла heroHeader, теперь
+    /// SwiftUI центрирует обе по общей оси HStack. Размер 44×44 и
+    /// .interactive() стекло — как у остальных зафиксированных шапок в
+    /// приложении (ProfileView.topBar/HistoryView/MyCommentsView).
+    private var pinnedTopBar: some View {
+        HStack {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(width: 44, height: 44)
+            }
+            .glassEffect(.regular.interactive(), in: Circle())
+
+            Spacer(minLength: 0)
+
+            Menu {
+                actionMenuItems
             } label: {
                 Label {
                     EmptyView()
@@ -533,16 +613,19 @@ struct MangaDetailView: View {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
-                        .frame(width: 48, height: 48)
+                        .frame(width: 44, height: 44)
                         .compositingGroup()
-                        .glassEffect(.regular, in: Circle())
+                        .glassEffect(.regular.interactive(), in: Circle())
                 }
             }
             .menuStyle(.borderlessButton)
-            .padding(.trailing, 16)
-            .padding(.top, 54)
-            .fadeInOnAppear()
         }
+        .padding(.horizontal, 16)
+        // Как в HistoryView.header — внешний ZStack (см. body) уважает
+        // системный safe area, статус-бар/Dynamic Island уже учтён им, это
+        // чисто визуальный зазор, а не ручная аппроксимация высоты статус-бара.
+        .padding(.top, 8)
+        .fadeInOnAppear()
     }
 
     /// titleBlock с отступом справа — вынесено отдельно от heroHeader просто
