@@ -47,14 +47,11 @@ struct NotificationsView: View {
             .navigationTitle("Уведомления")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                // Один чип-меню справа сверху — прочитанность + сортировка +
-                // Настройки/Отметить всё прочитанным/Удалить все. Было
-                // отдельное второе круглое меню "..." рядом — по просьбе
-                // убрано как лишняя вторая кнопка, всё объединено обратно в
-                // один контрол (так же, как это было в один комбинированный
-                // список ДО этого захода, см. typeFilterRow — там та же
-                // логика: раньше было "всё в одной кнопке").
-                ToolbarItem(placement: .topBarTrailing) { readFilterChip }
+                // Две кнопки (фильтр "Все" + "...") на ОДНОЙ общей стеклянной
+                // подложке — не два раздельных .glassEffect (было "две
+                // кнопки в одном месте"), а единая капсула-контейнер с
+                // разделителем внутри, по прямой просьбе.
+                ToolbarItem(placement: .topBarTrailing) { headerControls }
             }
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(
@@ -105,13 +102,24 @@ struct NotificationsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isHeaderAnimating = false }
     }
 
-    /// Чип "Все"/"Непрочитанные"/"Прочитанные" (текущий readFilter) в шапке
-    /// справа — тап открывает меню с прочитанностью, сортировкой и (ниже,
-    /// отдельным блоком) Настройками/Отметить всё прочитанным/Удалить все —
-    /// раньше это было отдельное второе круглое меню "...", объединено сюда
-    /// по просьбе, чтобы в шапке остался один контрол, а не два. Бейдж —
-    /// реальное число из GET /notifications/count (unread.all), не посчитано
-    /// на клиенте.
+    /// Обе кнопки шапки (фильтр "Все" + "...") на одной общей стеклянной
+    /// подложке — единственный .glassEffect на всю HStack, а не по одному
+    /// на каждую кнопку (это и была причина "две кнопки в одном месте").
+    /// Разделитель внутри капсулы — та же техника, что у сегментных
+    /// Liquid Glass контролов.
+    private var headerControls: some View {
+        HStack(spacing: 0) {
+            readFilterChip
+            Divider().frame(height: 20)
+            overflowMenu
+        }
+        .glassEffect(.regular.interactive(), in: Capsule())
+    }
+
+    /// Чип "Все"/"Непрочитанные"/"Прочитанные" (текущий readFilter) — тап
+    /// открывает меню с прочитанностью и, ниже, порядком сортировки
+    /// (сначала новые/старые). Бейдж — реальное число из
+    /// GET /notifications/count (unread.all), не посчитано на клиенте.
     private var readFilterChip: some View {
         Menu {
             Picker("Прочитанность", selection: $viewModel.readFilter) {
@@ -127,16 +135,6 @@ struct NotificationsView: View {
                 }
             }
             .pickerStyle(.inline)
-            Divider()
-            Button { showSettingsStub = true } label: {
-                Label("Настройки", systemImage: "gearshape")
-            }
-            Button { markAllReadTapped() } label: {
-                Label("Отметить всё прочитанным", systemImage: "checkmark.circle")
-            }
-            Button(role: .destructive) { showDeleteAllConfirm = true } label: {
-                Label("Удалить все уведомления", systemImage: "trash")
-            }
         } label: {
             ZStack(alignment: .topTrailing) {
                 HStack(spacing: 4) {
@@ -160,7 +158,27 @@ struct NotificationsView: View {
                 }
             }
         }
-        .glassEffect(.regular.interactive(), in: Capsule())
+    }
+
+    /// "..." — Настройки (заглушка, эндпоинт не подтверждён)/Отметить всё
+    /// прочитанным/Удалить все уведомления (красным).
+    private var overflowMenu: some View {
+        Menu {
+            Button { showSettingsStub = true } label: {
+                Label("Настройки", systemImage: "gearshape")
+            }
+            Button { markAllReadTapped() } label: {
+                Label("Отметить всё прочитанным", systemImage: "checkmark.circle")
+            }
+            Button(role: .destructive) { showDeleteAllConfirm = true } label: {
+                Label("Удалить все уведомления", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: Theme.pillControlHeight, height: Theme.pillControlHeight)
+        }
     }
 
     /// "Отметить всё прочитанным" — эндпоинт нигде не подтверждён
