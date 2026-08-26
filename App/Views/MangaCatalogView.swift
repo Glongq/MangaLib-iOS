@@ -280,6 +280,15 @@ struct MangaCatalogView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            // Эксперимент против раздутого отступа сверху под .large:
+            // на iOS 26 крупный заголовок технически часть самого
+            // ScrollView (а не отдельный слой поверх, как раньше) — Apple
+            // рекомендует растягивать сам скролл-контент до самого верха
+            // экрана, а не только до границы safe area, иначе система
+            // резервирует место под заголовок неточно. Раньше до верха был
+            // растянут только фон (Theme.background.ignoresSafeArea() в
+            // body), сам ScrollView — нет.
+            .ignoresSafeArea(edges: .top)
             .overlay {
                 if viewModel.isLoading && viewModel.results.isEmpty {
                     ProgressView().tint(Theme.accent)
