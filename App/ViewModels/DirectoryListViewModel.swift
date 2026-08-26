@@ -131,10 +131,20 @@ final class DirectoryListViewModel: ObservableObject {
         isLoadingMore = false
     }
 
+    /// Часть вариантов сортировки (см. DirectoryKind) добавлена по аналогии,
+    /// без реального перехвата именно для /teams, /character, /people —
+    /// сервер этой экосистемы строго валидирует sort_by и отвечает 422 на
+    /// неизвестное значение (та же защита, что у CatalogViewModel.fetchPage/
+    /// CharacterViewModel.fetchPage) вместо того, чтобы молча его
+    /// проигнорировать. Если гипотеза окажется неверной — список не
+    /// остаётся пустым с ошибкой, а просто грузится в серверном порядке по
+    /// умолчанию (без sort_by вообще).
     private func fetchPage(_ page: Int) async throws -> (items: [DirectoryEntity], hasNextPage: Bool) {
-        try await service.fetchDirectory(
-            kind: kind, page: page, sortBy: sort.apiValue,
-            sortType: sortDescending ? "desc" : "asc", query: query
-        )
+        let sortType = sortDescending ? "desc" : "asc"
+        do {
+            return try await service.fetchDirectory(kind: kind, page: page, sortBy: sort.apiValue, sortType: sortType, query: query)
+        } catch NetworkError.server(let status) where status == 422 {
+            return try await service.fetchDirectory(kind: kind, page: page, sortBy: nil, sortType: sortType, query: query)
+        }
     }
 }

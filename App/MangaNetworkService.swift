@@ -1059,12 +1059,22 @@ final class MangaNetworkService {
     /// DirectoryKind/DirectoryEntity). `q` — по той же логике "не
     /// подтверждено конкретно здесь, но по аналогии с остальными списковыми
     /// эндпоинтами", что и в fetchFranchises.
-    func fetchDirectory(kind: DirectoryKind, page: Int, sortBy: String, sortType: String, query: String) async throws -> (items: [DirectoryEntity], hasNextPage: Bool) {
-        var items: [URLQueryItem] = [
-            URLQueryItem(name: "page", value: String(max(page, 1))),
-            URLQueryItem(name: "sort_by", value: sortBy),
-            URLQueryItem(name: "sort_type", value: sortType)
-        ]
+    ///
+    /// `sortBy: nil` — не слать `sort_by`/`sort_type` вообще (серверный
+    /// порядок по умолчанию), НУЖНО как запасной вариант: сервер этой
+    /// экосистемы (тот же бэкенд, что и у каталога, см. CatalogViewModel.
+    /// fetchPage/CharacterViewModel.fetchPage) СТРОГО валидирует sort_by и
+    /// отвечает 422 на неизвестное значение вместо того, чтобы молча его
+    /// проигнорировать — а часть значений у Команд/Персонажей/Людей здесь
+    /// добавлена ПО АНАЛОГИИ (см. DirectoryKind), без реального перехвата
+    /// именно для этих эндпоинтов, так что 422 на новом варианте вполне
+    /// возможен. См. DirectoryListViewModel.fetchPage — именно там ловится.
+    func fetchDirectory(kind: DirectoryKind, page: Int, sortBy: String?, sortType: String, query: String) async throws -> (items: [DirectoryEntity], hasNextPage: Bool) {
+        var items: [URLQueryItem] = [URLQueryItem(name: "page", value: String(max(page, 1)))]
+        if let sortBy {
+            items.append(URLQueryItem(name: "sort_by", value: sortBy))
+            items.append(URLQueryItem(name: "sort_type", value: sortType))
+        }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
         let request = try makeRequest(path: kind.apiPath, queryItems: items)
