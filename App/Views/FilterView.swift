@@ -222,14 +222,6 @@ struct FilterView: View {
     private var bottomBar: some View {
         HStack(spacing: 4) {
             Button {
-                filter.reset()
-            } label: {
-                Text("Сбросить")
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, minHeight: 50)
-            }
-
-            Button {
                 onApply(filter)
                 dismiss()
             } label: {
@@ -238,6 +230,14 @@ struct FilterView: View {
                     .foregroundStyle(Theme.background)
                     .frame(maxWidth: .infinity, minHeight: 50)
                     .background(Theme.accent, in: Capsule())
+            }
+
+            Button {
+                filter.reset()
+            } label: {
+                Text("Сбросить")
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, minHeight: 50)
             }
         }
         .padding(.horizontal, 6)
