@@ -13,21 +13,6 @@ struct ProfileView: View {
     /// nil — свой профиль (id берётся из AuthSession).
     let userId: Int?
 
-    /// Id для .glassEffectID ниже (см. header/quickButtons) — капсула
-    /// "Готово" здесь и круглая кнопка "назад" в каждом из четырёх пушнутых
-    /// экранов (Списки тайтлов/Комментарии/Коллекции/Друзья) помечены ОДНИМ
-    /// и тем же id в общем @Namespace (glassTransition, передаётся вниз
-    /// параметром) — по прямой просьбе "плавный стекло-переход от кнопки
-    /// готово к кнопке назад и обратно". ЧЕСТНО: это новый для кодовой базы
-    /// приём (GlassEffectContainer здесь уже применялся, но НЕ через пуш
-    /// NavigationStack, а .glassEffectID вообще нигде раньше не
-    /// использовался) — протестировать вживую в этой среде нечем (нет
-    /// симулятора), так что стоит проверить на устройстве; если морф не
-    /// подхватится через пуш — деградирует просто в обычную мгновенную
-    /// смену формы, ничего не сломается.
-    static let dismissGlassID = "profile-dismiss-glass"
-    @Namespace private var glassTransition
-
     @ObservedObject private var auth = AuthSession.shared
     @ObservedObject private var site = SiteSession.shared
     @ObservedObject private var themeManager = ThemeManager.shared
@@ -186,20 +171,12 @@ struct ProfileView: View {
                             .foregroundStyle(topTextColor)
                             .shadow(color: (bannerTopLight ? Color.white : Color.black).opacity(0.4), radius: 2)
                         HStack {
-                            // GlassEffectContainer + .glassEffectID(Self.dismissGlassID,
-                            // in: glassTransition) — та же пара id/namespace, что и у
-                            // кнопки "назад" в пушнутых экранах ниже (см.
-                            // quickButtons), чтобы форма плавно перетекала
-                            // капсула → круг при переходе и обратно.
-                            GlassEffectContainer {
-                                Button { dismiss() } label: {
-                                    Text("Готово")
-                                        .font(.body.weight(.semibold))
-                                        .foregroundStyle(topTextColor)
-                                        .padding(.horizontal, 18).frame(height: 46)
-                                        .glassEffect(.regular.interactive(), in: Capsule())
-                                        .glassEffectID(Self.dismissGlassID, in: glassTransition)
-                                }
+                            Button { dismiss() } label: {
+                                Text("Готово")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(topTextColor)
+                                    .padding(.horizontal, 18).frame(height: 46)
+                                    .glassEffect(.regular.interactive(), in: Capsule())
                             }
                             Spacer(minLength: 0)
                             // «Щит» — дополнительная информация о пользователе
@@ -452,21 +429,21 @@ struct ProfileView: View {
                     quickRow("Списки тайтлов", "square.stack.3d.up")
                 }.buttonStyle(.plain)
             } else if let id = resolvedId {
-                NavigationLink { UserBookmarksView(userId: id, glassTransition: glassTransition) } label: {
+                NavigationLink { UserBookmarksView(userId: id) } label: {
                     quickRow("Списки тайтлов", "square.stack.3d.up")
                 }.buttonStyle(.plain)
             }
 
-            NavigationLink { MyCommentsView(userId: resolvedId, glassTransition: glassTransition) } label: {
+            NavigationLink { MyCommentsView(userId: resolvedId) } label: {
                 quickRow("Комментарии", "text.bubble")
             }.buttonStyle(.plain)
 
             if let id = resolvedId {
-                NavigationLink { UserCollectionsView(userId: id, glassTransition: glassTransition) } label: {
+                NavigationLink { UserCollectionsView(userId: id) } label: {
                     quickRow("Коллекции", "square.stack")
                 }.buttonStyle(.plain)
 
-                NavigationLink { FriendsView(userId: id, glassTransition: glassTransition) } label: {
+                NavigationLink { FriendsView(userId: id) } label: {
                     quickRow("Друзья", "person.2")
                 }.buttonStyle(.plain)
             }

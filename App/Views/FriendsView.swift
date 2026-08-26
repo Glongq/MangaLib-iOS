@@ -6,18 +6,14 @@ import SwiftUI
 /// Данные: GET /friendship?user_id=&status=1 и GET /friendship/{id}/mutual.
 struct FriendsView: View {
     let userId: Int
-    /// Namespace для плавного стекло-перехода "Готово" ↔ "назад" — см.
-    /// ProfileView.dismissGlassID/glassTransition.
-    let glassTransition: Namespace.ID?
 
     @StateObject private var vm: FriendsViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
     @State private var profileUser: ProfileUserId?
 
-    init(userId: Int, glassTransition: Namespace.ID? = nil) {
+    init(userId: Int) {
         self.userId = userId
-        self.glassTransition = glassTransition
         _vm = StateObject(wrappedValue: FriendsViewModel(userId: userId))
     }
 
@@ -54,23 +50,15 @@ struct FriendsView: View {
         .padding(.bottom, 10)
     }
 
-    @ViewBuilder
     private var backButton: some View {
-        let button = Button { dismiss() } label: {
+        Button { dismiss() } label: {
             Image(systemName: "chevron.left")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .frame(width: 44, height: 44)
         }
         .glassEffect(.regular.interactive(), in: Circle())
-
-        if let glassTransition {
-            GlassEffectContainer {
-                button.glassEffectID(ProfileView.dismissGlassID, in: glassTransition)
-            }
-        } else {
-            button
-        }
+        .fadeInOnAppear()
     }
 
     // MARK: Контент

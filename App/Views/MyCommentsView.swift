@@ -6,20 +6,13 @@ import SwiftUI
 /// комментарию открывает тайтл; долгий тап — удалить свой комментарий.
 struct MyCommentsView: View {
     let embedded: Bool
-    /// Namespace для плавного стекло-перехода "Готово" ↔ "назад" — только
-    /// когда сюда пришли из ProfileView (см. ProfileView.dismissGlassID/
-    /// glassTransition). Из бокового меню (embedded: true) — всегда nil,
-    /// там вместо морфа обычное плавное появление (см. backButton/appeared).
-    let glassTransition: Namespace.ID?
 
     @StateObject private var vm: MyCommentsViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
-    @State private var appeared = false
 
-    init(embedded: Bool = false, userId: Int? = nil, glassTransition: Namespace.ID? = nil) {
+    init(embedded: Bool = false, userId: Int? = nil) {
         self.embedded = embedded
-        self.glassTransition = glassTransition
         _vm = StateObject(wrappedValue: MyCommentsViewModel(userId: userId))
     }
 
@@ -53,32 +46,15 @@ struct MyCommentsView: View {
         .padding(.bottom, 10)
     }
 
-    /// Из профиля (glassTransition не nil) — плавный морф капсула → круг
-    /// (см. ProfileView.header). Из бокового меню (nil) — вместо морфа
-    /// плавное появление кнопки при заходе на экран (по прямой просьбе
-    /// "плавное появление кнопки назад при заходе меню-любой пункт").
-    @ViewBuilder
     private var backButton: some View {
-        let button = Button { dismiss() } label: {
+        Button { dismiss() } label: {
             Image(systemName: "chevron.left")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .frame(width: 44, height: 44)
         }
         .glassEffect(.regular.interactive(), in: Circle())
-
-        if let glassTransition {
-            GlassEffectContainer {
-                button.glassEffectID(ProfileView.dismissGlassID, in: glassTransition)
-            }
-        } else {
-            button
-                .opacity(appeared ? 1 : 0)
-                .scaleEffect(appeared ? 1 : 0.7)
-                .onAppear {
-                    withAnimation(.easeOut(duration: 0.28)) { appeared = true }
-                }
-        }
+        .fadeInOnAppear()
     }
 
     // MARK: Контент
