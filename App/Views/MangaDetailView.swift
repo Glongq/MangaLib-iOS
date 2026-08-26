@@ -2329,14 +2329,21 @@ struct MangaDetailView: View {
                         // Показывает ВСЕ уже загруженные ответы этой ветки разом —
                         // без парной кнопки "Скрыть" после (по прямой просьбе,
                         // однонаправленно, как и было).
-                        Button {
-                            expandedThreads.insert(comment.id)
-                        } label: {
-                            Label("Ещё комментарии (\(children.count))", systemImage: "chevron.down")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(Theme.accent)
+                        // Тот же HStack(threadBars + spacing 8), что и в
+                        // commentRow — гарантирует, что подпись встанет РОВНО
+                        // под тем же левым краем, что и "Показать полностью"
+                        // внутри самого комментария (а не под threadBars, как
+                        // было раньше с произвольным padding 28).
+                        HStack(spacing: 8) {
+                            threadBars(comment.commentLevel)
+                            Button {
+                                expandedThreads.insert(comment.id)
+                            } label: {
+                                Text("Ещё комментарии (\(children.count))")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Theme.accent)
+                            }
                         }
-                        .padding(.leading, 28)
                     } else {
                         VStack(alignment: .leading, spacing: 10) {
                             ForEach(children) { child in

@@ -31,7 +31,7 @@ struct ExpandableCommentText: View {
                     withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
                 } label: {
                     Text(expanded ? "Свернуть" : "Показать полностью")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(Theme.accent)
                 }
                 .buttonStyle(.plain)
