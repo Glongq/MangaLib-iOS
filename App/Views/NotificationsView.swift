@@ -47,11 +47,14 @@ struct NotificationsView: View {
             .navigationTitle("Уведомления")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                // "Все" (текущая прочитанность) + сортировка внутри одного
-                // меню, "..." — отдельным меню правее (Настройки/Отметить
-                // всё прочитанным/Удалить все, по прямой просьбе).
+                // Один чип-меню справа сверху — прочитанность + сортировка +
+                // Настройки/Отметить всё прочитанным/Удалить все. Было
+                // отдельное второе круглое меню "..." рядом — по просьбе
+                // убрано как лишняя вторая кнопка, всё объединено обратно в
+                // один контрол (так же, как это было в один комбинированный
+                // список ДО этого захода, см. typeFilterRow — там та же
+                // логика: раньше было "всё в одной кнопке").
                 ToolbarItem(placement: .topBarTrailing) { readFilterChip }
-                ToolbarItem(placement: .topBarTrailing) { overflowMenu }
             }
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(
@@ -103,9 +106,12 @@ struct NotificationsView: View {
     }
 
     /// Чип "Все"/"Непрочитанные"/"Прочитанные" (текущий readFilter) в шапке
-    /// справа — тап открывает меню с прочитанностью и, отдельным блоком
-    /// ниже, порядком сортировки (сначала новые/старые). Бейдж — реальное
-    /// число из GET /notifications/count (unread.all), не посчитано на клиенте.
+    /// справа — тап открывает меню с прочитанностью, сортировкой и (ниже,
+    /// отдельным блоком) Настройками/Отметить всё прочитанным/Удалить все —
+    /// раньше это было отдельное второе круглое меню "...", объединено сюда
+    /// по просьбе, чтобы в шапке остался один контрол, а не два. Бейдж —
+    /// реальное число из GET /notifications/count (unread.all), не посчитано
+    /// на клиенте.
     private var readFilterChip: some View {
         Menu {
             Picker("Прочитанность", selection: $viewModel.readFilter) {
@@ -121,6 +127,16 @@ struct NotificationsView: View {
                 }
             }
             .pickerStyle(.inline)
+            Divider()
+            Button { showSettingsStub = true } label: {
+                Label("Настройки", systemImage: "gearshape")
+            }
+            Button { markAllReadTapped() } label: {
+                Label("Отметить всё прочитанным", systemImage: "checkmark.circle")
+            }
+            Button(role: .destructive) { showDeleteAllConfirm = true } label: {
+                Label("Удалить все уведомления", systemImage: "trash")
+            }
         } label: {
             ZStack(alignment: .topTrailing) {
                 HStack(spacing: 4) {
@@ -145,29 +161,6 @@ struct NotificationsView: View {
             }
         }
         .glassEffect(.regular.interactive(), in: Capsule())
-    }
-
-    /// "..." справа от чипа "Все" — Настройки (заглушка, эндпоинт не
-    /// подтверждён)/Отметить всё прочитанным/Удалить все уведомления
-    /// (красным) — по прямой просьбе.
-    private var overflowMenu: some View {
-        Menu {
-            Button { showSettingsStub = true } label: {
-                Label("Настройки", systemImage: "gearshape")
-            }
-            Button { markAllReadTapped() } label: {
-                Label("Отметить всё прочитанным", systemImage: "checkmark.circle")
-            }
-            Button(role: .destructive) { showDeleteAllConfirm = true } label: {
-                Label("Удалить все уведомления", systemImage: "trash")
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: Theme.pillControlHeight, height: Theme.pillControlHeight)
-        }
-        .glassEffect(.regular.interactive(), in: Circle())
     }
 
     /// "Отметить всё прочитанным" — эндпоинт нигде не подтверждён
