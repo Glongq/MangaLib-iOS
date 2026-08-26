@@ -591,8 +591,15 @@ private struct AdditionalInfoSheet: View {
             .navigationTitle("Дополнительная информация")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // Крестик вместо текста "Готово" — тот же размер/цвет, что и
+                // у CreditsSheet/TeamMembersSheet (тот же класс маленьких
+                // sheet-экранов), по прямой просьбе выровнять.
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Готово") { dismiss() }
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
                 }
             }
         }

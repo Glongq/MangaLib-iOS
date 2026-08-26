@@ -88,10 +88,14 @@ struct CommentSettingsSheet: View {
             .navigationTitle("Настройки комментариев")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // Крестик вместо текста "Готово" — тот же размер/цвет, что и
+                // у CreditsSheet/TeamMembersSheet, по прямой просьбе выровнять.
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Готово") { dismiss() }
-                        .tint(Theme.accent)
-                        .fontWeight(.semibold)
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
                 }
             }
         }
