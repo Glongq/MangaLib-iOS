@@ -100,11 +100,6 @@ struct MangaDetailView: View {
     /// FranchiseRef уже Identifiable (id франшизы), отдельный обёрточный
     /// тип не нужен.
     @State private var franchiseTarget: FranchiseRef?
-    /// Открытый автор/художник/издательство (тап по чипу, см.
-    /// authorsChips/publisherChips) — DirectoryEntity сама по себе не несёт
-    /// признак "какой это вид" (people/publisher), нужен тот же .kind при
-    /// пуше DirectoryDetailView, поэтому обёрнуто в PersonNavTarget.
-    @State private var personTarget: PersonNavTarget?
 
     /// Отключить комментарии в читалке — ПОКА ЗАГЛУШКА, как явно попросили:
     /// переключатель есть и сохраняется, но ридер комментарии не показывает
@@ -246,14 +241,6 @@ struct MangaDetailView: View {
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
         .navigationDestination(item: $franchiseTarget) { ref in
             FranchiseView(slugURL: ref.slugURL, fallbackName: ref.name)
-        }
-        .navigationDestination(item: $personTarget) { target in
-            DirectoryDetailView(
-                kind: target.isPublisher ? .publisher : .people,
-                slugURL: target.entity.slugURL,
-                fallbackName: target.entity.displayName,
-                coverURL: target.entity.coverURL
-            )
         }
         .sheet(isPresented: $showTitleNames) {
             TitleNamesSheet(
@@ -1386,6 +1373,10 @@ struct MangaDetailView: View {
                 ProgressView().tint(Theme.accent).frame(maxWidth: .infinity)
             }
 
+            // Автор/Художник(и)/Издатель(и) — ОДНА строка чипов НАД описанием
+            // (по прямой просьбе). См. creditsRow.
+            creditsRow
+
             if isBlockedByLicenseOrModeration {
                 // "Нет глав" + подтверждённые маркеры (is_licensed/moderated,
                 // см. MangaDetail.isBlockedByLicenseOrModeration) — вместо
@@ -1456,24 +1447,6 @@ struct MangaDetailView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     blockTitle("Франшиза")
                     CollapsibleChips(items: [franchiseChip])
-                }
-            }
-
-            // Авторы/художники и издательство — та же идея, что и у франшизы:
-            // свои отдельные подкатегории (не вмешаны в жанры/теги), тап
-            // пушит DirectoryDetailView (см. personTarget/authorsChips/
-            // publisherChips). Авторы и художники объединены в одну секцию
-            // (дубликаты по id убраны — иногда это один и тот же человек).
-            if !authorsChips.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    blockTitle("Авторы")
-                    CollapsibleChips(items: authorsChips)
-                }
-            }
-            if !publisherChips.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    blockTitle("Издательство")
-                    CollapsibleChips(items: publisherChips)
                 }
             }
 
@@ -2147,27 +2120,22 @@ struct MangaDetailView: View {
 
     /// Закреплённый командой перевода/модератором комментарий (см.
     /// MangaNetworkService.fetchStickyComment) — своя карточка НАД обычной
-    /// лентой, с булавкой + подписью "Закреплённый комментарий" сверху-справа
-    /// (по прямой просьбе; обычным layout-рядом, а не .overlay — при длинном
-    /// нике в шапке комментария оверлей мог бы наехать на текст).
+    /// лентой, только булавка сверху-справа (по прямой просьбе убрали
+    /// подпись "Закреплённый комментарий" — .overlay, а не отдельный ряд в
+    /// layout, чтобы не оставалось пустой строки над комментарием).
     @ViewBuilder
     private var stickyCommentCard: some View {
         if let sticky = viewModel.stickyComment {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 4) {
-                    Spacer(minLength: 0)
+            commentRow(sticky)
+                .padding(12)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(alignment: .topTrailing) {
                     Image(systemName: "pin.fill")
                         .font(.caption2)
                         .rotationEffect(.degrees(45))
-                    Text("Закреплённый комментарий")
-                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Theme.accent)
+                        .padding(10)
                 }
-                .foregroundStyle(Theme.accent)
-
-                commentRow(sticky)
-            }
-            .padding(12)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
@@ -2437,24 +2405,42 @@ struct MangaDetailView: View {
         return .init(text: ref.name, tint: Theme.accent, onTap: { franchiseTarget = ref })
     }
 
-    /// Авторы + художники объединены (дубликаты по id убраны — иногда это
-    /// один и тот же человек в обоих списках). См. MangaDetail.authors/artists.
-    private var authorsChips: [CollapsibleChips.Item] {
-        var seen = Set<Int>()
-        let people = (viewModel.detail?.authors ?? []) + (viewModel.detail?.artists ?? [])
-        return people.filter { seen.insert($0.id).inserted }.map { p in
-            CollapsibleChips.Item(text: p.displayName, onTap: {
-                personTarget = PersonNavTarget(isPublisher: false, entity: p)
-            })
-        }
-    }
+    /// Один общий ряд Автор/Художник(и)/Издатель(и) НАД описанием (по прямой
+    /// просьбе). Если автор и художник — ОДИН И ТОТ ЖЕ человек (совпадающий
+    /// набор id, обычно один автор-иллюстратор), показываем ОДИН
+    /// объединённый чип "Автор и Художник" без листа выбора — тап сразу
+    /// пушит его карточку (см. MergedCreditsChip). Иначе — отдельные группы
+    /// (см. CreditsChip): у каждой всегда есть лист выбора (даже если внутри
+    /// один человек — для единообразия поведения), у издательства — своя,
+    /// никогда не объединяется с автором/художником.
+    @ViewBuilder
+    private var creditsRow: some View {
+        let authors = viewModel.detail?.authors ?? []
+        let artists = viewModel.detail?.artists ?? []
+        let publishers = viewModel.detail?.publisher ?? []
+        let authorIds = Set(authors.map(\.id))
+        let artistIds = Set(artists.map(\.id))
+        let sameSinglePerson = authors.count == 1 && authorIds == artistIds
 
-    /// См. MangaDetail.publisher.
-    private var publisherChips: [CollapsibleChips.Item] {
-        (viewModel.detail?.publisher ?? []).map { p in
-            CollapsibleChips.Item(text: p.displayName, onTap: {
-                personTarget = PersonNavTarget(isPublisher: true, entity: p)
-            })
+        if !authors.isEmpty || !artists.isEmpty || !publishers.isEmpty {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    if sameSinglePerson, let person = authors.first {
+                        MergedCreditsChip(person: person)
+                    } else {
+                        if !authors.isEmpty {
+                            CreditsChip(people: authors, kind: .people, sheetTitle: authors.count == 1 ? "Автор" : "Авторы")
+                        }
+                        if !artists.isEmpty {
+                            CreditsChip(people: artists, kind: .people, sheetTitle: artists.count == 1 ? "Художник" : "Художники")
+                        }
+                    }
+                    if !publishers.isEmpty {
+                        CreditsChip(people: publishers, kind: .publisher, sheetTitle: publishers.count == 1 ? "Издательство" : "Издатели")
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
         }
     }
 
@@ -2546,17 +2532,156 @@ struct TeamChipView: View {
     }
 }
 
-/// Цель перехода на автора/художника/издательство (см.
-/// MangaDetailView.personTarget/authorsChips/publisherChips) — DirectoryEntity
-/// сама по себе не несёт признак "это издательство, а не человек", нужен ещё
-/// .kind при пуше DirectoryDetailView.
-private struct PersonNavTarget: Identifiable, Hashable {
-    let isPublisher: Bool
-    let entity: DirectoryEntity
-    var id: Int { entity.id }
+/// Круглый аватар для чипов Автор/Художник/Издатель (см. MergedCreditsChip/
+/// CreditsChip/CreditsSheet ниже) — реальная обложка человека/издательства
+/// (DirectoryEntity.coverURL), тот же RemoteImage, что и везде.
+private func creditsAvatar(_ url: URL?, size: CGFloat) -> some View {
+    RemoteImage(url: url) { image in
+        image.resizable().scaledToFill()
+    } placeholder: {
+        Circle().fill(Theme.surface)
+    } failure: {
+        Circle().fill(Theme.surface).overlay(
+            Image(systemName: "person.fill").font(.caption2).foregroundStyle(Theme.textSecondary)
+        )
+    }
+    .frame(width: size, height: size)
+    .clipShape(Circle())
+}
 
-    static func == (l: PersonNavTarget, r: PersonNavTarget) -> Bool { l.id == r.id && l.isPublisher == r.isPublisher }
-    func hash(into hasher: inout Hasher) { hasher.combine(id); hasher.combine(isPublisher) }
+/// Автор и художник — ОДИН И ТОТ ЖЕ человек (см. MangaDetailView.creditsRow) —
+/// один чип БЕЗ листа выбора, тап сразу пушит его карточку.
+private struct MergedCreditsChip: View {
+    let person: DirectoryEntity
+
+    var body: some View {
+        NavigationLink {
+            DirectoryDetailView(kind: .people, slugURL: person.slugURL, fallbackName: person.displayName, coverURL: person.coverURL)
+        } label: {
+            HStack(spacing: 8) {
+                creditsAvatar(person.coverURL, size: 32)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(person.displayName)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    Text("Автор и художник")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 44)
+            .background(Theme.surfaceElevated, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Группа (Авторы/Художники/Издатели) — до двух аватарок внахлёст + имена
+/// через "&", "+N" если людей больше двух ("если 2 всего — без +1", по
+/// прямой просьбе). Тап ВСЕГДА открывает лист со всеми (даже если человек
+/// один — единообразное поведение, по прямой просьбе "лист всегда").
+private struct CreditsChip: View {
+    let people: [DirectoryEntity]
+    let kind: DirectoryKind
+    let sheetTitle: String
+
+    @State private var showSheet = false
+
+    private var shown: [DirectoryEntity] { Array(people.prefix(2)) }
+    private var remaining: Int { people.count - shown.count }
+
+    var body: some View {
+        Button { showSheet = true } label: {
+            HStack(spacing: 6) {
+                avatarsStack
+                Text(namesLabel)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 44)
+            .background(Theme.surfaceElevated, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showSheet) {
+            CreditsSheet(title: sheetTitle, people: people, kind: kind)
+        }
+    }
+
+    private var avatarsStack: some View {
+        HStack(spacing: -10) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { idx, person in
+                creditsAvatar(person.coverURL, size: 28)
+                    .overlay(Circle().stroke(Theme.surfaceElevated, lineWidth: 2))
+                    .zIndex(Double(shown.count - idx))
+            }
+        }
+    }
+
+    private var namesLabel: String {
+        let names = shown.map(\.displayName).joined(separator: " & ")
+        return remaining > 0 ? "\(names) +\(remaining)" : names
+    }
+}
+
+/// Лист выбора одного из группы (Авторы/Художники/Издатели) — та же сетка в
+/// 2 колонки, что и TeamMembersSheet (участники команды), тап пушит
+/// DirectoryDetailView.
+private struct CreditsSheet: View {
+    let title: String
+    let people: [DirectoryEntity]
+    let kind: DirectoryKind
+
+    @Environment(\.dismiss) private var dismiss
+
+    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(people) { person in
+                        NavigationLink {
+                            DirectoryDetailView(kind: kind, slugURL: person.slugURL, fallbackName: person.displayName, coverURL: person.coverURL)
+                        } label: {
+                            personCell(person)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(16)
+            }
+            .background(Theme.background.ignoresSafeArea())
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func personCell(_ person: DirectoryEntity) -> some View {
+        HStack(spacing: 8) {
+            creditsAvatar(person.coverURL, size: 28)
+            Text(person.displayName)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 44)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surfaceElevated, in: Capsule())
+    }
 }
 
 #Preview {
