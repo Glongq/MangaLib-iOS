@@ -26,16 +26,19 @@ struct UserBookmarksView: View {
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            VStack(spacing: 0) {
-                if showsOwnHeader { header }
-                if vm.folders.isEmpty {
-                    emptyOrLoadingFolders
-                } else {
-                    content
-                }
+            if vm.folders.isEmpty {
+                emptyOrLoadingFolders
+            } else {
+                content
             }
         }
-        .toolbar(.hidden, for: .navigationBar)
+        // showsOwnHeader — обычный push (не встроен в профиль): родной
+        // системный заголовок + системный back chevron, никакого своего
+        // кода (эталон — Настройки/Загрузки). Без него — навбар скрыт,
+        // шапку рисует ProfileView.topBar (см. AccountInfoView).
+        .navigationTitle("Списки тайтлов")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(showsOwnHeader ? .visible : .hidden, for: .navigationBar)
         // Папки — внизу, тем же приёмом safeAreaInset, что и переключатели в
         // "Друзья"/"Комментарии" (tabBar/controlsBar), а не отдельной строкой
         // сразу под шапкой, как было — единообразно с остальными вкладками
@@ -44,34 +47,6 @@ struct UserBookmarksView: View {
             if !vm.folders.isEmpty { folderChips }
         }
         .task { await vm.loadFoldersIfNeeded() }
-    }
-
-    /// Позиция кнопки "назад" и заголовка — та же, что и в шапке "Профиль"
-    /// (см. AccountInfoView.header: padding.top 14) — раньше здесь было 8,
-    /// заметно выше, чем в "Готово"/аватаре на самом профиле, из-за чего при
-    /// переходе с профиля сюда шапка визуально "прыгала" вверх.
-    private var header: some View {
-        ZStack {
-            Text("Списки тайтлов").font(.headline).foregroundStyle(Theme.textPrimary)
-            HStack {
-                backButton
-                Spacer()
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
-    }
-
-    private var backButton: some View {
-        Button { dismiss() } label: {
-            Image(systemName: "chevron.left")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: 44, height: 44)
-        }
-        .glassEffect(.regular.interactive(), in: Circle())
-        .fadeInOnAppear()
     }
 
     @ViewBuilder

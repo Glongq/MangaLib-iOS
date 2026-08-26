@@ -12,7 +12,6 @@ struct FriendsView: View {
 
     @StateObject private var vm: FriendsViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
-    @Environment(\.dismiss) private var dismiss
     @State private var profileUser: ProfileUserId?
 
     init(userId: Int, showsOwnHeader: Bool = true) {
@@ -24,45 +23,20 @@ struct FriendsView: View {
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            VStack(spacing: 0) {
-                if showsOwnHeader { header }
-                content
-            }
+            content
         }
-        .toolbar(.hidden, for: .navigationBar)
+        // showsOwnHeader — обычный push (не встроен в профиль): родной
+        // системный заголовок + системный back chevron, никакого своего
+        // кода (эталон — Настройки/Загрузки). Без него — навбар скрыт,
+        // шапку рисует ProfileView.topBar (см. AccountInfoView).
+        .navigationTitle("Друзья")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(showsOwnHeader ? .visible : .hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
         .task { await vm.loadIfNeeded() }
         .sheet(item: $profileUser) { pu in
             ProfileView(userId: pu.id).preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
         }
-    }
-
-    // MARK: Шапка
-
-    /// Позиция кнопки "назад" и заголовка — та же, что и в шапке "Профиль"
-    /// (см. AccountInfoView.header: padding.top 14) — раньше здесь было 8.
-    private var header: some View {
-        ZStack {
-            Text("Друзья").font(.headline).foregroundStyle(Theme.textPrimary)
-            HStack {
-                backButton
-                Spacer()
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
-    }
-
-    private var backButton: some View {
-        Button { dismiss() } label: {
-            Image(systemName: "chevron.left")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: 44, height: 44)
-        }
-        .glassEffect(.regular.interactive(), in: Circle())
-        .fadeInOnAppear()
     }
 
     // MARK: Контент

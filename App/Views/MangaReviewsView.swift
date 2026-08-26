@@ -9,7 +9,6 @@ struct MangaReviewsView: View {
     let siteId: Int?
 
     @StateObject private var vm: MangaReviewsViewModel
-    @Environment(\.dismiss) private var dismiss
     @State private var profileUser: ProfileUserId?
     @ObservedObject private var themeManager = ThemeManager.shared
 
@@ -23,38 +22,19 @@ struct MangaReviewsView: View {
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            VStack(spacing: 0) {
-                header
-                content
-            }
+            content
         }
-        .toolbar(.hidden, for: .navigationBar)
+        // Родной системный заголовок + подзаголовок (.navigationSubtitle —
+        // тот же приём, что нужен был для двухстрочной шапки "Отзывы" /
+        // название тайтла) + системный back chevron, никакого своего кода
+        // (эталон — Настройки/Загрузки).
+        .navigationTitle("Отзывы")
+        .navigationSubtitle(mangaTitle)
+        .navigationBarTitleDisplayMode(.inline)
         .task { await vm.loadIfNeeded() }
         .sheet(item: $profileUser) { pu in
             ProfileView(userId: pu.id).preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
         }
-    }
-
-    private var header: some View {
-        ZStack {
-            VStack(spacing: 1) {
-                Text("Отзывы").font(.headline).foregroundStyle(Theme.textPrimary)
-                Text(mangaTitle).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
-            }
-            HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(width: 44, height: 44)
-                }
-                .glassEffect(.regular.interactive(), in: Circle())
-                Spacer()
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
     }
 
     @ViewBuilder

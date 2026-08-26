@@ -522,7 +522,6 @@ struct MangaDetailView: View {
                 }
                 .padding(.leading, 16)
                 .padding(.top, 54) // ниже статус-бара, баннер уходит под него целиком
-                .fadeInOnAppear()
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -557,7 +556,6 @@ struct MangaDetailView: View {
                 .menuStyle(.borderlessButton)
                 .padding(.trailing, 16)
                 .padding(.top, 54)
-                .fadeInOnAppear()
             }
         }
     }
@@ -625,7 +623,6 @@ struct MangaDetailView: View {
         // системный safe area, статус-бар/Dynamic Island уже учтён им, это
         // чисто визуальный зазор, а не ручная аппроксимация высоты статус-бара.
         .padding(.top, 8)
-        .fadeInOnAppear()
     }
 
     /// titleBlock с отступом справа — вынесено отдельно от heroHeader просто

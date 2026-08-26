@@ -64,51 +64,30 @@ struct HistoryView: View {
             Theme.background.ignoresSafeArea()
             list
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            header
-        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             searchField
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
         }
-        // У экрана своя плавающая шапка — системный навбар скрываем всегда.
-        .toolbar(.hidden, for: .navigationBar)
+        // Родной системный заголовок + системный back chevron, никакого
+        // своего кода (эталон — Настройки/Загрузки). embedded — push из
+        // Меню (системная кнопка "назад" сама появляется); не embedded —
+        // свой NavigationStack, нужен явный dismiss (тот же приём, что у
+        // AppSettingsView/DownloadsView в их !embedded-режиме).
+        .navigationTitle("История")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if !embedded {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Готово") { dismiss() }
+                }
+            }
+        }
         .navigationDestination(for: HistoryEntry.self) { entry in
             MangaDetailView(slug: entry.media.apiSlug, fallbackTitle: entry.media.displayTitle,
                              coverURL: entry.media.cover?.bestURL, item: entry.media)
         }
         .background { if embedded { InteractivePopGesture() } }
-    }
-
-    // MARK: Шапка — заголовок и кнопка закрытия плавают раздельно
-
-    private var header: some View {
-        ZStack {
-            // Без стекла под текстом — просто заголовок, ничем не подложенный.
-            Text("История")
-                .font(.headline)
-                .foregroundStyle(Theme.textPrimary)
-
-            HStack {
-                // Стрелка назад вместо крестика — экран открывается ПОВЕРХ
-                // меню (см. SideMenuView.showHistory), а не как отдельный
-                // самостоятельный лист, так что "назад" точнее по смыслу, чем "закрыть".
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(width: 44, height: 44)
-                }
-                .glassEffect(.regular.interactive(), in: Circle())
-                .fadeInOnAppear()
-
-                Spacer()
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
     }
 
     // MARK: Поиск (снизу, над главной панелью)

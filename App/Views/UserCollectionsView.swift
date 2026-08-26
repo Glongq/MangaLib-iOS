@@ -12,7 +12,6 @@ struct UserCollectionsView: View {
     var showsOwnHeader: Bool = true
 
     @StateObject private var vm: UserCollectionsViewModel
-    @Environment(\.dismiss) private var dismiss
 
     init(userId: Int, showsOwnHeader: Bool = true) {
         self.userId = userId
@@ -23,41 +22,16 @@ struct UserCollectionsView: View {
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            VStack(spacing: 0) {
-                if showsOwnHeader { header }
-                content
-            }
+            content
         }
-        .toolbar(.hidden, for: .navigationBar)
+        // showsOwnHeader — обычный push (не встроен в профиль): родной
+        // системный заголовок + системный back chevron, никакого своего
+        // кода (эталон — Настройки/Загрузки). Без него — навбар скрыт,
+        // шапку рисует ProfileView.topBar (см. AccountInfoView).
+        .navigationTitle("Коллекции")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(showsOwnHeader ? .visible : .hidden, for: .navigationBar)
         .task { await vm.loadIfNeeded() }
-    }
-
-    /// Позиция кнопки "назад" и заголовка — та же, что и в шапке "Профиль"
-    /// (см. AccountInfoView.header: padding.top 14) — раньше здесь было 8,
-    /// тот же не замеченный явно, но тот же самый перекос, что и у
-    /// Комментариев/Друзей/Списков тайтлов рядом в том же меню профиля.
-    private var header: some View {
-        ZStack {
-            Text("Коллекции").font(.headline).foregroundStyle(Theme.textPrimary)
-            HStack {
-                backButton
-                Spacer()
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
-    }
-
-    private var backButton: some View {
-        Button { dismiss() } label: {
-            Image(systemName: "chevron.left")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: 44, height: 44)
-        }
-        .glassEffect(.regular.interactive(), in: Circle())
-        .fadeInOnAppear()
     }
 
     @ViewBuilder
