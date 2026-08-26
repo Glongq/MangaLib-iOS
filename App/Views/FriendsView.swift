@@ -70,7 +70,7 @@ struct FriendsView: View {
     @ViewBuilder
     private var content: some View {
         if vm.isLoading && vm.visible.isEmpty {
-            Spacer(); ProgressView().tint(Theme.accent); Spacer()
+            skeletonList
         } else if let error = vm.errorMessage, vm.visible.isEmpty {
             emptyState(icon: "wifi.exclamationmark", text: error)
         } else if vm.visible.isEmpty && vm.didLoadCurrent {
@@ -92,6 +92,35 @@ struct FriendsView: View {
             }
             .scrollIndicators(.hidden)
         }
+    }
+
+    /// Скелетон на первую загрузку — по прямой просьбе, вместо голого
+    /// спиннера. Форма строки повторяет friendRow ниже (аватар 52×52 +
+    /// пара строк текста).
+    private var skeletonList: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                ForEach(0..<6, id: \.self) { _ in friendSkeletonRow }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+        }
+        .scrollIndicators(.hidden)
+        .allowsHitTesting(false)
+    }
+
+    private var friendSkeletonRow: some View {
+        HStack(spacing: 12) {
+            SkeletonBox()
+                .frame(width: 52, height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            VStack(alignment: .leading, spacing: 6) {
+                SkeletonBar(width: 130)
+                SkeletonBar(width: 80, height: 10)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
     }
 
     private func friendRow(_ entry: FriendshipEntry) -> some View {

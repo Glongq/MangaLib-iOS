@@ -5,7 +5,7 @@ import SwiftUI
 /// GET /bookmarks/folder/{userId} и GET /bookmarks?status=&user_id=&page=.
 struct UserBookmarksView: View {
     let userId: Int
-    /// false — экран встроен в ProfileView (см. ProfileView.subScreenContent):
+    /// false — экран встроен в ProfileView (см. ProfileView.subScreenLayer):
     /// своя шапка/кнопка "назад" не рисуется, вместо неё общая, "перетекающая"
     /// шапка профиля (по прямой просьбе — иначе кнопка "назад" здесь и кнопка
     /// профиля были бы двумя РАЗНЫМИ View на разных экранах, а перетечь друг
@@ -77,12 +77,36 @@ struct UserBookmarksView: View {
     @ViewBuilder
     private var emptyOrLoadingFolders: some View {
         if vm.isLoadingFolders {
-            Spacer(); ProgressView().tint(Theme.accent); Spacer()
+            VStack(spacing: 0) {
+                folderChipsSkeleton
+                Spacer()
+                skeletonGrid
+            }
         } else if let error = vm.errorMessage {
             emptyState(icon: "wifi.exclamationmark", text: error)
         } else {
             emptyState(icon: "square.stack.3d.up", text: "Списки пусты")
         }
+    }
+
+    /// Скелетон на первую загрузку (папки ещё не пришли) — по прямой
+    /// просьбе, вместо голого спиннера. Форма — та же, что у настоящих
+    /// folderChips/grid ниже, просто на плейсхолдерах SkeletonBox/SkeletonBar.
+    private var folderChipsSkeleton: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(0..<3, id: \.self) { _ in
+                    SkeletonBox()
+                        .frame(width: 90, height: Theme.pillControlHeight)
+                        .clipShape(Capsule())
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+        .scrollIndicators(.hidden)
+        .padding(.top, 4)
+        .padding(.bottom, 20)
+        .allowsHitTesting(false)
     }
 
     private var folderChips: some View {
@@ -134,10 +158,39 @@ struct UserBookmarksView: View {
         }
     }
 
+    /// Скелетон сетки — та же ширина карточки, что и у настоящей (см.
+    /// content/grid), плюс независимый GeometryReader, чтобы её можно было
+    /// показать и до того, как папки вообще пришли (см.
+    /// emptyOrLoadingFolders), не дожидаясь layout настоящей content.
+    private var skeletonGrid: some View {
+        GeometryReader { proxy in
+            let cardWidth = MangaCardView.gridCardWidth(
+                totalWidth: proxy.size.width,
+                columns: gridColumnsCount,
+                spacing: gridSpacing,
+                containerPadding: 16
+            )
+            let columns = Array(repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing), count: gridColumnsCount)
+            ScrollView {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                    ForEach(0..<9, id: \.self) { _ in
+                        SkeletonBox()
+                            .aspectRatio(2 / 3, contentMode: .fill)
+                            .frame(width: cardWidth)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .allowsHitTesting(false)
+    }
+
     @ViewBuilder
     private func grid(cardWidth: CGFloat) -> some View {
         if vm.isLoadingItems && vm.items.isEmpty {
-            ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 40)
+            skeletonGrid
         } else if vm.items.isEmpty {
             emptyState(icon: "books.vertical", text: "Пусто")
         } else {

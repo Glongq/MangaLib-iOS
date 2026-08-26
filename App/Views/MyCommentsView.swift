@@ -69,7 +69,7 @@ struct MyCommentsView: View {
     @ViewBuilder
     private var content: some View {
         if vm.isLoading && vm.comments.isEmpty {
-            Spacer(); ProgressView().tint(Theme.accent); Spacer()
+            skeletonList
         } else if let error = vm.errorMessage, vm.comments.isEmpty {
             emptyState(icon: "wifi.exclamationmark", text: error) { Task { await vm.reload() } }
         } else if vm.visible.isEmpty && vm.didLoad {
@@ -90,6 +90,35 @@ struct MyCommentsView: View {
                 .padding(.bottom, 90)
             }
             .scrollIndicators(.hidden)
+        }
+    }
+
+    /// Скелетон на первую загрузку — по прямой просьбе, вместо голого
+    /// спиннера. Форма строки повторяет commentCard ниже (обложка 60×84 +
+    /// пара строк текста), на плейсхолдерах SkeletonBox/SkeletonBar.
+    private var skeletonList: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                ForEach(0..<6, id: \.self) { _ in commentSkeletonRow }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+        }
+        .scrollIndicators(.hidden)
+        .allowsHitTesting(false)
+    }
+
+    private var commentSkeletonRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            SkeletonBox()
+                .frame(width: 60, height: 84)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 6) {
+                SkeletonBar(width: 140)
+                SkeletonBar(width: 220, height: 10)
+                SkeletonBar(width: 170, height: 10)
+                SkeletonBar(width: 70, height: 10)
+            }
         }
     }
 

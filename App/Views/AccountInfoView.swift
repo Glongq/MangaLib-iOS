@@ -36,21 +36,21 @@ struct ProfileView: View {
     @State private var cancellingFriendRequest = false
     /// Какой из "быстрых" разделов сейчас открыт ВНУТРИ профиля, вместо
     /// push'а через NavigationLink на отдельный экран — по прямой просьбе
-    /// сделать так, чтобы левая кнопка шапки (щит ↔ назад) плавно
-    /// ПЕРЕТЕКАЛА одна в другую, а не просто появлялась/исчезала отдельно.
-    /// Настоящий морф (.contentTransition(.symbolEffect(.replace))) работает
-    /// только когда это ОДНА И ТА ЖЕ View, у которой меняется systemName —
-    /// а два разных экрана, соединённых через push NavigationStack, всегда
-    /// две РАЗНЫЕ View (проверено — см. предыдущую попытку с .glassEffectID
-    /// через push, эффекта не было вообще). Поэтому раздел теперь просто
-    /// подменяет контент под ОБЩЕЙ, постоянной шапкой (topBar) вместо пуша.
+    /// сделать так, чтобы левая кнопка шапки (щит ↔ назад) плавно перетекала
+    /// одна в другую (см. topBar), а не просто появлялась/исчезала отдельно:
+    /// два разных экрана, соединённых через push NavigationStack, всегда
+    /// ДВЕ РАЗНЫЕ View (проверено — см. предыдущую попытку с .glassEffectID
+    /// через push, эффекта не было вообще), а перетечь друг в друга может
+    /// только ОДНА и та же View. Поэтому раздел теперь просто подменяет
+    /// контент под ОБЩЕЙ, постоянной шапкой (topBar) вместо пуша.
     @State private var subScreen: ProfileSubScreen?
-    /// Направление смены контента (см. subScreen) — вперёд (открыли раздел)
-    /// или назад (вернулись в профиль): по прямой просьбе контент должен не
-    /// просто растворяться/проявляться на месте, а "перелистываться" —
-    /// новая страница едет СПРАВА и вытесняет старую (уезжающую влево) при
-    /// открытии раздела, и наоборот при возврате (см. contentTransition).
-    @State private var goingForward = true
+    /// Разделы, которые хоть раз открывали за время жизни этого экрана —
+    /// однажды смонтированный раздел остаётся в дереве насовсем (просто
+    /// уезжает за кадр, см. subScreenLayer), поэтому его @StateObject и уже
+    /// загруженные данные не создаются и не грузятся заново при повторном
+    /// открытии (по прямой просьбе — "постоянно подгружает вкладки, вместо
+    /// того чтобы это сделать 1 раз").
+    @State private var openedScreens: Set<ProfileSubScreen> = []
 
     enum ProfileSubScreen: Hashable {
         case bookmarks, comments, collections, friends
@@ -77,41 +77,31 @@ struct ProfileView: View {
             ZStack(alignment: .top) {
                 Theme.background.ignoresSafeArea()
 
-                Group {
-                    if let profile, !profile.canViewProfile {
-                        closedState
-                    } else if let subScreen {
-                        // Раздел вместо пуша — см. subScreen/openSubScreen. Отступ
-                        // сверху = высота topBar (он теперь рисуется ОТДЕЛЬНЫМ
-                        // слоем поверх, а не частью прокручиваемого контента).
-                        subScreenContent(subScreen)
-                            .padding(.top, Self.topBarHeight)
-                    } else {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 18) {
-                                heroBanner
-                                infoBlock
+                if let profile, !profile.canViewProfile {
+                    closedState
+                } else {
+                    // Корневой профиль и каждый открывавшийся хоть раз раздел —
+                    // ОДНОВРЕМЕННО в дереве (см. openedScreens/subScreenLayer),
+                    // просто со смещением/прозрачностью не-активного. Раньше
+                    // раздел был отдельной веткой if/else и полностью
+                    // уничтожался при закрытии — @StateObject внутри (вместе со
+                    // всеми загруженными данными) создавался заново при каждом
+                    // повторном открытии, отсюда жалоба "постоянно подгружает
+                    // вместо того чтобы сделать 1 раз". Теперь однажды открытый
+                    // раздел остаётся смонтированным и просто уезжает за кадр —
+                    // данные грузятся только один раз за всё время жизни экрана.
+                    ZStack {
+                        profileRootContent
+                            .opacity(subScreen == nil ? 1 : 0)
+                            .offset(x: subScreen == nil ? 0 : -Self.slideDistance)
+                            .allowsHitTesting(subScreen == nil)
 
-                                if profile?.canViewStatistics ?? true {
-                                    statsSection("Статистика по жанрам", stats?.genres ?? [])
-                                    statsSection("Статистика по тегам", stats?.tags ?? [])
-                                }
-
-                                quickButtons
-
-                                if isSelf { actions }
-                            }
-                            .padding(.bottom, 40)
-                        }
-                        .scrollIndicators(.hidden)
+                        subScreenLayer(.bookmarks)
+                        subScreenLayer(.comments)
+                        subScreenLayer(.collections)
+                        subScreenLayer(.friends)
                     }
                 }
-                // "Перелистывание" вместо простого растворения — по прямой
-                // просьбе (было .blurFade, выглядело как резкое пропадание/
-                // появление): новая страница едет с той стороны, откуда
-                // логически появляется (справа — открыли раздел, слева —
-                // вернулись), старая уезжает в противоположную сторону.
-                .transition(contentTransition)
 
                 // topBar — ОТДЕЛЬНЫМ слоем поверх (не часть прокручиваемого
                 // heroBanner, как раньше), т.к. должен оставаться ОДНОЙ и той
@@ -196,22 +186,16 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// См. goingForward — направление задаёт, с какой стороны едет новая
-    /// страница и куда уезжает старая (см. body.contentTransition).
-    private var contentTransition: AnyTransition {
-        goingForward
-            ? .asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
-                           removal: .move(edge: .leading).combined(with: .opacity))
-            : .asymmetric(insertion: .move(edge: .leading).combined(with: .opacity),
-                           removal: .move(edge: .trailing).combined(with: .opacity))
-    }
-
     // MARK: Шапка (постоянная topBar поверх + баннер/аватар/статистика под ней)
 
     /// Высота topBar (46 кнопка + 14 отступ сверху + 12 снизу) — heroBanner
     /// ниже отступает на эту же величину, чтобы аватар не залезал под неё;
-    /// subScreenContent тоже использует её же для своего верхнего отступа.
+    /// subScreenLayer тоже использует её же для своего верхнего отступа.
     private static let topBarHeight: CGFloat = 72
+    /// Смещение "за кадр" для неактивного корня/раздела (см. subScreenLayer)
+    /// — заведомо больше ширины любого экрана, чтобы уезжающая сторона была
+    /// гарантированно не видна и не кликабельна до конца анимации.
+    private static let slideDistance: CGFloat = 500
 
     /// Постоянный слой поверх всего — заголовок по центру + кнопки по краям.
     /// ОДНА и та же View независимо от того, открыт ли раздел (subScreen).
@@ -242,10 +226,7 @@ struct ProfileView: View {
             HStack {
                 Button {
                     if subScreen != nil {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            goingForward = false
-                            subScreen = nil
-                        }
+                        withAnimation(.easeInOut(duration: 0.2)) { subScreen = nil }
                     } else {
                         showAdditionalInfo = true
                     }
@@ -329,25 +310,60 @@ struct ProfileView: View {
         .frame(height: 230)
     }
 
-    /// Контент выбранного раздела (см. subScreen) — showsOwnHeader: false,
-    /// т.к. общую шапку рисует topBar выше, а не сам раздел.
+    /// Корневой контент профиля (баннер/статистика/быстрые кнопки) —
+    /// вынесен из body отдельным свойством, чтобы им можно было управлять
+    /// (opacity/offset) как одним из слоёв в общем ZStack (см. body).
+    private var profileRootContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                heroBanner
+                infoBlock
+
+                if profile?.canViewStatistics ?? true {
+                    statsSection("Статистика по жанрам", stats?.genres ?? [])
+                    statsSection("Статистика по тегам", stats?.tags ?? [])
+                }
+
+                quickButtons
+
+                if isSelf { actions }
+            }
+            .padding(.bottom, 40)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    /// Один раздел (см. subScreen/openedScreens) — смонтирован, только если
+    /// его хоть раз открывали (ленивая, но НЕОДНОКРАТНАЯ загрузка), и после
+    /// этого остаётся в дереве насовсем: активный раздел — на месте,
+    /// остальные (включая уже закрытые) — просто уезжают за кадр
+    /// (opacity/offset), а не удаляются — поэтому их @StateObject/данные не
+    /// пересоздаются и не грузятся заново при повторном открытии.
     @ViewBuilder
-    private func subScreenContent(_ screen: ProfileSubScreen) -> some View {
-        switch screen {
-        case .bookmarks:
-            if let id = resolvedId { UserBookmarksView(userId: id, showsOwnHeader: false) }
-        case .comments:
-            MyCommentsView(userId: resolvedId, showsOwnHeader: false)
-        case .collections:
-            if let id = resolvedId { UserCollectionsView(userId: id, showsOwnHeader: false) }
-        case .friends:
-            if let id = resolvedId { FriendsView(userId: id, showsOwnHeader: false) }
+    private func subScreenLayer(_ screen: ProfileSubScreen) -> some View {
+        if openedScreens.contains(screen) {
+            Group {
+                switch screen {
+                case .bookmarks:
+                    if let id = resolvedId { UserBookmarksView(userId: id, showsOwnHeader: false) }
+                case .comments:
+                    MyCommentsView(userId: resolvedId, showsOwnHeader: false)
+                case .collections:
+                    if let id = resolvedId { UserCollectionsView(userId: id, showsOwnHeader: false) }
+                case .friends:
+                    if let id = resolvedId { FriendsView(userId: id, showsOwnHeader: false) }
+                }
+            }
+            .padding(.top, Self.topBarHeight)
+            .opacity(subScreen == screen ? 1 : 0)
+            .offset(x: subScreen == screen ? 0 : Self.slideDistance)
+            .allowsHitTesting(subScreen == screen)
         }
     }
 
     private func openSubScreen(_ screen: ProfileSubScreen) {
         withAnimation(.easeInOut(duration: 0.2)) {
-            goingForward = true
+            openedScreens.insert(screen)
             subScreen = screen
         }
     }

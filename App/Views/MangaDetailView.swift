@@ -501,11 +501,17 @@ struct MangaDetailView: View {
             }
             .padding(.leading, 16)
             .padding(.top, 54) // ниже статус-бара, баннер уходит под него целиком
+            .fadeInOnAppear()
         }
         .overlay(alignment: .topTrailing) {
             // Кнопка "..." — стандартное системное Menu (стеклянный список iOS
             // по умолчанию), как попросили. Стеклянный круг вокруг иконки — как
-            // у кнопки "назад" слева.
+            // у кнопки "назад" слева. .menuStyle(.borderlessButton) — без него
+            // Menu добавляет СВОЙ системный "чехол" вокруг лейбла поверх уже
+            // заданных width/height/glassEffect, из-за чего круг оказывался на
+            // пару пунктов НЕ на той же высоте, что и обычная Button "назад"
+            // слева, хотя padding в коде у обеих буквально одинаковый (по
+            // прямой жалобе — "кнопки не выровнены ровно").
             Menu {
                 if let shareURL {
                     ShareLink(item: shareURL) {
@@ -523,8 +529,10 @@ struct MangaDetailView: View {
                     .frame(width: 48, height: 48)
                     .glassEffect(.regular, in: Circle())
             }
+            .menuStyle(.borderlessButton)
             .padding(.trailing, 16)
             .padding(.top, 54)
+            .fadeInOnAppear()
         }
     }
 

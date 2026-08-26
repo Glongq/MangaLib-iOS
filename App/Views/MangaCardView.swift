@@ -256,3 +256,18 @@ struct SkeletonBox: View {
             }
     }
 }
+
+/// Та же анимация шиммера, что и у SkeletonBox, но в виде узкой закруглённой
+/// полоски — плейсхолдер под строку текста в скелетон-строках списков (см.
+/// напр. MyCommentsView/FriendsView/UserCollectionsView/UserBookmarksView —
+/// плейсхолдер на первую загрузку вкладок профиля, по прямой просьбе).
+struct SkeletonBar: View {
+    var width: CGFloat? = nil
+    var height: CGFloat = 12
+
+    var body: some View {
+        SkeletonBox()
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: height / 2.5, style: .continuous))
+    }
+}

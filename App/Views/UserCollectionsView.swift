@@ -63,7 +63,7 @@ struct UserCollectionsView: View {
     @ViewBuilder
     private var content: some View {
         if vm.isLoading && vm.collections.isEmpty {
-            Spacer(); ProgressView().tint(Theme.accent); Spacer()
+            skeletonList
         } else if let error = vm.errorMessage, vm.collections.isEmpty {
             emptyState(icon: "wifi.exclamationmark", text: error)
         } else if vm.collections.isEmpty && vm.didLoad {
@@ -85,6 +85,34 @@ struct UserCollectionsView: View {
             }
             .scrollIndicators(.hidden)
         }
+    }
+
+    /// Скелетон на первую загрузку — по прямой просьбе, вместо голого
+    /// спиннера. Упрощённая форма collectionCard ниже (название + строка
+    /// статистики + место под веер превью), на плейсхолдерах SkeletonBar/Box.
+    private var skeletonList: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                ForEach(0..<4, id: \.self) { _ in collectionSkeletonCard }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+        }
+        .scrollIndicators(.hidden)
+        .allowsHitTesting(false)
+    }
+
+    private var collectionSkeletonCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SkeletonBar(width: 160, height: 16)
+            SkeletonBar(width: 200, height: 10)
+            SkeletonBox()
+                .frame(height: 56)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func collectionCard(_ collection: MangaCollection) -> some View {
