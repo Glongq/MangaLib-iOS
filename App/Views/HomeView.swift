@@ -86,8 +86,7 @@ struct HomeView: View {
             // поле активировано (см. SearchActivationRedirect в content),
             // сразу переключаемся на вкладку «Каталог» — там и живёт
             // реальный поиск (см. MangaCatalogView).
-            // .always — поиск сразу развёрнутой пилюлей (тот же фикс, что и в Каталоге).
-            .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .always), prompt: "Поиск по названию")
+            .searchable(text: $searchQuery, prompt: "Поиск по названию")
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(slug: item.apiSlug, fallbackTitle: item.displayTitle,
                                  coverURL: item.cover?.bestURL, item: item)

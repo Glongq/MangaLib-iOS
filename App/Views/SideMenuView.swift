@@ -90,7 +90,12 @@ struct SideMenuView: View {
                         searchSitesBlock
                     }
                     .padding(.horizontal, 16)
-                    .padding(.top, 22)
+                    // 22→22+56: та же логика, что и в Уведомлениях (см.
+                    // NotificationsView.list) — у Меню, как и у Уведомлений,
+                    // нет строки поиска под большим заголовком (у Закладок
+                    // есть, см. .searchable() там) — без компенсации контент
+                    // визуально начинался выше, чем в Закладках/Каталоге.
+                    .padding(.top, 22 + 56)
                     .padding(.bottom, 24)
                 }
                 .scrollIndicators(.hidden)

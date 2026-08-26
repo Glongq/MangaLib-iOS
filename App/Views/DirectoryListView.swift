@@ -23,9 +23,7 @@ struct DirectoryListView: View {
         }
         .navigationTitle(vm.kind.title)
         .navigationBarTitleDisplayMode(.inline)
-        // .always — поиск сразу развёрнутой пилюлей, без адаптивного
-        // сворачивания на стартовой позиции (тот же фикс, что и в Каталоге).
-        .searchable(text: $vm.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Поиск по названию")
+        .searchable(text: $vm.query, prompt: "Поиск по названию")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { sortMenu }
         }

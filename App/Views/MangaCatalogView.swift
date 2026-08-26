@@ -52,12 +52,7 @@ struct MangaCatalogView: View {
             // отступом. Сам раздутый отступ в покое ещё не решён.
             .navigationTitle("Каталог")
             .navigationBarTitleDisplayMode(.large)
-            // .navigationBarDrawer(displayMode: .always) — раньше без явного
-            // placement поле поиска на СТАРТОВОЙ (нескроленной) позиции иногда
-            // рисовалось в "свёрнутом" виде (система сама выбирала форму по
-            // автоматической эвристике) — по прямой просьбе зафиксировано:
-            // всегда полная пилюля под заголовком, а не адаптивная.
-            .searchable(text: $viewModel.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Поиск по названию")
+            .searchable(text: $viewModel.query, prompt: "Поиск по названию")
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(
                     slug: item.apiSlug,
