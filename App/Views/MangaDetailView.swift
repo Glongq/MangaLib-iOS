@@ -506,12 +506,16 @@ struct MangaDetailView: View {
         .overlay(alignment: .topTrailing) {
             // Кнопка "..." — стандартное системное Menu (стеклянный список iOS
             // по умолчанию), как попросили. Стеклянный круг вокруг иконки — как
-            // у кнопки "назад" слева. .menuStyle(.borderlessButton) — без него
-            // Menu добавляет СВОЙ системный "чехол" вокруг лейбла поверх уже
-            // заданных width/height/glassEffect, из-за чего круг оказывался на
-            // пару пунктов НЕ на той же высоте, что и обычная Button "назад"
-            // слева, хотя padding в коде у обеих буквально одинаковый (по
-            // прямой жалобе — "кнопки не выровнены ровно").
+            // у кнопки "назад" слева. Даже с .menuStyle(.borderlessButton) и
+            // идентичными width/height/padding голый Image как лейбл Menu
+            // рендерился на пару пунктов НЕ на той же высоте, что обычная
+            // Button "назад" — известный на iOS 26 нюанс: Menu считает
+            // внутренние отступы вокруг лейбла иначе, чем Button (подтверждено
+            // ответом инженера Apple DTS на форуме разработчиков). Фикс —
+            // обернуть содержимое в Label(title:icon:) вместо голого Image
+            // (Menu переходит на icon-only layout) + .compositingGroup() перед
+            // glassEffect, чтобы Menu считал вставки по уже готовому,
+            // "плоскому" слою, а не по промежуточному.
             Menu {
                 if let shareURL {
                     ShareLink(item: shareURL) {
@@ -523,11 +527,16 @@ struct MangaDetailView: View {
                 Button { /* ЗАГЛУШКА */ } label: { Label("Редактирование тайтла", systemImage: "pencil") }
                 Button { showDownloadSheet = true } label: { Label("Скачать тайтл", systemImage: "arrow.down.circle") }
             } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 48, height: 48)
-                    .glassEffect(.regular, in: Circle())
+                Label {
+                    EmptyView()
+                } icon: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .frame(width: 48, height: 48)
+                        .compositingGroup()
+                        .glassEffect(.regular, in: Circle())
+                }
             }
             .menuStyle(.borderlessButton)
             .padding(.trailing, 16)

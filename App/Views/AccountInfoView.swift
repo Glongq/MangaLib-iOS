@@ -188,10 +188,10 @@ struct ProfileView: View {
 
     // MARK: Шапка (постоянная topBar поверх + баннер/аватар/статистика под ней)
 
-    /// Высота topBar (46 кнопка + 14 отступ сверху + 12 снизу) — heroBanner
+    /// Высота topBar (44 кнопка + 14 отступ сверху + 12 снизу) — heroBanner
     /// ниже отступает на эту же величину, чтобы аватар не залезал под неё;
     /// subScreenLayer тоже использует её же для своего верхнего отступа.
-    private static let topBarHeight: CGFloat = 72
+    private static let topBarHeight: CGFloat = 70
     /// Смещение "за кадр" для неактивного корня/раздела (см. subScreenLayer)
     /// — заведомо больше ширины любого экрана, чтобы уезжающая сторона была
     /// гарантированно не видна и не кликабельна до конца анимации.
@@ -200,20 +200,17 @@ struct ProfileView: View {
     /// Постоянный слой поверх всего — заголовок по центру + кнопки по краям.
     /// ОДНА и та же View независимо от того, открыт ли раздел (subScreen).
     ///
-    /// Перетекание — тот же приём "блюр + прозрачность", что и у скрытия
-    /// интерфейса читалки по тапу (см. MangaReaderView.overlayUI и
-    /// AnyTransition.blurFade в Theme.swift, уже используется в
-    /// каталоге/закладках/уведомлениях/меню) — по прямой просьбе, а не
-    /// просто мгновенная смена иконки/текста:
-    /// - Заголовок и иконка слева — `.id(subScreen)` + `.transition(.blurFade)`.
-    ///   `.id()` заставляет SwiftUI считать это НОВОЙ вьюхой при смене
-    ///   subScreen, поэтому обычная смена контента (которая сама по себе
-    ///   .transition не подхватывает) превращается в настоящую
-    ///   вставку/удаление — старая версия блюрится и растворяется, новая
-    ///   проявляется из блюра, ОДНОВРЕМЕННО, а не резкий "щёлк".
-    /// - "Готово" — не удаляется/вставляется (не меняет id), а просто гасится
-    ///   тем же блюром+прозрачностью, пока открыт раздел, и тем же приёмом
-    ///   проявляется обратно при возврате.
+    /// - Иконка слева (щит ↔ назад) — настоящий морф SF Symbol через
+    ///   `.contentTransition(.symbolEffect(.replace))`: glassEffect-круг стоит
+    ///   СТАТИЧНО на самой Button (не пересоздаётся), меняется только
+    ///   systemName у Image — тот же приём, что уже работает в читалке (см.
+    ///   MangaReaderView.bookmarkButton), а не имитация через смену id.
+    /// - Заголовок и "Готово" — у Text/Capsule нет аналога symbolEffect,
+    ///   поэтому они по-прежнему на блюр-фейде (см. AnyTransition.blurFade в
+    ///   Theme.swift, тот же приём, что у скрытия интерфейса читалки по тапу):
+    ///   заголовок пересоздаётся через `.id(subScreen)` (иначе смена текста
+    ///   вообще не попадает под .transition), "Готово" просто гасится
+    ///   opacity+blur, пока открыт раздел, и так же проявляется обратно.
     private var topBar: some View {
         ZStack {
             Text(subScreen?.title ?? "Профиль")
@@ -226,7 +223,7 @@ struct ProfileView: View {
             HStack {
                 Button {
                     if subScreen != nil {
-                        withAnimation(.easeInOut(duration: 0.2)) { subScreen = nil }
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { subScreen = nil }
                     } else {
                         showAdditionalInfo = true
                     }
@@ -234,9 +231,8 @@ struct ProfileView: View {
                     Image(systemName: subScreen == nil ? "shield.lefthalf.filled" : "chevron.left")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(topTextColor)
-                        .frame(width: 46, height: 46)
-                        .id(subScreen)
-                        .transition(.blurFade(radius: 8))
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 44, height: 44)
                 }
                 .glassEffect(.regular.interactive(), in: Circle())
 
@@ -246,7 +242,7 @@ struct ProfileView: View {
                     Text("Готово")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(topTextColor)
-                        .padding(.horizontal, 18).frame(height: 46)
+                        .padding(.horizontal, 18).frame(height: 44)
                         .glassEffect(.regular.interactive(), in: Capsule())
                 }
                 .opacity(subScreen == nil ? 1 : 0)
@@ -362,7 +358,7 @@ struct ProfileView: View {
     }
 
     private func openSubScreen(_ screen: ProfileSubScreen) {
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
             openedScreens.insert(screen)
             subScreen = screen
         }
