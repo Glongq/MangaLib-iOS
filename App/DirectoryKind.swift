@@ -59,12 +59,17 @@ struct DirectoryKind {
         defaultSort: DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам")
     )
 
+    // Не хватало "По тайтлам" (titles_count) — по прямой просьбе добавлено,
+    // по той же аналогии с Командами/Издательствами выше (значение
+    // параметра то же самое, отдельного перехвата конкретно для /people не
+    // было).
     static let people = DirectoryKind(
         apiPath: "/people", sourceType: "people", title: "Люди", placeholderIcon: "person.crop.rectangle",
         targetModel: "people",
         sortOptions: [
-            DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам"),
-            DirectorySortOption(apiValue: "name", title: "По названию")
+            DirectorySortOption(apiValue: "name", title: "По названию"),
+            DirectorySortOption(apiValue: "titles_count", title: "По тайтлам"),
+            DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам")
         ],
         defaultSort: DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам")
     )
