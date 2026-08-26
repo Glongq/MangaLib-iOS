@@ -367,7 +367,7 @@ final class MangaDetailViewModel: ObservableObject {
     /// GET-ответах: корневой комментарий = 0, любой ответ = commentLevel
     /// родителя + 1.
     @discardableResult
-    func postComment(text: String, replyingTo: Comment? = nil) async -> Bool {
+    func postComment(text: String, spoilerLabel: String? = nil, replyingTo: Comment? = nil) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let mangaId = detail?.id else { return false }
         isPostingComment = true
@@ -375,7 +375,7 @@ final class MangaDetailViewModel: ObservableObject {
         let level = (replyingTo?.commentLevel).map { $0 + 1 } ?? 0
         do {
             let created = try await service.postComment(
-                postId: mangaId, text: trimmed,
+                postId: mangaId, text: trimmed, spoilerLabel: spoilerLabel,
                 commentLevel: level, parentComment: replyingTo?.id,
                 siteId: resolvedSiteId
             )

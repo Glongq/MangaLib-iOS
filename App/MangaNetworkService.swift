@@ -439,6 +439,16 @@ final class MangaNetworkService {
         try await performVoid(request)
     }
 
+    /// Добавить пользователя в игнор-лист (перестать видеть его комментарии) —
+    /// НЕ подтверждено перехватом (ни один захваченный запрос не содержал
+    /// такого действия, только `fields[]=ignored_by_user` в ответе команд).
+    /// Путь и метод — по аналогии с `/friendship/{userId}` выше; если сервер
+    /// ожидает другую форму, поправить по факту первого реального перехвата.
+    func addToIgnoreList(userId: Int) async throws {
+        let request = try makeRequest(path: "/ignore/\(userId)", queryItems: [], method: "POST")
+        try await performVoid(request)
+    }
+
     /// Список друзей пользователя — ПОДТВЕРЖДЕНО перехватом
     /// `GET /friendship?page=&user_id=&status=1`.
     func fetchFriends(userId: Int, page: Int = 1) async throws -> (friends: [FriendshipEntry], hasNextPage: Bool) {
@@ -758,10 +768,20 @@ final class MangaNetworkService {
     /// по аналогии (не гадание с нуля) — если сервер всё ещё вернёт 422, тело
     /// снова будет видно в NetworkLogsView и можно поправить точнее.
     /// `siteId` — см. комментарий у fetchComments(siteId:) выше, тот же смысл.
-    func postComment(postId: Int, postType: String = "manga", postPage: Int? = nil, text: String, commentLevel: Int, parentComment: Int? = nil, siteId: Int? = nil) async throws -> Comment {
+    /// `spoilerLabel` — ПОДТВЕРЖДЕНО реальным перехватом отправки спойлера
+    /// (см. ProseMirrorDoc.init(spoilerLabel:spoilerText:)): если задан,
+    /// комментарий целиком уходит одним spoilerInline-узлом вместо обычного
+    /// текстового.
+    func postComment(postId: Int, postType: String = "manga", postPage: Int? = nil, text: String, spoilerLabel: String? = nil, commentLevel: Int, parentComment: Int? = nil, siteId: Int? = nil) async throws -> Comment {
+        let doc: ProseMirrorDoc
+        if let spoilerLabel, !spoilerLabel.isEmpty {
+            doc = ProseMirrorDoc(spoilerLabel: spoilerLabel, spoilerText: text)
+        } else {
+            doc = ProseMirrorDoc(text: text)
+        }
         let payload = CommentPayload(
             post_id: postId, post_type: postType, post_page: postPage,
-            comment: ProseMirrorDoc(text: text),
+            comment: doc,
             comment_level: commentLevel,
             parent_comment: parentComment
         )
@@ -1491,6 +1511,9 @@ private struct CommentPayload: Encodable {
     /// синтезированный Encodable опускает nil-поля, так что для manga его нет).
     let post_page: Int?
     let comment: ProseMirrorDoc
+    /// ПОДТВЕРЖДЕНО реальным перехватом — сервер ожидает это поле даже у
+    /// комментария без вложений (пустой массив), а не его отсутствие.
+    let attachments: [String] = []
     let comment_level: Int
     let parent_comment: Int?
 }
@@ -1511,14 +1534,54 @@ private struct ProseMirrorDoc: Encodable {
     init(text: String) {
         content = text.components(separatedBy: "\n").map(ProseMirrorParagraph.init)
     }
+
+    /// Комментарий-спойлер целиком — ПОДТВЕРЖДЕНО реальным перехватом
+    /// отправки: один параграф из узла `spoilerInline` (плюс завершающий
+    /// текстовый узел с одним пробелом — сервер сам его добавляет в ответе,
+    /// повторяем то же самое, чтобы не расходиться с подтверждённой формой).
+    init(spoilerLabel: String, spoilerText: String) {
+        content = [ProseMirrorParagraph(spoilerLabel: spoilerLabel, spoilerText: spoilerText)]
+    }
 }
 
 private struct ProseMirrorParagraph: Encodable {
     let type = "paragraph"
-    let content: [ProseMirrorText]
+    let content: [ProseMirrorInline]
 
     init(_ text: String) {
-        content = text.isEmpty ? [] : [ProseMirrorText(text: text)]
+        content = text.isEmpty ? [] : [.text(text)]
+    }
+
+    init(spoilerLabel: String, spoilerText: String) {
+        content = [.spoiler(label: spoilerLabel, text: spoilerText), .text(" ")]
+    }
+}
+
+/// Один инлайн-узел параграфа — обычный текст ИЛИ спойлер. Форма спойлера
+/// ПОДТВЕРЖДЕНА реальным перехватом отправки: `{"type":"spoilerInline",
+/// "attrs":{"visibleText":"<подпись>"},"content":[{"type":"text",
+/// "text":"<скрытый текст>"}]}` — "visibleText" в запросе становится
+/// "data-spoiler-text" в HTML готового комментария (см. Comment.segments в
+/// MangaModels.swift).
+private enum ProseMirrorInline: Encodable {
+    case text(String)
+    case spoiler(label: String, text: String)
+
+    private enum CodingKeys: String, CodingKey { case type, text, attrs, content }
+    private struct Attrs: Encodable { let visibleText: String }
+    private struct InnerText: Encodable { let type = "text"; let text: String }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let value):
+            try c.encode("text", forKey: .type)
+            try c.encode(value, forKey: .text)
+        case .spoiler(let label, let value):
+            try c.encode("spoilerInline", forKey: .type)
+            try c.encode(Attrs(visibleText: label), forKey: .attrs)
+            try c.encode([InnerText(text: value)], forKey: .content)
+        }
     }
 }
 

@@ -72,6 +72,11 @@ struct MangaDetailView: View {
     }
     @State private var readerOpen: ReaderOpen?
     @State private var commentDraft = ""
+    /// Режим "весь комментарий — спойлер" (см. composeBar) — ПОДТВЕРЖДЕНО
+    /// реальным перехватом отправки, см. MangaNetworkService.postComment
+    /// (spoilerLabel:). Подпись по умолчанию — как в примере из перехвата.
+    @State private var spoilerMode = false
+    @State private var spoilerLabelDraft = "спойлер"
     @State private var showLoginForComment = false
 
     // MARK: Комментарии — доп. состояние UI (не сетевое, живёт только в этом View)
@@ -89,6 +94,14 @@ struct MangaDetailView: View {
     /// поэтому просто честно говорим, что функция скоро появится, а не
     /// притворяемся, что жалоба ушла.
     @State private var showReportComingSoon = false
+    /// Меню "•••" у комментария (см. commentMenu): "Ссылка на комментарий"
+    /// копирует ссылку вида .../manga/{slug}?section=comments&comment_id={id}
+    /// (формат подтверждён примером пользователя), "Добавить в игнор лист"
+    /// шлёт MangaNetworkService.addToIgnoreList (эндпоинт НЕ подтверждён
+    /// перехватом — см. комментарий там). showCommentLinkCopied/
+    /// showIgnoreResult — короткая обратная связь после действия.
+    @State private var showCommentLinkCopied = false
+    @State private var showIgnoreResult: String?
 
     /// Голос "+"/"-" за "Похожее" (см. similarSection/similarVoteColumn) —
     /// требует авторизации так же, как и комментарии; отдельный флаг вместо
@@ -2017,6 +2030,66 @@ struct MangaDetailView: View {
         } message: {
             Text("Отправка жалоб на комментарии пока не реализована.")
         }
+        .alert("Ссылка скопирована", isPresented: $showCommentLinkCopied) {
+            Button("Понятно", role: .cancel) {}
+        }
+        .alert("Игнор-лист", isPresented: Binding(
+            get: { showIgnoreResult != nil },
+            set: { if !$0 { showIgnoreResult = nil } }
+        )) {
+            Button("Понятно", role: .cancel) {}
+        } message: {
+            Text(showIgnoreResult ?? "")
+        }
+    }
+
+    /// Ссылка на конкретный комментарий — вида .../manga/{slug}?section=
+    /// comments&comment_id={id} (формат из примера пользователя). Хост берём
+    /// по фактическому сайту тайтла (resolvedSiteId), а не активному в меню —
+    /// комментарий мог быть открыт на карточке с другого сайта, чем выбран
+    /// сейчас глобально.
+    private func commentLink(_ comment: Comment) -> String {
+        let host = LibSite(rawValue: viewModel.resolvedSiteId ?? 0)?.host ?? SiteSession.shared.activeSite.host
+        return "https://\(host)/ru/manga/\(viewModel.slug)?section=comments&comment_id=\(comment.id)"
+    }
+
+    /// "•••" рядом с "Ответить"/"Жалоба" — "Ссылка на комментарий" (копирует
+    /// commentLink в буфер) и "Добавить в игнор лист" (см.
+    /// MangaNetworkService.addToIgnoreList — эндпоинт не подтверждён
+    /// перехватом, поэтому честно показываем ошибку, если сервер её вернёт).
+    @ViewBuilder
+    private func commentMenu(_ comment: Comment) -> some View {
+        Menu {
+            Button {
+                UIPasteboard.general.string = commentLink(comment)
+                showCommentLinkCopied = true
+            } label: {
+                Label("Ссылка на комментарий", systemImage: "link")
+            }
+
+            if let authorId = comment.author?.id, authorId > 0, authorId != AuthSession.shared.userId {
+                Button {
+                    guard AuthSession.shared.isLoggedIn else { showLoginForComment = true; return }
+                    Task { await addToIgnoreList(userId: authorId) }
+                } label: {
+                    Label("Добавить в игнор лист", systemImage: "eye.slash")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 20, height: 20)
+        }
+    }
+
+    private func addToIgnoreList(userId: Int) async {
+        do {
+            try await MangaNetworkService.shared.addToIgnoreList(userId: userId)
+            showIgnoreResult = "Пользователь добавлен в игнор-лист."
+        } catch {
+            showIgnoreResult = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     /// "Популярные/Старые/Новые" (меню сортировки) + "Настройки" (sheet) —
@@ -2081,7 +2154,8 @@ struct MangaDetailView: View {
                 // вкладке глав того же тайтла: центр по HStack + стрелка
                 // зажата в те же 34pt, а не «плавает» по своей intrinsic-высоте.
                 HStack(alignment: .center, spacing: 8) {
-                    TextField("Написать комментарий...", text: $commentDraft, axis: .vertical)
+                    TextField(spoilerMode ? "Скрытый текст спойлера..." : "Написать комментарий...",
+                              text: $commentDraft, axis: .vertical)
                         .lineLimit(1...4)
                         .foregroundStyle(Theme.textPrimary)
                         .padding(.horizontal, 14)
@@ -2091,11 +2165,13 @@ struct MangaDetailView: View {
                     let trimmed = commentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                     Button {
                         let text = commentDraft
+                        let label = spoilerMode ? spoilerLabelDraft.trimmingCharacters(in: .whitespacesAndNewlines) : nil
                         let parent = replyingTo
                         commentDraft = ""
                         replyingTo = nil
+                        spoilerMode = false
                         Task {
-                            let ok = await viewModel.postComment(text: text, replyingTo: parent)
+                            let ok = await viewModel.postComment(text: text, spoilerLabel: label, replyingTo: parent)
                             if !ok { commentDraft = text }
                         }
                     } label: {
@@ -2105,6 +2181,33 @@ struct MangaDetailView: View {
                     }
                     .frame(width: 34, height: 34)
                     .disabled(trimmed.isEmpty || viewModel.isPostingComment)
+                }
+
+                // Панель форматирования — пока только спойлер (см.
+                // MangaNetworkService.postComment(spoilerLabel:)). Тап по
+                // иконке "разворачивает вниз" поле подписи спойлера (по
+                // прямой просьбе), сам комментарий целиком уходит спойлером.
+                HStack(spacing: 10) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { spoilerMode.toggle() }
+                    } label: {
+                        Image(systemName: spoilerMode ? "eye.slash.fill" : "eye.slash")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(spoilerMode ? Theme.accent : Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 4)
+
+                if spoilerMode {
+                    TextField("Подпись спойлера", text: $spoilerLabelDraft)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 30)
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
         } else {
@@ -2301,11 +2404,10 @@ struct MangaDetailView: View {
                 }
                 .buttonStyle(.plain)
 
-                if !comment.text.isEmpty {
-                    // "Показать полностью" — НАД рядом Ответить/Жалоба/голоса
-                    // (по прямой просьбе), см. ExpandableCommentText.
-                    ExpandableCommentText(text: comment.text)
-                }
+                // Спойлеры (см. Comment.segments) — свои чипы вместо
+                // обычного текста; без них — старое поведение целиком
+                // ("Показать полностью" НАД рядом Ответить/Жалоба/голоса).
+                CommentBodyView(comment: comment)
 
                 // Низ сообщения: "Ответить" слева, "Жалоба" + счётчик
                 // голосов (▲ число ▼) справа — как попросили.
@@ -2321,6 +2423,8 @@ struct MangaDetailView: View {
                         Text("Жалоба").font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
                     }
                     .buttonStyle(.plain)
+
+                    commentMenu(comment)
 
                     // Реальное голосование (эндпоинт подтверждён). Плюс/минус —
                     // кнопки; активный голос подсвечивается; без входа — предложить войти.

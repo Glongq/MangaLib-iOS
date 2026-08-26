@@ -2074,8 +2074,53 @@ struct Comment: Decodable, Identifiable, Hashable {
     /// HTML → читаемый плоский текст: сервер оборачивает комментарий в
     /// <p>...</p> (возможно, с <br> внутри для переносов) — простой безопасный
     /// стрип тегов, без NSAttributedString (полноценный rich-text не нужен).
+    /// Спойлеры (см. segments) тут тоже разворачиваются в открытый текст —
+    /// это поле только для мест, где сегменты не нужны (превью/ссылка и т.п.).
     var text: String {
-        var s = commentHTML
+        Self.htmlToPlainText(commentHTML)
+    }
+
+    /// Комментарий, разбитый на обычный текст и спойлеры — ПОДТВЕРЖДЕНО
+    /// реальным перехватом (см. MangaNetworkService.ProseMirrorInline):
+    /// `<span class="spoiler-node" data-spoiler-type="inline"
+    /// data-spoiler-text="<подпись>"><span class="spoiler-node__text">
+    /// <скрытый текст></span></span>`. Порядок сегментов сохраняется — так
+    /// собирается ряд Text/спойлер-чипов в UI (см. MangaDetailView.
+    /// CommentBodyView).
+    var segments: [CommentSegment] {
+        let html = commentHTML
+        guard let regex = Self.spoilerRegex, !html.isEmpty else {
+            let plain = Self.htmlToPlainText(html)
+            return plain.isEmpty ? [] : [.text(plain)]
+        }
+        let ns = html as NSString
+        var result: [CommentSegment] = []
+        var cursor = 0
+        for match in regex.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+            if match.range.location > cursor {
+                let before = ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+                let plain = Self.htmlToPlainText(before)
+                if !plain.isEmpty { result.append(.text(plain)) }
+            }
+            let label = Self.htmlToPlainText(ns.substring(with: match.range(at: 1)))
+            let content = Self.htmlToPlainText(ns.substring(with: match.range(at: 2)))
+            result.append(.spoiler(label: label, text: content))
+            cursor = match.range.location + match.range.length
+        }
+        if cursor < ns.length {
+            let after = ns.substring(with: NSRange(location: cursor, length: ns.length - cursor))
+            let plain = Self.htmlToPlainText(after)
+            if !plain.isEmpty { result.append(.text(plain)) }
+        }
+        return result
+    }
+
+    private static let spoilerRegex = try? NSRegularExpression(
+        pattern: #"<span class="spoiler-node"[^>]*data-spoiler-text="([^"]*)"[^>]*><span class="spoiler-node__text">([\s\S]*?)</span></span>"#
+    )
+
+    private static func htmlToPlainText(_ html: String) -> String {
+        var s = html
         for (tag, replacement) in [("</p><p>", "\n"), ("<br/>", "\n"), ("<br />", "\n"), ("<br>", "\n")] {
             s = s.replacingOccurrences(of: tag, with: replacement)
         }
@@ -2085,6 +2130,12 @@ struct Comment: Decodable, Identifiable, Hashable {
         }
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+}
+
+/// Один сегмент разобранного комментария — см. Comment.segments.
+enum CommentSegment: Hashable {
+    case text(String)
+    case spoiler(label: String, text: String)
 }
 
 extension Array where Element == Comment {

@@ -83,6 +83,67 @@ struct ExpandableCommentText: View {
     }
 }
 
+/// Тело комментария: если есть хотя бы один спойлер (см. Comment.segments) —
+/// обычный текст + чипы-спойлеры друг под другом (тап по чипу раскрывает
+/// его СВОЙ, независимо от остальных), без 5-строчного лимита/затемнения
+/// (сочетать оба сразу — отдельная задача, спойлеры на практике редки). Без
+/// спойлеров — прежнее поведение целиком (ExpandableCommentText: 5 строк,
+/// затемнение, "Показать полностью").
+struct CommentBodyView: View {
+    let comment: Comment
+
+    var body: some View {
+        let segments = comment.segments
+        if segments.contains(where: { if case .spoiler = $0 { return true } else { return false } }) {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                    switch segment {
+                    case .text(let s):
+                        Text(s).font(.subheadline).foregroundStyle(Theme.textPrimary)
+                    case .spoiler(let label, let text):
+                        SpoilerSegmentView(label: label, text: text)
+                    }
+                }
+            }
+        } else if !comment.text.isEmpty {
+            ExpandableCommentText(text: comment.text)
+        }
+    }
+}
+
+/// Один спойлер внутри комментария — пунктирная рамка с подписью автора
+/// (`data-spoiler-text`, см. Comment.segments), тап раскрывает скрытый текст
+/// на месте. Своё состояние — раскрытие одного спойлера не трогает соседние.
+private struct SpoilerSegmentView: View {
+    let label: String
+    let text: String
+
+    @State private var revealed = false
+
+    var body: some View {
+        if revealed {
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(Theme.textPrimary)
+        } else {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { revealed = true }
+            } label: {
+                Text(label.isEmpty ? "Спойлер" : label)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
 #Preview {
     ScrollView {
         VStack(alignment: .leading, spacing: 16) {
