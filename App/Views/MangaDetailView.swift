@@ -1426,13 +1426,23 @@ struct MangaDetailView: View {
                     CatalogNavigator.shared.openCatalog(filter: CatalogNavigator.tagFilter(id: t.id))
                 })
             }
-            let chipItems = [franchiseChip, ageRatingChip].compactMap { $0 } + genreItems + tagItems
+            let chipItems = [ageRatingChip].compactMap { $0 } + genreItems + tagItems
             if !chipItems.isEmpty {
                 // Тот же единый отступ 10pt заголовок→контент, что у
                 // Описания/Похожего/Связанного.
                 VStack(alignment: .leading, spacing: 10) {
                     blockTitle("Жанры и теги")
                     CollapsibleChips(items: chipItems)
+                }
+            }
+
+            // Франшиза — ОТДЕЛЬНАЯ подкатегория ПОД "Жанры и теги" (по прямой
+            // просьбе — раньше была вмешана первым чипом в тот же ряд, теперь
+            // свой заголовок и свой блок), см. franchiseChip.
+            if let franchiseChip {
+                VStack(alignment: .leading, spacing: 10) {
+                    blockTitle("Франшиза")
+                    CollapsibleChips(items: [franchiseChip])
                 }
             }
 
@@ -2359,10 +2369,11 @@ struct MangaDetailView: View {
         return detail.isBlockedByLicenseOrModeration
     }
 
-    /// Чип-подкатегория франшизы (по прямой просьбе) — первым в общем ряду
-    /// чипов, отдельным акцентным цветом (не как обычный жанр и не как тег с
-    /// "#"), тап пушит FranchiseView (см. franchiseTarget/navigationDestination
-    /// в body). Требует fields[]=franchise (см. MangaDetail.franchise).
+    /// Чип франшизы — своя ОТДЕЛЬНАЯ подкатегория под "Жанры и теги" (см. её
+    /// использование в aboutTab), не вмешан в общий ряд чипов жанров/тегов.
+    /// Акцентный цвет (не как обычный жанр и не как тег с "#"), тап пушит
+    /// FranchiseView (см. franchiseTarget/navigationDestination в body).
+    /// Требует fields[]=franchise (см. MangaDetail.franchise).
     private var franchiseChip: CollapsibleChips.Item? {
         guard let ref = viewModel.detail?.franchise else { return nil }
         return .init(text: ref.name, tint: Theme.accent, onTap: { franchiseTarget = ref })
