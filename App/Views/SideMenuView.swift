@@ -71,63 +71,41 @@ struct SideMenuView: View {
     // Раскрыт ли список выбора активного сайта в блоке профиля (см. siteRow).
     @State private var siteExpanded = false
 
-    // Схлопывание шапки при скролле — тот же механизм, что в Каталоге/
-    // Закладках (см. комментарии у setHeaderCollapsed там): вниз — крупный
-    // заголовок "Меню" блюр-фейдом уходит, вместо него появляется маленький
-    // ЦЕНТРИРОВАННЫЙ заголовок (как у нативного navigationTitle в .large,
-    // сжимающегося в .inline); вверх (хоть чуть-чуть) — всё возвращается.
-    @State private var headerCollapsed = false
-    @State private var lastScrollOffset: CGFloat = 0
-    // Та же защита от дребезга во время анимации схлопывания, что и в
-    // Каталоге/Закладках — см. комментарий у isHeaderAnimating там.
-    @State private var isHeaderAnimating = false
-
     var body: some View {
         NavigationStack(path: $path) {
             ZStack {
                 Theme.background.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    header
-
-                    ScrollView {
-                        // Блоки-карточки с отступами между ними — как на референсе
-                        // (лист аккаунта Apple): каждая логическая группа пунктов —
-                        // отдельная закруглённая карточка, между карточками зазор.
-                        VStack(spacing: 34) {
-                            block1
-                            quickBlock
-                            profileSection
-                            catalogSection
-                            otherSection
-                            searchSitesBlock
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 22)
-                        .padding(.bottom, 24)
+                ScrollView {
+                    // Блоки-карточки с отступами между ними — как на референсе
+                    // (лист аккаунта Apple): каждая логическая группа пунктов —
+                    // отдельная закруглённая карточка, между карточками зазор.
+                    VStack(spacing: 34) {
+                        block1
+                        quickBlock
+                        profileSection
+                        catalogSection
+                        otherSection
+                        searchSitesBlock
                     }
-                    .scrollIndicators(.hidden)
-                    // Тот же приём, что в Каталоге/Закладках — onScrollGeometryChange
-                    // вместо самодельного GeometryReader-датчика. В отличие от
-                    // них — по прямой просьбе — развёрнутое состояние
-                    // возвращается ТОЛЬКО у самого верха (newOffset <= 0), а
-                    // не при любом небольшом скролле вверх.
-                    .onScrollGeometryChange(for: CGFloat.self) { geo in
-                        geo.contentOffset.y
-                    } action: { _, newOffset in
-                        defer { lastScrollOffset = newOffset }
-                        guard !isHeaderAnimating else { return }
-                        let delta = newOffset - lastScrollOffset
-                        if newOffset <= 0 {
-                            setHeaderCollapsed(false)
-                        } else if delta > 6 {
-                            setHeaderCollapsed(true)
-                        }
-                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 22)
+                    .padding(.bottom, 24)
                 }
+                .scrollIndicators(.hidden)
             }
-            // У меню своя шапка «Меню» — системный навбар прячем.
-            .toolbar(.hidden, for: .navigationBar)
+            // Родной системный заголовок — 1-в-1 как в Каталоге/Закладках
+            // (см. те же файлы): маленький, центрированный, всегда виден,
+            // без своего "схлопывания"/блюр-фейда. Раньше здесь был
+            // самодельный крупный левый заголовок, уезжающий блюр-фейдом при
+            // скролле и заменяющийся маленьким центрированным (имитация
+            // .large→.inline) — но, в отличие от Каталога/Закладок, у Меню
+            // нет строки поиска, чтобы занять освободившееся место сверху:
+            // после скролла верх экрана просто пустовал бы. Оставляем
+            // заголовок видимым всегда — тот же компонент, что и везде
+            // теперь, и раздел, в котором находишься, виден постоянно.
+            .navigationTitle("Меню")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: MenuRoute.self) { route in
                 switch route {
                 case .history:    HistoryView(embedded: true)
@@ -143,46 +121,6 @@ struct SideMenuView: View {
                 }
             }
         }
-    }
-
-    // MARK: Шапка
-
-    private var header: some View {
-        // Кнопку-крестик убрали — меню теперь обычная вкладка (не sheet),
-        // закрывать/сворачивать её через "крестик" незачем: переключение на
-        // другой раздел происходит через нижнюю панель, как и у любой другой вкладки.
-        //
-        // Развёрнуто — крупный заголовок слева, тот же размер (29pt bold),
-        // что и в шапках Каталога/Закладок. Схлопнуто — маленький ЦЕНТРИРОВАННЫЙ
-        // заголовок, как у нативного navigationTitle при переходе из .large
-        // в .inline (см. AppSettingsView/StubView) — тот эффект и попросили
-        // повторить здесь, только в размере большого состояния как в Каталоге.
-        ZStack {
-            if headerCollapsed {
-                Text("Меню")
-                    .font(.headline)
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .transition(.blurFade)
-            } else {
-                // Без иконки — просто текст, как в шапках Каталога/Закладок
-                // (тот же паддинг 16, то же left-aligned .frame(maxWidth: .infinity)).
-                Text("Меню")
-                    .font(.system(size: 29, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.blurFade)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-    }
-
-    private func setHeaderCollapsed(_ value: Bool) {
-        guard headerCollapsed != value else { return }
-        isHeaderAnimating = true
-        withAnimation(.easeInOut(duration: 0.22)) { headerCollapsed = value }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isHeaderAnimating = false }
     }
 
     // MARK: Блоки (по группировке, которую попросили)
