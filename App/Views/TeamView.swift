@@ -3,8 +3,10 @@ import SwiftUI
 /// Страница переводчика (команды) — шапка теперь 1-в-1 как в карточке
 /// тайтла (см. MangaDetailView.heroHeader): растягивающийся хиро-фон,
 /// плавающая обложка-аватар (2:3, как обычная обложка тайтла), название
-/// поверх, своя стеклянная кнопка "назад" вместо системной шапки (её нет
-/// вообще), и там же, где у тайтла "..." — кнопка подписки на уведомления.
+/// поверх. Кнопки "назад"/подписки — настоящие toolbar-элементы поверх
+/// прозрачного системного navigation bar (см. .toolbar в body — та же схема,
+/// что и в MangaDetailView, и по той же причине: полностью скрытый бар ломал
+/// интерактивный свайп-назад с экранов с .searchable(), напр. DirectoryListView).
 /// Метаданные — те же чипы, что и у тайтла (infoBlock), включая отдельным
 /// чипом количество участников. Список тайтлов с поиском/фильтрами/
 /// сортировкой — из CharacterView (тот же паттерн, target_model=team).
@@ -89,8 +91,19 @@ struct TeamView: View {
             .scrollIndicators(.hidden)
             .coordinateSpace(name: "teamScroll")
             .background(Theme.background)
-            .toolbar(.hidden, for: .navigationBar)
             .ignoresSafeArea(edges: .top)
+            // РЕАЛЬНЫЙ системный navigation bar (не .toolbar(.hidden...), как
+            // было) — прозрачный, без заголовка. См. подробное объяснение у
+            // того же фикса в MangaDetailView.body: скрытый бар целиком ломал
+            // интерполяцию navigation bar при интерактивном свайпе-назад с
+            // экранов с .searchable() (напр. DirectoryListView) — "просвечивал"
+            // поиск сквозь эту карточку во время жеста.
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { backButton }
+                ToolbarItem(placement: .topBarTrailing) { subscribeButton }
+            }
         }
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
@@ -193,8 +206,6 @@ struct TeamView: View {
                 .offset(y: -stretch)
             }
         }
-        .overlay(alignment: .topLeading) { backButton }
-        .overlay(alignment: .topTrailing) { subscribeButton }
     }
 
     /// По прямой просьбе — по центру (не слева, как в MangaDetailView), и
@@ -222,19 +233,16 @@ struct TeamView: View {
         .onTapGesture { showTeamNames = true }
     }
 
-    /// Своя стеклянная кнопка "назад" вместо системной шапки — по прямой
-    /// просьбе убрать шапку целиком, оставив только её. 1-в-1
-    /// MangaDetailView.heroHeader (тот же стиль/позиция).
+    /// Кнопка "назад" — настоящий toolbar-элемент (см. .toolbar в body), тот
+    /// же стиль/размер (44×44, .interactive() стекло), что и в MangaDetailView.
     private var backButton: some View {
         Button { dismiss() } label: {
             Image(systemName: "chevron.left")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
-                .frame(width: 48, height: 48)
-                .glassEffect(.regular, in: Circle())
+                .frame(width: 44, height: 44)
         }
-        .padding(.leading, 16)
-        .padding(.top, 54)
+        .glassEffect(.regular.interactive(), in: Circle())
     }
 
     /// Там, где у тайтла кнопка "..." — здесь подписка на уведомления
@@ -266,13 +274,11 @@ struct TeamView: View {
             }
             .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 16)
-            .frame(height: 46)
+            .frame(height: 44)
             .glassEffect(.regular.interactive(), in: Capsule())
         }
         .buttonStyle(.plain)
         .disabled(vm.isTogglingSubscription)
-        .padding(.trailing, 16)
-        .padding(.top, 54)
     }
 
     // MARK: Метаданные — те же чипы, что у тайтла (MangaDetailView.infoBlock)

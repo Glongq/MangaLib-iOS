@@ -3,9 +3,11 @@ import SwiftUI
 /// Экран персонажа — тот же "полный стиль", что и у страницы переводчика
 /// (см. TeamView), по прямой просьбе, только со своими данными: хиро-фон +
 /// плавающая обложка-аватар (2:3, размер = карточка тайтла в гриде ниже) по
-/// центру экрана, своя стеклянная кнопка "назад" вместо системной шапки,
-/// название по центру с тапом на sheet со всеми названиями, метаданные
-/// чипами, описание, список тайтлов с поиском/фильтрами/сортировкой.
+/// центру экрана, кнопка "назад" — toolbar-элемент над прозрачным системным
+/// navigation bar (см. .toolbar в body, та же схема, что в TeamView/
+/// MangaDetailView), название по центру с тапом на sheet со всеми
+/// названиями, метаданные чипами, описание, список тайтлов с поиском/
+/// фильтрами/сортировкой.
 ///
 /// Чего у персонажа НЕТ (в отличие от команды) — соответствующие блоки
 /// TeamView просто отсутствуют здесь, а не имитируются пустыми:
@@ -81,8 +83,17 @@ struct CharacterView: View {
             .scrollIndicators(.hidden)
             .coordinateSpace(name: "characterScroll")
             .background(Theme.background)
-            .toolbar(.hidden, for: .navigationBar)
             .ignoresSafeArea(edges: .top)
+            // РЕАЛЬНЫЙ системный navigation bar (не .toolbar(.hidden...), как
+            // было) — прозрачный, без заголовка. Та же причина, что и в
+            // MangaDetailView/TeamView: полностью скрытый бар ломал
+            // интерактивный свайп-назад с экранов с .searchable() (напр.
+            // DirectoryListView) — "просвечивал" поиск сквозь эту карточку.
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { backButton }
+            }
         }
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
@@ -169,7 +180,6 @@ struct CharacterView: View {
                 .offset(y: -stretch)
             }
         }
-        .overlay(alignment: .topLeading) { backButton }
     }
 
     /// По центру, тап открывает sheet со всеми названиями — 1-в-1
@@ -194,7 +204,8 @@ struct CharacterView: View {
         .onTapGesture { showCharacterNames = true }
     }
 
-    /// Своя стеклянная кнопка "назад" — 1-в-1 TeamView.backButton. Кнопки на
+    /// Кнопка "назад" — настоящий toolbar-элемент (см. .toolbar в body), тот
+    /// же стиль/размер, что и TeamView.backButton/MangaDetailView. Кнопки на
     /// месте "..."/подписки здесь нет — эндпоинт подписки на персонажа нигде
     /// не подтверждён (см. комментарий у структуры).
     private var backButton: some View {
@@ -202,11 +213,9 @@ struct CharacterView: View {
             Image(systemName: "chevron.left")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
-                .frame(width: 48, height: 48)
-                .glassEffect(.regular, in: Circle())
+                .frame(width: 44, height: 44)
         }
-        .padding(.leading, 16)
-        .padding(.top, 54)
+        .glassEffect(.regular.interactive(), in: Circle())
     }
 
     // MARK: Метаданные — чипы (как у тайтла/команды), по центру

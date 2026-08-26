@@ -100,8 +100,7 @@ struct MyCommentsView: View {
     private func commentRow(_ c: UserComment) -> some View {
         if let slug = c.slugURL {
             NavigationLink {
-                MangaDetailView(slug: slug, fallbackTitle: c.title ?? "", coverURL: c.coverURL,
-                                 pinnedHeader: !showsOwnHeader)
+                MangaDetailView(slug: slug, fallbackTitle: c.title ?? "", coverURL: c.coverURL)
             } label: {
                 commentCard(c)
             }

@@ -5,7 +5,9 @@ import SwiftUI
 /// плюс кнопка подписки поверх баннера, как у TeamView (эти два вида, в
 /// отличие от персонажа, реально поддерживают POST /favorites — см.
 /// DirectoryKind.sourceType). Параметризован DirectoryKind вместо отдельного
-/// файла на каждый вид.
+/// файла на каждый вид. Кнопки "назад"/подписки — toolbar-элементы над
+/// прозрачным системным navigation bar (см. .toolbar в body, та же схема,
+/// что в MangaDetailView/TeamView/CharacterView).
 struct DirectoryDetailView: View {
     let kind: DirectoryKind
     let slugURL: String
@@ -66,8 +68,20 @@ struct DirectoryDetailView: View {
             .scrollIndicators(.hidden)
             .coordinateSpace(name: "directoryScroll")
             .background(Theme.background)
-            .toolbar(.hidden, for: .navigationBar)
             .ignoresSafeArea(edges: .top)
+            // РЕАЛЬНЫЙ системный navigation bar (не .toolbar(.hidden...), как
+            // было) — прозрачный, без заголовка. Та же причина, что и в
+            // MangaDetailView/TeamView/CharacterView: полностью скрытый бар
+            // ломал интерактивный свайп-назад с экранов с .searchable()
+            // (напр. DirectoryListView) — "просвечивал" поиск сквозь карточку.
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { backButton }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if kind.sourceType != nil { subscribeButton }
+                }
+            }
         }
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
@@ -140,10 +154,6 @@ struct DirectoryDetailView: View {
                 .offset(y: -stretch)
             }
         }
-        .overlay(alignment: .topLeading) { backButton }
-        .overlay(alignment: .topTrailing) {
-            if kind.sourceType != nil { subscribeButton }
-        }
     }
 
     private var titleBlockOverlay: some View {
@@ -167,11 +177,9 @@ struct DirectoryDetailView: View {
             Image(systemName: "chevron.left")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
-                .frame(width: 48, height: 48)
-                .glassEffect(.regular, in: Circle())
+                .frame(width: 44, height: 44)
         }
-        .padding(.leading, 16)
-        .padding(.top, 54)
+        .glassEffect(.regular.interactive(), in: Circle())
     }
 
     /// Реальный POST /favorites {source_type: kind.sourceType} — та же
@@ -198,13 +206,11 @@ struct DirectoryDetailView: View {
             }
             .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 16)
-            .frame(height: 46)
+            .frame(height: 44)
             .glassEffect(.regular.interactive(), in: Capsule())
         }
         .buttonStyle(.plain)
         .disabled(vm.isTogglingSubscription)
-        .padding(.trailing, 16)
-        .padding(.top, 54)
     }
 
     // MARK: Метаданные

@@ -177,8 +177,7 @@ struct UserBookmarksView: View {
                             slug: entry.media.apiSlug,
                             fallbackTitle: entry.media.displayTitle,
                             coverURL: entry.media.cover?.bestURL,
-                            item: entry.media,
-                            pinnedHeader: !showsOwnHeader
+                            item: entry.media
                         )
                     } label: {
                         MangaCardView(item: entry.media, width: cardWidth)
