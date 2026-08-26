@@ -331,7 +331,9 @@ struct DirectoryDetailView: View {
     private func filterLabel(_ f: DirectoryDetailViewModel.SiteFilter) -> String {
         switch f {
         case .all: return "Все"
-        case .site(let s): return siteLabel(s)
+        case .site(let s):
+            guard let count = vm.titlesCount(for: s) else { return siteLabel(s) }
+            return "\(siteLabel(s)) \(count)"
         }
     }
 

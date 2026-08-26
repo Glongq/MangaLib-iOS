@@ -283,11 +283,11 @@ struct CharacterView: View {
         Menu {
             Picker("Тип", selection: $vm.siteFilter) {
                 ForEach(vm.availableFilters) { f in
-                    Text(Self.filterLabel(f)).tag(f)
+                    Text(filterLabel(f)).tag(f)
                 }
             }
         } label: {
-            pill(icon: "square.grid.2x2", text: Self.filterLabel(vm.siteFilter))
+            pill(icon: "square.grid.2x2", text: filterLabel(vm.siteFilter))
         }
     }
 
@@ -339,10 +339,14 @@ struct CharacterView: View {
         }
     }
 
-    private static func filterLabel(_ f: CharacterViewModel.SiteFilter) -> String {
+    /// Число тайтлов рядом с названием сайта ("Манга 6") — как попросили,
+    /// по образцу FranchiseView. Не static (нужен доступ к vm.titlesCount).
+    private func filterLabel(_ f: CharacterViewModel.SiteFilter) -> String {
         switch f {
         case .all: return "Все"
-        case .site(let s): return siteLabel(s)
+        case .site(let s):
+            guard let count = vm.titlesCount(for: s) else { return Self.siteLabel(s) }
+            return "\(Self.siteLabel(s)) \(count)"
         }
     }
 
