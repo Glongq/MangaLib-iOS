@@ -3,10 +3,9 @@ import SwiftUI
 /// Страница переводчика (команды) — шапка теперь 1-в-1 как в карточке
 /// тайтла (см. MangaDetailView.heroHeader): растягивающийся хиро-фон,
 /// плавающая обложка-аватар (2:3, как обычная обложка тайтла), название
-/// поверх. Кнопки "назад"/подписки — настоящие toolbar-элементы поверх
-/// прозрачного системного navigation bar (см. .toolbar в body — та же схема,
-/// что и в MangaDetailView, и по той же причине: полностью скрытый бар ломал
-/// интерактивный свайп-назад с экранов с .searchable(), напр. DirectoryListView).
+/// поверх. Кнопки "назад"/подписки — ручной слой поверх прозрачного
+/// системного navigation bar (см. pinnedTopBar/transparentSystemNavigationBar
+/// в body — та же схема, что и в MangaDetailView, и по той же причине).
 /// Метаданные — те же чипы, что и у тайтла (infoBlock), включая отдельным
 /// чипом количество участников. Список тайтлов с поиском/фильтрами/
 /// сортировкой — из CharacterView (тот же паттерн, target_model=team).
@@ -95,13 +94,12 @@ struct TeamView: View {
             .ignoresSafeArea(edges: .top)
         }
 
-        pinnedTopBar
+        pinnedTopBar.alignedWithTransparentNavigationBar()
         }
-        // Свой back/подписка поверх hero вместо системной navigation bar —
-        // см. подробную историю решения (три раунда багов с задвоением
-        // системной кнопки "назад" при реальном toolbar-баре) в комментарии
-        // у того же фикса в MangaDetailView.body.
-        .toolbar(.hidden, for: .navigationBar)
+        // Прозрачный, но РЕАЛЬНО существующий пустой системный бар — см.
+        // подробную причину в transparentSystemNavigationBar()
+        // (App/InteractivePopGesture.swift) и в том же фиксе в MangaDetailView.body.
+        .transparentSystemNavigationBar()
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
         .sheet(isPresented: $showFilters) {
@@ -117,14 +115,11 @@ struct TeamView: View {
         }
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
         .sheet(isPresented: $showAllMembers) { TeamMembersSheet(members: vm.members) }
-        // Интерактивный свайп-жест «назад» выключен — та же причина, что и
-        // в MangaDetailView (см. DisableInteractivePopGesture).
-        .background(DisableInteractivePopGesture())
     }
 
     /// Кнопки "назад"/подписка — отдельный слой поверх скролла, единая
     /// HStack-строка (общая ось выравнивания по высоте), не toolbar (см.
-    /// историю решения у .toolbar(.hidden...) выше).
+    /// историю решения у transparentSystemNavigationBar() выше).
     private var pinnedTopBar: some View {
         HStack {
             backButton

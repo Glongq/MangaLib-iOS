@@ -3,9 +3,9 @@ import SwiftUI
 /// Экран персонажа — тот же "полный стиль", что и у страницы переводчика
 /// (см. TeamView), по прямой просьбе, только со своими данными: хиро-фон +
 /// плавающая обложка-аватар (2:3, размер = карточка тайтла в гриде ниже) по
-/// центру экрана, кнопка "назад" — toolbar-элемент над прозрачным системным
-/// navigation bar (см. .toolbar в body, та же схема, что в TeamView/
-/// MangaDetailView), название по центру с тапом на sheet со всеми
+/// центру экрана, кнопка "назад" — ручной слой над прозрачным системным
+/// navigation bar (см. transparentSystemNavigationBar() в body, та же схема,
+/// что в TeamView/MangaDetailView), название по центру с тапом на sheet со всеми
 /// названиями, метаданные чипами, описание, список тайтлов с поиском/
 /// фильтрами/сортировкой.
 ///
@@ -90,12 +90,12 @@ struct CharacterView: View {
         backButton
             .padding(.horizontal, 16)
             .padding(.top, 8)
+            .alignedWithTransparentNavigationBar()
         }
-        // Свой back поверх hero вместо системной navigation bar — см.
-        // подробную историю решения в комментарии у того же фикса в
-        // MangaDetailView.body (три раунда багов с задвоением системной
-        // кнопки "назад" при реальном toolbar-баре).
-        .toolbar(.hidden, for: .navigationBar)
+        // Прозрачный, но РЕАЛЬНО существующий пустой системный бар — см.
+        // подробную причину в transparentSystemNavigationBar()
+        // (App/InteractivePopGesture.swift) и в том же фиксе в MangaDetailView.body.
+        .transparentSystemNavigationBar()
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
         .sheet(isPresented: $showFilters) {
@@ -109,9 +109,6 @@ struct CharacterView: View {
             TitleNamesSheet(rusName: vm.detail?.rusName, originalName: vm.detail?.name ?? fallbackName, engName: nil, otherNames: [])
                 .presentationDetents([.medium, .large])
         }
-        // Интерактивный свайп-жест «назад» выключен — та же причина, что и
-        // в MangaDetailView (см. DisableInteractivePopGesture).
-        .background(DisableInteractivePopGesture())
     }
 
     // MARK: Шапка (1-в-1 TeamView.heroHeader)

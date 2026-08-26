@@ -5,9 +5,9 @@ import SwiftUI
 /// плюс кнопка подписки поверх баннера, как у TeamView (эти два вида, в
 /// отличие от персонажа, реально поддерживают POST /favorites — см.
 /// DirectoryKind.sourceType). Параметризован DirectoryKind вместо отдельного
-/// файла на каждый вид. Кнопки "назад"/подписки — toolbar-элементы над
-/// прозрачным системным navigation bar (см. .toolbar в body, та же схема,
-/// что в MangaDetailView/TeamView/CharacterView).
+/// файла на каждый вид. Кнопки "назад"/подписки — ручной слой над
+/// прозрачным системным navigation bar (см. transparentSystemNavigationBar()
+/// в body, та же схема, что в MangaDetailView/TeamView/CharacterView).
 struct DirectoryDetailView: View {
     let kind: DirectoryKind
     let slugURL: String
@@ -72,21 +72,17 @@ struct DirectoryDetailView: View {
             .ignoresSafeArea(edges: .top)
         }
 
-        pinnedTopBar
+        pinnedTopBar.alignedWithTransparentNavigationBar()
         }
-        // Свой back/подписка поверх hero вместо системной navigation bar —
-        // см. подробную историю решения в комментарии у того же фикса в
-        // MangaDetailView.body (три раунда багов с задвоением системной
-        // кнопки "назад" при реальном toolbar-баре).
-        .toolbar(.hidden, for: .navigationBar)
+        // Прозрачный, но РЕАЛЬНО существующий пустой системный бар — см.
+        // подробную причину в transparentSystemNavigationBar()
+        // (App/InteractivePopGesture.swift) и в том же фиксе в MangaDetailView.body.
+        .transparentSystemNavigationBar()
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
         .sheet(isPresented: $showFilters) {
             FilterView(initial: vm.filter) { vm.apply(filter: $0) }
         }
-        // Интерактивный свайп-жест «назад» выключен — та же причина, что и
-        // в MangaDetailView (см. DisableInteractivePopGesture).
-        .background(DisableInteractivePopGesture())
     }
 
     /// Кнопки "назад"/подписка — отдельный слой поверх скролла, единая
