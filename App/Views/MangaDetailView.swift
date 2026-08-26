@@ -1324,15 +1324,25 @@ struct MangaDetailView: View {
     // стеклянных капсул — как просили.
 
     private var tabBar: some View {
-        // Три вкладки поровну делят ширину (было: HStack по естественной
-        // ширине текста + Spacer по краям) — при большом числе глав подпись
-        // "Главы 1234" раньше расширяла свою вкладку и весь центрированный
-        // блок съезжал в сторону; теперь у каждой вкладки фиксированная 1/3
-        // ширины, поэтому позиции вкладок не зависят от длины текста.
+        // Было: три вкладки поровну делят ширину (1/3 каждая) — из-за этого
+        // "О тайтле" (короче) и "Комментарии" (длиннее) оказывались на
+        // РАЗНОМ расстоянии от краёв экрана, хотя обе вкладки крайние (по
+        // прямой жалобе — "разный зазор у О тайтлы и комментарии от углов").
+        // Теперь вкладки — по естественной ширине текста, с фиксированным
+        // зазором МЕЖДУ ними, а весь ряд центрируется целиком как один блок
+        // (Spacer с обеих сторон снаружи) — "Главы NNNN" всегда в середине
+        // этого блока, а расстояние от "О тайтле"/"Комментарии" до краёв
+        // экрана теперь буквально одинаковое (не по совпадению, а потому что
+        // Spacer слева и справа делят оставшееся место поровну), плюс сами
+        // вкладки визуально ближе друг к другу, как и просили ("сблизить").
         HStack(spacing: 0) {
-            tabButton("О тайтле", .about)
-            tabButton(displayChapters.isEmpty ? "Главы" : "Главы \(max(viewModel.totalChapters, displayChapters.count))", .chapters)
-            tabButton("Комментарии", .comments)
+            Spacer(minLength: 0)
+            HStack(spacing: 28) {
+                tabButton("О тайтле", .about)
+                tabButton(displayChapters.isEmpty ? "Главы" : "Главы \(max(viewModel.totalChapters, displayChapters.count))", .chapters)
+                tabButton("Комментарии", .comments)
+            }
+            Spacer(minLength: 0)
         }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.separator).frame(height: 1)
@@ -1347,7 +1357,6 @@ struct MangaDetailView: View {
                 .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-                .frame(maxWidth: .infinity)
                 .padding(.bottom, 13)
                 .overlay(alignment: .bottom) {
                     // Подчёркивание рисуется ТОЛЬКО у активной вкладки, но с
