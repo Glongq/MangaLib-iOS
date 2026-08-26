@@ -3,9 +3,14 @@ import Foundation
 /// Один вариант сортировки списка каталожной сущности — сервер у каждого
 /// вида принимает свой набор `sort_by` (см. DirectoryKind), общего enum не
 /// делаем, чтобы не городить значения, каких конкретный вид не поддерживает.
+/// systemImage — та же иконка, что и у одноимённого варианта в FranchiseSort
+/// (name/subscribersCount/titlesCount имеют один смысл и там, и тут) — чтобы
+/// иконки сортировки были узнаваемы одинаково во всех подобных меню, а не
+/// только текст без иконки, как было раньше (см. DirectoryListView.sortMenu).
 struct DirectorySortOption: Identifiable, Hashable {
     let apiValue: String
     let title: String
+    let systemImage: String
     var id: String { apiValue }
 }
 
@@ -41,49 +46,50 @@ struct DirectoryKind {
         apiPath: "/teams", sourceType: nil, title: "Команды", placeholderIcon: "person.3.fill",
         targetModel: "team",
         sortOptions: [
-            DirectorySortOption(apiValue: "likes_count", title: "По лайкам"),
-            DirectorySortOption(apiValue: "titles_count", title: "По тайтлам"),
-            DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам"),
-            DirectorySortOption(apiValue: "name", title: "По названию")
+            DirectorySortOption(apiValue: "likes_count", title: "По лайкам", systemImage: "heart"),
+            DirectorySortOption(apiValue: "titles_count", title: "По тайтлам", systemImage: "books.vertical"),
+            DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам", systemImage: "person.2"),
+            DirectorySortOption(apiValue: "name", title: "По названию", systemImage: "textformat.abc")
         ],
-        defaultSort: DirectorySortOption(apiValue: "likes_count", title: "По лайкам")
+        defaultSort: DirectorySortOption(apiValue: "likes_count", title: "По лайкам", systemImage: "heart")
     )
 
     // Не хватало "По тайтлам" (titles_count) — по прямой просьбе добавлено,
-    // та же аналогия, что и у Людей ниже.
+    // та же аналогия, что и у Людей ниже. Порядок — название → тайтлы →
+    // подписчики, как и во франшизах (см. FranchiseSort).
     static let character = DirectoryKind(
         apiPath: "/character", sourceType: nil, title: "Персонажи", placeholderIcon: "face.smiling",
         targetModel: "character",
         sortOptions: [
-            DirectorySortOption(apiValue: "name", title: "По названию"),
-            DirectorySortOption(apiValue: "titles_count", title: "По тайтлам"),
-            DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам")
+            DirectorySortOption(apiValue: "name", title: "По названию", systemImage: "textformat.abc"),
+            DirectorySortOption(apiValue: "titles_count", title: "По тайтлам", systemImage: "books.vertical"),
+            DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам", systemImage: "person.2")
         ],
-        defaultSort: DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам")
+        defaultSort: DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам", systemImage: "person.2")
     )
 
     // Не хватало "По тайтлам" (titles_count) — по прямой просьбе добавлено,
     // по той же аналогии с Командами/Издательствами выше (значение
     // параметра то же самое, отдельного перехвата конкретно для /people не
-    // было).
+    // было). Порядок — название → тайтлы → подписчики, как и во франшизах.
     static let people = DirectoryKind(
         apiPath: "/people", sourceType: "people", title: "Люди", placeholderIcon: "person.crop.rectangle",
         targetModel: "people",
         sortOptions: [
-            DirectorySortOption(apiValue: "name", title: "По названию"),
-            DirectorySortOption(apiValue: "titles_count", title: "По тайтлам"),
-            DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам")
+            DirectorySortOption(apiValue: "name", title: "По названию", systemImage: "textformat.abc"),
+            DirectorySortOption(apiValue: "titles_count", title: "По тайтлам", systemImage: "books.vertical"),
+            DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам", systemImage: "person.2")
         ],
-        defaultSort: DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам")
+        defaultSort: DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам", systemImage: "person.2")
     )
 
     static let publisher = DirectoryKind(
         apiPath: "/publisher", sourceType: "publisher", title: "Издательства", placeholderIcon: "building.2",
         targetModel: "publisher",
         sortOptions: [
-            DirectorySortOption(apiValue: "name", title: "По названию"),
-            DirectorySortOption(apiValue: "titles_count", title: "По тайтлам")
+            DirectorySortOption(apiValue: "name", title: "По названию", systemImage: "textformat.abc"),
+            DirectorySortOption(apiValue: "titles_count", title: "По тайтлам", systemImage: "books.vertical")
         ],
-        defaultSort: DirectorySortOption(apiValue: "titles_count", title: "По тайтлам")
+        defaultSort: DirectorySortOption(apiValue: "titles_count", title: "По тайтлам", systemImage: "books.vertical")
     )
 }

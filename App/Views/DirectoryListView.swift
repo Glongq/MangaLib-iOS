@@ -82,7 +82,7 @@ struct DirectoryListView: View {
                 get: { vm.sort }, set: { vm.changeSort($0) }
             )) {
                 ForEach(vm.kind.sortOptions) { option in
-                    Text(option.title).tag(option)
+                    Label(option.title, systemImage: option.systemImage).tag(option)
                 }
             }
             if vm.kind.sortOptions.count > 1 {

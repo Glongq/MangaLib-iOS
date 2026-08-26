@@ -120,7 +120,9 @@ enum CharacterTitleSort: String, CaseIterable, Identifiable {
 /// sort_by=name|subscribes_count|titles_count&sort_type=asc|desc` (все три
 /// значения реально встречались, см. MangaNetworkService.fetchFranchises).
 enum FranchiseSort: String, CaseIterable, Identifiable {
-    case name, subscribersCount, titlesCount
+    // Порядок объявления = порядок в меню (CaseIterable.allCases) — по
+    // прямой просьбе: название → тайтлы → подписчики.
+    case name, titlesCount, subscribersCount
 
     var id: String { rawValue }
 
