@@ -2306,7 +2306,14 @@ struct MangaDetailView: View {
     /// местах выше по цепочке: commentsList → commentsTab → body).
     /// AnyView стирает конкретный тип, разрывая эту рекурсию — стандартный,
     /// единственный способ сделать рекурсивную SwiftUI-вью.
-    private func commentNode(_ comment: Comment, grouped: [Int: [Comment]]) -> AnyView {
+    /// `forceExpanded` — унаследовано от родителя: если ХОТЬ ОДИН предок по
+    /// цепочке уже был явно развёрнут (см. кнопку "Ещё комментарии" ниже),
+    /// весь поддерево под ним считается развёрнутым СРАЗУ на всю глубину, а
+    /// не только на один уровень — раньше при глубокой вложенности каждый
+    /// следующий уровень заново упирался в collapseFromLevel и показывал
+    /// СВОЮ кнопку "Ещё комментарии", так что до конца ветки приходилось
+    /// нажимать её по одному разу на каждый уровень (по прямой жалобе).
+    private func commentNode(_ comment: Comment, grouped: [Int: [Comment]], forceExpanded: Bool = false) -> AnyView {
         // Было children.sort{...} (мутирующий вызов, возвращает Void) — внутри
         // @ViewBuilder-контекста это ломало компиляцию отдельно от проблемы
         // выше; заменено на .sorted (не мутирует, обычное присваивание).
@@ -2314,6 +2321,7 @@ struct MangaDetailView: View {
             let arr = grouped[comment.id] ?? []
             return viewModel.commentSort == .popular ? arr.sorted { $0.score > $1.score } : arr
         }()
+        let expandedHere = forceExpanded || expandedThreads.contains(comment.id)
 
         return AnyView(
             VStack(alignment: .leading, spacing: 10) {
@@ -2322,11 +2330,12 @@ struct MangaDetailView: View {
                 if !children.isEmpty {
                     // Сворачиваем ответы по умолчанию, если их СОБСТВЕННЫЙ уровень
                     // вложенности достиг порога из настроек (см. collapseFromLevel) —
-                    // если пользователь уже разворачивал ЭТУ ветку вручную, не
-                    // сворачиваем снова (см. expandedThreads).
+                    // если пользователь уже разворачивал ЭТУ ветку (или любого её
+                    // предка) вручную, не сворачиваем снова (см. expandedHere).
                     if let firstLevel = children.first?.commentLevel,
-                       Double(firstLevel) >= collapseFromLevel, !expandedThreads.contains(comment.id) {
-                        // Показывает ВСЕ уже загруженные ответы этой ветки разом —
+                       Double(firstLevel) >= collapseFromLevel, !expandedHere {
+                        // Показывает ВСЕ уже загруженные ответы этой ветки разом,
+                        // причём СРАЗУ на всю глубину (см. forceExpanded выше) —
                         // без парной кнопки "Скрыть" после (по прямой просьбе,
                         // однонаправленно, как и было).
                         // Тот же HStack(threadBars + spacing 8), что и в
@@ -2355,7 +2364,7 @@ struct MangaDetailView: View {
                                 // визуальная граница между "текст родителя" и
                                 // "текст ответа", раз они в одном фоне.
                                 Divider().overlay(Theme.separator)
-                                commentNode(child, grouped: grouped)
+                                commentNode(child, grouped: grouped, forceExpanded: expandedHere)
                             }
                         }
                     }
@@ -2434,15 +2443,16 @@ struct MangaDetailView: View {
                 // ("Показать полностью" НАД рядом Ответить/Жалоба/голоса).
                 CommentBodyView(comment: comment)
 
-                // Низ сообщения: "Ответить" слева, "Жалоба" + счётчик
-                // голосов (▲ число ▼) справа — как попросили.
+                // Низ сообщения: "Ответить"/"Жалоба"/"•••" вместе слева,
+                // счётчик голосов (▲ число ▼) справа — по прямой просьбе
+                // выровнять первые три рядом друг с другом (раньше "Жалоба"
+                // с "•••" были прижаты к голосам справа, а "Ответить" —
+                // отдельно слева).
                 HStack(spacing: 16) {
                     Button { replyingTo = comment } label: {
                         Text("Ответить").font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
                     }
                     .buttonStyle(.plain)
-
-                    Spacer(minLength: 0)
 
                     Button { showReportComingSoon = true } label: {
                         Text("Жалоба").font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
@@ -2450,6 +2460,8 @@ struct MangaDetailView: View {
                     .buttonStyle(.plain)
 
                     commentMenu(comment)
+
+                    Spacer(minLength: 0)
 
                     // Реальное голосование (эндпоинт подтверждён). Плюс/минус —
                     // кнопки; активный голос подсвечивается; без входа — предложить войти.
