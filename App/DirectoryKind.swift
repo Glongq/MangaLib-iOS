@@ -31,10 +31,21 @@ struct DirectoryKind {
     let sortOptions: [DirectorySortOption]
     let defaultSort: DirectorySortOption
 
+    // "По лайкам" (likes_count) — ПОДТВЕРЖДЕНО перехватом. Остальные три —
+    // ПО АНАЛОГИИ с уже подтверждёнными sort_by у Персонажей/Людей/
+    // Издательств ниже (subscribes_count/name/titles_count — те же самые
+    // значения параметра, просто у команд отдельно такого перехвата не
+    // было) — если сервер какое-то из них не примет, он его просто
+    // проигнорирует (см. общий комментарий DirectoryKind выше про `q`).
     static let team = DirectoryKind(
         apiPath: "/teams", sourceType: nil, title: "Команды", placeholderIcon: "person.3.fill",
         targetModel: "team",
-        sortOptions: [DirectorySortOption(apiValue: "likes_count", title: "По лайкам")],
+        sortOptions: [
+            DirectorySortOption(apiValue: "likes_count", title: "По лайкам"),
+            DirectorySortOption(apiValue: "titles_count", title: "По тайтлам"),
+            DirectorySortOption(apiValue: "subscribes_count", title: "По подписчикам"),
+            DirectorySortOption(apiValue: "name", title: "По названию")
+        ],
         defaultSort: DirectorySortOption(apiValue: "likes_count", title: "По лайкам")
     )
 

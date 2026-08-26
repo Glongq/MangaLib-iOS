@@ -120,8 +120,17 @@ struct DirectoryListView: View {
         }
     }
 
+    /// Обложка — то же соотношение 2:3, что и у "хиро"-аватара в самой
+    /// карточке команды (см. TeamView.heroHeader: avatarHeight = avatarSize*
+    /// 3/2), только заметно меньше и БЕЗ отступов — высота обложки задаёт
+    /// высоту всей строки целиком, обложка заполняет подложку слева от края
+    /// до края (по прямой просьбе), а не плавает по центру с паддингом, как
+    /// раньше (44×44 с закруглением со всех сторон).
+    private static let rowCoverWidth: CGFloat = 64
+    private static let rowCoverHeight: CGFloat = 96
+
     private func rowContent(_ entity: DirectoryEntity) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 0) {
             RemoteImage(url: entity.coverURL) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
@@ -129,39 +138,76 @@ struct DirectoryListView: View {
             } failure: {
                 ZStack { Theme.surfaceElevated; Image(systemName: vm.kind.placeholderIcon).foregroundStyle(Theme.textSecondary) }
             }
-            .frame(width: 44, height: 44)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .frame(width: Self.rowCoverWidth, height: Self.rowCoverHeight)
             .clipped()
+            // Закругление ТОЛЬКО с левой стороны — обложка встык с текстом
+            // справа, без отдельной подложки под собой.
+            .clipShape(.rect(topLeadingRadius: 16, bottomLeadingRadius: 16))
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(entity.displayName)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(2)
-                statsLine(entity)
+                    .lineLimit(1)
+                statsChipsRow(entity)
             }
+            .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if vm.kind.sourceType != nil {
                 subscribeBell(entity)
+                    .padding(.trailing, 10)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .frame(height: Self.rowCoverHeight)
         .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .contentShape(Rectangle())
     }
 
-    private func statsLine(_ entity: DirectoryEntity) -> some View {
-        HStack(spacing: 8) {
-            ForEach(entity.stats) { stat in
-                if let value = stat.value, let label = stat.label {
-                    Text("\(value) \(label)")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                }
+    /// Короткие чипы-метаданные — иконка + значение (short, уже отформатировано
+    /// сервером вроде "105.8 М"/"1,9 К"), в формате чипов из самой карточки
+    /// команды (Capsule/pill), только компактнее и на подложку потемнее
+    /// (Theme.surface — сама строка уже surfaceElevated, иначе чип слился бы
+    /// с фоном). Порядок и иконки — по прямой просьбе: тайтлы → лайки →
+    /// подписчики; любой другой tag, который вдруг пришлёт сервер, тоже
+    /// показываем (нейтральной иконкой), а не молча теряем.
+    private static let statIconOrder: [(tag: String, icon: String)] = [
+        ("titles", "book.closed.fill"),
+        ("likes", "heart.fill"),
+        ("subscribes", "person.3.fill")
+    ]
+
+    private func statsChipsRow(_ entity: DirectoryEntity) -> some View {
+        var used = Set<String>()
+        var chips: [(id: String, icon: String, value: String)] = []
+        for (tag, icon) in Self.statIconOrder {
+            if let stat = entity.stats.first(where: { $0.tag == tag }), let short = stat.short {
+                chips.append((tag, icon, short))
+                used.insert(tag)
             }
         }
+        for stat in entity.stats where !used.contains(stat.tag ?? "") {
+            if let short = stat.short {
+                chips.append((stat.id, "circle.fill", short))
+            }
+        }
+        return HStack(spacing: 6) {
+            ForEach(chips, id: \.id) { chip in
+                statChip(icon: chip.icon, value: chip.value)
+            }
+        }
+    }
+
+    private func statChip(icon: String, value: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+            Text(value).font(.caption2.weight(.medium))
+        }
+        .foregroundStyle(Theme.textSecondary)
+        .padding(.horizontal, 8)
+        .frame(height: 22)
+        .background(Theme.surface, in: Capsule())
     }
 
     private func subscribeBell(_ entity: DirectoryEntity) -> some View {
