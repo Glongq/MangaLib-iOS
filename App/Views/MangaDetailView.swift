@@ -2205,10 +2205,13 @@ struct MangaDetailView: View {
                     // сворачиваем снова (см. expandedThreads).
                     if let firstLevel = children.first?.commentLevel,
                        Double(firstLevel) >= collapseFromLevel, !expandedThreads.contains(comment.id) {
+                        // Показывает ВСЕ уже загруженные ответы этой ветки разом —
+                        // без парной кнопки "Скрыть" после (по прямой просьбе,
+                        // однонаправленно, как и было).
                         Button {
                             expandedThreads.insert(comment.id)
                         } label: {
-                            Label("Показать ответы (\(children.count))", systemImage: "chevron.down")
+                            Label("Ещё комментарии (\(children.count))", systemImage: "chevron.down")
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(Theme.accent)
                         }
@@ -2299,7 +2302,9 @@ struct MangaDetailView: View {
                 .buttonStyle(.plain)
 
                 if !comment.text.isEmpty {
-                    Text(comment.text).font(.subheadline).foregroundStyle(Theme.textPrimary)
+                    // "Показать полностью" — НАД рядом Ответить/Жалоба/голоса
+                    // (по прямой просьбе), см. ExpandableCommentText.
+                    ExpandableCommentText(text: comment.text)
                 }
 
                 // Низ сообщения: "Ответить" слева, "Жалоба" + счётчик
