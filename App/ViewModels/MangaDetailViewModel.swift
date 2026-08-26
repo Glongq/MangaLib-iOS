@@ -1,5 +1,57 @@
 import Foundation
 
+/// Кэш данных карточки тайтла (detail/главы/похожее/связанное/статы/
+/// персонажи/доп.обложки) — по slug, с TTL. Та же идея, что и
+/// RemoteImageCache для картинок (см. RemoteImage.swift): без него каждое
+/// повторное открытие ТОЙ ЖЕ карточки (новый экземпляр MangaDetailView —
+/// напр. зашёл-вышел-зашёл снова, или тайтл встречается сразу в нескольких
+/// лентах/списках) заново долбило ВСЕ ~6 эндпоинтов карточки с нуля.
+/// Подтверждено реальным логом сети от пользователя: один и тот же slug,
+/// десятки повторных запросов за полторы минуты, часть уже ловит 429
+/// (рейт-лимит сервера) — притом что пользователь даже не был залогинен, то
+/// есть дело не в токене/повторной авторизации, а именно в отсутствии
+/// какого-либо переиспользования уже полученных данных между заходами.
+@MainActor
+final class MangaDetailCache {
+    static let shared = MangaDetailCache()
+    private init() {}
+
+    struct Entry {
+        var detail: MangaDetail
+        var chapters: [ChapterItem]
+        var similar: [SimilarItem]
+        var related: [RelatedItem]
+        var characters: [Character]
+        var coverGallery: [MangaCoverGalleryItem]
+        var stats: MangaStats?
+        var effectiveSite: Int?
+        let cachedAt: Date
+    }
+
+    /// 2 минуты — достаточно, чтобы повторные заходы туда-обратно в течение
+    /// одной сессии просмотра не долбили сеть заново, но не настолько
+    /// долго, чтобы надолго застрять на устаревших счётчиках/статистике при
+    /// следующем реальном визите на карточку.
+    private let ttl: TimeInterval = 120
+    private var entries: [String: Entry] = [:]
+
+    func entry(for slug: String) -> Entry? {
+        guard let e = entries[slug], Date().timeIntervalSince(e.cachedAt) < ttl else { return nil }
+        return e
+    }
+
+    func store(_ entry: Entry, for slug: String) {
+        entries[slug] = entry
+    }
+
+    /// Сброс кэша конкретного тайтла — для явного "Обновить" на карточке
+    /// (см. MangaDetailViewModel.load(force:)), чтобы кнопка реально дёргала
+    /// сеть, а не молча повторно показывала те же кэшированные данные.
+    func invalidate(slug: String) {
+        entries[slug] = nil
+    }
+}
+
 /// Режим сортировки комментариев — "Старые"/"Новые" реально уходят на сервер
 /// (sort_type=asc/desc, тот же подтверждённый параметр, что и в fetchComments
 /// по умолчанию), "Популярные" считается на клиенте по score (см.
@@ -127,7 +179,28 @@ final class MangaDetailViewModel: ObservableObject {
 
     /// Загружает карточку и главы параллельно и независимо:
     /// ошибка одного запроса не отменяет другой.
-    func load() async {
+    ///
+    /// `force` — игнорировать кэш и дёрнуть сеть заново (кнопка "Обновить"
+    /// на карточке, см. MangaDetailView) — обычное открытие карточки (см.
+    /// `.task` в MangaDetailView.body) всегда `force: false`, отсюда и
+    /// переиспользование недавно загруженных данных того же slug (см.
+    /// MangaDetailCache выше).
+    func load(force: Bool = false) async {
+        if !force, let cached = MangaDetailCache.shared.entry(for: slug) {
+            detail = cached.detail
+            chapters = cached.chapters
+            similar = cached.similar
+            related = cached.related
+            characters = cached.characters
+            coverGallery = cached.coverGallery
+            stats = cached.stats
+            effectiveSite = cached.effectiveSite
+            errorMessage = nil
+            detailErrorMessage = nil
+            return
+        }
+        if force { MangaDetailCache.shared.invalidate(slug: slug) }
+
         isLoading = true
         errorMessage = nil
         detailErrorMessage = nil
@@ -152,6 +225,19 @@ final class MangaDetailViewModel: ObservableObject {
             errorMessage = detailError ?? chaptersError
         }
         isLoading = false
+
+        // Успех — сохраняем в кэш, чтобы следующее открытие ЭТОГО ЖЕ
+        // тайтла (в течение TTL) не долбило все эндпоинты заново.
+        if let detail {
+            MangaDetailCache.shared.store(
+                MangaDetailCache.Entry(
+                    detail: detail, chapters: chapters, similar: similar, related: related,
+                    characters: characters, coverGallery: coverGallery, stats: stats,
+                    effectiveSite: effectiveSite, cachedAt: Date()
+                ),
+                for: slug
+            )
+        }
     }
 
     /// Грузит карточку, подбирая рабочий site_id: сначала переданный при

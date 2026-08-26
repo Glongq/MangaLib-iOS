@@ -1,6 +1,30 @@
 import SwiftUI
 import UIKit
 
+/// Плавное появление кнопок шапки карточки тайтла (opacity+масштаб при
+/// первом рендере) — раньше был общий FadeInAppear.swift, использовавшийся
+/// ещё на нескольких экранах; убрали его совсем ради единообразия с
+/// Команда/Персонаж/Directory-деталь (там анимации появления никогда не
+/// было), но по прямой просьбе на самой карточке тайтла плавность нужна —
+/// возвращена здесь локально, не общим файлом (больше нигде не используется).
+private struct FadeInOnAppearModifier: ViewModifier {
+    @State private var appeared = false
+    func body(content: Content) -> some View {
+        content
+            .opacity(appeared ? 1 : 0)
+            .scaleEffect(appeared ? 1 : 0.7)
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    withAnimation(.easeOut(duration: 0.28)) { appeared = true }
+                }
+            }
+    }
+}
+
+private extension View {
+    func fadeInOnAppear() -> some View { modifier(FadeInOnAppearModifier()) }
+}
+
 /// Экран тайтла: шапка, инфо-строка, кнопки, вкладки (О тайтле / Главы / Комментарии).
 struct MangaDetailView: View {
 
@@ -522,6 +546,7 @@ struct MangaDetailView: View {
                 }
                 .padding(.leading, 16)
                 .padding(.top, 54) // ниже статус-бара, баннер уходит под него целиком
+                .fadeInOnAppear()
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -556,6 +581,7 @@ struct MangaDetailView: View {
                 .menuStyle(.borderlessButton)
                 .padding(.trailing, 16)
                 .padding(.top, 54)
+                .fadeInOnAppear()
             }
         }
     }
@@ -623,6 +649,7 @@ struct MangaDetailView: View {
         // системный safe area, статус-бар/Dynamic Island уже учтён им, это
         // чисто визуальный зазор, а не ручная аппроксимация высоты статус-бара.
         .padding(.top, 8)
+        .fadeInOnAppear()
     }
 
     /// titleBlock с отступом справа — вынесено отдельно от heroHeader просто
@@ -1597,7 +1624,7 @@ struct MangaDetailView: View {
                     Text(viewModel.detailErrorMessage ?? "Не удалось загрузить описание (причина неизвестна).")
                         .font(.footnote).foregroundStyle(Theme.textSecondary)
                     Button {
-                        Task { await viewModel.load() }
+                        Task { await viewModel.load(force: true) }
                     } label: {
                         Label("Обновить", systemImage: "arrow.clockwise")
                             .font(.subheadline.weight(.medium))

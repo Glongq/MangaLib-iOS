@@ -1,6 +1,23 @@
 import SwiftUI
 import UIKit
 
+/// Невидимый "датчик" активации родного .searchable() (см. HomeView.body) —
+/// глобального поиска пока нет, поле служит воротами на вкладку Каталог, где
+/// он и живёт (см. CatalogNavigator.switchRequest в RootView, тот же мост,
+/// что уже используют жанры/теги из карточки тайтла). @Environment(\.isSearching)
+/// нужно читать ИЗ потомка того места, где применён .searchable() — не из
+/// самого HomeView (его тело строит содержимое .searchable(), а не наоборот) —
+/// отсюда отдельный вью-пустышка, а не просто вычисляемое свойство.
+private struct SearchActivationRedirect: View {
+    @Environment(\.isSearching) private var isSearching
+    var body: some View {
+        Color.clear
+            .onChange(of: isSearching) { _, active in
+                if active { CatalogNavigator.shared.openCatalog(filter: MangaFilter()) }
+            }
+    }
+}
+
 /// Вкладка «Читают» — теперь настоящая главная лента приложения (раньше
 /// была заглушкой StubView, см. историю в RootView), собранная по образцу
 /// главной страницы сайта: продолжить читать, сейчас читают (с подвкладками
@@ -26,6 +43,9 @@ struct HomeView: View {
     @ObservedObject private var authSession = AuthSession.shared
     /// Экран входа для "Мои обновления" без аккаунта — см. updatesTabBinding.
     @State private var showLoginForUpdates = false
+    /// Текст в .searchable() — реально никуда не отправляется, поле служит
+    /// только "воротами" на вкладку Каталог (см. searchActivationProbe).
+    @State private var searchQuery = ""
 
     /// Эталонный размер названия тайтла для ЭТОЙ страницы — тот же расчёт,
     /// что и MangaCardView.titleFont (caption1 × 1.2, medium), которым уже
@@ -42,31 +62,27 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Theme.background.ignoresSafeArea()
-                // quickSearchBar — единственное, что осталось от старой
-                // шапки: заголовок теперь родной .navigationTitle/.large (см.
-                // ниже), капсула-переход садится под ним через safeAreaInset,
-                // тот же приём, что и раньше, просто без соседнего Text.
-                content
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        quickSearchBar
-                            .padding(.horizontal, 16)
-                            .padding(.top, 2)
-                            .padding(.bottom, 10)
-                    }
-                    .refreshable {
-                        async let a: Void = viewModel.refresh()
-                        async let b: Void = bookmarks.syncHistoryFromServer()
-                        _ = await (a, b)
-                    }
-            }
-            // App Store-эталон (см. тот же приём в MangaCatalogView/
-            // BookmarksView/NotificationsView): крупный заголовок без фона в
-            // покое, системный блюр проявляется при первом скролле,
-            // заголовок схлопывается в маленький.
+            content
+                .background { Theme.background.ignoresSafeArea() }
+                .refreshable {
+                    async let a: Void = viewModel.refresh()
+                    async let b: Void = bookmarks.syncHistoryFromServer()
+                    _ = await (a, b)
+                }
+            // App Store-эталон (тот же приём, что в MangaCatalogView —
+            // .background() вместо равноправного слоя в ZStack, см.
+            // комментарий там): крупный заголовок без фона в покое,
+            // системный блюр проявляется при первом скролле, заголовок
+            // схлопывается в маленький.
             .navigationTitle("Читают")
             .navigationBarTitleDisplayMode(.large)
+            // Настоящего глобального поиска пока нет — то же решение, что и
+            // раньше у капсулы-заглушки, просто через родной .searchable()
+            // вместо самодельного нередактируемого TextField: как только
+            // поле активировано (см. SearchActivationRedirect в content),
+            // сразу переключаемся на вкладку «Каталог» — там и живёт
+            // реальный поиск (см. MangaCatalogView).
+            .searchable(text: $searchQuery, prompt: "Поиск по названию")
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(slug: item.apiSlug, fallbackTitle: item.displayTitle,
                                  coverURL: item.cover?.bestURL, item: item)
@@ -113,8 +129,10 @@ struct HomeView: View {
     /// появляются сами после входа, как и раньше, но ТОЖЕ получают скелетон
     /// при обновлении (см. continueReadingSection и .refreshable в body).
     ///
-    /// .refreshable НЕ здесь (не на самом ScrollView) — см. комментарий в
-    /// body про safeAreaInset.
+    /// .refreshable НЕ здесь (не на самом ScrollView, а снаружи, в body) —
+    /// раньше именно эта связка на одном и том же ScrollView скроллила
+    /// шапку вместе с контентом; теперь шапка — родной navigationTitle, не
+    /// часть ScrollView вообще, но порядок оставлен как есть, менять незачем.
     private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -129,35 +147,7 @@ struct HomeView: View {
             .padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
-    }
-
-    // MARK: Капсула-переход на поиск в Каталоге
-
-    /// Тапом уходим на вкладку «Каталог» (там и живёт реальный поиск, см.
-    /// MangaCatalogView) — тот же мост, что уже используют жанры/теги из
-    /// карточки тайтла (см. CatalogNavigator.switchRequest в RootView).
-    ///
-    /// Настоящий (хоть и нерабочий) TextField вместо Text — раньше здесь
-    /// стоял обычный Text с тем же паддингом/капсулой, но визуально всё
-    /// равно немного отличался от searchField в Каталоге: у TextField своя
-    /// внутренняя метрика высоты/базовой линии, не идентичная Text. Теперь
-    /// это тот же самый компонент, просто .allowsHitTesting(false) —
-    /// не редактируется и не получает фокус, тап уходит на всю капсулу.
-    private var quickSearchBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
-            TextField("", text: .constant(""),
-                      prompt: Text("Быстрый поиск").foregroundColor(Theme.textSecondary))
-                .foregroundStyle(Theme.textPrimary)
-                .allowsHitTesting(false)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.interactive(), in: Capsule())
-        .contentShape(Capsule())
-        .onTapGesture {
-            CatalogNavigator.shared.openCatalog(filter: MangaFilter())
-        }
+        .background { SearchActivationRedirect() }
     }
 
     // MARK: Продолжить читать
