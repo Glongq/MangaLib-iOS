@@ -14,12 +14,25 @@ struct NotificationsView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
-    // Схлопывание кнопки сортировки при скролле вниз (вверх — хоть чуть-чуть
+    // Схлопывание строки категорий при скролле вниз (вверх — хоть чуть-чуть
     // — возвращается). Заголовок теперь родной .navigationTitle/.large (см.
     // body) — как в Каталоге/Закладках — его эта логика больше не касается.
     @State private var headerCollapsed = false
     @State private var lastScrollOffset: CGFloat = 0
     @State private var isHeaderAnimating = false
+
+    /// "Настройки" в "..." — эндпоинт настроек уведомлений нигде не
+    /// подтверждён перехватом, честная заглушка (тот же приём, что и у
+    /// остальных ещё не реализованных пунктов настроек — см.
+    /// AppSettingsView.settingsRow).
+    @State private var showSettingsStub = false
+    /// Подтверждение перед "Удалить все уведомления" — сам эндпоинт
+    /// удаления ВСЕХ уведомлений разом нигде не подтверждён перехватом,
+    /// поэтому реального запроса тут нет (см. deleteAllTapped) — но раз
+    /// кнопка красная/деструктивная, диалог подтверждения — на месте уже
+    /// сейчас, менять нужно будет только сам запрос внутри, когда эндпоинт
+    /// найдётся.
+    @State private var showDeleteAllConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -33,26 +46,32 @@ struct NotificationsView: View {
             // маленький — целиком системное поведение, доп. кода не нужно.
             .navigationTitle("Уведомления")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                // "Все" (текущая прочитанность) + сортировка внутри одного
+                // меню, "..." — отдельным меню правее (Настройки/Отметить
+                // всё прочитанным/Удалить все, по прямой просьбе).
+                ToolbarItem(placement: .topBarTrailing) { readFilterChip }
+                ToolbarItem(placement: .topBarTrailing) { overflowMenu }
+            }
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(
                     slug: item.apiSlug, fallbackTitle: item.displayTitle,
                     coverURL: item.cover?.bestURL, item: item
                 )
             }
-            // Кнопка сортировки — снизу слева, над главной панелью. ВНУТРИ
-            // NavigationStack (на корневом контенте) — иначе она остаётся на
-            // экране поверх любого пуша (карточки тайтла из уведомления),
-            // потому что технически была бы соседом стека, а не частью его
-            // корневого экрана.
+            // Строка категорий — снизу, над главной панелью (была одна
+            // круглая кнопка-меню, теперь горизонтальная полоска чипов, как
+            // в Закладках — по прямой просьбе, "вместо того чтобы тянуть
+            // это всё в одну кнопку"). ВНУТРИ NavigationStack (на корневом
+            // контенте) — иначе она остаётся на экране поверх любого пуша
+            // (карточки тайтла из уведомления), потому что технически была
+            // бы соседом стека, а не частью его корневого экрана.
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !headerCollapsed {
-                    HStack {
-                        filterButton
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
-                    .transition(.blurFade)
+                    typeFilterRow
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
+                        .transition(.blurFade)
                 }
             }
         }
@@ -62,6 +81,15 @@ struct NotificationsView: View {
             if newPhase == .active {
                 Task { await viewModel.refresh() }
             }
+        }
+        .sheet(isPresented: $showSettingsStub) {
+            NavigationStack { StubView(title: "Настройки уведомлений") }
+        }
+        .alert("Удалить все уведомления?", isPresented: $showDeleteAllConfirm) {
+            Button("Отмена", role: .cancel) {}
+            Button("Удалить", role: .destructive) { deleteAllTapped() }
+        } message: {
+            Text("Действие необратимо.")
         }
     }
 
@@ -74,13 +102,11 @@ struct NotificationsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isHeaderAnimating = false }
     }
 
-    /// Круглая кнопка сортировки/фильтра — раньше открывала
-    /// NotificationFilterSheet (шторка снизу), теперь обычное системное
-    /// глассовое `Menu` (тот же приём, что и Сортировка в Каталоге/
-    /// Комментариях) — не отдельный экран, а нативный поповер.
-    /// Бейдж — реальное число из GET /notifications/count (unread.all), не
-    /// посчитано на клиенте.
-    private var filterButton: some View {
+    /// Чип "Все"/"Непрочитанные"/"Прочитанные" (текущий readFilter) в шапке
+    /// справа — тап открывает меню с прочитанностью и, отдельным блоком
+    /// ниже, порядком сортировки (сначала новые/старые). Бейдж — реальное
+    /// число из GET /notifications/count (unread.all), не посчитано на клиенте.
+    private var readFilterChip: some View {
         Menu {
             Picker("Прочитанность", selection: $viewModel.readFilter) {
                 ForEach(NotificationReadFilter.allCases) { option in
@@ -95,19 +121,17 @@ struct NotificationsView: View {
                 }
             }
             .pickerStyle(.inline)
-            Divider()
-            Picker("Категория", selection: $viewModel.typeFilter) {
-                ForEach(NotificationTypeFilter.allCases) { option in
-                    Text(option.title).tag(option)
-                }
-            }
-            .pickerStyle(.inline)
         } label: {
             ZStack(alignment: .topTrailing) {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: Theme.pillControlHeight, height: Theme.pillControlHeight)
+                HStack(spacing: 4) {
+                    Text(viewModel.readFilter.title)
+                        .font(.subheadline.weight(.medium))
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.horizontal, 14)
+                .frame(height: Theme.pillControlHeight)
 
                 if let unread = viewModel.counts?.unread.all, unread > 0 {
                     Text(unread > 99 ? "99+" : "\(unread)")
@@ -120,7 +144,81 @@ struct NotificationsView: View {
                 }
             }
         }
+        .glassEffect(.regular.interactive(), in: Capsule())
+    }
+
+    /// "..." справа от чипа "Все" — Настройки (заглушка, эндпоинт не
+    /// подтверждён)/Отметить всё прочитанным/Удалить все уведомления
+    /// (красным) — по прямой просьбе.
+    private var overflowMenu: some View {
+        Menu {
+            Button { showSettingsStub = true } label: {
+                Label("Настройки", systemImage: "gearshape")
+            }
+            Button { markAllReadTapped() } label: {
+                Label("Отметить всё прочитанным", systemImage: "checkmark.circle")
+            }
+            Button(role: .destructive) { showDeleteAllConfirm = true } label: {
+                Label("Удалить все уведомления", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: Theme.pillControlHeight, height: Theme.pillControlHeight)
+        }
         .glassEffect(.regular.interactive(), in: Circle())
+    }
+
+    /// "Отметить всё прочитанным" — эндпоинт нигде не подтверждён
+    /// перехватом (в отличие от read_type=фильтра — это просто параметр
+    /// запроса, а не мутация), поэтому пока честно ничего не отправляем на
+    /// сервер — только тост с объяснением, чтобы не выглядело "нажал и
+    /// ничего не произошло" молча.
+    private func markAllReadTapped() {
+        DownloadsManager.shared.showBanner("Пока не реализовано")
+    }
+
+    /// См. showDeleteAllConfirm — эндпоинт удаления ВСЕХ уведомлений разом
+    /// нигде не подтверждён перехватом, поэтому реального запроса тут нет.
+    private func deleteAllTapped() {
+        DownloadsManager.shared.showBanner("Пока не реализовано")
+    }
+
+    /// Строка категорий (было "Категория" внутри общего меню-кнопки —
+    /// теперь отдельная горизонтальная полоска чипов, тот же приём, что и
+    /// у папок в Закладках, см. BookmarksView.categoryMenu). Показаны не
+    /// ВСЕ 8 категорий taxonomy (см. NotificationTypeFilter), а отобранные
+    /// 6, которые реально попросили.
+    private static let typeFilterChips: [NotificationTypeFilter] = [.all, .chapter, .episode, .comments, .message, .other]
+
+    private var typeFilterRow: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(Self.typeFilterChips) { option in
+                    typeFilterChip(option)
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func typeFilterChip(_ option: NotificationTypeFilter) -> some View {
+        let active = viewModel.typeFilter == option
+        return Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { viewModel.typeFilter = option }
+        } label: {
+            Text(option.title)
+                .font(.subheadline.weight(active ? .semibold : .regular))
+                .foregroundStyle(active ? Theme.background : Theme.textPrimary)
+                .padding(.horizontal, 14)
+                .frame(minHeight: Theme.pillControlHeight)
+                .contentShape(Capsule())
+                // Тот же рецепт активного/обычного стекла, что и у чипов
+                // папок в Закладках (см. BookmarksView.categoryChip).
+                .glassEffect(active ? .regular.tint(Theme.accent).interactive() : .regular.interactive(), in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Контент

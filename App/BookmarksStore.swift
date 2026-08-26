@@ -74,6 +74,12 @@ struct BookmarkedTitle: Codable, Identifiable, Hashable {
     /// со значением по умолчанию — старые локальные записи без этого поля
     /// декодируются нормально (nil → серый бэйдж).
     var rating: Double? = nil
+    /// Когда тайтл реально добавлен в закладки — для сортировки "По дате
+    /// добавления" (см. BookmarksView.BookmarksSortOption). Optional со
+    /// значением по умолчанию nil — старые локальные записи (сохранённые до
+    /// этого поля) декодируются нормально, просто без даты (сортировка
+    /// такие записи считает "самыми старыми", см. BookmarksView.sortByDate).
+    var addedAt: Date? = nil
 
     var id: String { slug }
 }
@@ -227,6 +233,15 @@ final class BookmarksStore: ObservableObject {
         return folder
     }
 
+    /// Меняет порядок папок (см. BookmarksView — щит редактирования списков
+    /// по иконке карандаша) — определяет порядок чипов внизу Закладок.
+    /// Чисто локальная настройка отображения — никакого серверного аналога
+    /// у порядка папок нет.
+    func moveFolders(fromOffsets: IndexSet, toOffset: Int) {
+        folders.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        persistFolders()
+    }
+
     // MARK: Закладки
 
     /// В какой папке находится тайтл (nil — не в закладках).
@@ -250,7 +265,7 @@ final class BookmarksStore: ObservableObject {
             // не знает (например, авто-добавление в "Читаю" из ReaderViewModel).
             if let rating { items[index].rating = rating }
         } else {
-            items.append(BookmarkedTitle(slug: slug, title: title, coverURL: coverURL, folderId: folderId, rating: rating))
+            items.append(BookmarkedTitle(slug: slug, title: title, coverURL: coverURL, folderId: folderId, rating: rating, addedAt: Date()))
         }
         persistItems()
 

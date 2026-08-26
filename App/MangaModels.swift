@@ -2341,11 +2341,11 @@ enum NotificationTypeFilter: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .all: return "Все"
-        case .chapter: return "Новые главы"
+        case .chapter: return "Главы"
         case .chapter_player: return "Плеер"
         case .episode: return "Эпизоды"
-        case .comments: return "Комментарии"
-        case .message: return "Сообщения"
+        case .comments: return "Ответы"
+        case .message: return "Личка"
         case .card: return "Карточки"
         case .other: return "Другое"
         }
