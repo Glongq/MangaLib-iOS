@@ -39,7 +39,8 @@ struct BookmarksView: View {
             // стеклянной капсуле со своим схлопыванием заголовка.
             .navigationTitle("Закладки")
             .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $query, prompt: "Поиск в «\(selectedName)»")
+            // .always — поиск сразу развёрнутой пилюлей (тот же фикс, что и в Каталоге).
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Поиск в «\(selectedName)»")
             .onAppear { applyPendingFolder() }
             .onChange(of: catalogNav.openBookmarksRequest) { _, _ in applyPendingFolder() }
             .navigationDestination(for: BookmarkedTitle.self) { bm in

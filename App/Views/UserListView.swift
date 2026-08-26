@@ -19,7 +19,8 @@ struct UserListView: View {
         }
         .navigationTitle("Пользователи")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $vm.query, prompt: "Поиск по нику")
+        // .always — поиск сразу развёрнутой пилюлей (тот же фикс, что и в Каталоге).
+        .searchable(text: $vm.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Поиск по нику")
         .tint(Theme.accent)
         .task { vm.loadInitialIfNeeded() }
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
