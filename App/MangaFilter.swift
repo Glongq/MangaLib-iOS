@@ -116,6 +116,39 @@ enum CharacterTitleSort: String, CaseIterable, Identifiable {
     var sortType: String { self == .nameAsc ? "asc" : "desc" }
 }
 
+/// Сортировка списка франшиз — ПОДТВЕРЖДЕНО перехватом `GET /franchise?
+/// sort_by=name|subscribes_count|titles_count&sort_type=asc|desc` (все три
+/// значения реально встречались, см. MangaNetworkService.fetchFranchises).
+enum FranchiseSort: String, CaseIterable, Identifiable {
+    case name, subscribersCount, titlesCount
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .name:             return "По названию"
+        case .subscribersCount: return "По подписчикам"
+        case .titlesCount:      return "По тайтлам"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .name:             return "textformat.abc"
+        case .subscribersCount: return "person.2"
+        case .titlesCount:      return "books.vertical"
+        }
+    }
+
+    var apiValue: String {
+        switch self {
+        case .name:             return "name"
+        case .subscribersCount: return "subscribes_count"
+        case .titlesCount:      return "titles_count"
+        }
+    }
+}
+
 // MARK: - Filter option
 
 /// Пункт фильтра: отображаемое имя + id для API.

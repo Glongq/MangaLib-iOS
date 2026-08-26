@@ -1114,6 +1114,10 @@ struct MangaDetail: Decodable, Identifiable {
     /// isLicensed определяет, показывать ли вместо описания текст про
     /// удаление глав правообладателем/РКН.
     let moderated: MangaStatus?
+    /// Франшиза тайтла (чип-подкатегория на карточке, см.
+    /// MangaDetailView.franchiseChip) — ПОДТВЕРЖДЕНО перехватом, требует
+    /// явного fields[]=franchise (см. FranchiseRef/fetchMangaDetailRawData).
+    let franchise: FranchiseRef?
 
     var displayTitle: String { rusName?.isEmpty == false ? rusName! : name }
     var apiSlug: String { slugURL?.isEmpty == false ? slugURL! : slug }
@@ -1159,7 +1163,7 @@ struct MangaDetail: Decodable, Identifiable {
     var backgroundURL: URL? { background?.bestURL ?? cover?.bestURL }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, cover, background, rating, status, type, site, summary, genres, tags, authors, views, format, moderated
+        case id, name, slug, cover, background, rating, status, type, site, summary, genres, tags, authors, views, format, moderated, franchise
         case otherNames = "otherNames"
         case otherNamesSnake = "other_names"
         case ageRestriction = "ageRestriction"
@@ -1193,6 +1197,7 @@ struct MangaDetail: Decodable, Identifiable {
         site = (try? c.decodeIfPresent(Int.self, forKey: .site)) ?? nil
         isLicensed = (try? c.decodeIfPresent(Bool.self, forKey: .isLicensed)) ?? false
         moderated = try? c.decodeIfPresent(MangaStatus.self, forKey: .moderated) ?? nil
+        franchise = ((try? c.decodeIfPresent([FranchiseRef].self, forKey: .franchise)) ?? nil)?.first
         // "summary"/"description" — оба ключа пробуем, ПЛЮС на случай, если
         // описание приходит не голой строкой, а вложенным объектом (напр.
         // {"ru": "...", "text": "..."}) — тоже не подтверждено перехватом,
@@ -1566,6 +1571,81 @@ struct TeamDetail: Decodable, Identifiable {
             titlesCountBySite = [:]
         }
     }
+}
+
+// MARK: - Франшиза
+
+/// Франшиза — ПОДТВЕРЖДЕНО перехватом `GET /franchise` (список) и
+/// `GET /franchise/{id}--{slug}` (одна) — ОДНА И ТА ЖЕ форма в обоих:
+/// `{id, slug, slug_url, model:"franchise", name, alt_name, subscription:
+/// {is_subscribed,...}, stats:[{value,formated,short,label,tag}],
+/// titles_count_details:{site_id:count}}`. Общий на ВСЮ экосистему
+/// справочник (не завязан на активный сайт) — ПОДТВЕРЖДЕНО прямым
+/// сравнением перехватов MangaLib/HentaiLib: франшиза id 308 «Оригинальные
+/// работы» — с абсолютно тем же id/названием/titles_count_details на обоих
+/// сайтах. Без обложки/аватара — только текст и счётчики. stats — та же
+/// форма, что и у TeamStat (переиспользуется).
+struct Franchise: Decodable, Identifiable, Hashable {
+    let id: Int
+    let slug: String
+    let slugURL: String
+    let name: String
+    let altName: String?
+    var isSubscribed: Bool
+    let stats: [TeamStat]
+    /// site_id → число тайтлов (1=манга, 2=слэш, 3=новеллы, 4=хентай, 5=аниме).
+    let titlesCountBySite: [Int: Int]
+
+    var titlesCount: Int? { stats.first { $0.tag == "titles" }?.value }
+    var subscribersCount: Int? { stats.first { $0.tag == "subscribes" }?.value }
+
+    private struct Subscription: Decodable {
+        let isSubscribed: Bool?
+        enum CodingKeys: String, CodingKey { case isSubscribed = "is_subscribed" }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, slug, name, stats, subscription
+        case slugURL = "slug_url"
+        case altName = "alt_name"
+        case titlesCountDetails = "titles_count_details"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        slug = (try? c.decode(String.self, forKey: .slug)) ?? ""
+        slugURL = ((try? c.decodeIfPresent(String.self, forKey: .slugURL)) ?? nil) ?? slug
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        altName = (try? c.decodeIfPresent(String.self, forKey: .altName)) ?? nil
+        let subscription = (try? c.decodeIfPresent(Subscription.self, forKey: .subscription)) ?? nil
+        isSubscribed = subscription?.isSubscribed ?? false
+        stats = ((try? c.decodeIfPresent([TeamStat].self, forKey: .stats)) ?? nil) ?? []
+
+        if let raw = ((try? c.decodeIfPresent([String: Int].self, forKey: .titlesCountDetails)) ?? nil) {
+            var m: [Int: Int] = [:]
+            for (k, v) in raw { if let ik = Int(k) { m[ik] = v } }
+            titlesCountBySite = m
+        } else {
+            titlesCountBySite = [:]
+        }
+    }
+
+    static func == (lhs: Franchise, rhs: Franchise) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+/// Ссылка на франшизу тайтла — ПОДТВЕРЖДЕНО перехватом `GET /manga/{slug}?
+/// fields[]=franchise`: `"franchise":[{"id","slug","slug_url","model":
+/// "franchise","name"}]` — массив (на практике из одного элемента), БЕЗ
+/// alt_name/подписки/статистики (те есть только в отдельном
+/// GET /franchise/{id}--{slug}, см. Franchise/MangaNetworkService.fetchFranchiseDetail).
+struct FranchiseRef: Decodable, Identifiable, Hashable {
+    let id: Int
+    let slugURL: String
+    let name: String
+
+    enum CodingKeys: String, CodingKey { case id, name, slugURL = "slug_url" }
 }
 
 // MARK: - Chapter

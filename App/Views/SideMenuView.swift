@@ -50,7 +50,7 @@ struct SideMenuView: View {
     // профиля её не касается, поэтому не нужно поднимать выше в RootView.
     // История/Настройки/Загрузки теперь не sheet, а обычные PUSH-переходы внутри
     // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
-    private enum MenuRoute: Hashable { case history, settings, downloads, comments }
+    private enum MenuRoute: Hashable { case history, settings, downloads, comments, franchises }
     // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
     // NavigationLink(value:) ВНУТРИ этих экранов (например, History →
     // тайтл, см. HistoryView.navigationDestination(for: HistoryEntry.self))
@@ -127,10 +127,11 @@ struct SideMenuView: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: MenuRoute.self) { route in
                 switch route {
-                case .history:   HistoryView(embedded: true)
-                case .settings:  AppSettingsView(embedded: true)
-                case .downloads: DownloadsView(embedded: true)
-                case .comments:  MyCommentsView(embedded: true)
+                case .history:    HistoryView(embedded: true)
+                case .settings:   AppSettingsView(embedded: true)
+                case .downloads:  DownloadsView(embedded: true)
+                case .comments:   MyCommentsView(embedded: true)
+                case .franchises: FranchiseListView()
                 }
             }
         }
@@ -307,7 +308,7 @@ struct SideMenuView: View {
             row("Команды", icon: "person.3")
             row("Люди", icon: "person.crop.rectangle")
             row("Персонажи", icon: "face.smiling")
-            row("Франшизы", icon: "sparkles")
+            row("Франшизы", icon: "sparkles", action: { path.append(MenuRoute.franchises) })
             row("Издательства", icon: "building.2")
             row("Пользователи", icon: "person.crop.circle", showDivider: false)
         }

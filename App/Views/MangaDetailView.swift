@@ -96,6 +96,10 @@ struct MangaDetailView: View {
     @State private var showLoginForSimilarVote = false
     /// Открытый профиль автора комментария (тап по нику/аватарке).
     @State private var profileUser: ProfileUserId?
+    /// Открытая франшиза (тап по чипу-подкатегории, см. franchiseChip) —
+    /// FranchiseRef уже Identifiable (id франшизы), отдельный обёрточный
+    /// тип не нужен.
+    @State private var franchiseTarget: FranchiseRef?
 
     /// Отключить комментарии в читалке — ПОКА ЗАГЛУШКА, как явно попросили:
     /// переключатель есть и сохраняется, но ридер комментарии не показывает
@@ -235,6 +239,9 @@ struct MangaDetailView: View {
         .sheet(isPresented: $showLoginForComment) { LoginView() }
         .sheet(isPresented: $showLoginForSimilarVote) { LoginView() }
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
+        .navigationDestination(item: $franchiseTarget) { ref in
+            FranchiseView(slugURL: ref.slugURL, fallbackName: ref.name)
+        }
         .sheet(isPresented: $showTitleNames) {
             TitleNamesSheet(
                 rusName: viewModel.detail?.rusName ?? listItem?.rusName,
@@ -1419,7 +1426,7 @@ struct MangaDetailView: View {
                     CatalogNavigator.shared.openCatalog(filter: CatalogNavigator.tagFilter(id: t.id))
                 })
             }
-            let chipItems = [ageRatingChip].compactMap { $0 } + genreItems + tagItems
+            let chipItems = [franchiseChip, ageRatingChip].compactMap { $0 } + genreItems + tagItems
             if !chipItems.isEmpty {
                 // Тот же единый отступ 10pt заголовок→контент, что у
                 // Описания/Похожего/Связанного.
@@ -2352,11 +2359,20 @@ struct MangaDetailView: View {
         return detail.isBlockedByLicenseOrModeration
     }
 
+    /// Чип-подкатегория франшизы (по прямой просьбе) — первым в общем ряду
+    /// чипов, отдельным акцентным цветом (не как обычный жанр и не как тег с
+    /// "#"), тап пушит FranchiseView (см. franchiseTarget/navigationDestination
+    /// в body). Требует fields[]=franchise (см. MangaDetail.franchise).
+    private var franchiseChip: CollapsibleChips.Item? {
+        guard let ref = viewModel.detail?.franchise else { return nil }
+        return .init(text: ref.name, tint: Theme.accent, onTap: { franchiseTarget = ref })
+    }
+
     /// Чип возрастного рейтинга для блока "Жанры и теги" — как попросили:
     /// 18+ красным (текст + обводка), 16+ таким же образом оранжевым, а
     /// 12+/6+/"Нет"/отсутствие рейтинга вообще не показываются (nil).
-    /// Показывается ПЕРВЫМ в списке — см. aboutTab, где он идёт перед
-    /// genres+tags.
+    /// Показывается сразу после чипа франшизы (см. franchiseChip выше) — см.
+    /// aboutTab, где он идёт перед genres+tags.
     private var ageRatingChip: CollapsibleChips.Item? {
         guard let label = viewModel.detail?.ageRestriction?.label else { return nil }
         let digits = label.prefix { $0.isNumber }

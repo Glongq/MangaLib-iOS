@@ -855,7 +855,11 @@ final class MangaNetworkService {
             // "moderated" — ПОДТВЕРЖДЕНО реальным перехваченным запросом (см.
             // MangaDetail.moderated) — нужно для проверки "главы удалены по
             // требованию правообладателя/РКН, либо тайтл на проверке".
-            URLQueryItem(name: "fields[]", value: "moderated")
+            URLQueryItem(name: "fields[]", value: "moderated"),
+            // "franchise" — ПОДТВЕРЖДЕНО реальным перехваченным запросом (см.
+            // MangaDetail.franchise/FranchiseRef) — чип-подкатегория франшизы
+            // на карточке тайтла.
+            URLQueryItem(name: "fields[]", value: "franchise")
         ]
         let request = try makeRequest(path: "/manga/\(encodePath(slug))", queryItems: items, siteId: siteId)
         return try await performOptionalData(request)
@@ -993,6 +997,41 @@ final class MangaNetworkService {
         let request = try makeRequest(path: "/teams/\(encodePath(slugURL))/users", queryItems: [])
         let response: LossyListResponse<TeamMemberEntry> = try await perform(request)
         return response.data.filter { $0.userId != 0 }
+    }
+
+    // MARK: Франшизы
+
+    /// Список франшиз — ПОДТВЕРЖДЕНО перехватом `GET /franchise?page=&
+    /// sort_by=name|subscribes_count|titles_count&sort_type=asc|desc`. Общий
+    /// на всю экосистему справочник, НЕ завязан на активный сайт (см.
+    /// Franchise) — поэтому, в отличие от fetchCatalog, никакого site_id[]
+    /// здесь нет и не нужно. `q` — ПО АНАЛОГИИ с остальными списковыми
+    /// эндпоинтами (manga/teams/users), реальным перехватом для /franchise
+    /// конкретно НЕ подтверждён (в капче поиск не пробовали) — если сервер
+    /// его не примет, лишний параметр видимо будет просто проигнорирован
+    /// (так ведёт себя большинство параметров вне строгого fields[]-белого
+    /// списка, см. комментарий у fetchCatalog).
+    /// meta здесь — обычная Laravel-пагинация (current_page/last_page), а не
+    /// has_next_page, как у каталога — hasNextPage считаем по непустой
+    /// странице (см. fetchUserComments и другие похожие места).
+    func fetchFranchises(page: Int, sortBy: FranchiseSort, sortType: String, query: String) async throws -> (items: [Franchise], hasNextPage: Bool) {
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "sort_by", value: sortBy.apiValue),
+            URLQueryItem(name: "sort_type", value: sortType)
+        ]
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
+        let request = try makeRequest(path: "/franchise", queryItems: items)
+        let response: APIListResponse<Franchise> = try await perform(request)
+        return (response.data, !response.data.isEmpty)
+    }
+
+    /// Одна франшиза — ПОДТВЕРЖДЕНО перехватом `GET /franchise/{id}--{slug}`.
+    func fetchFranchiseDetail(slugURL: String) async throws -> Franchise {
+        let request = try makeRequest(path: "/franchise/\(encodePath(slugURL))", queryItems: [])
+        let response: APIObjectResponse<Franchise> = try await perform(request)
+        return response.data
     }
 
     /// Голос "+"/"-" за рекомендацию из "Похожего" — ПОДТВЕРЖДЕНО реальным
