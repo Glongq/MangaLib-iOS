@@ -46,7 +46,7 @@ struct ProfileView: View {
     /// подменяет контент под ОБЩЕЙ, постоянной шапкой (topBar) вместо пуша.
     @State private var subScreen: ProfileSubScreen?
 
-    enum ProfileSubScreen: Equatable {
+    enum ProfileSubScreen: Hashable {
         case bookmarks, comments, collections, friends
 
         var title: String {
@@ -100,7 +100,10 @@ struct ProfileView: View {
                         .scrollIndicators(.hidden)
                     }
                 }
-                .transition(.opacity)
+                // Тот же блюр-переход, что и у иконки/заголовка в topBar
+                // (см. AnyTransition.blurFade) — по прямой просьбе, а не
+                // просто прозрачность.
+                .transition(.blurFade)
 
                 // topBar — ОТДЕЛЬНЫМ слоем поверх (не часть прокручиваемого
                 // heroBanner, как раньше), т.к. должен оставаться ОДНОЙ и той
@@ -193,22 +196,35 @@ struct ProfileView: View {
     private static let topBarHeight: CGFloat = 72
 
     /// Постоянный слой поверх всего — заголовок по центру + кнопки по краям.
-    /// ОДНА и та же View независимо от того, открыт ли раздел (subScreen) —
-    /// именно поэтому левая кнопка может плавно ПЕРЕТЕКАТЬ между "щитом" и
-    /// "назад" через .contentTransition(.symbolEffect(.replace)), а не
-    /// просто резко подменяться (см. subScreen выше).
+    /// ОДНА и та же View независимо от того, открыт ли раздел (subScreen).
+    ///
+    /// Перетекание — тот же приём "блюр + прозрачность", что и у скрытия
+    /// интерфейса читалки по тапу (см. MangaReaderView.overlayUI и
+    /// AnyTransition.blurFade в Theme.swift, уже используется в
+    /// каталоге/закладках/уведомлениях/меню) — по прямой просьбе, а не
+    /// просто мгновенная смена иконки/текста:
+    /// - Заголовок и иконка слева — `.id(subScreen)` + `.transition(.blurFade)`.
+    ///   `.id()` заставляет SwiftUI считать это НОВОЙ вьюхой при смене
+    ///   subScreen, поэтому обычная смена контента (которая сама по себе
+    ///   .transition не подхватывает) превращается в настоящую
+    ///   вставку/удаление — старая версия блюрится и растворяется, новая
+    ///   проявляется из блюра, ОДНОВРЕМЕННО, а не резкий "щёлк".
+    /// - "Готово" — не удаляется/вставляется (не меняет id), а просто гасится
+    ///   тем же блюром+прозрачностью, пока открыт раздел, и тем же приёмом
+    ///   проявляется обратно при возврате.
     private var topBar: some View {
         ZStack {
             Text(subScreen?.title ?? "Профиль")
                 .font(.headline)
                 .foregroundStyle(topTextColor)
                 .shadow(color: (subScreen == nil && !bannerTopLight ? Color.black : Color.clear).opacity(0.4), radius: 2)
-                .contentTransition(.opacity)
+                .id(subScreen)
+                .transition(.blurFade)
 
             HStack {
                 Button {
                     if subScreen != nil {
-                        withAnimation(.easeInOut(duration: 0.32)) { subScreen = nil }
+                        withAnimation(.easeInOut(duration: 0.3)) { subScreen = nil }
                     } else {
                         showAdditionalInfo = true
                     }
@@ -217,7 +233,8 @@ struct ProfileView: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(topTextColor)
                         .frame(width: 46, height: 46)
-                        .contentTransition(.symbolEffect(.replace))
+                        .id(subScreen)
+                        .transition(.blurFade)
                 }
                 .glassEffect(.regular.interactive(), in: Circle())
 
@@ -230,6 +247,9 @@ struct ProfileView: View {
                         .padding(.horizontal, 18).frame(height: 46)
                         .glassEffect(.regular.interactive(), in: Capsule())
                 }
+                .opacity(subScreen == nil ? 1 : 0)
+                .blur(radius: subScreen == nil ? 0 : 12)
+                .allowsHitTesting(subScreen == nil)
             }
         }
         .padding(.horizontal, 16)
@@ -305,7 +325,7 @@ struct ProfileView: View {
     }
 
     private func openSubScreen(_ screen: ProfileSubScreen) {
-        withAnimation(.easeInOut(duration: 0.32)) { subScreen = screen }
+        withAnimation(.easeInOut(duration: 0.3)) { subScreen = screen }
     }
 
     private var avatarPlaceholder: some View {
