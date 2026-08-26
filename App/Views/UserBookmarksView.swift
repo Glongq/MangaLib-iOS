@@ -5,14 +5,20 @@ import SwiftUI
 /// GET /bookmarks/folder/{userId} и GET /bookmarks?status=&user_id=&page=.
 struct UserBookmarksView: View {
     let userId: Int
+    /// Namespace для плавного стекло-перехода "Готово" (в ProfileView) →
+    /// "назад" здесь и обратно — см. ProfileView.dismissGlassID. nil, если
+    /// экран открыт не из профиля (сейчас всегда из профиля, параметр на
+    /// случай будущего другого входа — тогда просто обычная кнопка без морфа).
+    let glassTransition: Namespace.ID?
 
     @StateObject private var vm: UserBookmarksViewModel
     @Environment(\.dismiss) private var dismiss
     private let gridColumnsCount = 3
     private let gridSpacing: CGFloat = 12
 
-    init(userId: Int) {
+    init(userId: Int, glassTransition: Namespace.ID? = nil) {
         self.userId = userId
+        self.glassTransition = glassTransition
         _vm = StateObject(wrappedValue: UserBookmarksViewModel(userId: userId))
     }
 
@@ -47,19 +53,36 @@ struct UserBookmarksView: View {
         ZStack {
             Text("Списки тайтлов").font(.headline).foregroundStyle(Theme.textPrimary)
             HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(width: 44, height: 44)
-                }
-                .glassEffect(.regular.interactive(), in: Circle())
+                backButton
                 Spacer()
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)
         .padding(.bottom, 10)
+    }
+
+    /// С переданным glassTransition — тот же id/namespace, что у "Готово" в
+    /// ProfileView (см. glassTransition выше), так что форма плавно
+    /// перетекает капсула → круг при пуше сюда и обратно при возврате. Без
+    /// namespace (nil) — обычная кнопка без морфа.
+    @ViewBuilder
+    private var backButton: some View {
+        let button = Button { dismiss() } label: {
+            Image(systemName: "chevron.left")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: 44, height: 44)
+        }
+        .glassEffect(.regular.interactive(), in: Circle())
+
+        if let glassTransition {
+            GlassEffectContainer {
+                button.glassEffectID(ProfileView.dismissGlassID, in: glassTransition)
+            }
+        } else {
+            button
+        }
     }
 
     @ViewBuilder

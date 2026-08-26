@@ -7,12 +7,16 @@ import SwiftUI
 /// user_id=&page=.
 struct UserCollectionsView: View {
     let userId: Int
+    /// Namespace для плавного стекло-перехода "Готово" ↔ "назад" — см.
+    /// ProfileView.dismissGlassID/glassTransition.
+    let glassTransition: Namespace.ID?
 
     @StateObject private var vm: UserCollectionsViewModel
     @Environment(\.dismiss) private var dismiss
 
-    init(userId: Int) {
+    init(userId: Int, glassTransition: Namespace.ID? = nil) {
         self.userId = userId
+        self.glassTransition = glassTransition
         _vm = StateObject(wrappedValue: UserCollectionsViewModel(userId: userId))
     }
 
@@ -36,19 +40,32 @@ struct UserCollectionsView: View {
         ZStack {
             Text("Коллекции").font(.headline).foregroundStyle(Theme.textPrimary)
             HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(width: 44, height: 44)
-                }
-                .glassEffect(.regular.interactive(), in: Circle())
+                backButton
                 Spacer()
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)
         .padding(.bottom, 10)
+    }
+
+    @ViewBuilder
+    private var backButton: some View {
+        let button = Button { dismiss() } label: {
+            Image(systemName: "chevron.left")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: 44, height: 44)
+        }
+        .glassEffect(.regular.interactive(), in: Circle())
+
+        if let glassTransition {
+            GlassEffectContainer {
+                button.glassEffectID(ProfileView.dismissGlassID, in: glassTransition)
+            }
+        } else {
+            button
+        }
     }
 
     @ViewBuilder

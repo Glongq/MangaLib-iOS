@@ -20,6 +20,9 @@ struct HistoryView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var query = ""
     @FocusState private var searchFocused: Bool
+    /// Плавное появление кнопки "назад" при заходе на экран (см. header) —
+    /// по прямой просьбе для экранов, открываемых из бокового меню.
+    @State private var backButtonAppeared = false
 
     /// Дедуп по media.id — сервер отдаёт КАЖДЫЙ просмотр главы отдельной
     /// записью, а не одну запись на тайтл (см. пример ответа в чате: два
@@ -101,6 +104,11 @@ struct HistoryView: View {
                         .frame(width: 44, height: 44)
                 }
                 .glassEffect(.regular.interactive(), in: Circle())
+                .opacity(backButtonAppeared ? 1 : 0)
+                .scaleEffect(backButtonAppeared ? 1 : 0.7)
+                .onAppear {
+                    withAnimation(.easeOut(duration: 0.28)) { backButtonAppeared = true }
+                }
 
                 Spacer()
             }
