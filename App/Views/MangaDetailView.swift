@@ -428,7 +428,9 @@ struct MangaDetailView: View {
                 }
                 .frame(width: Self.heroCoverSize.width, height: Self.heroCoverSize.height)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                // 24 — единый радиус "основных" элементов карточки тайтла
+                // (обложки/подложки), как в разделе Меню, по прямой просьбе.
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
                 .overlay(alignment: .topLeading) { bookmarkStatusBadge }
                 .overlay(alignment: .bottomLeading) { coverRatingBadge }
@@ -935,7 +937,7 @@ struct MangaDetailView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -1095,7 +1097,7 @@ struct MangaDetailView: View {
                 }
                 .frame(width: 104, height: 140)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
 
                 Text(ch.displayName)
                     .font(.caption.weight(.semibold))
@@ -1171,7 +1173,7 @@ struct MangaDetailView: View {
                     .clipped()
                     // Все 4 угла одинаково скруглены (было — только левые,
                     // вплотную к краю подложки) — как явно попросили.
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
 
                     // .frame(maxWidth: .infinity) — КЛЮЧЕВОЕ: без него VStack
                     // растягивался под самый длинный текст (название/подпись),
@@ -1220,7 +1222,7 @@ struct MangaDetailView: View {
                 .padding(.trailing, 10)
         }
         .frame(width: width, height: Self.similarCardHeight)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     /// Голосующая колонка справа: сверху "+", по центру число (чистый счёт
@@ -1323,7 +1325,7 @@ struct MangaDetailView: View {
                 .frame(width: Self.similarCoverWidth, height: Self.similarCardHeight)
                 .clipped()
                 // Все 4 угла одинаково скруглены, как у similarCard.
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
 
                 // .frame(maxWidth: .infinity) — та же причина, что и в
                 // similarCard: без него карточки были бы разной ширины.
@@ -1361,7 +1363,7 @@ struct MangaDetailView: View {
         }
         .buttonStyle(.plain)
         .frame(width: width, height: Self.similarCardHeight)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     // MARK: Action buttons
@@ -1649,7 +1651,7 @@ struct MangaDetailView: View {
                     .font(.subheadline).foregroundStyle(Theme.textSecondary)
             }
             .frame(maxWidth: .infinity, minHeight: 120)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         } else {
             VStack(alignment: .leading, spacing: 12) {
                 // Команды перевода тайтла — чипы сверху (аватар + имя + колокол),
@@ -1695,7 +1697,7 @@ struct MangaDetailView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                 }
 
                 // Порядок: по умолчанию новые сверху; «Сортировать» переключает.
@@ -1715,7 +1717,7 @@ struct MangaDetailView: View {
                         }
                     }
                 }
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             }
         }
     }
@@ -2382,7 +2384,7 @@ struct MangaDetailView: View {
         if let sticky = viewModel.stickyComment {
             commentRow(sticky)
                 .padding(12)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .overlay(alignment: .topTrailing) {
                     Image(systemName: "pin.fill")
                         .font(.caption2)
@@ -2414,7 +2416,7 @@ struct MangaDetailView: View {
                 // независимых карточек.
                 commentNode(root, grouped: grouped)
                     .padding(12)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .onAppear {
                         guard root.id == roots.last?.id else { return }
                         Task { await viewModel.loadMoreCommentsIfNeeded(currentComment: root) }
