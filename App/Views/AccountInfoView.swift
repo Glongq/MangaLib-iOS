@@ -34,6 +34,30 @@ struct ProfileView: View {
     /// отмены (см. friendshipRow/cancelFriendRequest).
     @State private var showCancelFriendRequestConfirm = false
     @State private var cancellingFriendRequest = false
+    /// Какой из "быстрых" разделов сейчас открыт ВНУТРИ профиля, вместо
+    /// push'а через NavigationLink на отдельный экран — по прямой просьбе
+    /// сделать так, чтобы левая кнопка шапки (щит ↔ назад) плавно
+    /// ПЕРЕТЕКАЛА одна в другую, а не просто появлялась/исчезала отдельно.
+    /// Настоящий морф (.contentTransition(.symbolEffect(.replace))) работает
+    /// только когда это ОДНА И ТА ЖЕ View, у которой меняется systemName —
+    /// а два разных экрана, соединённых через push NavigationStack, всегда
+    /// две РАЗНЫЕ View (проверено — см. предыдущую попытку с .glassEffectID
+    /// через push, эффекта не было вообще). Поэтому раздел теперь просто
+    /// подменяет контент под ОБЩЕЙ, постоянной шапкой (topBar) вместо пуша.
+    @State private var subScreen: ProfileSubScreen?
+
+    enum ProfileSubScreen: Equatable {
+        case bookmarks, comments, collections, friends
+
+        var title: String {
+            switch self {
+            case .bookmarks:   return "Списки тайтлов"
+            case .comments:    return "Комментарии"
+            case .collections: return "Коллекции"
+            case .friends:     return "Друзья"
+            }
+        }
+    }
 
     init(userId: Int? = nil) { self.userId = userId }
 
@@ -44,34 +68,47 @@ struct ProfileView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .topLeading) {
+            ZStack(alignment: .top) {
                 Theme.background.ignoresSafeArea()
 
-                if let profile, !profile.canViewProfile {
-                    closedState
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 18) {
-                            header
-                            infoBlock
+                Group {
+                    if let profile, !profile.canViewProfile {
+                        closedState
+                    } else if let subScreen {
+                        // Раздел вместо пуша — см. subScreen/openSubScreen. Отступ
+                        // сверху = высота topBar (он теперь рисуется ОТДЕЛЬНЫМ
+                        // слоем поверх, а не частью прокручиваемого контента).
+                        subScreenContent(subScreen)
+                            .padding(.top, Self.topBarHeight)
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 18) {
+                                heroBanner
+                                infoBlock
 
-                            if profile?.canViewStatistics ?? true {
-                                statsSection("Статистика по жанрам", stats?.genres ?? [])
-                                statsSection("Статистика по тегам", stats?.tags ?? [])
+                                if profile?.canViewStatistics ?? true {
+                                    statsSection("Статистика по жанрам", stats?.genres ?? [])
+                                    statsSection("Статистика по тегам", stats?.tags ?? [])
+                                }
+
+                                quickButtons
+
+                                if isSelf { actions }
                             }
-
-                            quickButtons
-
-                            if isSelf { actions }
+                            .padding(.bottom, 40)
                         }
-                        .padding(.bottom, 40)
+                        .scrollIndicators(.hidden)
                     }
-                    .scrollIndicators(.hidden)
-                    // Баннер уходит в самый верх (под статус-бар), как hero на
-                    // карточке тайтла. «Готово», аватар и плашки — часть шапки.
-                    .ignoresSafeArea(edges: .top)
                 }
+                .transition(.opacity)
+
+                // topBar — ОТДЕЛЬНЫМ слоем поверх (не часть прокручиваемого
+                // heroBanner, как раньше), т.к. должен оставаться ОДНОЙ и той
+                // же View независимо от того, что сейчас показано под ним —
+                // корневой профиль или один из разделов (см. subScreen).
+                topBar
             }
+            .ignoresSafeArea(edges: .top)
             .toolbar(.hidden, for: .navigationBar)
         }
         .task(id: resolvedId) { await loadProfile() }
@@ -128,7 +165,9 @@ struct ProfileView: View {
                               startPoint: .top, endPoint: .bottom)
     }
 
-    private var topTextColor: Color { bannerTopLight ? .black : .white }
+    /// Без баннера-фото за спиной (см. topBar/subScreen) — обычный
+    /// Theme.textPrimary, как и на всех остальных экранах приложения.
+    private var topTextColor: Color { subScreen != nil ? Theme.textPrimary : (bannerTopLight ? .black : .white) }
 
     // MARK: Закрытый профиль
 
@@ -146,9 +185,61 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: Шапка (баннер + аватар + топ-статистика)
+    // MARK: Шапка (постоянная topBar поверх + баннер/аватар/статистика под ней)
 
-    private var header: some View {
+    /// Высота topBar (46 кнопка + 14 отступ сверху + 12 снизу) — heroBanner
+    /// ниже отступает на эту же величину, чтобы аватар не залезал под неё;
+    /// subScreenContent тоже использует её же для своего верхнего отступа.
+    private static let topBarHeight: CGFloat = 72
+
+    /// Постоянный слой поверх всего — заголовок по центру + кнопки по краям.
+    /// ОДНА и та же View независимо от того, открыт ли раздел (subScreen) —
+    /// именно поэтому левая кнопка может плавно ПЕРЕТЕКАТЬ между "щитом" и
+    /// "назад" через .contentTransition(.symbolEffect(.replace)), а не
+    /// просто резко подменяться (см. subScreen выше).
+    private var topBar: some View {
+        ZStack {
+            Text(subScreen?.title ?? "Профиль")
+                .font(.headline)
+                .foregroundStyle(topTextColor)
+                .shadow(color: (subScreen == nil && !bannerTopLight ? Color.black : Color.clear).opacity(0.4), radius: 2)
+                .contentTransition(.opacity)
+
+            HStack {
+                Button {
+                    if subScreen != nil {
+                        withAnimation(.easeInOut(duration: 0.32)) { subScreen = nil }
+                    } else {
+                        showAdditionalInfo = true
+                    }
+                } label: {
+                    Image(systemName: subScreen == nil ? "shield.lefthalf.filled" : "chevron.left")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(topTextColor)
+                        .frame(width: 46, height: 46)
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .glassEffect(.regular.interactive(), in: Circle())
+
+                Spacer(minLength: 0)
+
+                Button { dismiss() } label: {
+                    Text("Готово")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(topTextColor)
+                        .padding(.horizontal, 18).frame(height: 46)
+                        .glassEffect(.regular.interactive(), in: Capsule())
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        // Это sheet — статус-бара над контентом нет, поэтому кнопки прижаты
+        // к самому верху (без запаса под статус-бар).
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+    }
+
+    private var heroBanner: some View {
         GeometryReader { geo in
             // Доступная ширина под плашки = экран − боковые поля − аватар − зазор.
             let statsW = statsWidth(available: geo.size.width - 32 - 104 - 12)
@@ -164,35 +255,9 @@ struct ProfileView: View {
                 .overlay(bannerGradient)
 
                 VStack(spacing: 0) {
-                    // Верхняя строка: «Готово» слева, заголовок по центру.
-                    ZStack {
-                        Text("Профиль")
-                            .font(.headline)
-                            .foregroundStyle(topTextColor)
-                            .shadow(color: (bannerTopLight ? Color.white : Color.black).opacity(0.4), radius: 2)
-                        HStack {
-                            Button { dismiss() } label: {
-                                Text("Готово")
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(topTextColor)
-                                    .padding(.horizontal, 18).frame(height: 46)
-                                    .glassEffect(.regular.interactive(), in: Capsule())
-                            }
-                            Spacer(minLength: 0)
-                            // «Щит» — дополнительная информация о пользователе
-                            // (опыт/уровень, дата регистрации, пол) — см.
-                            // AdditionalInfoSheet.
-                            Button { showAdditionalInfo = true } label: {
-                                Image(systemName: "shield.lefthalf.filled")
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(topTextColor)
-                                    .frame(width: 46, height: 46)
-                                    .glassEffect(.regular.interactive(), in: Circle())
-                            }
-                        }
-                    }
-
-                    Spacer(minLength: 8)
+                    // Место под topBar (отдельный слой поверх, см. body) —
+                    // раньше кнопки были частью этого VStack, теперь только отступ.
+                    Spacer(minLength: Self.topBarHeight)
 
                     // Аватар (слева) + статистика (справа), по центру баннера.
                     HStack(alignment: .center, spacing: 12) {
@@ -217,13 +282,30 @@ struct ProfileView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .padding(.horizontal, 16)
-                // Это sheet — статус-бара над контентом нет, поэтому «Готово»
-                // прижата к самому верху баннера (без запаса под статус-бар).
-                .padding(.top, 14)
                 .padding(.bottom, 12)
             }
         }
         .frame(height: 230)
+    }
+
+    /// Контент выбранного раздела (см. subScreen) — showsOwnHeader: false,
+    /// т.к. общую шапку рисует topBar выше, а не сам раздел.
+    @ViewBuilder
+    private func subScreenContent(_ screen: ProfileSubScreen) -> some View {
+        switch screen {
+        case .bookmarks:
+            if let id = resolvedId { UserBookmarksView(userId: id, showsOwnHeader: false) }
+        case .comments:
+            MyCommentsView(userId: resolvedId, showsOwnHeader: false)
+        case .collections:
+            if let id = resolvedId { UserCollectionsView(userId: id, showsOwnHeader: false) }
+        case .friends:
+            if let id = resolvedId { FriendsView(userId: id, showsOwnHeader: false) }
+        }
+    }
+
+    private func openSubScreen(_ screen: ProfileSubScreen) {
+        withAnimation(.easeInOut(duration: 0.32)) { subScreen = screen }
     }
 
     private var avatarPlaceholder: some View {
@@ -428,22 +510,22 @@ struct ProfileView: View {
                 } label: {
                     quickRow("Списки тайтлов", "square.stack.3d.up")
                 }.buttonStyle(.plain)
-            } else if let id = resolvedId {
-                NavigationLink { UserBookmarksView(userId: id) } label: {
+            } else if resolvedId != nil {
+                Button { openSubScreen(.bookmarks) } label: {
                     quickRow("Списки тайтлов", "square.stack.3d.up")
                 }.buttonStyle(.plain)
             }
 
-            NavigationLink { MyCommentsView(userId: resolvedId) } label: {
+            Button { openSubScreen(.comments) } label: {
                 quickRow("Комментарии", "text.bubble")
             }.buttonStyle(.plain)
 
-            if let id = resolvedId {
-                NavigationLink { UserCollectionsView(userId: id) } label: {
+            if resolvedId != nil {
+                Button { openSubScreen(.collections) } label: {
                     quickRow("Коллекции", "square.stack")
                 }.buttonStyle(.plain)
 
-                NavigationLink { FriendsView(userId: id) } label: {
+                Button { openSubScreen(.friends) } label: {
                     quickRow("Друзья", "person.2")
                 }.buttonStyle(.plain)
             }

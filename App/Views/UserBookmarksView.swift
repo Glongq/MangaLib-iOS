@@ -5,14 +5,21 @@ import SwiftUI
 /// GET /bookmarks/folder/{userId} и GET /bookmarks?status=&user_id=&page=.
 struct UserBookmarksView: View {
     let userId: Int
+    /// false — экран встроен в ProfileView (см. ProfileView.subScreenContent):
+    /// своя шапка/кнопка "назад" не рисуется, вместо неё общая, "перетекающая"
+    /// шапка профиля (по прямой просьбе — иначе кнопка "назад" здесь и кнопка
+    /// профиля были бы двумя РАЗНЫМИ View на разных экранах, а перетечь друг
+    /// в друга плавно может только один и тот же узел).
+    var showsOwnHeader: Bool = true
 
     @StateObject private var vm: UserBookmarksViewModel
     @Environment(\.dismiss) private var dismiss
     private let gridColumnsCount = 3
     private let gridSpacing: CGFloat = 12
 
-    init(userId: Int) {
+    init(userId: Int, showsOwnHeader: Bool = true) {
         self.userId = userId
+        self.showsOwnHeader = showsOwnHeader
         _vm = StateObject(wrappedValue: UserBookmarksViewModel(userId: userId))
     }
 
@@ -20,7 +27,7 @@ struct UserBookmarksView: View {
         ZStack {
             Theme.background.ignoresSafeArea()
             VStack(spacing: 0) {
-                header
+                if showsOwnHeader { header }
                 if vm.folders.isEmpty {
                     emptyOrLoadingFolders
                 } else {

@@ -7,12 +7,16 @@ import SwiftUI
 /// user_id=&page=.
 struct UserCollectionsView: View {
     let userId: Int
+    /// false — встроен в ProfileView без своей шапки (см.
+    /// UserBookmarksView.showsOwnHeader).
+    var showsOwnHeader: Bool = true
 
     @StateObject private var vm: UserCollectionsViewModel
     @Environment(\.dismiss) private var dismiss
 
-    init(userId: Int) {
+    init(userId: Int, showsOwnHeader: Bool = true) {
         self.userId = userId
+        self.showsOwnHeader = showsOwnHeader
         _vm = StateObject(wrappedValue: UserCollectionsViewModel(userId: userId))
     }
 
@@ -20,7 +24,7 @@ struct UserCollectionsView: View {
         ZStack {
             Theme.background.ignoresSafeArea()
             VStack(spacing: 0) {
-                header
+                if showsOwnHeader { header }
                 content
             }
         }

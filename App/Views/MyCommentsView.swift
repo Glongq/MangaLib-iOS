@@ -6,13 +6,20 @@ import SwiftUI
 /// комментарию открывает тайтл; долгий тап — удалить свой комментарий.
 struct MyCommentsView: View {
     let embedded: Bool
+    /// false — встроен в ProfileView без своей шапки (см.
+    /// UserBookmarksView.showsOwnHeader). У этого экрана два входа —
+    /// из бокового меню (embedded: true, showsOwnHeader: true, своя шапка) и
+    /// из профиля (userId:, showsOwnHeader: false, общая "перетекающая"
+    /// шапка профиля).
+    var showsOwnHeader: Bool = true
 
     @StateObject private var vm: MyCommentsViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
 
-    init(embedded: Bool = false, userId: Int? = nil) {
+    init(embedded: Bool = false, userId: Int? = nil, showsOwnHeader: Bool = true) {
         self.embedded = embedded
+        self.showsOwnHeader = showsOwnHeader
         _vm = StateObject(wrappedValue: MyCommentsViewModel(userId: userId))
     }
 
@@ -20,7 +27,7 @@ struct MyCommentsView: View {
         ZStack {
             Theme.background.ignoresSafeArea()
             VStack(spacing: 0) {
-                header
+                if showsOwnHeader { header }
                 content
             }
         }

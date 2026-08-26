@@ -6,14 +6,18 @@ import SwiftUI
 /// Данные: GET /friendship?user_id=&status=1 и GET /friendship/{id}/mutual.
 struct FriendsView: View {
     let userId: Int
+    /// false — встроен в ProfileView без своей шапки (см.
+    /// UserBookmarksView.showsOwnHeader).
+    var showsOwnHeader: Bool = true
 
     @StateObject private var vm: FriendsViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
     @State private var profileUser: ProfileUserId?
 
-    init(userId: Int) {
+    init(userId: Int, showsOwnHeader: Bool = true) {
         self.userId = userId
+        self.showsOwnHeader = showsOwnHeader
         _vm = StateObject(wrappedValue: FriendsViewModel(userId: userId))
     }
 
@@ -21,7 +25,7 @@ struct FriendsView: View {
         ZStack {
             Theme.background.ignoresSafeArea()
             VStack(spacing: 0) {
-                header
+                if showsOwnHeader { header }
                 content
             }
         }
