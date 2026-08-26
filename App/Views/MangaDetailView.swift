@@ -2689,7 +2689,10 @@ private struct MergedCreditsChip: View {
 
 /// Группа (Авторы/Художники/Издатели) — до двух аватарок внахлёст + имена
 /// через "&", "+N" если людей больше двух ("если 2 всего — без +1", по
-/// прямой просьбе). Тап ВСЕГДА открывает лист со всеми (даже если человек
+/// прямой просьбе), а под именами — подпись роли (sheetTitle: "Автор"/
+/// "Авторы"/"Художник"/"Художники"/"Издательство"/"Издатели"), по аналогии
+/// с "Автор и художник" у MergedCreditsChip (раньше была только ник/имя без
+/// подписи роли). Тап ВСЕГДА открывает лист со всеми (даже если человек
 /// один — единообразное поведение, по прямой просьбе "лист всегда").
 private struct CreditsChip: View {
     let people: [DirectoryEntity]
@@ -2703,12 +2706,17 @@ private struct CreditsChip: View {
 
     var body: some View {
         Button { showSheet = true } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 avatarsStack
-                Text(namesLabel)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(namesLabel)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    Text(sheetTitle)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
             }
             .padding(.horizontal, 10)
             .frame(height: 44)
