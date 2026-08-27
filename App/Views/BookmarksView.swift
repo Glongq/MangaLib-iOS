@@ -34,9 +34,9 @@ struct BookmarksView: View {
     @AppStorage("bookmarks_view_mode") private var viewMode: BookmarksViewMode = .list
     /// Поле сортировки — см. ViewSortSheet.
     @AppStorage("bookmarks_sort_option") private var sortOption: BookmarksSortOption = .dateAdded
-    /// Направление — применяется только к полям-датам (см.
-    /// BookmarksSortOption.needsDirection), у сортировки по названию
-    /// направление уже "зашито" в сам вариант (А-Я/Я-А).
+    /// Направление — реально влияет на сортировку только у полей-дат
+    /// (у сортировки по названию направление уже "зашито" в сам вариант,
+    /// А-Я/Я-А), но карточка выбора в ViewSortSheet видна всегда.
     @AppStorage("bookmarks_sort_direction") private var sortDirection: BookmarksSortDirection = .newestFirst
     /// Число колонок в режиме "Плитка" — из Персонализации (см. CardsPerRow,
     /// тот же ключ, что читает MangaCatalogView.gridColumnsCount).
@@ -167,17 +167,6 @@ struct BookmarksView: View {
             // данными (см. project.yml/CLAUDE.md — принцип "не полу-готовые
             // реализации").
             return titles
-        case .myRating:
-            // Без личной оценки — всегда в конец (тот же принцип, что и у
-            // sortedByDate ниже для дат-nil), а не в начало/вперемешку.
-            return titles.sorted { a, b in
-                switch (a.myRating, b.myRating) {
-                case let (ra?, rb?): return sortDirection == .newestFirst ? ra > rb : ra < rb
-                case (nil, .some): return false
-                case (.some, nil): return true
-                case (nil, nil): return false
-                }
-            }
         }
     }
 
@@ -639,7 +628,7 @@ enum BookmarksViewMode: String {
 
 /// Поле сортировки списка закладок — см. BookmarksView.sorted(_:).
 enum BookmarksSortOption: String, CaseIterable, Identifiable {
-    case titleAsc, titleDesc, dateAdded, chapterUpdated, dateRead, myRating
+    case titleAsc, titleDesc, dateAdded, chapterUpdated, dateRead
 
     var id: String { rawValue }
 
@@ -650,34 +639,19 @@ enum BookmarksSortOption: String, CaseIterable, Identifiable {
         case .dateAdded:      return "По дате добавления"
         case .chapterUpdated: return "Дате обновления глав"
         case .dateRead:       return "Дате чтения"
-        case .myRating:       return "По моей оценке"
-        }
-    }
-
-    /// У сортировки по названию направление уже "зашито" в сам вариант
-    /// (А-Я/Я-А) — общий переключатель "По убыванию"/"По возрастанию" (см.
-    /// BookmarksSortDirection) имеет смысл только у полей-дат и у личной
-    /// оценки.
-    var needsDirection: Bool {
-        switch self {
-        case .titleAsc, .titleDesc: return false
-        case .dateAdded, .chapterUpdated, .dateRead, .myRating: return true
         }
     }
 }
 
-/// Направление для полей-дат и личной оценки (см.
-/// BookmarksSortOption.needsDirection) — подпись ВСЕГДА "По убыванию"/"По
-/// возрастанию", не меняется в зависимости от выбранного поля (по прямой
-/// просьбе — раньше была "Сначала новые/старые" у дат и "высокая/низкая
-/// оценка" у рейтинга, отдельно под каждое поле; решили не делать так).
-/// newestFirst = убывание (новее/больше сначала), oldestFirst = возрастание.
+/// Направление — карточка с "Сначала новые"/"Сначала старые" под списком
+/// полей сортировки, ВСЕГДА видна (по прямой просьбе — раньше пряталась
+/// для сортировки по названию, "чтобы не пропадало").
 enum BookmarksSortDirection: String, CaseIterable, Identifiable {
     case newestFirst, oldestFirst
 
     var id: String { rawValue }
 
-    var title: String { self == .newestFirst ? "По убыванию" : "По возрастанию" }
+    var title: String { self == .newestFirst ? "Сначала новые" : "Сначала старые" }
 }
 
 /// Щит редактирования порядка списков (иконка карандаша в шапке Закладок) —
@@ -782,22 +756,17 @@ private struct ViewSortSheet: View {
                         }
                     }
 
-                    // Направление — своя ОТДЕЛЬНАЯ подложка ниже (по прямой
-                    // просьбе), без собственного заголовка. Подписи ВСЕГДА
-                    // "По убыванию"/"По возрастанию", не меняются в
-                    // зависимости от выбранного поля сортировки (не "Сначала
-                    // новые"/"Сначала высокая оценка" и т.п. — тоже прямая
-                    // просьба, отменяет предыдущий вариант с
-                    // BookmarksSortDirection.title(for:)).
-                    if sortOption.needsDirection {
-                        card {
-                            ForEach(BookmarksSortDirection.allCases) { direction in
-                                selectableRow(title: direction.title, isSelected: sortDirection == direction) {
-                                    sortDirection = direction
-                                }
-                                if direction != BookmarksSortDirection.allCases.last {
-                                    divider
-                                }
+                    // Направление — своя ОТДЕЛЬНАЯ подложка ниже, без
+                    // заголовка, ВСЕГДА видна (по прямой просьбе — раньше
+                    // пряталась для сортировки по названию, "чтобы не
+                    // пропадало").
+                    card {
+                        ForEach(BookmarksSortDirection.allCases) { direction in
+                            selectableRow(title: direction.title, isSelected: sortDirection == direction) {
+                                sortDirection = direction
+                            }
+                            if direction != BookmarksSortDirection.allCases.last {
+                                divider
                             }
                         }
                     }

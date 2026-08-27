@@ -589,24 +589,36 @@ struct MangaDetailView: View {
         }
     }
 
-    /// Рейтинг поверх обложки тайтла — единый бэйдж (см. RatingChip), тот же
-    /// стиль/цвет, что и на карточках каталога и в закладках. Сверху справа
-    /// (было снизу справа) — как явно попросили.
-    /// Верхний правый бейдж обложки: ★ + оценка + просмотры (коротко, K/M).
-    /// Звёздочка перед оценкой, просмотры перенесены сюда (нижний-левый бейдж
-    /// удалён) — как попросили.
+    /// Рейтинг поверх обложки тайтла — снизу слева, ДВА отдельных чипа (по
+    /// прямой просьбе): [1] твоя личная оценка (★ под цвет, см.
+    /// personalRatingColor — тот же непрерывный градиент, что и везде в
+    /// приложении), только если она есть; [2] средняя оценка сайта (★
+    /// жёлтая) + кол-во проголосовавших цифрами. Просмотры с обложки убраны
+    /// — теперь только в info row (см. "MARK: Info row" ниже,
+    /// viewModel.detail?.viewsString), это и есть "метаданные".
     @ViewBuilder
     private var coverRatingBadge: some View {
         let ratingObj = viewModel.detail?.rating ?? listItem?.rating
         let rating = ratingObj?.value
         let votes = ratingObj?.votes
-        let views = viewModel.detail?.views
+        let myScore = viewModel.detail?.rating?.myScore
         let hasRating = (rating ?? 0) > 0
-        let hasVotes = (votes ?? 0) > 0
-        let hasViews = (views ?? 0) > 0
-        if hasRating || hasViews {
-            HStack(spacing: 4) {
-                if hasRating, let rating {
+        HStack(spacing: 6) {
+            if let myScore {
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(personalRatingColor(myScore))
+                    Text("\(myScore)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(personalRatingColor(myScore))
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(.black.opacity(0.55), in: Capsule())
+            }
+            if hasRating, let rating {
+                HStack(spacing: 4) {
                     Image(systemName: "star.fill")
                         .font(.system(size: 9))
                         .foregroundStyle(.yellow)
@@ -614,24 +626,19 @@ struct MangaDetailView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
                     // Сколько людей поставило оценку — в коротком формате (762k).
-                    if hasVotes, let votes {
+                    if let votes, votes > 0 {
                         Text(Self.shortCount(votes).lowercased())
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.85))
                     }
                 }
-                if hasViews, let views {
-                    Text(Self.shortCount(views))
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
-                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(.black.opacity(0.55), in: Capsule())
             }
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(.black.opacity(0.55), in: Capsule())
-            .padding(6)
         }
+        .lineLimit(1)
+        .padding(6)
     }
 
     /// Чип "иконка изображения + кол-во доп. обложек" — сверху справа на
