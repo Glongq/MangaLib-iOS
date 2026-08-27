@@ -36,7 +36,7 @@ struct RatingSheet: View {
 
     init(viewModel: MangaDetailViewModel) {
         self.viewModel = viewModel
-        _selected = State(initialValue: viewModel.detail?.rating?.user)
+        _selected = State(initialValue: viewModel.detail?.rating?.myScore)
     }
 
     var body: some View {

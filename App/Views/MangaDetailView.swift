@@ -272,7 +272,7 @@ struct MangaDetailView: View {
         // BookmarksStore.setMyRating) при каждой загрузке/обновлении
         // карточки — no-op, если тайтла нет в закладках. initial: true —
         // подхватывает значение и на первой загрузке, не только при смене.
-        .onChange(of: viewModel.detail?.rating?.user, initial: true) { _, newValue in
+        .onChange(of: viewModel.detail?.rating?.myScore, initial: true) { _, newValue in
             bookmarks.setMyRating(newValue, forSlug: viewModel.slug)
         }
         // "Около 0.5 сек ничего не используется, а если за это время ничего
@@ -865,7 +865,7 @@ struct MangaDetailView: View {
                         // личной оценки в плитке закладок (см.
                         // personalRatingColor, RatingChip.swift) — единый
                         // цвет для "твоей" оценки везде в приложении.
-                        if let myScore = viewModel.detail?.rating?.user {
+                        if let myScore = viewModel.detail?.rating?.myScore {
                             HStack(spacing: 5) {
                                 Image(systemName: "star.fill")
                                     .font(.subheadline)
