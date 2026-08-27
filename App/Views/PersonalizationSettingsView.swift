@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// "Персонализация" — набор пунктов персонализации приложения, каждый в
 /// своей отдельной карточке-подложке (по прямой просьбе, вместо одной общей
@@ -287,20 +288,34 @@ struct PersonalizationSettingsView: View {
         let isOLED: Bool
     }
 
-    /// Приблизительная (НЕ строго по масштабу, чисто визуальная) визуализация
-    /// — высота карточек теперь ФИКСИРОВАННАЯ (см. cardsPreviewHeight),
-    /// меняется только ширина/число карточек. Раньше высота считалась от
-    /// ширины экрана и числа колонок — при 2 карточки были заметно выше,
-    /// при 4 заметно ниже, из-за чего блок "распахивался"/"схлопывался" по
-    /// высоте при переключении — по прямой просьбе исправлено: подложка
-    /// (сама область превью) больше не меняет высоту.
-    private static let cardsPreviewHeight: CGFloat = 90
+    /// Пол высоты области превью — заметно больше прежних 90pt, по прямой
+    /// просьбе "сделай больше высоту блока". Реальная высота (см. ниже,
+    /// считается от 2-колоночного случая) на типичных экранах и так больше
+    /// этого числа — это именно СТРАХОВОЧНЫЙ минимум на узких устройствах.
+    private static let cardsPreviewMinHeight: CGFloat = 130
 
+    /// Карточки заполняют ширину блока целиком (ширина каждой = доступная
+    /// ширина / count) — раньше был фиксированный размер у самих карточек,
+    /// из-за чего при смене 2/3/4/Авто лишние карточки просто ПРОПАДАЛИ/
+    /// ПОЯВЛЯЛИСЬ рывком (менялось количество одинаковых прямоугольников, а
+    /// не их размер) — по прямой просьбе "не так что просто пропадает
+    /// появляется картинка карточки", теперь все карточки плавно
+    /// сужаются/расширяются при переключении.
+    ///
+    /// Высота КОНТЕЙНЕРА при этом всё равно фиксированная (иначе вернулся бы
+    /// прошлый баг "блок прыгает по высоте при переключении") — берётся по
+    /// самому широкому случаю (2 колонки, при котором карточки выше всего
+    /// при сохранении 2:3), не по текущему count. У 3/4 карточки короче
+    /// этого максимума и прижаты по верху — пустое место снизу нормально
+    /// для приблизительной, не строго по масштабу визуализации.
     private var cardsPreview: some View {
         let count = cardsPerRow.columns
         let spacing: CGFloat = 8
-        let cardHeight = Self.cardsPreviewHeight
-        let cardWidth = (cardHeight * 2 / 3).rounded()
+        let availableWidth = UIScreen.main.bounds.width - 64
+        let cardWidth = max(0, (availableWidth - spacing * CGFloat(count - 1)) / CGFloat(count))
+        let cardHeight = (cardWidth * 3 / 2).rounded()
+        let maxCardWidth = max(0, (availableWidth - spacing) / 2) // count = 2, самый широкий случай
+        let containerHeight = max((maxCardWidth * 3 / 2).rounded(), Self.cardsPreviewMinHeight)
         return HStack(spacing: spacing) {
             ForEach(0..<count, id: \.self) { _ in
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -309,6 +324,7 @@ struct PersonalizationSettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: containerHeight, alignment: .top)
         .animation(.spring(response: 0.35, dampingFraction: 0.85),
                    value: CardsPreviewKey(cardsPerRow: cardsPerRow, isDark: themeManager.isDarkTheme, isOLED: themeManager.isOLEDTheme))
     }
