@@ -174,33 +174,44 @@ struct PersonalizationSettingsView: View {
 
     private static let homeSectionRowHeight: CGFloat = 52
 
-    /// Список — НЕ скроллится сам (.scrollDisabled), высота ровно под все
-    /// строки: это блок ВНУТРИ уже скроллящегося экрана Персонализации,
-    /// вложенный скроллящийся List внутри него конфликтовал бы жестами. Тот
-    /// же приём (List + .onMove + editMode.constant(.active)), что и у
-    /// BookmarksView.FolderOrderSheet, но БЕЗ отдельного шита — прямо здесь,
-    /// как единый "блок" на экране, по прямой просьбе.
+    /// Обычный VStack, БЕЗ List — раньше здесь стоял List (+ .scrollDisabled
+    /// + editMode.constant(.active)) для перетаскивания строк, но он всё
+    /// равно остаётся отдельным UIScrollView (UITableView) ПОД капотом даже
+    /// с выключенным своим скроллом — вложенный внутрь ВНЕШНЕГО ScrollView
+    /// экрана Персонализации, он перехватывал/задерживал жест скролла
+    /// внешнего ScrollView именно в области этого блока (по прямой просьбе:
+    /// "скролл не зафиксирован в разделе персонализация" — в остальных
+    /// разделах настроек такого List нет, скролл вёл себя нормально).
+    /// Перетаскивание теперь — нативный .draggable/.dropDestination
+    /// (Transferable String = kind.rawValue), без единого вложенного
+    /// скролл-контейнера — жест скролла внешнего ScrollView больше ничем не
+    /// перехватывается.
     private var homeSectionsList: some View {
-        List {
+        VStack(spacing: 0) {
             ForEach(sectionsStore.order) { kind in
                 homeSectionRow(kind)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets())
+                    .draggable(kind.rawValue)
+                    .dropDestination(for: String.self) { items, _ in
+                        guard let raw = items.first,
+                              let dragged = HomeSectionKind(rawValue: raw),
+                              let from = sectionsStore.order.firstIndex(of: dragged),
+                              let to = sectionsStore.order.firstIndex(of: kind),
+                              from != to else { return false }
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                            sectionsStore.moveSections(fromOffsets: IndexSet(integer: from),
+                                                        toOffset: to > from ? to + 1 : to)
+                        }
+                        return true
+                    }
             }
-            .onMove { from, to in sectionsStore.moveSections(fromOffsets: from, toOffset: to) }
         }
-        .listStyle(.plain)
-        .scrollDisabled(true)
-        .scrollContentBackground(.hidden)
-        .environment(\.editMode, .constant(.active))
-        .frame(height: Self.homeSectionRowHeight * CGFloat(sectionsStore.order.count))
         .padding(.bottom, 8)
     }
 
     /// Скруглённый чекбокс слева (заливка акцентом, если раздел включён) —
     /// по прямой просьбе, вместо системного Toggle-переключателя. Ручка
-    /// перетаскивания (drag handle) — справа, рисует сам List/.onMove.
+    /// перетаскивания справа — просто визуальная подсказка, тянуть можно за
+    /// всю строку (см. .draggable в homeSectionsList).
     private func homeSectionRow(_ kind: HomeSectionKind) -> some View {
         HStack(spacing: 12) {
             Button {
@@ -232,6 +243,10 @@ struct PersonalizationSettingsView: View {
                 .lineLimit(1)
 
             Spacer(minLength: 0)
+
+            Image(systemName: "line.3.horizontal")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary.opacity(0.5))
         }
         .padding(.horizontal, 16)
         .frame(height: Self.homeSectionRowHeight)

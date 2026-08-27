@@ -147,6 +147,13 @@ struct NotificationsView: View {
                         .padding(.horizontal, 5)
                         .frame(minWidth: 16, minHeight: 16)
                         .background(Theme.accent, in: Capsule())
+                        // Без этого бейдж рендерится ВНУТРИ системного
+                        // Liquid-Glass слоя ToolbarItemGroup и частично
+                        // просвечивает (тот же приём, что уже спасал от
+                        // похожей ситуации в MangaDetailView) — сплющивает
+                        // подложку+цифру в один непрозрачный слой ДО того,
+                        // как toolbar применит своё стекло/вибрантность.
+                        .compositingGroup()
                         .offset(x: 6, y: -4)
                 }
             }
