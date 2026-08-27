@@ -174,6 +174,15 @@ struct PersonalizationSettingsView: View {
 
     private static let homeSectionRowHeight: CGFloat = 52
 
+    /// Кто сейчас тянут (по ручке) и текущее вертикальное смещение — только
+    /// Y, .draggable/.dropDestination убраны: та версия позволяла тянуть
+    /// строку свободно в любую сторону, включая горизонталь ("типа скролл
+    /// влево вправо можно двигать" — с точки зрения пользователя строка
+    /// "гуляла" туда-обратно). Кастомный DragGesture ниже читает только
+    /// value.translation.height.
+    @State private var draggedKind: HomeSectionKind?
+    @State private var dragOffsetY: CGFloat = 0
+
     /// Обычный VStack, БЕЗ List — раньше здесь стоял List (+ .scrollDisabled
     /// + editMode.constant(.active)) для перетаскивания строк, но он всё
     /// равно остаётся отдельным UIScrollView (UITableView) ПОД капотом даже
@@ -182,36 +191,56 @@ struct PersonalizationSettingsView: View {
     /// внешнего ScrollView именно в области этого блока (по прямой просьбе:
     /// "скролл не зафиксирован в разделе персонализация" — в остальных
     /// разделах настроек такого List нет, скролл вёл себя нормально).
-    /// Перетаскивание теперь — нативный .draggable/.dropDestination
-    /// (Transferable String = kind.rawValue), без единого вложенного
-    /// скролл-контейнера — жест скролла внешнего ScrollView больше ничем не
-    /// перехватывается.
+    /// Перетаскивание — кастомный DragGesture (см. dragHandleGesture),
+    /// навешанный ТОЛЬКО на иконку-ручку в homeSectionRow, а не на всю
+    /// строку: иначе любой тач по строке конфликтовал бы со скроллом
+    /// внешнего ScrollView вместо перетаскивания.
     private var homeSectionsList: some View {
         VStack(spacing: 0) {
             ForEach(sectionsStore.order) { kind in
                 homeSectionRow(kind)
-                    .draggable(kind.rawValue)
-                    .dropDestination(for: String.self) { items, _ in
-                        guard let raw = items.first,
-                              let dragged = HomeSectionKind(rawValue: raw),
-                              let from = sectionsStore.order.firstIndex(of: dragged),
-                              let to = sectionsStore.order.firstIndex(of: kind),
-                              from != to else { return false }
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                            sectionsStore.moveSections(fromOffsets: IndexSet(integer: from),
-                                                        toOffset: to > from ? to + 1 : to)
-                        }
-                        return true
-                    }
+                    .zIndex(draggedKind == kind ? 1 : 0)
+                    .offset(y: draggedKind == kind ? dragOffsetY : 0)
             }
         }
         .padding(.bottom, 8)
     }
 
+    /// Читает только translation.height (никогда .width) — строго
+    /// вертикальное перетаскивание. По ходу драга сразу переставляет раздел
+    /// в sectionsStore, как только смещение "перевешивает" за половину
+    /// высоты соседней строки, и тут же гасит уже учтённую часть смещения —
+    /// чтобы после перестановки строка не "прыгала", а продолжала плавно
+    /// следовать за пальцем.
+    private func dragHandleGesture(for kind: HomeSectionKind) -> some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .local)
+            .onChanged { value in
+                draggedKind = kind
+                dragOffsetY = value.translation.height
+
+                guard let from = sectionsStore.order.firstIndex(of: kind) else { return }
+                let shift = Int((dragOffsetY / Self.homeSectionRowHeight).rounded())
+                guard shift != 0 else { return }
+                let to = min(max(from + shift, 0), sectionsStore.order.count - 1)
+                guard to != from else { return }
+
+                sectionsStore.moveSections(fromOffsets: IndexSet(integer: from),
+                                            toOffset: to > from ? to + 1 : to)
+                dragOffsetY -= CGFloat(to - from) * Self.homeSectionRowHeight
+            }
+            .onEnded { _ in
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    draggedKind = nil
+                    dragOffsetY = 0
+                }
+            }
+    }
+
     /// Скруглённый чекбокс слева (заливка акцентом, если раздел включён) —
     /// по прямой просьбе, вместо системного Toggle-переключателя. Ручка
-    /// перетаскивания справа — просто визуальная подсказка, тянуть можно за
-    /// всю строку (см. .draggable в homeSectionsList).
+    /// перетаскивания справа — теперь единственное место, за которое реально
+    /// тянут (см. dragHandleGesture); остальная часть строки свободна для
+    /// скролла внешнего ScrollView.
     private func homeSectionRow(_ kind: HomeSectionKind) -> some View {
         HStack(spacing: 12) {
             Button {
@@ -247,10 +276,12 @@ struct PersonalizationSettingsView: View {
             Image(systemName: "line.3.horizontal")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary.opacity(0.5))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .gesture(dragHandleGesture(for: kind))
         }
         .padding(.horizontal, 16)
         .frame(height: Self.homeSectionRowHeight)
-        .contentShape(Rectangle())
     }
 
     // MARK: Количество карточек в ряд
