@@ -47,11 +47,18 @@ struct NotificationsView: View {
             .navigationTitle("Уведомления")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                // Две кнопки (фильтр "Все" + "...") на ОДНОЙ общей стеклянной
-                // подложке — не два раздельных .glassEffect (было "две
-                // кнопки в одном месте"), а единая капсула-контейнер с
-                // разделителем внутри, по прямой просьбе.
-                ToolbarItem(placement: .topBarTrailing) { headerControls }
+                // Обе кнопки (фильтр "Все" + "...") в ОДНОЙ ToolbarItemGroup —
+                // система сама объединяет несколько элементов группы в один
+                // Liquid-Glass pill, без ручного .glassEffect (см. WWDC25
+                // Liquid Glass toolbars). Прошлая попытка (свой HStack +
+                // .glassEffect в одном ToolbarItem) давала задвоение:
+                // системный toolbar и так добавляет свой glass-фон вокруг
+                // содержимого ToolbarItem, а ручной .glassEffect накладывался
+                // вторым слоем ("призрачный" pill на скриншоте).
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    readFilterChip
+                    overflowMenu
+                }
             }
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(
@@ -102,20 +109,6 @@ struct NotificationsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isHeaderAnimating = false }
     }
 
-    /// Обе кнопки шапки (фильтр "Все" + "...") на одной общей стеклянной
-    /// подложке — единственный .glassEffect на всю HStack, а не по одному
-    /// на каждую кнопку (это и была причина "две кнопки в одном месте").
-    /// Разделитель внутри капсулы — та же техника, что у сегментных
-    /// Liquid Glass контролов.
-    private var headerControls: some View {
-        HStack(spacing: 0) {
-            readFilterChip
-            Divider().frame(height: 20)
-            overflowMenu
-        }
-        .glassEffect(.regular.interactive(), in: Capsule())
-    }
-
     /// Чип "Все"/"Непрочитанные"/"Прочитанные" (текущий readFilter) — тап
     /// открывает меню с прочитанностью и, ниже, порядком сортировки
     /// (сначала новые/старые). Бейдж — реальное число из
@@ -158,10 +151,6 @@ struct NotificationsView: View {
                 }
             }
         }
-        // Без этого Menu сам рисует свой системный фон под лейблом — на
-        // общей headerControls-капсуле это выглядело как "два стекла"
-        // (тот же фикс, что и у MangaDetailView.actionMenuItems).
-        .menuStyle(.borderlessButton)
     }
 
     /// "..." — Настройки (заглушка, эндпоинт не подтверждён)/Отметить всё
@@ -183,8 +172,6 @@ struct NotificationsView: View {
                 .foregroundStyle(Theme.textPrimary)
                 .frame(width: Theme.pillControlHeight, height: Theme.pillControlHeight)
         }
-        // См. комментарий у readFilterChip — та же причина "двух стёкол".
-        .menuStyle(.borderlessButton)
     }
 
     /// "Отметить всё прочитанным" — эндпоинт нигде не подтверждён

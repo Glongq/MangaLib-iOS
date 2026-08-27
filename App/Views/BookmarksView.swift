@@ -65,12 +65,24 @@ struct BookmarksView: View {
             .navigationTitle("Закладки")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $query, prompt: "Поиск в «\(selectedName)»")
-            // Шестерёнка (Вид/Сортировка) + карандаш (порядок списков) — на
-            // одной общей стеклянной капсуле с разделителем, а не в двух
-            // отдельных круглых кнопках (по прямой просьбе, тот же приём,
-            // что и NotificationsView.headerControls).
+            // Шестерёнка (Вид/Сортировка) + карандаш (порядок списков) — в
+            // ОДНОЙ ToolbarItemGroup: систему сама объединяет несколько
+            // элементов группы в один Liquid-Glass pill (см. WWDC25 Liquid
+            // Glass toolbars) — БЕЗ ручного .glassEffect. Предыдущая попытка
+            // (свой HStack + .glassEffect в одном ToolbarItem) давала
+            // задвоение: системный toolbar и так добавляет свой glass-фон
+            // вокруг содержимого ToolbarItem, поверх которого наш ручной
+            // .glassEffect накладывался вторым слоем ("призрачный" pill на
+            // скриншоте).
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { toolbarControls }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button { showViewSortSheet = true } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    Button { showFolderOrderSheet = true } label: {
+                        Image(systemName: "pencil")
+                    }
+                }
             }
             .onAppear { applyPendingFolder() }
             .onChange(of: catalogNav.openBookmarksRequest) { _, _ in applyPendingFolder() }
@@ -172,31 +184,6 @@ struct BookmarksView: View {
     private var selectedName: String {
         guard let id = selectedFolderId else { return "Все" }
         return store.allFolders.first { $0.id == id }?.name ?? "Все"
-    }
-
-    // MARK: Кнопки шапки (шестерёнка + карандаш)
-
-    /// Шестерёнка (Вид/Сортировка) и карандаш (порядок списков) на одной
-    /// общей стеклянной капсуле с разделителем — та же техника, что и
-    /// NotificationsView.headerControls (единственный .glassEffect на всю
-    /// HStack, а не по одному на каждую кнопку).
-    private var toolbarControls: some View {
-        HStack(spacing: 0) {
-            Button { showViewSortSheet = true } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: Theme.pillControlHeight, height: Theme.pillControlHeight)
-            }
-            Divider().frame(height: 20)
-            Button { showFolderOrderSheet = true } label: {
-                Image(systemName: "pencil")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: Theme.pillControlHeight, height: Theme.pillControlHeight)
-            }
-        }
-        .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     // MARK: Полоска подкатегорий (горизонтальный скролл, вместо аккордеона)
