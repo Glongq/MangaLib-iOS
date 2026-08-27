@@ -228,16 +228,25 @@ final class MangaDetailViewModel: ObservableObject {
 
         // Успех — сохраняем в кэш, чтобы следующее открытие ЭТОГО ЖЕ
         // тайтла (в течение TTL) не долбило все эндпоинты заново.
-        if let detail {
-            MangaDetailCache.shared.store(
-                MangaDetailCache.Entry(
-                    detail: detail, chapters: chapters, similar: similar, related: related,
-                    characters: characters, coverGallery: coverGallery, stats: stats,
-                    effectiveSite: effectiveSite, cachedAt: Date()
-                ),
-                for: slug
-            )
-        }
+        storeCache()
+    }
+
+    /// Сохраняет ТЕКУЩЕЕ состояние (detail/главы/похожее/статы/...) в
+    /// MangaDetailCache под этим slug — общий хвост load() и submitRating()
+    /// (см. там же: без повторного сохранения после re-stamp свежей оценки
+    /// кэш оставался со старым/отставшим "user", и при следующем заходе на
+    /// эту же карточку — до истечения TTL — снова показывалось "не
+    /// оценено", хотя оценка на сервере уже была).
+    private func storeCache() {
+        guard let detail else { return }
+        MangaDetailCache.shared.store(
+            MangaDetailCache.Entry(
+                detail: detail, chapters: chapters, similar: similar, related: related,
+                characters: characters, coverGallery: coverGallery, stats: stats,
+                effectiveSite: effectiveSite, cachedAt: Date()
+            ),
+            for: slug
+        )
     }
 
     /// Грузит карточку, подбирая рабочий site_id: сначала переданный при
@@ -375,6 +384,12 @@ final class MangaDetailViewModel: ObservableObject {
         MangaDetailCache.shared.invalidate(slug: slug)
         await load(force: true)
         detail?.rating = freshRating
+        // load(force:true) уже сохранил кэш САМ (см. storeCache в конце
+        // load()), но с тем "user", что вернул его собственный GET — мог
+        // ещё не досчитаться на сервере. Пересохраняем кэш ПОСЛЕ re-stamp
+        // выше, иначе следующий заход на эту карточку (в течение TTL) снова
+        // покажет "не оценено".
+        storeCache()
     }
 
     /// Сортировка глав по возрастанию тома, затем номера главы.
