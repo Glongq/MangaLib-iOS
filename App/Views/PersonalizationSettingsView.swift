@@ -306,8 +306,9 @@ struct PersonalizationSettingsView: View {
     /// прошлый баг "блок прыгает по высоте при переключении") — берётся по
     /// самому широкому случаю (2 колонки, при котором карточки выше всего
     /// при сохранении 2:3), не по текущему count. У 3/4 карточки короче
-    /// этого максимума и прижаты по верху — пустое место снизу нормально
-    /// для приблизительной, не строго по масштабу визуализации.
+    /// этого максимума — по прямой просьбе "вмещалось РАВНО" центрированы по
+    /// вертикали (не прижаты к верху с пустым местом снизу, а симметрично
+    /// вписаны в блок при любом 2/3/4/Авто).
     private var cardsPreview: some View {
         let count = cardsPerRow.columns
         let spacing: CGFloat = 8
@@ -324,7 +325,7 @@ struct PersonalizationSettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: containerHeight, alignment: .top)
+        .frame(height: containerHeight, alignment: .center)
         .animation(.spring(response: 0.35, dampingFraction: 0.85),
                    value: CardsPreviewKey(cardsPerRow: cardsPerRow, isDark: themeManager.isDarkTheme, isOLED: themeManager.isOLEDTheme))
     }
