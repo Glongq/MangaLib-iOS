@@ -55,6 +55,11 @@ struct BookmarksView: View {
                 Theme.background.ignoresSafeArea()
                 titlesList
             }
+            // Потянуть вниз — реальная пересинхронизация закладок с
+            // сервера (GET /bookmarks, тот же store.syncFromServer, что и
+            // при открытии вкладки), без сессии — no-op. Тот же принцип,
+            // что и в Читают/Уведомлениях/Каталоге.
+            .refreshable { await store.syncFromServer() }
             // Родной системный поиск (сам выезжает сверху, свой Cancel, своя
             // анимация — высоту менять нельзя, это контролирует iOS) +
             // .large — эталон App Store (см. тот же приём в MangaCatalogView):

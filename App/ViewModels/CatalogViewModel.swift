@@ -93,6 +93,19 @@ final class CatalogViewModel: ObservableObject {
         reloadNow()
     }
 
+    /// Точка входа для потянуть-обновить (.refreshable в MangaCatalogView) —
+    /// в отличие от retry()/reloadNow() (которые лишь ПЛАНИРУЮТ Task и сразу
+    /// возвращаются) реально дожидается конца reload(), иначе системный
+    /// спиннер pull-to-refresh пропал бы раньше, чем список успел бы
+    /// обновиться. Каталог и так не кэширует список постранично (в отличие
+    /// от MangaDetailCache у карточки тайтла) — reload() всегда бьёт по
+    /// сети, так что отдельной инвалидации кэша здесь не нужно.
+    func refreshPulled() async {
+        reloadTask?.cancel()
+        pageTask?.cancel()
+        await reload()
+    }
+
     func apply(filter newFilter: MangaFilter) {
         filter = newFilter
         reloadNow()
