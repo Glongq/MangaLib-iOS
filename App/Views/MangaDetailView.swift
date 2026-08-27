@@ -859,6 +859,22 @@ struct MangaDetailView: View {
                     HStack(spacing: 8) {
                         blockTitle("Оценки пользователей")
                         Spacer(minLength: 0)
+                        // Твоя личная оценка — слева от общей (сайтовой), по
+                        // прямой просьбе. Звезда+число красятся тем же
+                        // непрерывным градиентом красный→зелёный, что и чип
+                        // личной оценки в плитке закладок (см.
+                        // personalRatingColor, RatingChip.swift) — единый
+                        // цвет для "твоей" оценки везде в приложении.
+                        if let myScore = viewModel.detail?.rating?.user {
+                            HStack(spacing: 5) {
+                                Image(systemName: "star.fill")
+                                    .font(.subheadline)
+                                    .foregroundStyle(personalRatingColor(myScore))
+                                Text("\(myScore)")
+                                    .font(.headline)
+                                    .foregroundStyle(personalRatingColor(myScore))
+                            }
+                        }
                         if let r = viewModel.detail?.rating {
                             HStack(spacing: 6) {
                                 Image(systemName: "star.fill").font(.subheadline).foregroundStyle(Theme.accent)

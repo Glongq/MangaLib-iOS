@@ -198,8 +198,55 @@ struct MangaCatalogView: View {
             errorState(error)
         } else if viewModel.results.isEmpty && viewModel.didLoadOnce && !viewModel.isLoading {
             ContentUnavailableView.search(text: viewModel.query)
+        } else if viewModel.results.isEmpty && viewModel.isLoading {
+            // Первая загрузка (ещё ни одной карточки) — скелетон-сетка под
+            // текущее число колонок (см. CardsPerRow), а не голый спиннер:
+            // сразу видно примерную форму будущего контента.
+            skeletonGrid
         } else {
             grid
+        }
+    }
+
+    /// Скелетон-сетка на время первой загрузки — та же ширина карточки, что
+    /// и у настоящей сетки (см. gridCardWidth), просто вместо MangaCardView —
+    /// шиммер-плейсхолдеры (SkeletonBox/SkeletonBar). Число ячеек (12) не
+    /// привязано к реальным данным (их ещё нет) — просто с запасом на экран
+    /// при любом gridColumnsCount (2/3/4 → 6/4/3 ряда).
+    private var skeletonGrid: some View {
+        GeometryReader { proxy in
+            let cardWidth = MangaCardView.gridCardWidth(
+                totalWidth: proxy.size.width,
+                columns: gridColumnsCount,
+                spacing: gridSpacing,
+                containerPadding: gridHorizontalPadding
+            )
+            let placeholderCount = 12
+            let rows = stride(from: 0, to: placeholderCount, by: gridColumnsCount).map { start in
+                Array(start..<min(start + gridColumnsCount, placeholderCount))
+            }
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, rowIndices in
+                        HStack(alignment: .top, spacing: gridSpacing) {
+                            ForEach(rowIndices, id: \.self) { _ in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    SkeletonBox()
+                                        .frame(width: cardWidth, height: (cardWidth * 3 / 2).rounded())
+                                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    SkeletonBar(width: cardWidth * 0.85, height: 12)
+                                    SkeletonBar(width: cardWidth * 0.5, height: 10)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, gridHorizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 90)
+            }
+            .scrollIndicators(.hidden)
         }
     }
 

@@ -485,14 +485,13 @@ struct BookmarksView: View {
     @ViewBuilder
     private func myRatingChip(_ rating: Int?) -> some View {
         if let rating {
-            let t = max(0, min(1, Double(rating) / 10))
             Text("\(rating)")
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
-                .background(Color(hue: t * 0.33, saturation: 0.85, brightness: 0.8), in: Capsule())
+                .background(personalRatingColor(rating), in: Capsule())
                 .padding(6)
         }
     }
