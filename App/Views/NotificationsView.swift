@@ -158,6 +158,10 @@ struct NotificationsView: View {
                 }
             }
         }
+        // Без этого Menu сам рисует свой системный фон под лейблом — на
+        // общей headerControls-капсуле это выглядело как "два стекла"
+        // (тот же фикс, что и у MangaDetailView.actionMenuItems).
+        .menuStyle(.borderlessButton)
     }
 
     /// "..." — Настройки (заглушка, эндпоинт не подтверждён)/Отметить всё
@@ -179,6 +183,8 @@ struct NotificationsView: View {
                 .foregroundStyle(Theme.textPrimary)
                 .frame(width: Theme.pillControlHeight, height: Theme.pillControlHeight)
         }
+        // См. комментарий у readFilterChip — та же причина "двух стёкол".
+        .menuStyle(.borderlessButton)
     }
 
     /// "Отметить всё прочитанным" — эндпоинт нигде не подтверждён
