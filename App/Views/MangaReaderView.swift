@@ -52,7 +52,21 @@ struct MangaReaderView: View {
     @StateObject private var viewModel: ReaderViewModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var currentPage = 0
+    /// Тег 1 — первая РЕАЛЬНАЯ страница главы (тег 0 зарезервирован под
+    /// prevTriggerPage, см. pager/singlePageView ниже).
+    @State private var currentPage = 1
+    /// true — следующая успешно загруженная глава должна поставить
+    /// currentPage на её endPage (свайпнули НАЗАД, "Конец" прошлой главы), а
+    /// не на страницу 1 (обычный вход/переход вперёд/скачок из списка глав).
+    /// См. openPrevious()/applyLandingIfNeeded().
+    @State private var pendingLandOnEnd = false
+    /// currentIndex, для которого уже применена посадка currentPage (см.
+    /// applyLandingIfNeeded) — идемпотентность вместо расчёта "на изменение
+    /// pages.count": при переходе на главу с БЫСТРЫМ путём (уже в pageCache,
+    /// см. ReaderViewModel.goTo) новое число страниц может СЛУЧАЙНО совпасть
+    /// со старым, и тогда .onChange(of: pages.count) вообще не сработал бы —
+    /// сравнение "применяли ли уже для ЭТОГО currentIndex" работает всегда.
+    @State private var pagesAppliedForIndex: Int?
     @State private var showUI = true
     @State private var showChapters = false
     @State private var showSettings = false
@@ -189,7 +203,7 @@ struct MangaReaderView: View {
             // центру экрана (см. verticalReader/onPreferenceChange), а не
             // по первому появлению картинки.
             if !hidePageNumber, pageBubbleTotal > 0,
-               (pageMode == 1 || currentPage < viewModel.pages.count) {
+               (pageMode == 1 || (currentPage > 0 && currentPage <= viewModel.pages.count)) {
                 VStack {
                     Spacer()
                     pageBubble
@@ -226,7 +240,7 @@ struct MangaReaderView: View {
             if showComments, let ch = viewModel.currentChapter {
                 let pageNo = pageMode == 1
                     ? verticalPage
-                    : min(currentPage, max(viewModel.pages.count - 1, 0)) + 1
+                    : max(min(currentPage, viewModel.pages.count), 1)
                 ChapterCommentsSheet(
                     chapterId: ch.id,
                     postPage: pageNo,
@@ -253,10 +267,10 @@ struct MangaReaderView: View {
         .task {
             if pageMode == 1 {
                 await viewModel.startVertical()
-            } else {
-                if viewModel.pages.isEmpty { await viewModel.load() }
-                preloadUpcoming(from: currentPage)
+            } else if viewModel.pages.isEmpty {
+                await viewModel.load()
             }
+            applyLandingIfNeeded()
         }
         // Живое переключение режима листания.
         .onChange(of: pageMode) { _, mode in
@@ -264,31 +278,35 @@ struct MangaReaderView: View {
                 if mode == 1 {
                     await viewModel.startVertical()
                 } else {
-                    currentPage = 0
                     await viewModel.load()
                 }
+                applyLandingIfNeeded()
             }
         }
         .onChange(of: viewModel.currentIndex) { _, _ in
-            currentPage = 0
             // На новой главе заливка закладки возвращается «как была».
             withAnimation(.easeInOut(duration: 0.2)) { bookmarkFilled = false }
             // Индексы revealedCommentPages относились к pages ПРЕДЫДУЩЕЙ главы.
             revealedCommentPages.removeAll()
             endCommentsRevealed = false
             isCurrentPageZoomed = false
+            // Быстрый путь (кэш соседей/офлайн, см. ReaderViewModel.goTo) —
+            // pages уже готовы к этому моменту (goTo наполняет их СИНХРОННО,
+            // без await), можно применять посадку сразу. Сетевой путь ещё
+            // пуст — применится через onChange(pages.count) ниже.
+            applyLandingIfNeeded()
         }
         .onChange(of: currentPage) { _, page in
-            preloadUpcoming(from: page)
             isCurrentPageZoomed = false
-            // Долистали до страницы-триггера — открываем следующую главу
+            // Долистали до страницы-триггера — открываем след./прошлую главу
             // (работает и в режиме «выключить перелистывание», где листаем тапом).
-            if page == viewModel.pages.count + 1 { openNext() }
+            if page == viewModel.pages.count + 2 { openNext() }
+            else if page == 0 { openPrevious() }
         }
-        // Срабатывает и на первую загрузку страниц, и при переходе на
-        // следующую главу (goTo → load() заново наполняет pages).
-        .onChange(of: viewModel.pages.count) { _, count in
-            if count > 0 { preloadUpcoming(from: currentPage) }
+        // Подстраховка на сетевой путь (см. onChange(currentIndex) выше) —
+        // срабатывает, когда pages наконец реально наполнились.
+        .onChange(of: viewModel.pages.count) { _, _ in
+            applyLandingIfNeeded()
         }
         .sheet(isPresented: $showChapters) {
             ChapterListSheet(
@@ -297,6 +315,9 @@ struct MangaReaderView: View {
                 currentBranchId: viewModel.preferredBranchId,
                 onSelect: { index in
                     showChapters = false
+                    // Переход из списка глав — всегда на страницу 1, не на
+                    // "Конец" (см. pendingLandOnEnd/openPrevious).
+                    pendingLandOnEnd = false
                     Task {
                         if pageMode == 1 { await viewModel.goToVertical(index: index) }
                         else { await viewModel.goTo(index: index) }
@@ -489,12 +510,17 @@ struct MangaReaderView: View {
     }
 
     /// Одна текущая страница без пейджера (режим «выключить перелистывание»).
+    /// Схема тегов (та же, что и у pager ниже — общая currentPage): 0 —
+    /// prevTriggerPage, 1...pages.count — реальные страницы, pages.count+1 —
+    /// endPage, pages.count+2 — nextTriggerPage.
     @ViewBuilder
     private var singlePageView: some View {
-        if currentPage < viewModel.pages.count {
-            horizontalPage(index: currentPage, page: viewModel.pages[currentPage])
+        if currentPage == 0 {
+            prevTriggerPage
+        } else if currentPage <= viewModel.pages.count {
+            horizontalPage(index: currentPage - 1, page: viewModel.pages[currentPage - 1])
                 .id(currentPage)
-        } else if currentPage == viewModel.pages.count {
+        } else if currentPage == viewModel.pages.count + 1 {
             endPage
         } else {
             nextTriggerPage
@@ -508,17 +534,25 @@ struct MangaReaderView: View {
 
     private var pager: some View {
         TabView(selection: $currentPage) {
+            // Страница-триггер перехода к ПРОШЛОЙ главе — свайп дальше назад
+            // с первой страницы главы попадает сюда, а не упирается в край
+            // (см. ReaderViewModel.pageCache/prefetchNeighbors — обычно уже
+            // готова заранее, без сетевого спиннера).
+            if viewModel.hasPrevious {
+                prevTriggerPage.tag(0)
+            }
+
             ForEach(Array(viewModel.pages.enumerated()), id: \.offset) { index, page in
                 horizontalPage(index: index, page: page)
-                    .tag(index)
+                    .tag(index + 1)
             }
 
             // Страница-перелистывание в конце главы.
-            endPage.tag(viewModel.pages.count)
+            endPage.tag(viewModel.pages.count + 1)
 
             // Ещё одна страница-триггер: доведя свайп до неё, открываем следующую главу.
             if nextChapter != nil {
-                nextTriggerPage.tag(viewModel.pages.count + 1)
+                nextTriggerPage.tag(viewModel.pages.count + 2)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -585,8 +619,9 @@ struct MangaReaderView: View {
     /// Перейти к странице по тапу: плавно (анимация) или мгновенно —
     /// по настройке «Плавное перелистывание».
     private func goToPage(_ target: Int) {
-        let maxTag = viewModel.pages.count + (nextChapter != nil ? 1 : 0)
-        let clamped = min(max(target, 0), maxTag)
+        let minTag = viewModel.hasPrevious ? 0 : 1
+        let maxTag = viewModel.pages.count + 1 + (nextChapter != nil ? 1 : 0)
+        let clamped = min(max(target, minTag), maxTag)
         guard clamped != currentPage else { return }
         if smoothPaging {
             // Ускорено ×1.5 (0.25 → ~0.167).
@@ -598,10 +633,40 @@ struct MangaReaderView: View {
         }
     }
 
-    // Невидимая страница-триггер (перехода к следующей главе).
+    // Невидимые страницы-триггеры перехода к следующей/прошлой главе — сама
+    // разница только в том, какую главу превью-догружает .task (см.
+    // ReaderViewModel.loadTransitionPreview).
     private var nextTriggerPage: some View {
         readerBackground
-            .overlay { ProgressView().tint(fg) }
+            .overlay { transitionSpinner }
+            .task { await viewModel.loadTransitionPreview(for: viewModel.currentIndex + 1) }
+    }
+
+    private var prevTriggerPage: some View {
+        readerBackground
+            .overlay { transitionSpinner }
+            .task { await viewModel.loadTransitionPreview(for: viewModel.currentIndex - 1) }
+    }
+
+    /// Кольцевой прогресс (тот же стиль рисования, что у спиннера скачивания
+    /// главы, см. MangaDetailView.chapterDownloadControl) пока известен
+    /// transitionImageProgress; иначе — обычный неопределённый спиннер
+    /// (кэш-хит без картинок для превью — редкий случай, переход почти
+    /// мгновенный).
+    @ViewBuilder
+    private var transitionSpinner: some View {
+        if let frac = viewModel.transitionImageProgress {
+            ZStack {
+                Circle().stroke(fg.opacity(0.25), lineWidth: 3)
+                Circle().trim(from: 0, to: max(0.02, frac))
+                    .stroke(Theme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 28, height: 28)
+            .animation(.linear(duration: 0.15), value: frac)
+        } else {
+            ProgressView().tint(fg)
+        }
     }
 
     // Экран конца главы: сверху «Конец…»/«Следующая глава» на всю высоту
@@ -687,7 +752,34 @@ struct MangaReaderView: View {
 
     private func openNext() {
         guard nextChapter != nil else { return }
+        pendingLandOnEnd = false
         Task { await viewModel.goTo(index: viewModel.currentIndex + 1) }
+    }
+
+    /// Свайпнули/дотапали до prevTriggerPage — переходим на ПРОШЛУЮ главу и
+    /// приземляемся на её "Конец" (endPage), а не на страницу 1 — зеркально
+    /// тому, как forward-переход всегда высаживает на первую страницу новой
+    /// главы (см. pendingLandOnEnd/onChange(of: viewModel.pages.count)).
+    private func openPrevious() {
+        guard viewModel.hasPrevious else { return }
+        pendingLandOnEnd = true
+        Task { await viewModel.goTo(index: viewModel.currentIndex - 1) }
+    }
+
+    /// Ставит currentPage на верную страницу ТЕКУЩЕЙ (уже загруженной)
+    /// главы — 1, либо, если ждали возврата назад (pendingLandOnEnd), на её
+    /// endPage. Идемпотентно (см. pagesAppliedForIndex) и безопасно вызывать
+    /// из нескольких мест (см. .task/.onChange(currentIndex)/.onChange(pages.
+    /// count) выше) — не полагается на факт "значение pages.count
+    /// ИЗМЕНИЛОСЬ" (при переходе по уже закэшированным соседям новое число
+    /// страниц может случайно совпасть со старым, и тогда обычный onChange
+    /// просто не сработал бы).
+    private func applyLandingIfNeeded() {
+        guard !viewModel.pages.isEmpty, pagesAppliedForIndex != viewModel.currentIndex else { return }
+        pagesAppliedForIndex = viewModel.currentIndex
+        currentPage = pendingLandOnEnd ? viewModel.pages.count + 1 : 1
+        pendingLandOnEnd = false
+        preloadUpcoming(from: currentPage - 1)
     }
 
     // MARK: Оверлей интерфейса
@@ -767,9 +859,10 @@ struct MangaReaderView: View {
     }
 
     // Текущий номер страницы для бабла — в горизонтальном режиме это
-    // TabView-селекция (currentPage), в вертикальном — verticalPage,
-    // считаемый по центру экрана (см. verticalReader).
-    private var pageBubbleCurrent: Int { pageMode == 1 ? verticalPage : currentPage + 1 }
+    // TabView-селекция (currentPage — уже 1-based для реальных страниц, тег
+    // 0 зарезервирован под prevTriggerPage, см. pager), в вертикальном —
+    // verticalPage, считаемый по центру экрана (см. verticalReader).
+    private var pageBubbleCurrent: Int { pageMode == 1 ? verticalPage : currentPage }
 
     // Общее число страниц ТЕКУЩЕЙ главы для бабла — в вертикальном режиме
     // берём из segments (там же, откуда verticalPage), а не из pages
@@ -782,8 +875,9 @@ struct MangaReaderView: View {
     }
 
     // Бабл с номером страницы. Скрыт на "виртуальных" страницах конца главы/
-    // перехода (currentPage >= pages.count) — иначе показывал бы, например,
-    // "3/2" на экране "Конец главы", вместо того чтобы просто пропасть.
+    // перехода (currentPage == 0 или > pages.count, см. видимость выше) —
+    // иначе показывал бы, например, "3/2" на экране "Конец главы", вместо
+    // того чтобы просто пропасть.
     private var pageBubble: some View {
         Text("\(pageBubbleCurrent)/\(pageBubbleTotal)")
             .font(.footnote.weight(.semibold))
