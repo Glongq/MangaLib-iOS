@@ -74,6 +74,15 @@ struct BookmarkedTitle: Codable, Identifiable, Hashable {
     /// со значением по умолчанию — старые локальные записи без этого поля
     /// декодируются нормально (nil → серый бэйдж).
     var rating: Double? = nil
+    /// ТВОЯ личная оценка тайтла (1-10) — см. BookmarksStore.setMyRating.
+    /// Список закладок с сервера её не возвращает (это ОЦЕНКА САЙТА, см.
+    /// `rating` выше, другое поле), поэтому это локальный кэш реального
+    /// значения `MangaRating.user` (ПОДТВЕРЖДЕНО перехватом `POST
+    /// /manga/rate`, см. MangaModels.swift) — заполняется, когда мы его
+    /// узнаём: открыли карточку уже оценённого тайтла или сами поставили
+    /// оценку (см. MangaDetailView). nil — ещё не узнали, чип в сетке
+    /// закладок просто не рисуется (тот же принцип, что и у RatingChip).
+    var myRating: Int? = nil
     /// Когда тайтл реально добавлен в закладки — для сортировки "По дате
     /// добавления" (см. BookmarksView.BookmarksSortOption). Optional со
     /// значением по умолчанию nil — старые локальные записи (сохранённые до
@@ -298,6 +307,18 @@ final class BookmarksStore: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Кэширует ТВОЮ личную оценку тайтла (см. BookmarkedTitle.myRating) —
+    /// no-op, если этого тайтла нет в закладках. Вызывается из
+    /// MangaDetailView при каждой загрузке/обновлении карточки (реальное
+    /// значение `MangaRating.user`, см. MangaModels.swift), в т.ч. сразу
+    /// после того, как поставили оценку через RatingSheet (submitRating
+    /// перезагружает detail).
+    func setMyRating(_ rating: Int?, forSlug slug: String) {
+        guard let index = items.firstIndex(where: { $0.slug == slug }), items[index].myRating != rating else { return }
+        items[index].myRating = rating
+        persistItems()
     }
 
     func remove(slug: String) {

@@ -268,6 +268,13 @@ struct MangaDetailView: View {
             let realBG = detail.background?.bestURL
             updateHero(to: realBG ?? detail.cover?.bestURL ?? coverURL, isReal: realBG != nil)
         }
+        // Кэшируем твою личную оценку тайтла в закладки (см.
+        // BookmarksStore.setMyRating) при каждой загрузке/обновлении
+        // карточки — no-op, если тайтла нет в закладках. initial: true —
+        // подхватывает значение и на первой загрузке, не только при смене.
+        .onChange(of: viewModel.detail?.rating?.user, initial: true) { _, newValue in
+            bookmarks.setMyRating(newValue, forSlug: viewModel.slug)
+        }
         // "Около 0.5 сек ничего не используется, а если за это время ничего
         // не подгрузилось — ставим обложку с плавным появлением" (как
         // попросили): если через 0.5с у нас ВСЁ ЕЩЁ нет никакой hero-картинки

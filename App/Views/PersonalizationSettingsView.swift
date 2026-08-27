@@ -11,9 +11,8 @@ import UIKit
 /// без применения к самому поведению приложения — тот же принцип "заглушка,
 /// но не выдуманная", что уже используется в MangaDetailView
 /// (commentsDisabledInReader/commentsDisabledOnCard). "Количество
-/// отображаемого контента" — аналогично: параметр сохраняется и
-/// визуализируется, но реальный грид каталога/подборок пока его не читает
-/// (по прямой просьбе — "это позже реализуем функционально").
+/// отображаемого контента" — реальный параметр (см. CardsPerRow), который
+/// теперь читают сетки Каталога и Закладок (режим "Плитка").
 struct PersonalizationSettingsView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
 
@@ -145,19 +144,6 @@ struct PersonalizationSettingsView: View {
 
     // MARK: Количество карточек в ряд
 
-    /// Сколько карточек в ряд показывать в сетках приложения — 2-4 или
-    /// "Авто" (по прямой просьбе вариант "1" убран). ПОКА только параметр
-    /// (сохраняется, визуализируется), сам грид каталога/подборок его ещё
-    /// не читает — "это позже реализуем функционально, пока как параметр просто".
-    private enum CardsPerRow: Int, CaseIterable, Identifiable {
-        case two = 2, three = 3, four = 4, auto = 0
-
-        var id: Int { rawValue }
-        var label: String { self == .auto ? "Авто" : "\(rawValue)" }
-        /// "Авто" в визуализации ниже показываем как 3 в ряд — по прямой просьбе.
-        var displayColumns: Int { self == .auto ? 3 : rawValue }
-    }
-
     private var cardsPerRowSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
@@ -203,7 +189,7 @@ struct PersonalizationSettingsView: View {
     /// и у остальных карточек этого экрана (16 у ScrollView + 16 у card,
     /// с каждой стороны).
     private var cardsPreview: some View {
-        let count = cardsPerRow.displayColumns
+        let count = cardsPerRow.columns
         let spacing: CGFloat = 8
         let availableWidth = UIScreen.main.bounds.width - 64
         let totalSpacing = spacing * CGFloat(count - 1)

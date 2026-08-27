@@ -22,12 +22,14 @@ struct MangaCatalogView: View {
     // назад, из-за чего заголовок дёргался. См. тот же фикс в BookmarksView.
     @State private var isHeaderAnimating = false
 
-    // Сетка: ровно 3 колонки одинаковой ширины — строгое выравнивание карточек.
+    // Сетка: N колонок одинаковой ширины — строгое выравнивание карточек.
     // Ширину меряем один раз через GeometryReader (см. grid) и кормим ЕЮ ЖЕ
     // и GridItem(.fixed), и саму MangaCardView — см. комментарий у
     // MangaCardView.width про то, почему раньше .flexible()+.aspectRatio
     // иногда расходились на пиксель ("поплывшие" обложки).
-    private let gridColumnsCount = 3
+    // Число колонок — из Персонализации (см. CardsPerRow), 2/3/4/Авто(=3).
+    @AppStorage("personalization_cards_per_row") private var cardsPerRow: CardsPerRow = .auto
+    private var gridColumnsCount: Int { cardsPerRow.columns }
     private let gridSpacing: CGFloat = 12
     private let gridHorizontalPadding: CGFloat = 12
 

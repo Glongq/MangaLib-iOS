@@ -1,8 +1,15 @@
 import SwiftUI
+import UIKit
 
 /// Вкладка «Закладки»: сверху заголовок/поиск + шестерёнка (Вид/Сортировка,
 /// см. ViewSortSheet) и карандаш (порядок списков, см. FolderOrderSheet),
 /// снизу горизонтальная полоска подкатегорий, между ними список/плитка тайтлов.
+/// Плитка (gridContent/bookmarkGridCell) — число колонок из Персонализации
+/// (см. CardsPerRow, 2/3/4/Авто), карточка та же архитектура точного
+/// расчёта ширины/построчной высоты текста, что и в Каталоге (см.
+/// MangaCatalogView.grid/MangaCardView) — плюс, по прямой просьбе, три чипа
+/// поверх обложки: номер текущей главы (слева сверху), твоя личная оценка
+/// (справа сверху) и "..." — быстрая смена папки (справа снизу).
 struct BookmarksView: View {
 
     @ObservedObject private var store = BookmarksStore.shared
@@ -31,6 +38,9 @@ struct BookmarksView: View {
     /// BookmarksSortOption.needsDirection), у сортировки по названию
     /// направление уже "зашито" в сам вариант (А-Я/Я-А).
     @AppStorage("bookmarks_sort_direction") private var sortDirection: BookmarksSortDirection = .newestFirst
+    /// Число колонок в режиме "Плитка" — из Персонализации (см. CardsPerRow,
+    /// тот же ключ, что читает MangaCatalogView.gridColumnsCount).
+    @AppStorage("personalization_cards_per_row") private var cardsPerRow: CardsPerRow = .auto
 
     /// Применить папку, запрошенную извне (профиль «Списки тайтлов» → «Читаю»).
     private func applyPendingFolder() {
@@ -310,28 +320,82 @@ struct BookmarksView: View {
         .scrollIndicators(.hidden)
     }
 
-    private static let gridColumnsCount = 3
+    // Число колонок — динамическое (см. cardsPerRow/CardsPerRow), 2/3/4/Авто(=3).
+    private var gridColumnsCount: Int { cardsPerRow.columns }
     private static let gridSpacing: CGFloat = 12
+    private static let gridHorizontalPadding: CGFloat = 12
 
+    /// Та же архитектура, что и MangaCatalogView.grid (см. комментарий там
+    /// и у MangaCardView.width): ширина карточки считается ОДИН раз через
+    /// GeometryReader и кормит и GridItem(.fixed), и саму карточку — вместо
+    /// LazyVGrid(.flexible())+.aspectRatio, которые могли разойтись на
+    /// пиксель между соседними карточками. Ряды — явным stride, а не плоский
+    /// ForEach: нужно видеть все карточки ряда сразу, чтобы решить, нужна ли
+    /// ряду высота под 2-строчные название/прогресс (см. bookmarkGridCell).
     private var gridContent: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: Self.gridSpacing), count: Self.gridColumnsCount)
-        return ScrollView {
-            LazyVGrid(columns: columns, spacing: 16) {
-                ForEach(currentTitles) { bm in
-                    NavigationLink(value: bm) { gridCell(bm) }
-                        .buttonStyle(.plain)
-                        .contextMenu { bookmarkContextMenu(bm) }
-                }
+        GeometryReader { proxy in
+            let cardWidth = MangaCardView.gridCardWidth(
+                totalWidth: proxy.size.width,
+                columns: gridColumnsCount,
+                spacing: Self.gridSpacing,
+                containerPadding: Self.gridHorizontalPadding
+            )
+            let titles = currentTitles
+            let rows = stride(from: 0, to: titles.count, by: gridColumnsCount).map { start in
+                Array(titles[start..<min(start + gridColumnsCount, titles.count)])
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 120)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, rowItems in
+                        let twoLineTitle = rowItems.contains {
+                            Self.gridTitleLineCount($0.title, width: cardWidth) > 1
+                        }
+                        let twoLineProgress = rowItems.contains {
+                            Self.gridProgressLineCount(progressText(for: $0), width: cardWidth) > 1
+                        }
+                        HStack(alignment: .top, spacing: Self.gridSpacing) {
+                            ForEach(rowItems) { bm in
+                                NavigationLink(value: bm) {
+                                    bookmarkGridCell(bm, width: cardWidth,
+                                                      twoLineTitle: twoLineTitle, twoLineProgress: twoLineProgress)
+                                }
+                                .buttonStyle(.plain)
+                                .contextMenu { bookmarkContextMenu(bm) }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, Self.gridHorizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 120)
+            }
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
     }
 
-    private func gridCell(_ bm: BookmarkedTitle) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    /// "Продолжить N/M" / "Продолжить: Том X, Глава Y" / "Начать чтение" —
+    /// тот же формат, что и в списке (см. row(_:) ниже), только с явным
+    /// "Начать чтение" вместо "Открыть" для карточек плитки, по прямой просьбе.
+    private func progressText(for bm: BookmarkedTitle) -> String {
+        guard let p = store.readingProgress(forSlug: bm.slug) else { return "Начать чтение" }
+        return p.totalChapters > 0
+            ? "Продолжить \(p.lastChapterNumber)/\(p.totalChapters)"
+            : "Продолжить: Том \(p.lastChapterVolume), Глава \(p.lastChapterNumber)"
+    }
+
+    /// Карточка плитки закладок: обложка 2:3 с тремя чипами поверх (глава
+    /// слева сверху / твоя оценка справа сверху / "..." смена папки справа
+    /// снизу, все три — см. helpers ниже), название (макс 2 строки) +
+    /// прогресс чтения (макс 2 строки). twoLineTitle/twoLineProgress считает
+    /// родительский ряд целиком (см. gridContent) — та же логика, что и в
+    /// MangaCardView.rowNeedsTwoLines: у всех карточек ряда одна и та же
+    /// минимальная высота текстового блока, сами строки внутри каждой
+    /// карточки всегда стоят вплотную, недостающая высота уходит пустым
+    /// местом снизу, а не зазором между названием и прогрессом.
+    private func bookmarkGridCell(_ bm: BookmarkedTitle, width: CGFloat, twoLineTitle: Bool, twoLineProgress: Bool) -> some View {
+        let progress = store.readingProgress(forSlug: bm.slug)
+        return VStack(alignment: .leading, spacing: 6) {
             RemoteImage(url: bm.coverURL.flatMap(URL.init(string:))) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
@@ -339,19 +403,115 @@ struct BookmarksView: View {
             } failure: {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
-            // 2:3 — тот же эталон, что и у обложки в списке (см.
-            // bookmarkCoverWidth/Height ниже).
-            .aspectRatio(2.0 / 3.0, contentMode: .fill)
+            .frame(width: width, height: (width * 3 / 2).rounded())
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
-            .overlay(alignment: .topTrailing) { RatingChip(rating: bm.rating) }
+            .overlay(alignment: .topLeading) { chapterChip(progress) }
+            .overlay(alignment: .topTrailing) { myRatingChip(bm.myRating) }
+            .overlay(alignment: .bottomTrailing) { folderMenuChip(bm) }
 
-            Text(bm.title)
-                .font(.subheadline)
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: Self.gridTextSpacing) {
+                Text(bm.title)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(width: width, alignment: .topLeading)
+
+                Text(progressText(for: bm))
+                    .font(.caption2)
+                    .foregroundStyle(progress != nil ? Theme.accent : Theme.textSecondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(width: width, alignment: .topLeading)
+            }
+            .frame(width: width, alignment: .top)
+            .frame(minHeight: Self.gridTextBlockHeight(twoLineTitle: twoLineTitle, twoLineProgress: twoLineProgress), alignment: .top)
         }
+        .frame(width: width, alignment: .top)
+    }
+
+    // MARK: Точный расчёт высоты текстового блока плитки (см. bookmarkGridCell)
+
+    private static var gridTitleFont: UIFont { UIFont.preferredFont(forTextStyle: .subheadline) }
+    private static var gridProgressFont: UIFont { UIFont.preferredFont(forTextStyle: .caption2) }
+    private static var gridTextSpacing: CGFloat { gridTitleFont.leading }
+
+    private static func gridLineCount(_ text: String, width: CGFloat, font: UIFont) -> Int {
+        guard width > 0 else { return 1 }
+        let box = (text as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        )
+        return min(max(Int((box.height / font.lineHeight).rounded(.up)), 1), 2)
+    }
+    private static func gridTitleLineCount(_ text: String, width: CGFloat) -> Int {
+        gridLineCount(text, width: width, font: gridTitleFont)
+    }
+    private static func gridProgressLineCount(_ text: String, width: CGFloat) -> Int {
+        gridLineCount(text, width: width, font: gridProgressFont)
+    }
+    private static func gridTextBlockHeight(twoLineTitle: Bool, twoLineProgress: Bool) -> CGFloat {
+        let titleHeight = gridTitleFont.lineHeight * (twoLineTitle ? 2 : 1)
+        let progressHeight = gridProgressFont.lineHeight * (twoLineProgress ? 2 : 1)
+        return (titleHeight + gridTextSpacing + progressHeight).rounded(.up)
+    }
+
+    // MARK: Чипы поверх обложки в плитке
+
+    /// Номер текущей/последней открытой главы — слева сверху, только в
+    /// плитке. Ничего не рисует, если прогресса ещё нет (тайтл не открывали).
+    @ViewBuilder
+    private func chapterChip(_ progress: ReadingProgress?) -> some View {
+        if let progress {
+            Text("Глава \(progress.lastChapterNumber)")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(.black.opacity(0.55), in: Capsule())
+                .padding(6)
+        }
+    }
+
+    /// Твоя личная оценка тайтла (см. BookmarkedTitle.myRating) — справа
+    /// сверху. В отличие от RatingChip (оценка САЙТА, 3 фиксированные зоны
+    /// цвета красный/жёлтый/зелёный) здесь НЕПРЕРЫВНЫЙ градиент красный→
+    /// зелёный по значению 0-10, по прямой просьбе. Ничего не рисует, если
+    /// оценка ещё не подтянулась (см. BookmarksStore.setMyRating).
+    @ViewBuilder
+    private func myRatingChip(_ rating: Int?) -> some View {
+        if let rating {
+            let t = max(0, min(1, Double(rating) / 10))
+            Text("\(rating)")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Color(hue: t * 0.33, saturation: 0.85, brightness: 0.8), in: Capsule())
+                .padding(6)
+        }
+    }
+
+    /// "..." — быстрая смена папки без захода на страницу тайтла и без
+    /// долгого нажатия, справа снизу. .highPriorityGesture (а не Button) —
+    /// карточка целиком лежит внутри NavigationLink(value:), обычный Button
+    /// внутри его лейбла не всегда надёжно перехватывает тап отдельно от
+    /// самой навигации; .highPriorityGesture гарантированно забирает тап
+    /// раньше NavigationLink, не запуская переход на карточку тайтла.
+    private func folderMenuChip(_ bm: BookmarkedTitle) -> some View {
+        Image(systemName: "ellipsis")
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.white)
+            .frame(width: 26, height: 26)
+            .background(.black.opacity(0.55), in: Circle())
+            .padding(6)
+            .contentShape(Circle())
+            .highPriorityGesture(TapGesture().onEnded { editingBookmark = bm })
     }
 
     /// Соотношение сторон и закругление обложки — эталон Каталог/Новинки
