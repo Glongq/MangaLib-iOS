@@ -229,7 +229,9 @@ struct MangaCardView: View {
     /// ВСЕГДА, даже без оценки (RatingChip сам красит nil/0.0 серым — как
     /// явно попросили, "если 0.0 то серым", а не скрывает бэйдж вовсе).
     private var ratingBadge: some View {
-        RatingChip(rating: item.rating?.value)
+        // fontSize/horizontalPadding — совпадают со statusBadge (тот же
+        // 9pt/6h), чтобы оба чипа на одной обложке были одной высоты.
+        RatingChip(rating: item.rating?.value, fontSize: 9, horizontalPadding: 6)
     }
 }
 

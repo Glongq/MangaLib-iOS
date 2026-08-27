@@ -516,10 +516,10 @@ struct BookmarksView: View {
     private func chapterChip(_ progress: ReadingProgress?) -> some View {
         if let progress {
             Text("Глава \(progress.lastChapterNumber)")
-                .font(.caption2.weight(.bold))
+                .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-                .padding(.horizontal, 7)
+                .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(.black.opacity(0.55), in: Capsule())
                 .padding(6)
@@ -535,10 +535,10 @@ struct BookmarksView: View {
     private func myRatingChip(_ rating: Int?) -> some View {
         if let rating {
             Text("\(rating)")
-                .font(.caption2.weight(.bold))
+                .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-                .padding(.horizontal, 7)
+                .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(personalRatingColor(rating), in: Capsule())
                 .padding(6)
