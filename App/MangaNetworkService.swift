@@ -932,8 +932,28 @@ final class MangaNetworkService {
             URLQueryItem(name: "fields[]", value: "artists"),
             URLQueryItem(name: "fields[]", value: "publisher")
         ]
-        let request = try makeRequest(path: "/manga/\(encodePath(slug))", queryItems: items, siteId: siteId)
-        return try await performOptionalData(request)
+        // "userRating" — ПОДТВЕРЖДЕНО реальным перехваченным запросом
+        // (авторизованная сессия): без него `rating.user` (твоя личная
+        // оценка) на ЧИСТОМ GET (не сразу после POST /manga/rate) просто
+        // отсутствовал — отсюда "оценка пропадает при перезаходе на
+        // карточку". С этим полем реальный ответ содержал
+        // `"rating":{...,"user":10}`. ВАЖНО: НЕ "fields[]=user" — это
+        // совсем другое поле (объект автора/загрузившего тайтл
+        // пользователя, отдельный ключ "user" верхнего уровня, не имеет
+        // отношения к оценке). Перехват был с hapi.hentaicdn.org (сайт 4) —
+        // не на 100% подтверждено, что api.cdnlibs.org тоже знает это
+        // значение в своём белом списке fields[] (одно нераспознанное
+        // значение валит ВЕСЬ запрос 422, см. комментарий выше) — при 422
+        // повторяем БЕЗ этого поля, а не рискуем всей карточкой.
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))",
+                                       queryItems: items + [URLQueryItem(name: "fields[]", value: "userRating")],
+                                       siteId: siteId)
+        do {
+            return try await performOptionalData(request)
+        } catch NetworkError.server(let status) where status == 422 {
+            let fallback = try makeRequest(path: "/manga/\(encodePath(slug))", queryItems: items, siteId: siteId)
+            return try await performOptionalData(fallback)
+        }
     }
 
     /// Список глав манги.

@@ -585,9 +585,12 @@ struct BookmarksView: View {
             .frame(width: Self.bookmarkCoverWidth, height: Self.bookmarkCoverHeight)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
-            // Единый бэйдж оценки (см. RatingChip) — тот же стиль/цвет, что и
-            // в каталоге/карточке тайтла, теперь и в закладках.
-            .overlay(alignment: .topTrailing) { RatingChip(rating: bm.rating) }
+            // ТВОЯ личная оценка справа сверху — тот же чип (myRatingChip),
+            // тот же размер, что и в Плитке (см. bookmarkGridCell), для
+            // единообразия между Списком и Плиткой. Раньше здесь была
+            // общая (сайтовая) RatingChip — в Плитке в этом углу её и не
+            // было никогда, только личная оценка.
+            .overlay(alignment: .topTrailing) { myRatingChip(bm.myRating) }
 
             // Тот же размер текста, что и в «Новое» (NotificationsView.row) —
             // .subheadline для основной строки, .caption2 для второстепенной

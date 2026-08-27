@@ -605,17 +605,19 @@ struct MangaDetailView: View {
         let hasRating = (rating ?? 0) > 0
         HStack(spacing: 6) {
             if let myScore {
+                // Заливка под цвет оценки (не чёрная полупрозрачная, как у
+                // средней ниже) — тот же стиль чипа, что и у ratingStatsBlock.
                 HStack(spacing: 4) {
                     Image(systemName: "star.fill")
                         .font(.system(size: 9))
-                        .foregroundStyle(personalRatingColor(myScore))
+                        .foregroundStyle(.white)
                     Text("\(myScore)")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(personalRatingColor(myScore))
+                        .foregroundStyle(.white)
                 }
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
-                .background(.black.opacity(0.55), in: Capsule())
+                .background(personalRatingColor(myScore), in: Capsule())
             }
             if hasRating, let rating {
                 HStack(spacing: 4) {
@@ -866,21 +868,26 @@ struct MangaDetailView: View {
                     HStack(spacing: 8) {
                         blockTitle("Оценки пользователей")
                         Spacer(minLength: 0)
-                        // Твоя личная оценка — слева от общей (сайтовой), по
-                        // прямой просьбе. Звезда+число красятся тем же
-                        // непрерывным градиентом красный→зелёный, что и чип
-                        // личной оценки в плитке закладок (см.
-                        // personalRatingColor, RatingChip.swift) — единый
-                        // цвет для "твоей" оценки везде в приложении.
+                        // Твоя личная оценка — слева от общей (сайтовой), в
+                        // виде ЗАЛИТОГО чипа (не просто цветной текст, как
+                        // раньше) — фон под цвет оценки (personalRatingColor,
+                        // тот же непрерывный градиент красный→зелёный, что и
+                        // чип личной оценки в плитке закладок и на обложке
+                        // тайтла, см. coverRatingBadge), звезда+число белые
+                        // для контраста. Средняя оценка сайта РЯДОМ — по
+                        // прямой просьбе БЕЗ чипа, как и была.
                         if let myScore = viewModel.detail?.rating?.myScore {
                             HStack(spacing: 5) {
                                 Image(systemName: "star.fill")
                                     .font(.subheadline)
-                                    .foregroundStyle(personalRatingColor(myScore))
+                                    .foregroundStyle(.white)
                                 Text("\(myScore)")
                                     .font(.headline)
-                                    .foregroundStyle(personalRatingColor(myScore))
+                                    .foregroundStyle(.white)
                             }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(personalRatingColor(myScore), in: Capsule())
                         }
                         if let r = viewModel.detail?.rating {
                             HStack(spacing: 6) {
