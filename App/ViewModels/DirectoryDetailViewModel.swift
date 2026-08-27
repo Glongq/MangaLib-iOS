@@ -79,6 +79,14 @@ final class DirectoryDetailViewModel: ObservableObject {
         }
     }
 
+    /// Реальный хост+заголовок Site-Id (см. FranchiseViewModel.overrideSiteId).
+    private var overrideSiteId: Int? {
+        switch siteFilter {
+        case .all: return nil
+        case .site(let s): return s.rawValue
+        }
+    }
+
     // MARK: Загрузка
 
     func loadIfNeeded() async {
@@ -197,7 +205,7 @@ final class DirectoryDetailViewModel: ObservableObject {
             page: page,
             sortByOverride: sortBy,
             sortType: sort.sortType,
-            siteIds: selectedSiteIds,
+            siteIds: selectedSiteIds, siteId: overrideSiteId,
             targetId: entityId,
             targetModel: kind.targetModel
         )

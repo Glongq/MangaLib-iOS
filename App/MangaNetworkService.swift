@@ -154,9 +154,27 @@ final class MangaNetworkService {
     /// (страница персонажа фильтрует по одному типу контента). `targetId`+
     /// `targetModel` — фильтр «тайтлы, где есть эта сущность» (персонаж и т.п.),
     /// ПОДТВЕРЖДЕНО перехватом `?target_id=1221&target_model=character`.
+    /// `siteId` — ПЕРЕОПРЕДЕЛЯЕТ хост+заголовок Site-Id (как и у fetchCharacters/
+    /// fetchMangaStats/etc, см. makeRequest(siteId:)), а НЕ просто фильтр
+    /// query-параметра `site_id[]` (тот — `siteIds`, отдельный параметр).
+    /// Раньше здесь такого не было: экраны франшизы/персонажа/команды/
+    /// каталожной сущности (FranchiseView/CharacterView/TeamView/
+    /// DirectoryDetailView), у которых есть СВОЙ локальный выбор сайта
+    /// (siteFilter), передавали через siteIds ТОЛЬКО query-фильтр — а
+    /// реальный HTTP-запрос всё равно уходил на хост+Site-Id ГЛОБАЛЬНОГО
+    /// активного сайта (см. baseURL/defaultHeaders). Из-за этого выбор,
+    /// например, Хентай(4)/СлэшLib(2) при глобально активном МангаLib(1)
+    /// реально бил в `api.cdnlibs.org` (хост МангаLib/РанобэLib) с
+    /// Site-Id:1 вместо `hapi.hentaicdn.org` с Site-Id:4 — сервер отвечал
+    /// 403/404 ("доступ"/"не найдено"), а не отдавал контент другого сайта.
+    /// Передавайте siteId ТОЛЬКО когда выбран ОДИН конкретный сайт (см.
+    /// *ViewModel.overrideSiteId) — при "Все" (несколько сайтов сразу,
+    /// возможно на РАЗНЫХ хостах) переопределять нечем, один HTTP-запрос
+    /// физически не может одновременно бить в два разных хоста — остаётся
+    /// прежнее поведение (глобальный активный сайт).
     func fetchCatalog(query: String, sort: SortOption, filter: MangaFilter, page: Int = 1,
                       sortByOverride: String? = nil, sortType: String = "desc",
-                      siteIds: [Int]? = nil,
+                      siteIds: [Int]? = nil, siteId: Int? = nil,
                       targetId: Int? = nil, targetModel: String? = nil) async throws -> CatalogPage {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "fields[]", value: "rate"),
@@ -226,7 +244,7 @@ final class MangaNetworkService {
         appendTri(&items, "status", filter.titleStatuses)
         appendTri(&items, "scanlate_status", filter.translationStatuses)
 
-        let request = try makeRequest(path: "/manga", queryItems: items)
+        let request = try makeRequest(path: "/manga", queryItems: items, siteId: siteId)
         let response: APIListResponse<MangaItem> = try await perform(request)
         return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
     }

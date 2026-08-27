@@ -82,6 +82,20 @@ final class FranchiseViewModel: ObservableObject {
         }
     }
 
+    /// Реальный хост+заголовок Site-Id для запроса (см. fetchCatalog(siteId:)
+    /// в MangaNetworkService — раньше выбор конкретного сайта здесь влиял
+    /// ТОЛЬКО на query-фильтр site_id[], а не на то, куда физически уходит
+    /// запрос, из-за чего выбор Хентай/СлэшLib при другом глобально активном
+    /// сайте бил не в тот хост и возвращал "доступ запрещён"/"не найдено").
+    /// nil при "Все" — несколько сайтов сразу, возможно на разных хостах,
+    /// переопределять нечем одним запросом.
+    private var overrideSiteId: Int? {
+        switch siteFilter {
+        case .all: return nil
+        case .site(let s): return s.rawValue
+        }
+    }
+
     // MARK: Загрузка
 
     func loadIfNeeded() async {
@@ -200,7 +214,7 @@ final class FranchiseViewModel: ObservableObject {
             page: page,
             sortByOverride: sortBy,
             sortType: sort.sortType,
-            siteIds: selectedSiteIds,
+            siteIds: selectedSiteIds, siteId: overrideSiteId,
             targetId: franchiseId,
             targetModel: "franchise"
         )

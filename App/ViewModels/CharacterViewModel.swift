@@ -82,6 +82,16 @@ final class CharacterViewModel: ObservableObject {
         }
     }
 
+    /// Реальный хост+заголовок Site-Id (см. FranchiseViewModel.overrideSiteId —
+    /// тот же фикс, та же причина: без этого выбор Хентай/СлэшLib при другом
+    /// глобально активном сайте бил не в тот хост).
+    private var overrideSiteId: Int? {
+        switch siteFilter {
+        case .all: return nil
+        case .site(let s): return s.rawValue
+        }
+    }
+
     // MARK: Загрузка
 
     func loadIfNeeded() async {
@@ -194,7 +204,7 @@ final class CharacterViewModel: ObservableObject {
             page: page,
             sortByOverride: sortBy,
             sortType: sort.sortType,
-            siteIds: selectedSiteIds,
+            siteIds: selectedSiteIds, siteId: overrideSiteId,
             targetId: characterId,
             targetModel: "character"
         )

@@ -191,8 +191,9 @@ struct TriStateFilterView: View {
                     searchFocused = false
                 } label: {
                     Image(systemName: "keyboard.chevron.compact.down")
-                        .font(.subheadline)
+                        .font(.title3)
                         .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
                 .padding(.trailing, 4)
@@ -219,7 +220,7 @@ struct TriStateFilterView: View {
 
     private func legend(color: Color, text: String) -> some View {
         HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 9, height: 9)
+            Circle().fill(color).frame(width: 13, height: 13)
             Text(text).font(.caption2).foregroundStyle(Theme.textSecondary)
         }
     }

@@ -218,9 +218,18 @@ struct FilterView: View {
     // MARK: Подвал
 
     // Одна общая стеклянная капсула на весь подвал; "Применить" выделяется
-    // акцентной заливкой поверх неё.
+    // акцентной заливкой поверх неё. "Сбросить" — слева, "Применить" —
+    // справа (поменяны местами по прямой просьбе).
     private var bottomBar: some View {
         HStack(spacing: 4) {
+            Button {
+                filter.reset()
+            } label: {
+                Text("Сбросить")
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+            }
+
             Button {
                 onApply(filter)
                 dismiss()
@@ -230,14 +239,6 @@ struct FilterView: View {
                     .foregroundStyle(Theme.background)
                     .frame(maxWidth: .infinity, minHeight: 50)
                     .background(Theme.accent, in: Capsule())
-            }
-
-            Button {
-                filter.reset()
-            } label: {
-                Text("Сбросить")
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, minHeight: 50)
             }
         }
         .padding(.horizontal, 6)
