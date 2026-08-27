@@ -265,8 +265,15 @@ struct BookmarksView: View {
             if store.isSyncing {
                 // Идёт первая подтяжка закладок аккаунта — иначе пустой экран
                 // на секунду выглядит как баг (будто ничего не подтянулось).
-                ProgressView().tint(Theme.accent)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // В режиме "Плитка" — скелетон-сетка под текущее число
+                // колонок (та же идея, что и в Каталоге, см. skeletonGrid
+                // там), в списке — как раньше, просто спиннер.
+                if viewMode == .grid {
+                    bookmarksSkeletonGrid
+                } else {
+                    ProgressView().tint(Theme.accent)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
                 ContentUnavailableView(
                     "Пусто",
@@ -362,6 +369,48 @@ struct BookmarksView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .contextMenu { bookmarkContextMenu(bm) }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, Self.gridHorizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 120)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    /// Скелетон-сетка на время первой подтяжки закладок аккаунта (см.
+    /// titlesList/store.isSyncing) — та же ширина карточки, что и у
+    /// настоящей плитки, шиммер-плейсхолдеры вместо реальных обложек/текста.
+    /// 12 ячеек с запасом — не привязано к реальному количеству закладок
+    /// (его ещё не знаем).
+    private var bookmarksSkeletonGrid: some View {
+        GeometryReader { proxy in
+            let cardWidth = MangaCardView.gridCardWidth(
+                totalWidth: proxy.size.width,
+                columns: gridColumnsCount,
+                spacing: Self.gridSpacing,
+                containerPadding: Self.gridHorizontalPadding
+            )
+            let placeholderCount = 12
+            let rows = stride(from: 0, to: placeholderCount, by: gridColumnsCount).map { start in
+                Array(start..<min(start + gridColumnsCount, placeholderCount))
+            }
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, rowIndices in
+                        HStack(alignment: .top, spacing: Self.gridSpacing) {
+                            ForEach(rowIndices, id: \.self) { _ in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    SkeletonBox()
+                                        .frame(width: cardWidth, height: (cardWidth * 3 / 2).rounded())
+                                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    SkeletonBar(width: cardWidth * 0.85, height: 12)
+                                    SkeletonBar(width: cardWidth * 0.5, height: 10)
+                                }
                             }
                         }
                     }

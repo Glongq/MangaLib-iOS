@@ -337,11 +337,9 @@ struct MangaCatalogView: View {
             // просто уехал под шапку/поиск (они остались на месте, т.к. это
             // системный navigationTitle/.searchable, не завязаны на верстку
             // ScrollView). Откачено.
-            .overlay {
-                if viewModel.isLoading && viewModel.results.isEmpty {
-                    ProgressView().tint(Theme.accent)
-                }
-            }
+            // Спиннер на первую загрузку убран — теперь это состояние
+            // (results.isEmpty && isLoading) перехватывает skeletonGrid
+            // ДО того, как content вообще доходит до этого grid (см. content).
         }
     }
 
