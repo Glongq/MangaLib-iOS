@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 /// "Персонализация" — набор пунктов персонализации приложения, каждый в
 /// своей отдельной карточке-подложке (по прямой просьбе, вместо одной общей
@@ -260,6 +259,10 @@ struct PersonalizationSettingsView: View {
         }
     }
 
+    /// Без стекла (по прямой просьбе) — обычная сплошная заливка, каждый
+    /// чип растягивается на равную долю ширины (см. cardsPerRowSection —
+    /// вся строка чипов теперь той же ширины, что и остальной контент
+    /// карточки, а не компактные чипы с пустым местом справа).
     private func cardsPerRowChip(_ option: CardsPerRow) -> some View {
         let active = cardsPerRow == option
         return Button {
@@ -268,37 +271,46 @@ struct PersonalizationSettingsView: View {
             Text(option.label)
                 .font(.subheadline.weight(active ? .semibold : .regular))
                 .foregroundStyle(active ? Theme.background : Theme.textPrimary)
-                .padding(.horizontal, 14)
-                .frame(minWidth: 44, minHeight: Theme.pillControlHeight)
-                .contentShape(Capsule())
-                // Тот же рецепт активного/обычного стекла, что и у чипов
-                // папок в Закладках (см. BookmarksView.categoryChip).
-                .glassEffect(active ? .regular.tint(Theme.accent).interactive() : .regular.interactive(), in: Capsule())
+                .frame(maxWidth: .infinity, minHeight: Theme.pillControlHeight)
+                .background(active ? Theme.accent : Theme.surface, in: Capsule())
         }
         .buttonStyle(.plain)
     }
 
-    /// Плавная (анимированная при смене выбора) визуализация — N карточек
-    /// формата 2:3 в ряд. Ширина карточек считается от ширины экрана
-    /// напрямую (без GeometryReader — высота тогда была бы обратной
-    /// зависимостью от самой себя): 64 = те же горизонтальные отступы, что
-    /// и у остальных карточек этого экрана (16 у ScrollView + 16 у card,
-    /// с каждой стороны).
+    /// Ключ для .animation(value:) ниже — раньше туда шёл только cardsPerRow,
+    /// поэтому смена тёмная/светлая (или OLED) не запускала перерисовку
+    /// ЭТОГО конкретного блока: сами карточки просто не перекрашивались,
+    /// пока не тронешь 2/3/4/Авто (минибаг, по прямой просьбе).
+    private struct CardsPreviewKey: Equatable {
+        let cardsPerRow: CardsPerRow
+        let isDark: Bool
+        let isOLED: Bool
+    }
+
+    /// Приблизительная (НЕ строго по масштабу, чисто визуальная) визуализация
+    /// — высота карточек теперь ФИКСИРОВАННАЯ (см. cardsPreviewHeight),
+    /// меняется только ширина/число карточек. Раньше высота считалась от
+    /// ширины экрана и числа колонок — при 2 карточки были заметно выше,
+    /// при 4 заметно ниже, из-за чего блок "распахивался"/"схлопывался" по
+    /// высоте при переключении — по прямой просьбе исправлено: подложка
+    /// (сама область превью) больше не меняет высоту.
+    private static let cardsPreviewHeight: CGFloat = 90
+
     private var cardsPreview: some View {
         let count = cardsPerRow.columns
         let spacing: CGFloat = 8
-        let availableWidth = UIScreen.main.bounds.width - 64
-        let totalSpacing = spacing * CGFloat(count - 1)
-        let cardWidth = max(0, (availableWidth - totalSpacing) / CGFloat(count))
+        let cardHeight = Self.cardsPreviewHeight
+        let cardWidth = (cardHeight * 2 / 3).rounded()
         return HStack(spacing: spacing) {
             ForEach(0..<count, id: \.self) { _ in
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Theme.surface)
-                    .frame(width: cardWidth, height: cardWidth * 3 / 2)
+                    .frame(width: cardWidth, height: cardHeight)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: cardsPerRow)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85),
+                   value: CardsPreviewKey(cardsPerRow: cardsPerRow, isDark: themeManager.isDarkTheme, isOLED: themeManager.isOLEDTheme))
     }
 
     // MARK: Общие помощники

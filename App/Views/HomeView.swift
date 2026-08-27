@@ -54,6 +54,9 @@ struct HomeView: View {
     /// недели» — тот же ProfileUserId + .sheet(item:), что и в
     /// FriendsView/MangaReviewsView (см. ProfileUserId в AccountInfoView.swift).
     @State private var profileUser: ProfileUserId?
+    /// Сколько строк "Последних обновлений" видно сейчас — см.
+    /// updatesSection/updatesFooterControls/Self.updatesPageSize.
+    @State private var updatesVisibleCount: Int = HomeView.updatesPageSize
 
     /// Эталонный размер названия тайтла для ЭТОЙ страницы — тот же расчёт,
     /// что и MangaCardView.titleFont (caption1 × 1.2, medium), которым уже
@@ -786,6 +789,11 @@ struct HomeView: View {
         )
     }
 
+    /// Сколько строк показываем сразу/добавляем за раз (см.
+    /// updatesFooterControls) — по прямой просьбе "всегда макс 7", вместо
+    /// прежнего бесконечного скролла (см. историю ниже про onAppear).
+    private static let updatesPageSize = 7
+
     private var updatesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("Последние обновления")
@@ -803,22 +811,88 @@ struct HomeView: View {
             // (см. HomeViewModel.fetchUpdatesPage) — общий ряд для обеих вкладок.
             // Скелетон, пока список ещё пуст И идёт именно НАЧАЛЬНАЯ загрузка
             // (isLoadingUpdates) — не путать с isLoadingMoreUpdates (подгрузка
-            // следующей страницы, спиннер внизу уже готового списка).
+            // следующей страницы по "Показать ещё", см. updatesFooterControls).
             if viewModel.updates.isEmpty && viewModel.isLoadingUpdates {
                 updatesSkeleton
             } else {
+                // Раньше — плоский ForEach по ВСЕМ viewModel.updates с
+                // .onAppear-подгрузкой следующей страницы у последней строки
+                // (бесконечный скролл). По прямой просьбе — максимум 7 строк
+                // видно сразу, дальше только по явному тапу "Показать ещё"
+                // (см. updatesFooterControls/showMoreUpdates), плюс кнопка
+                // свернуть обратно до 7.
                 LazyVStack(spacing: 10) {
-                    ForEach(viewModel.updates) { item in
+                    ForEach(viewModel.updates.prefix(updatesVisibleCount)) { item in
                         NavigationLink(value: item) { updateRow(item) }
                             .buttonStyle(.plain)
-                            .onAppear { viewModel.loadMoreUpdatesIfNeeded(currentId: item.id) }
-                    }
-                    if viewModel.isLoadingMoreUpdates {
-                        ProgressView().tint(Theme.accent).frame(maxWidth: .infinity)
                     }
                 }
                 .padding(.horizontal, 16)
+
+                updatesFooterControls
             }
+        }
+        // Смена вкладки Все/Мои сбрасывает сам список (см. HomeViewModel.
+        // updatesTab.didSet) — видимый лимит сбрасываем туда же, к 7.
+        .onChange(of: viewModel.updatesTab) { _, _ in updatesVisibleCount = Self.updatesPageSize }
+    }
+
+    /// "Показать ещё" (+7, бесконечно, пока есть данные) и, если список уже
+    /// раскрыт больше 7 — рядом круглая кнопка "свернуть обратно до 7" (НЕ
+    /// стеклянная), обе центрированы. По прямой просьбе.
+    @ViewBuilder
+    private var updatesFooterControls: some View {
+        let isExpanded = updatesVisibleCount > Self.updatesPageSize
+        let canShowMore = updatesVisibleCount < viewModel.updates.count || viewModel.updatesHasNext
+
+        if canShowMore || isExpanded {
+            HStack(spacing: 12) {
+                if canShowMore {
+                    Button {
+                        showMoreUpdates()
+                    } label: {
+                        Group {
+                            if viewModel.isLoadingMoreUpdates {
+                                ProgressView().tint(Theme.textPrimary)
+                            } else {
+                                Text("Показать ещё")
+                            }
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, 22)
+                        .frame(minHeight: 44)
+                        .background(Theme.surfaceElevated, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isLoadingMoreUpdates)
+                }
+
+                if isExpanded {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) { updatesVisibleCount = Self.updatesPageSize }
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Theme.textPrimary)
+                            .frame(width: 44, height: 44)
+                            .background(Theme.surfaceElevated, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 2)
+        }
+    }
+
+    /// +7 — если уже подгружено достаточно строк, просто открывает их;
+    /// если нет, дозапрашивает следующую страницу (переиспользует ту же
+    /// пагинацию, что раньше запускалась по onAppear последней строки).
+    private func showMoreUpdates() {
+        updatesVisibleCount += Self.updatesPageSize
+        if viewModel.updates.count < updatesVisibleCount, let lastId = viewModel.updates.last?.id {
+            viewModel.loadMoreUpdatesIfNeeded(currentId: lastId)
         }
     }
 
@@ -1056,7 +1130,7 @@ struct HomeView: View {
     /// чтобы список не "прыгал" при подмене на реальные карточки.
     private var updatesSkeleton: some View {
         VStack(spacing: 10) {
-            ForEach(0..<4, id: \.self) { _ in
+            ForEach(0..<Self.updatesPageSize, id: \.self) { _ in
                 HStack(spacing: 12) {
                     SkeletonBox()
                         .frame(width: Self.updatesCoverWidth, height: Self.updatesCoverHeight)

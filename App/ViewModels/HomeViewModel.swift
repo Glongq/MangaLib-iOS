@@ -94,7 +94,9 @@ final class HomeViewModel: ObservableObject {
 
     private let service: MangaNetworkService
     private var updatesPage = 1
-    private var updatesHasNext = true
+    /// Не private — читается HomeView.updatesFooterControls, чтобы решить,
+    /// показывать ли ещё "Показать ещё" (см. HomeView.updatesSection).
+    private(set) var updatesHasNext = true
     /// Активная полная перезагрузка — отменяется перед стартом новой (см.
     /// комментарий у типа выше). Не хранит частичные (loadMoreUpdates и т.п.).
     private var reloadTask: Task<Void, Never>?
