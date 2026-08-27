@@ -1222,6 +1222,11 @@ final class MangaNetworkService {
     /// MangaDetailViewModel.submitRating). Ошибка (например 403 "нужно
     /// прочитать минимум 1 главу...") приходит с человекочитаемым текстом в
     /// `{"data":{"toast":{"message":...}}}` — отсюда performToastAware.
+    ///
+    /// УДАЛЕНИЕ оценки — ТОТ ЖЕ эндпоинт с `score: 0` — ПОДТВЕРЖДЕНО
+    /// реальным перехватом ("Удалить оценку" на сайте шлёт именно это):
+    /// ответ `"user":0`, votes уменьшается на 1. Отдельного DELETE-эндпоинта
+    /// нет. См. RatingSheet.isDeleteAction/submit().
     func rateManga(id: Int, score: Int, siteId: Int? = nil) async throws -> MangaRating {
         let payload = RateMangaPayload(score: score, rateable_id: id, rateable_type: "manga")
         let request = try makeJSONRequest(path: "/manga/rate", method: "POST", body: payload, siteId: siteId)
@@ -1319,6 +1324,17 @@ final class MangaNetworkService {
 
         var request = URLRequest(url: url)
         request.httpMethod = method
+        // Игнорируем HTTP-кэш URLSession (URLCache.shared, дефолтный для
+        // .shared сессии) — иначе тянуть-обновить (.refreshable) мог молча
+        // получать назад ТУ ЖЕ закэшированную сетью страницу вместо реально
+        // новых данных с сервера (пример бага: оценка, поставленная с
+        // другого устройства, не появлялась после свайпа-обновления в
+        // Закладках — GET /bookmarks с теми же query-параметрами отдавался
+        // из локального URLCache, а не по сети). У нас уже есть свой,
+        // осознанный app-уровневый кэш там, где он нужен (см.
+        // MangaDetailCache) — полагаться ЕЩЁ и на непрозрачный HTTP-кэш
+        // поверх него не нужно.
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         for (field, value) in defaultHeaders {
             request.setValue(value, forHTTPHeaderField: field)
         }
@@ -1341,6 +1357,9 @@ final class MangaNetworkService {
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
+        // См. тот же комментарий у makeRequest — игнорируем HTTP-кэш
+        // URLSession, чтобы не получать назад устаревший ответ.
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         for (field, value) in defaultHeaders {
             request.setValue(value, forHTTPHeaderField: field)
         }

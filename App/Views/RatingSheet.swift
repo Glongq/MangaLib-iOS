@@ -6,6 +6,8 @@ import SwiftUI
 /// `POST /manga/rate` — ПОДТВЕРЖДЕНО реальным перехватом: тело
 /// `{"score":Int,"rateable_id":Int,"rateable_type":"manga"}`, ответ —
 /// актуальный агрегат (average/votes/user), см. MangaNetworkService.rateManga.
+/// Удаление оценки — ТОТ ЖЕ запрос с score:0 (см. isDeleteAction/submit
+/// ниже) — своего DELETE-эндпоинта нет, тоже подтверждено перехватом.
 /// Ошибка (например 403 "Чтобы поставить оценку, нужно прочитать минимум 1
 /// глав...") приходит с человекочитаемым текстом в
 /// `{"data":{"toast":{"message":...}}}` (см. NetworkError.apiMessage) —
@@ -100,6 +102,31 @@ struct RatingSheet: View {
         .frame(height: 108)
     }
 
+    /// true, если сейчас выбрана РОВНО та же оценка, что была до открытия
+    /// листа (и она вообще была) — в этом состоянии основная кнопка удаляет
+    /// оценку (score: 0, см. submit()), а не пересылает ту же самую. Как
+    /// только звёзды меняют на другое значение — становится false, кнопка
+    /// превращается в "Изменить" (ПОДТВЕРЖДЕНО реальным перехватом: сайт
+    /// удаляет оценку тем же `POST /manga/rate` с `score:0` — ответ
+    /// `"user":0`, votes на 1 меньше; та же семантика, что и наш
+    /// MangaRating.myScore, где 0 == "не оценено").
+    private var isDeleteAction: Bool {
+        initialScore != nil && selected == initialScore
+    }
+
+    private var confirmButtonTitle: String {
+        guard initialScore != nil else { return "Оценить" }
+        return isDeleteAction ? "Удалить оценку" : "Изменить"
+    }
+
+    /// Единственный случай, когда кнопку нужно выключить, — новый (ещё не
+    /// оценённый) тайтл, пока не выбрана ни одна звезда. Если оценка УЖЕ
+    /// была — `selected` не бывает nil (см. init), кнопка активна всегда:
+    /// либо удаляет (то же значение), либо меняет (другое).
+    private var confirmButtonEnabled: Bool {
+        initialScore != nil || selected != nil
+    }
+
     private var actionButtons: some View {
         HStack(spacing: 12) {
             Button {
@@ -120,25 +147,27 @@ struct RatingSheet: View {
                     if isSubmitting {
                         ProgressView().tint(Theme.background)
                     } else {
-                        Text(initialScore != nil ? "Изменить" : "Оценить")
+                        Text(confirmButtonTitle)
                             .font(.subheadline.weight(.semibold))
                     }
                 }
-                .foregroundStyle(selected != nil ? Theme.background : Theme.textSecondary)
+                .foregroundStyle(confirmButtonEnabled ? Theme.background : Theme.textSecondary)
                 .frame(maxWidth: .infinity, minHeight: 48)
             }
-            .background(selected != nil ? Theme.accent : Theme.surfaceElevated,
+            .background(confirmButtonEnabled ? Theme.accent : Theme.surfaceElevated,
                         in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .disabled(selected == nil || isSubmitting)
+            .disabled(!confirmButtonEnabled || isSubmitting)
         }
     }
 
     private func submit() {
-        guard let selected, !isSubmitting else { return }
+        guard !isSubmitting else { return }
+        // Удаление — тот же POST /manga/rate, score: 0 (см. isDeleteAction).
+        guard let scoreToSubmit = isDeleteAction ? 0 : selected else { return }
         isSubmitting = true
         Task {
             do {
-                try await viewModel.submitRating(selected)
+                try await viewModel.submitRating(scoreToSubmit)
                 isSubmitting = false
                 dismiss()
             } catch {
