@@ -34,9 +34,17 @@ struct RatingSheet: View {
     @State private var selected: Int?
     @State private var isSubmitting = false
 
+    /// Была ли оценка ДО открытия листа — в отличие от `selected` (меняется
+    /// по ходу выбора звёзд) не меняется никогда, нужна только чтобы решить
+    /// подпись кнопки ("Оценить" на новый тайтл / "Изменить" на уже
+    /// оценённый, см. actionButtons).
+    private let initialScore: Int?
+
     init(viewModel: MangaDetailViewModel) {
         self.viewModel = viewModel
-        _selected = State(initialValue: viewModel.detail?.rating?.myScore)
+        let existing = viewModel.detail?.rating?.myScore
+        initialScore = existing
+        _selected = State(initialValue: existing)
     }
 
     var body: some View {
@@ -112,7 +120,7 @@ struct RatingSheet: View {
                     if isSubmitting {
                         ProgressView().tint(Theme.background)
                     } else {
-                        Text("Оценить")
+                        Text(initialScore != nil ? "Изменить" : "Оценить")
                             .font(.subheadline.weight(.semibold))
                     }
                 }

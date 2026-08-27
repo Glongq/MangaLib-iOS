@@ -352,17 +352,29 @@ final class MangaDetailViewModel: ObservableObject {
     }
 
     /// Отправляет оценку тайтлу (1-10 звёзд, см. RatingSheet) — POST
-    /// /manga/rate. Сервер отдаёт в ответе только АГРЕГАТ (average/votes),
-    /// без обновлённого распределения по звёздам (stats.rating.stats) — вместо
-    /// ручного мёржа проще и надёжнее инвалидировать кэш и тихо перезагрузить
-    /// карточку целиком (force: true), тогда и средний балл, и распределение
-    /// сразу актуальны. Бросает ошибку дальше — RatingSheet сам решает, как
-    /// её показать (см. DownloadsManager.showBanner).
+    /// /manga/rate. Раньше здесь ответ POST отбрасывался, а "моя оценка"
+    /// подтягивалась только из последующего `load(force: true)` — из-за
+    /// этого она заметно ЗАПАЗДЫВАЛА (полная перезагрузка карточки не
+    /// мгновенная, плюс GET /manga/{slug} может на секунду-другую отставать
+    /// от только что сделанной записи). POST-ответ уже содержит АКТУАЛЬНЫЙ
+    /// агрегат (average/votes/user) — применяем его в `detail.rating`
+    /// СРАЗУ, без ожидания сети, это и есть твоя оценка мгновенно на
+    /// карточке/в закладках (см. MangaDetailView.onChange →
+    /// BookmarksStore.setMyRating). Полная перезагрузка (force: true)
+    /// всё равно нужна — она подтягивает обновлённое распределение по
+    /// звёздам (stats.rating.stats), которого в ответе POST нет — но раз
+    /// её результат может на мгновение прийти с ещё не досчитанным на
+    /// сервере "user", переприменяем уже известный свежий rating поверх
+    /// него, чтобы UI не откатился обратно на старое значение. Бросает
+    /// ошибку дальше — RatingSheet сам решает, как её показать (см.
+    /// DownloadsManager.showBanner).
     func submitRating(_ score: Int) async throws {
         guard let mangaId = detail?.id else { return }
-        _ = try await service.rateManga(id: mangaId, score: score, siteId: resolvedSiteId)
+        let freshRating = try await service.rateManga(id: mangaId, score: score, siteId: resolvedSiteId)
+        detail?.rating = freshRating
         MangaDetailCache.shared.invalidate(slug: slug)
         await load(force: true)
+        detail?.rating = freshRating
     }
 
     /// Сортировка глав по возрастанию тома, затем номера главы.

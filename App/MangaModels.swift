@@ -1104,7 +1104,12 @@ struct MangaDetail: Decodable, Identifiable {
     /// fields[]=background (см. fetchMangaDetail) — без этого сервер его не
     /// присылает вообще, как summary/genres/tags и т.п.
     let background: MangaBackgroundImage?
-    let rating: MangaRating?
+    /// `var`, а не `let` — единственное поле, которое мутируется ПОСЛЕ
+    /// декодирования: `MangaDetailViewModel.submitRating` подставляет сюда
+    /// свежий агрегат прямо из ответа `POST /manga/rate`, не дожидаясь
+    /// отдельного `GET /manga/{slug}` (см. там же — раньше "моя оценка"
+    /// появлялась с заметной задержкой именно из-за этого ожидания).
+    var rating: MangaRating?
     let status: MangaStatus?
     let type: MangaStatus?
     /// Возрастной рейтинг («18+»/«16+»/«12+»/«6+»/«Нет») — та же форма
