@@ -231,9 +231,12 @@ struct TeamView: View {
     /// команды. ПОДТВЕРЖДЕНО перехватом: стартовое состояние — реальный
     /// GET /favorites/team/{id} (TeamViewModel.loadSubscriptionStatus),
     /// переключение — тот же POST /favorites, что и у колокольчика в чипе
-    /// главы (TeamChipView). Обычное стекло в обоих состояниях (без
-    /// акцента, по прямой просьбе) — текст меняется на "Увед. включены" со
-    /// значком колокольчика с галкой.
+    /// главы (TeamChipView). Текст меняется на "Увед. включены" со значком
+    /// колокольчика с галкой. Настоящий ToolbarItem (см. body) — БЕЗ
+    /// собственного оформления (без .padding/.frame/.glassEffect, как раньше
+    /// в overlay-эпохе): капсулу/стекло теперь рисует сам системный тулбар,
+    /// добавление своих поверх него давало задвоение (см. FranchiseView.subscribeButton
+    /// — тот же голый Button, тот же паттерн, без единого инцидента).
     private var subscribeButton: some View {
         Button { vm.toggleSubscription() } label: {
             HStack(spacing: 6) {
@@ -254,12 +257,7 @@ struct TeamView: View {
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
             }
-            .foregroundStyle(Theme.textPrimary)
-            .padding(.horizontal, 16)
-            .frame(height: 44)
-            .glassEffect(.regular.interactive(), in: Capsule())
         }
-        .buttonStyle(.plain)
         .disabled(vm.isTogglingSubscription)
     }
 

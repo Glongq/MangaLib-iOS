@@ -171,6 +171,9 @@ struct DirectoryDetailView: View {
 
     /// Реальный POST /favorites {source_type: kind.sourceType} — та же
     /// подписка, что и у команды/франшизы, просто с другим source_type.
+    /// Настоящий ToolbarItem (см. body) — БЕЗ собственного оформления (см.
+    /// тот же комментарий у TeamView.subscribeButton): капсулу/стекло рисует
+    /// сам системный тулбар, свои поверх него давали задвоение.
     private var subscribeButton: some View {
         Button { vm.toggleSubscription() } label: {
             HStack(spacing: 6) {
@@ -191,12 +194,7 @@ struct DirectoryDetailView: View {
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
             }
-            .foregroundStyle(Theme.textPrimary)
-            .padding(.horizontal, 16)
-            .frame(height: 44)
-            .glassEffect(.regular.interactive(), in: Capsule())
         }
-        .buttonStyle(.plain)
         .disabled(vm.isTogglingSubscription)
     }
 
