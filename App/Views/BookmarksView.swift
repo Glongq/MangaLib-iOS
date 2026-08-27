@@ -655,9 +655,9 @@ enum BookmarksSortOption: String, CaseIterable, Identifiable {
     }
 
     /// У сортировки по названию направление уже "зашито" в сам вариант
-    /// (А-Я/Я-А) — общий переключатель (см. BookmarksSortDirection) имеет
-    /// смысл у полей-дат ("сначала новые/старые") и у личной оценки
-    /// ("сначала высокая/низкая", см. BookmarksSortDirection.title(for:)).
+    /// (А-Я/Я-А) — общий переключатель "По убыванию"/"По возрастанию" (см.
+    /// BookmarksSortDirection) имеет смысл только у полей-дат и у личной
+    /// оценки.
     var needsDirection: Bool {
         switch self {
         case .titleAsc, .titleDesc: return false
@@ -667,19 +667,17 @@ enum BookmarksSortOption: String, CaseIterable, Identifiable {
 }
 
 /// Направление для полей-дат и личной оценки (см.
-/// BookmarksSortOption.needsDirection) — подпись зависит от того, к какому
-/// полю применяется (даты — "новые/старые", оценка — "высокая/низкая").
+/// BookmarksSortOption.needsDirection) — подпись ВСЕГДА "По убыванию"/"По
+/// возрастанию", не меняется в зависимости от выбранного поля (по прямой
+/// просьбе — раньше была "Сначала новые/старые" у дат и "высокая/низкая
+/// оценка" у рейтинга, отдельно под каждое поле; решили не делать так).
+/// newestFirst = убывание (новее/больше сначала), oldestFirst = возрастание.
 enum BookmarksSortDirection: String, CaseIterable, Identifiable {
     case newestFirst, oldestFirst
 
     var id: String { rawValue }
 
-    func title(for option: BookmarksSortOption) -> String {
-        if option == .myRating {
-            return self == .newestFirst ? "Сначала высокая оценка" : "Сначала низкая оценка"
-        }
-        return self == .newestFirst ? "Сначала новые" : "Сначала старые"
-    }
+    var title: String { self == .newestFirst ? "По убыванию" : "По возрастанию" }
 }
 
 /// Щит редактирования порядка списков (иконка карандаша в шапке Закладок) —
@@ -758,10 +756,12 @@ private struct ViewSortSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
+                // Заголовки секций — ОТДЕЛЬНО НАД подложкой, не первой
+                // строкой внутри неё (эталон — системные "Настройки" iOS, по
+                // прямой просьбе со скриншотом: там подпись сверху, мелким
+                // серым, не на самой карточке). См. sectionBlock ниже.
                 VStack(alignment: .leading, spacing: 20) {
-                    card {
-                        sectionHeader("Вид")
-                        divider
+                    sectionBlock("Вид") {
                         selectableRow(title: "Список", icon: "list.bullet", isSelected: viewMode == .list) {
                             viewMode = .list
                         }
@@ -771,18 +771,28 @@ private struct ViewSortSheet: View {
                         }
                     }
 
-                    card {
-                        sectionHeader("Сортировка")
+                    sectionBlock("Сортировка") {
                         ForEach(BookmarksSortOption.allCases) { option in
-                            divider
                             selectableRow(title: option.title, isSelected: sortOption == option) {
                                 sortOption = option
                             }
+                            if option != BookmarksSortOption.allCases.last {
+                                divider
+                            }
                         }
-                        if sortOption.needsDirection {
-                            divider
+                    }
+
+                    // Направление — своя ОТДЕЛЬНАЯ подложка ниже (по прямой
+                    // просьбе), без собственного заголовка. Подписи ВСЕГДА
+                    // "По убыванию"/"По возрастанию", не меняются в
+                    // зависимости от выбранного поля сортировки (не "Сначала
+                    // новые"/"Сначала высокая оценка" и т.п. — тоже прямая
+                    // просьба, отменяет предыдущий вариант с
+                    // BookmarksSortDirection.title(for:)).
+                    if sortOption.needsDirection {
+                        card {
                             ForEach(BookmarksSortDirection.allCases) { direction in
-                                selectableRow(title: direction.title(for: sortOption), isSelected: sortDirection == direction) {
+                                selectableRow(title: direction.title, isSelected: sortDirection == direction) {
                                     sortDirection = direction
                                 }
                                 if direction != BookmarksSortDirection.allCases.last {
@@ -818,13 +828,17 @@ private struct ViewSortSheet: View {
         Divider().overlay(Theme.separator).padding(.leading, 16)
     }
 
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 4)
+    /// Заголовок + подложка под ним — эталон "Настройки" iOS (см. body):
+    /// подпись мелким серым текстом СВЕРХУ, отдельно от карточки, не первой
+    /// строкой внутри неё.
+    private func sectionBlock(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 4)
+            card(content: content)
+        }
     }
 
     private func selectableRow(title: String, icon: String? = nil, isSelected: Bool, action: @escaping () -> Void) -> some View {
