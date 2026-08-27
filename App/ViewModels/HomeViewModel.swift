@@ -54,6 +54,10 @@ final class HomeViewModel: ObservableObject {
 
     @Published private(set) var collections: [MangaCollection] = []
     @Published private(set) var topActiveUsers: [TopActiveUser] = []
+    /// "Обновление популярных тайтлов" — тот же агрегат, что и
+    /// collections/topActiveUsers (см. loadWidgets), поэтому отдельного
+    /// isLoading-флага не заводим — используем общий isLoadingWidgets.
+    @Published private(set) var popular: [MangaItem] = []
     @Published private(set) var isLoadingWidgets = true
     @Published private(set) var newest: [MangaItem] = []
     @Published private(set) var isLoadingNewest = true
@@ -242,10 +246,12 @@ final class HomeViewModel: ObservableObject {
             let payload = try await service.fetchHomeWidgets()
             collections = payload.collections ?? []
             topActiveUsers = payload.weeklyTopUsers ?? []
+            popular = payload.popular ?? []
         } catch {
             guard !isCancellation(error) else { isLoadingWidgets = false; return }
             collections = []
             topActiveUsers = []
+            popular = []
         }
         isLoadingWidgets = false
     }

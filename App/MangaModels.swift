@@ -2760,21 +2760,28 @@ struct TopActiveUserPoints: Decodable, Hashable {
 /// Полезная нагрузка агрегата главной страницы — из ВСЕГО перехваченного
 /// дампа (popular/collections/reviews/newest/latest_updates/currently_views/
 /// weekly_top_users/weekly_top_views_users/news/forum/slider) сюда взяты
-/// ТОЛЬКО collections и weeklyTopUsers: остальное либо уже покрыто другими,
-/// подтверждёнными эндпоинтами (newest/latest_updates — см.
-/// fetchCatalog(sort:.added/.updated)), либо не нужно для экрана «Читают»
-/// (reviews/news/forum/slider). JSONDecoder тихо игнорирует лишние ключи
-/// верхнего уровня, которых нет в CodingKeys — остальные секции агрегата
-/// не мешают декодированию.
+/// collections, weeklyTopUsers И popular (см. HomeView.popularSection —
+/// раздел "Обновление популярных тайтлов", ключ был в дампе с самого
+/// начала, просто раньше нигде не декодировался): остальное либо уже
+/// покрыто другими, подтверждёнными эндпоинтами (newest/latest_updates —
+/// см. fetchCatalog(sort:.added/.updated)), либо не нужно для экрана
+/// «Читают» (reviews/news/forum/slider). JSONDecoder тихо игнорирует
+/// лишние ключи верхнего уровня, которых нет в CodingKeys — остальные
+/// секции агрегата не мешают декодированию. `popular` — те же элементы
+/// формы MangaItem, что и `newest` (metadata.last_item, см. MangaItemMetadata) —
+/// "Глава X" на карточке означает ровно то же самое, что и в «Новинках»:
+/// номер последней главы тайтла, а не какой-то отдельный "ранг популярности".
 ///
 /// ВАЖНО: путь самого этого эндпоинта НЕ ПОДТВЕРЖДЁН — см.
 /// MangaNetworkService.fetchHomeWidgets.
 struct HomeWidgetsPayload: Decodable {
     let collections: [MangaCollection]?
     let weeklyTopUsers: [TopActiveUser]?
+    let popular: [MangaItem]?
 
     enum CodingKeys: String, CodingKey {
         case collections
         case weeklyTopUsers = "weekly_top_users"
+        case popular
     }
 }

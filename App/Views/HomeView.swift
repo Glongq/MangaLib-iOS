@@ -41,6 +41,10 @@ struct HomeView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var bookmarks = BookmarksStore.shared
     @ObservedObject private var authSession = AuthSession.shared
+    /// Порядок/видимость разделов — настраивается в Персонализации (см.
+    /// PersonalizationSettingsView.homeSectionsCard), реально применяется
+    /// здесь (см. content/section(for:)).
+    @ObservedObject private var sectionsStore = HomeSectionsStore.shared
     /// Экран входа для "Мои обновления" без аккаунта — см. updatesTabBinding.
     @State private var showLoginForUpdates = false
     /// Текст в .searchable() — реально никуда не отправляется, поле служит
@@ -141,20 +145,45 @@ struct HomeView: View {
     /// шапку вместе с контентом; теперь шапка — родной navigationTitle, не
     /// часть ScrollView вообще, но порядок оставлен как есть, менять незачем.
     private var content: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                continueReadingSection
-                currentlyReadingSection
-                collectionsSection
-                topActiveUsersSection
-                newestSection
-                updatesSection
+        // ScrollViewReader — нужен ТОЛЬКО чтобы при переключении "Все"/"Мои"
+        // в "Последних обновлениях" не подбрасывало наверх (см. комментарий
+        // у .onChange ниже): весь экран — один ScrollView, и когда
+        // updatesTab.didSet мгновенно очищает список (см. HomeViewModel) —
+        // высота контента резко схлопывается до 4 строк скелетона, и если
+        // пользователь был проскроллен ниже этой высоты, ScrollView сам
+        // "прижимает" его обратно наверх. Явный scrollTo к началу секции —
+        // предсказуемый результат вместо случайного клэмпинга.
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    ForEach(sectionsStore.order.filter(sectionsStore.isVisible)) { kind in
+                        section(for: kind).id(kind.id)
+                    }
+                }
+                .padding(.top, 12)
+                .padding(.bottom, 32)
             }
-            .padding(.top, 12)
-            .padding(.bottom, 32)
+            .scrollIndicators(.hidden)
+            .background { SearchActivationRedirect() }
+            .onChange(of: viewModel.updatesTab) { _, _ in
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(HomeSectionKind.updates.id, anchor: .top)
+                }
+            }
         }
-        .scrollIndicators(.hidden)
-        .background { SearchActivationRedirect() }
+    }
+
+    @ViewBuilder
+    private func section(for kind: HomeSectionKind) -> some View {
+        switch kind {
+        case .popular:          popularSection
+        case .continueReading:  continueReadingSection
+        case .currentlyReading: currentlyReadingSection
+        case .collections:      collectionsSection
+        case .topActiveWeek:    topActiveUsersSection
+        case .newest:           newestSection
+        case .updates:          updatesSection
+        }
     }
 
     // MARK: Продолжить читать
@@ -645,6 +674,65 @@ struct HomeView: View {
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
+    // MARK: Общий размер карточки — "как в Каталоге при сетке 3"
+
+    /// Используется в "Новинках" и "Обновлении популярных тайтлов" — по
+    /// прямой просьбе "обложки и текст всё должно быть как в разделе
+    /// каталог при сетке 3". Специально ЖЁСТКО columns: 3 (не читает
+    /// личную настройку "Количество карточек", см. CardsPerRow) — та
+    /// влияет только на настоящие сетки Каталога/Закладок, здесь же речь
+    /// именно про фиксированный эталон "как при сетке 3", а не "как
+    /// сейчас выбрано". Тот же расчёт, что и MangaCatalogView.gridCardWidth.
+    private static var catalogGrid3CardWidth: CGFloat {
+        MangaCardView.gridCardWidth(totalWidth: UIScreen.main.bounds.width, columns: 3, spacing: 12, containerPadding: 12)
+    }
+
+    // MARK: Обновление популярных тайтлов
+
+    /// Слайдер популярных тайтлов — БЕЗ заголовка секции сверху (по прямой
+    /// просьбе, в отличие от остальных разделов). ПОДТВЕРЖДЁННЫЙ перехватом
+    /// ключ "popular" в агрегате главной (см. HomeWidgetsPayload) — раньше
+    /// нигде не декодировался. "Глава X" на карточке — то же самое поле,
+    /// что и в "Новинках" (metadata.last_item), не отдельный "ранг".
+    @ViewBuilder
+    private var popularSection: some View {
+        if !viewModel.popular.isEmpty {
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(viewModel.popular) { item in
+                        NavigationLink(value: item) {
+                            MangaCardView(item: item, width: Self.catalogGrid3CardWidth)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollIndicators(.hidden)
+        } else if viewModel.isLoadingWidgets {
+            popularSkeleton
+        }
+    }
+
+    private var popularSkeleton: some View {
+        ScrollView(.horizontal) {
+            LazyHStack(alignment: .top, spacing: 12) {
+                ForEach(0..<4, id: \.self) { _ in
+                    VStack(alignment: .leading, spacing: 6) {
+                        SkeletonBox()
+                            .frame(width: Self.catalogGrid3CardWidth, height: (Self.catalogGrid3CardWidth * 3 / 2).rounded())
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        skeletonBar(width: Self.catalogGrid3CardWidth * 0.85, height: 12)
+                        skeletonBar(width: Self.catalogGrid3CardWidth * 0.6, height: 10)
+                    }
+                    .frame(width: Self.catalogGrid3CardWidth)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .scrollIndicators(.hidden)
+    }
+
     // MARK: Новинки
 
     @ViewBuilder
@@ -657,10 +745,9 @@ struct HomeView: View {
                     LazyHStack(alignment: .top, spacing: 12) {
                         ForEach(viewModel.newest) { item in
                             NavigationLink(value: item) {
-                                // Без thumbnail (в отличие от остальных 3 секций) — карточка
-                                // здесь такой же ширины (108pt), что и в Каталоге, где на
-                                // маленьком thumbnail (100px) при апскейле уже заметно мылит.
-                                MangaCardView(item: item, width: 108)
+                                // Ширина — "как в Каталоге при сетке 3" (см.
+                                // Self.catalogGrid3CardWidth), по прямой просьбе.
+                                MangaCardView(item: item, width: Self.catalogGrid3CardWidth)
                             }
                             .buttonStyle(.plain)
                         }
@@ -743,14 +830,12 @@ struct HomeView: View {
     private static var updatesTypeFont: Font { Font(updatesTypeUIFont) }
     private static let updatesTextSpacing: CGFloat = 4
 
-    /// Высота — как была (см. историю: «Продолжить читать» + высота одной
-    /// строки текста, чуть добавили воздуха). Ширина ПЕРЕСЧИТАНА под эталон
-    /// (Theme.coverAspectRatio = 2:3, как в Каталоге/Новинках) — раньше
-    /// бралась от соотношения continueReadingCover (≈67:94, не 2:3), теперь
-    /// от высоты в обратную сторону: width = height / 1.5, высота не менялась.
-    private static var updatesCoverHeightBoost: CGFloat { updatesTypeUIFont.lineHeight.rounded(.up) }
-    private static let updatesCoverHeight: CGFloat = continueReadingCoverHeight + updatesCoverHeightBoost
-    private static let updatesCoverWidth: CGFloat = (updatesCoverHeight / Theme.coverAspectRatio).rounded()
+    /// 1-в-1 обложка списка закладок (см. BookmarksView.bookmarkCoverWidth/
+    /// bookmarkCoverHeight, 80×120, 2:3) — по прямой просьбе "привести
+    /// размер/высоту обложек для последних обновлений 1в1 как список
+    /// закладок", вместо отдельного независимого расчёта, который был раньше.
+    private static let updatesCoverWidth: CGFloat = BookmarksView.bookmarkCoverWidth
+    private static let updatesCoverHeight: CGFloat = BookmarksView.bookmarkCoverHeight
 
     /// Высота подложки — под ХУДШИЙ случай текста (название в 2 строки +
     /// "Том X Глава Y — Название" в 2 строки + дата), а не константа "от
@@ -954,12 +1039,12 @@ struct HomeView: View {
                 ForEach(0..<4, id: \.self) { _ in
                     VStack(alignment: .leading, spacing: 6) {
                         SkeletonBox()
-                            .frame(width: 108, height: (108 * 3 / 2).rounded())
+                            .frame(width: Self.catalogGrid3CardWidth, height: (Self.catalogGrid3CardWidth * 3 / 2).rounded())
                             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        skeletonBar(width: 90, height: 12)
-                        skeletonBar(width: 60, height: 10)
+                        skeletonBar(width: Self.catalogGrid3CardWidth * 0.85, height: 12)
+                        skeletonBar(width: Self.catalogGrid3CardWidth * 0.6, height: 10)
                     }
-                    .frame(width: 108)
+                    .frame(width: Self.catalogGrid3CardWidth)
                 }
             }
             .padding(.horizontal, 16)

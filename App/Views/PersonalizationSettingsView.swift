@@ -12,9 +12,14 @@ import UIKit
 /// но не выдуманная", что уже используется в MangaDetailView
 /// (commentsDisabledInReader/commentsDisabledOnCard). "Количество
 /// отображаемого контента" — реальный параметр (см. CardsPerRow), который
-/// теперь читают сетки Каталога и Закладок (режим "Плитка").
+/// теперь читают сетки Каталога и Закладок (режим "Плитка"). "Главная
+/// страница" (homeSectionsCard) — порядок (drag) и видимость (чекбокс)
+/// разделов вкладки «Читают», реально применяется там же (см.
+/// HomeSectionsStore/HomeView.content).
 struct PersonalizationSettingsView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
+    /// Порядок/видимость разделов главной — см. homeSectionsCard.
+    @ObservedObject private var sectionsStore = HomeSectionsStore.shared
 
     @AppStorage("personalization_compact_tab_bar") private var compactTabBar = false
     @AppStorage("personalization_censor_comment_images") private var censorCommentImages = false
@@ -42,6 +47,8 @@ struct PersonalizationSettingsView: View {
                         }
                         .buttonStyle(.plain)
                     }
+
+                    card { homeSectionsCard }
 
                     card {
                         Toggle(isOn: $compactTabBar) {
@@ -140,6 +147,95 @@ struct PersonalizationSettingsView: View {
                 .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(Theme.separator, lineWidth: 1))
                 .frame(width: 16, height: 16)
         }
+    }
+
+    // MARK: Главная страница — порядок/видимость разделов
+
+    /// Заголовок + "Сбросить" сверху, ниже — перетаскиваемый список разделов
+    /// с чекбоксом видимости слева у каждого (см. homeSectionRow). Реально
+    /// применяется на вкладке «Читают» (см. HomeView.content/HomeSectionsStore).
+    private var homeSectionsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Главная страница")
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 0)
+                Button("Сбросить") { sectionsStore.resetToDefaults() }
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 6)
+
+            homeSectionsList
+        }
+    }
+
+    private static let homeSectionRowHeight: CGFloat = 52
+
+    /// Список — НЕ скроллится сам (.scrollDisabled), высота ровно под все
+    /// строки: это блок ВНУТРИ уже скроллящегося экрана Персонализации,
+    /// вложенный скроллящийся List внутри него конфликтовал бы жестами. Тот
+    /// же приём (List + .onMove + editMode.constant(.active)), что и у
+    /// BookmarksView.FolderOrderSheet, но БЕЗ отдельного шита — прямо здесь,
+    /// как единый "блок" на экране, по прямой просьбе.
+    private var homeSectionsList: some View {
+        List {
+            ForEach(sectionsStore.order) { kind in
+                homeSectionRow(kind)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+            }
+            .onMove { from, to in sectionsStore.moveSections(fromOffsets: from, toOffset: to) }
+        }
+        .listStyle(.plain)
+        .scrollDisabled(true)
+        .scrollContentBackground(.hidden)
+        .environment(\.editMode, .constant(.active))
+        .frame(height: Self.homeSectionRowHeight * CGFloat(sectionsStore.order.count))
+        .padding(.bottom, 8)
+    }
+
+    /// Скруглённый чекбокс слева (заливка акцентом, если раздел включён) —
+    /// по прямой просьбе, вместо системного Toggle-переключателя. Ручка
+    /// перетаскивания (drag handle) — справа, рисует сам List/.onMove.
+    private func homeSectionRow(_ kind: HomeSectionKind) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    sectionsStore.toggleVisibility(kind)
+                }
+            } label: {
+                let visible = sectionsStore.isVisible(kind)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(visible ? Theme.accent : Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Theme.separator, lineWidth: visible ? 0 : 1.5)
+                    )
+                    .overlay {
+                        if visible {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Theme.background)
+                        }
+                    }
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+
+            Text(kind.title)
+                .font(.subheadline)
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: Self.homeSectionRowHeight)
+        .contentShape(Rectangle())
     }
 
     // MARK: Количество карточек в ряд
