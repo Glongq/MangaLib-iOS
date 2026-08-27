@@ -424,11 +424,13 @@ final class BookmarksStore: ObservableObject {
                 items[idx].coverURL = entry.media.coverURLString
                 items[idx].serverId = entry.id
                 items[idx].rating = entry.media.rating?.value
+                items[idx].myRating = entry.myScore
             } else {
                 items.append(BookmarkedTitle(slug: slug, title: entry.media.displayTitle,
                                               coverURL: entry.media.coverURLString,
                                               folderId: folder.id, serverId: entry.id,
-                                              rating: entry.media.rating?.value))
+                                              rating: entry.media.rating?.value,
+                                              myRating: entry.myScore))
             }
         }
         persistItems()

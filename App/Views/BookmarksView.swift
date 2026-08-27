@@ -167,6 +167,17 @@ struct BookmarksView: View {
             // данными (см. project.yml/CLAUDE.md — принцип "не полу-готовые
             // реализации").
             return titles
+        case .myRating:
+            // Без личной оценки — всегда в конец (тот же принцип, что и у
+            // sortedByDate ниже для дат-nil), а не в начало/вперемешку.
+            return titles.sorted { a, b in
+                switch (a.myRating, b.myRating) {
+                case let (ra?, rb?): return sortDirection == .newestFirst ? ra > rb : ra < rb
+                case (nil, .some): return false
+                case (.some, nil): return true
+                case (nil, nil): return false
+                }
+            }
         }
     }
 
@@ -628,7 +639,7 @@ enum BookmarksViewMode: String {
 
 /// Поле сортировки списка закладок — см. BookmarksView.sorted(_:).
 enum BookmarksSortOption: String, CaseIterable, Identifiable {
-    case titleAsc, titleDesc, dateAdded, chapterUpdated, dateRead
+    case titleAsc, titleDesc, dateAdded, chapterUpdated, dateRead, myRating
 
     var id: String { rawValue }
 
@@ -639,27 +650,36 @@ enum BookmarksSortOption: String, CaseIterable, Identifiable {
         case .dateAdded:      return "По дате добавления"
         case .chapterUpdated: return "Дате обновления глав"
         case .dateRead:       return "Дате чтения"
+        case .myRating:       return "По моей оценке"
         }
     }
 
     /// У сортировки по названию направление уже "зашито" в сам вариант
-    /// (А-Я/Я-А) — общий переключатель "сначала новые/старые" (см.
-    /// BookmarksSortDirection) имеет смысл только у полей-дат.
+    /// (А-Я/Я-А) — общий переключатель (см. BookmarksSortDirection) имеет
+    /// смысл у полей-дат ("сначала новые/старые") и у личной оценки
+    /// ("сначала высокая/низкая", см. BookmarksSortDirection.title(for:)).
     var needsDirection: Bool {
         switch self {
         case .titleAsc, .titleDesc: return false
-        case .dateAdded, .chapterUpdated, .dateRead: return true
+        case .dateAdded, .chapterUpdated, .dateRead, .myRating: return true
         }
     }
 }
 
-/// Направление для полей-дат (см. BookmarksSortOption.needsDirection).
+/// Направление для полей-дат и личной оценки (см.
+/// BookmarksSortOption.needsDirection) — подпись зависит от того, к какому
+/// полю применяется (даты — "новые/старые", оценка — "высокая/низкая").
 enum BookmarksSortDirection: String, CaseIterable, Identifiable {
     case newestFirst, oldestFirst
 
     var id: String { rawValue }
 
-    var title: String { self == .newestFirst ? "Сначала новые" : "Сначала старые" }
+    func title(for option: BookmarksSortOption) -> String {
+        if option == .myRating {
+            return self == .newestFirst ? "Сначала высокая оценка" : "Сначала низкая оценка"
+        }
+        return self == .newestFirst ? "Сначала новые" : "Сначала старые"
+    }
 }
 
 /// Щит редактирования порядка списков (иконка карандаша в шапке Закладок) —
@@ -762,7 +782,7 @@ private struct ViewSortSheet: View {
                         if sortOption.needsDirection {
                             divider
                             ForEach(BookmarksSortDirection.allCases) { direction in
-                                selectableRow(title: direction.title, isSelected: sortDirection == direction) {
+                                selectableRow(title: direction.title(for: sortOption), isSelected: sortDirection == direction) {
                                     sortDirection = direction
                                 }
                                 if direction != BookmarksSortDirection.allCases.last {
@@ -787,7 +807,10 @@ private struct ViewSortSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        // Полностью открытым сразу (не .medium с доводкой пальцем до
+        // .large) — по прямой просьбе, этот щит короткий и разворачивать
+        // руками смысла нет.
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
 
