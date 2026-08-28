@@ -21,15 +21,24 @@ struct NotificationsView: View {
     @State private var lastScrollOffset: CGFloat = 0
     @State private var isHeaderAnimating = false
 
-    /// "Настройки" в "..." — честная заглушка. ЧТЕНИЕ подтверждено
-    /// перехватом (`GET /user/settings/notifications` → плоский набор
-    /// булевых тумблеров: manga/reading/plan_read/on_hold/completed/
-    /// favourites — похоже на "уведомлять о новых главах по папке
-    /// закладок", plus push_chapter/push_comments/push_episode/push_forum/
-    /// push_messages/notify_anime/disable_*_notif), но эндпоинт СОХРАНЕНИЯ
-    /// (PUT/POST) ни разу не перехвачен — экран с тумблерами без реальной
-    /// записи был бы хуже заглушки (см. CLAUDE.md — не полу-готовые
-    /// реализации), поэтому пока так и оставлено, до находки записи.
+    /// "Настройки" в "..." — заглушка, ОСОЗНАННО оставлена как есть по
+    /// прямой просьбе ("пока не строй, только анализ"), хотя и чтение, И
+    /// запись теперь ПОДТВЕРЖДЕНЫ перехватом — реальный экран можно
+    /// собрать в любой момент:
+    /// - `GET/PUT /user/settings/notifications` — ПОЛНЫЙ объект: user_id,
+    ///   manga, notify_anime, reading/plan_read/on_hold/completed/
+    ///   favourites (булевы — вероятно "уведомлять о новых главах по
+    ///   СТАТУСУ закладки", пересекается по смыслу с notify ниже, но
+    ///   эндпоинт другой), disable_friends_notif, media_status_finished,
+    ///   disable_chapter_early_access_notif, disable_card_drop_notif,
+    ///   push_chapter/push_comments/push_episode/push_forum/push_messages —
+    ///   все булевы; disable_old_comments_notif — ИСКЛЮЧЕНИЕ, смешанный
+    ///   тип: false/0 ИЛИ строка-число дней ("7"/"14"/"30"/"180"/"360",
+    ///   видимо Picker "не уведомлять о комментариях старше N дней") — PUT
+    ///   шлёт ВЕСЬ объект целиком, не частично.
+    /// - `PUT /bookmarks/folder/notifications` — отдельно, тумблер notify
+    ///   ПО КАЖДОЙ папке закладок: {"folders":[{"id":Int,"notify":Bool},
+    ///   ...]}, тоже весь список целиком.
     @State private var showSettingsStub = false
     /// Подтверждение перед "Удалить все уведомления" — сам эндпоинт
     /// РЕАЛИЗОВАН (см. deleteAllTapped/NotificationsViewModel.
