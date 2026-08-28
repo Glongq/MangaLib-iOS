@@ -46,6 +46,16 @@ private struct VerticalPagePositionKey: PreferenceKey {
     }
 }
 
+/// Команда для листа профиля (см. MangaReaderView.selectedTeam/teamsCreditChip) —
+/// облегчённая обёртка над ChapterTeam: slugURL там Optional (нужен
+/// non-optional для TeamView), .sheet(item:) нужен Identifiable.
+private struct SelectedTeam: Identifiable {
+    let id: Int
+    let slugURL: String
+    let name: String
+    let coverURL: URL?
+}
+
 /// Полноэкранная читалка: горизонтальное листание страниц, тап переключает интерфейс.
 struct MangaReaderView: View {
 
@@ -71,6 +81,12 @@ struct MangaReaderView: View {
     @State private var showChapters = false
     @State private var showSettings = false
     @State private var showComments = false
+    /// Команда, по чипу "Над главой работали" на экране конца главы (см.
+    /// teamsCreditChip) — открывает её профиль (TeamView) листом.
+    @State private var selectedTeam: SelectedTeam?
+    /// Лист "Оценить перевод" (см. chapterActionButtons/
+    /// TranslationRatingSheet).
+    @State private var showTranslationRating = false
     /// Индексы страниц (горизонтальный режим), для которых пользователь уже
     /// докрутил вниз до блока комментариев — сам блок ChapterCommentsSheet
     /// рендерится (и начинает грузить данные) только для них, а не для всех
@@ -340,6 +356,14 @@ struct MangaReaderView: View {
                 smoothPaging: $smoothPaging,
                 verticalGap: $verticalGap
             )
+        }
+        .sheet(item: $selectedTeam) { team in
+            NavigationStack {
+                TeamView(slugURL: team.slugURL, fallbackName: team.name, coverURL: team.coverURL)
+            }
+        }
+        .sheet(isPresented: $showTranslationRating) {
+            TranslationRatingSheet(viewModel: viewModel)
         }
         .preferredColorScheme(readerTheme == 2 ? nil : (readerIsLight ? .light : .dark))
     }
@@ -723,6 +747,10 @@ struct MangaReaderView: View {
                 .foregroundStyle(fg.opacity(0.85))
                 .padding(.top, 60)
 
+            if !viewModel.chapterTeams.isEmpty {
+                teamsCreditChip
+            }
+
             if let next = nextChapter {
                 Button {
                     openNext()
@@ -746,8 +774,93 @@ struct MangaReaderView: View {
                 Text("Это последняя доступная глава")
                     .font(.subheadline).foregroundStyle(fg.opacity(0.6))
             }
+
+            chapterActionButtons
         }
         .padding(.bottom, 18)
+    }
+
+    /// "Над главой работали" — команда(ы) перевода ИМЕННО этой главы (см.
+    /// ReaderViewModel.chapterTeams/ChapterPagesResult.teams, приходят
+    /// прямо в ответе главы) — тап открывает профиль команды (см.
+    /// TeamView), по прямой просьбе рядом с "Спасибо" на экране конца главы.
+    private var teamsCreditChip: some View {
+        VStack(spacing: 6) {
+            Text("Над главой работали")
+                .font(.caption2)
+                .foregroundStyle(fg.opacity(0.5))
+            HStack(spacing: 8) {
+                ForEach(viewModel.chapterTeams) { team in
+                    Group {
+                        if let slugURL = team.slugURL {
+                            Button {
+                                selectedTeam = SelectedTeam(id: team.id, slugURL: slugURL, name: team.name, coverURL: team.avatarURL)
+                            } label: {
+                                teamChipLabel(team.name)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            // Нет slug_url — переход некуда, показываем как
+                            // обычную неинтерактивную подпись.
+                            teamChipLabel(team.name)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func teamChipLabel(_ name: String) -> some View {
+        Text(name)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(fg)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(fg.opacity(0.12), in: Capsule())
+    }
+
+    /// "Спасибо" (лайк главы) + "Оценить перевод" — обе по прямой просьбе,
+    /// на экране конца главы рядом с командой-переводчиком выше. "Спасибо"
+    /// заливается акцентным, когда уже лайкнуто (см. ReaderViewModel.
+    /// chapterIsLiked/toggleLike) — счётчик берём из того же места, что и
+    /// исходное состояние (приходит прямо в ответе главы).
+    private var chapterActionButtons: some View {
+        HStack(spacing: 10) {
+            Button { likeTapped() } label: {
+                Label(
+                    viewModel.chapterLikesCount.map { "Спасибо · \($0)" } ?? "Спасибо",
+                    systemImage: (viewModel.chapterIsLiked ?? false) ? "heart.fill" : "heart"
+                )
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle((viewModel.chapterIsLiked ?? false) ? Theme.background : fg)
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+            }
+            .background((viewModel.chapterIsLiked ?? false) ? Theme.accent : fg.opacity(0.12), in: Capsule())
+            .buttonStyle(.plain)
+
+            Button { showTranslationRating = true } label: {
+                Text("Оценить перевод")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(fg)
+                    .padding(.horizontal, 16)
+                    .frame(height: 44)
+            }
+            .background(fg.opacity(0.12), in: Capsule())
+            .buttonStyle(.plain)
+        }
+        .padding(.top, 4)
+    }
+
+    private func likeTapped() {
+        Task {
+            do {
+                try await viewModel.toggleLike()
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                DownloadsManager.shared.showBanner(message)
+            }
+        }
     }
 
     private func openNext() {

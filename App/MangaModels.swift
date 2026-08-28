@@ -1975,10 +1975,86 @@ struct ChapterPagesData: Decodable {
     /// не сработает как быстрая проверка, и приложение всё равно отправит
     /// markChapterViewed как раньше).
     let isViewed: Bool?
+    /// Команда(ы), переводившие ИМЕННО эту главу — ПОДТВЕРЖДЕНО реальным
+    /// перехватом ("Над главой работали", см. MangaReaderView.endHeader) —
+    /// та же модель, что и у ChapterBranch.teams, просто здесь прямо в
+    /// ответе главы, без обёртки веткой.
+    let teams: [ChapterTeam]?
+    /// "Спасибо" переводчикам (лайк главы, см. MangaNetworkService.
+    /// likeChapter) — ПОДТВЕРЖДЕНО реальным перехватом: оба поля уже
+    /// приходят прямо в ответе главы, не нужно отдельного запроса, чтобы
+    /// узнать текущее состояние при открытии.
+    let likesCount: Int?
+    let isLiked: Bool?
+    /// Оценка перевода (см. MangaNetworkService.rateTranslation) —
+    /// ПОДТВЕРЖДЕНО реальным перехватом: агрегат + твоя предыдущая оценка
+    /// (если была) приходят прямо в ответе главы.
+    let translationRating: TranslationRating?
 
     enum CodingKeys: String, CodingKey {
-        case id, pages
+        case id, pages, teams
         case isViewed = "is_viewed"
+        case likesCount = "likes_count"
+        case isLiked = "is_liked"
+        case translationRating = "translation_quality_rating"
+    }
+}
+
+/// Оценка качества перевода главы по 3 категориям — ПОДТВЕРЖДЕНО реальным
+/// перехватом `POST /chapters/{id}/translation-rating` (см.
+/// MangaNetworkService.rateTranslation) и тем же форматом прямо внутри
+/// ответа главы (ChapterPagesData.translationRating). `categories` —
+/// средние ОБЩИЕ (всех проголосовавших) по каждой категории, `user` —
+/// ТВОИ предыдущие значения (если оценивал).
+struct TranslationRating: Decodable {
+    let average: String?
+    let averageFormated: String?
+    let votes: Int?
+    let ratedChapters: Int?
+    let canRate: Bool?
+    let categories: TranslationRatingCategories?
+    let user: TranslationRatingUser?
+
+    enum CodingKeys: String, CodingKey {
+        case average, averageFormated, votes, categories, user
+        case ratedChapters = "rated_chapters"
+        case canRate = "can_rate"
+    }
+}
+
+struct TranslationRatingCategories: Decodable {
+    let translationAccuracy: String?
+    let readabilityAdaptation: String?
+    let editingFormatting: String?
+
+    enum CodingKeys: String, CodingKey {
+        case translationAccuracy = "translation_accuracy"
+        case readabilityAdaptation = "readability_adaptation"
+        case editingFormatting = "editing_formatting"
+    }
+}
+
+/// Твои предыдущие оценки по 3 категориям — ПОДТВЕРЖДЕНО перехватом: у ещё
+/// не оценённой (тобой) главы сервер прислал ровно "0" в каждом поле (та же
+/// семантика 0 == "не оценено", что и у MangaRating.myScore — шкала 1-10,
+/// 0 руками не поставить), отсюда myScores.
+struct TranslationRatingUser: Decodable {
+    let translationAccuracy: Int?
+    let readabilityAdaptation: Int?
+    let editingFormatting: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case translationAccuracy = "translation_accuracy"
+        case readabilityAdaptation = "readability_adaptation"
+        case editingFormatting = "editing_formatting"
+    }
+
+    /// nil, если ещё не оценено (0 или отсутствует) — иначе (accuracy,
+    /// readability, editing), для предзаполнения RateTranslationSheet.
+    var myScores: (accuracy: Int, readability: Int, editing: Int)? {
+        guard let translationAccuracy, let readabilityAdaptation, let editingFormatting,
+              translationAccuracy > 0 || readabilityAdaptation > 0 || editingFormatting > 0 else { return nil }
+        return (translationAccuracy, readabilityAdaptation, editingFormatting)
     }
 }
 
@@ -2298,6 +2374,13 @@ struct CommentsListResponse: Decodable {
 struct ChapterPagesResult {
     let pages: [PageItem]
     let isViewed: Bool
+    /// Команда(ы)/лайк/оценка перевода ИМЕННО этой главы — см.
+    /// ChapterPagesData. nil у офлайн (скачанных) глав — там своего ответа
+    /// сервера нет (см. ReaderViewModel.load/fetchSegment, ветка localFiles).
+    let teams: [ChapterTeam]
+    let likesCount: Int?
+    let isLiked: Bool?
+    let translationRating: TranslationRating?
 }
 
 /// Одна страница главы. `url` — относительный путь, дополняется базовым URL сервера картинок.

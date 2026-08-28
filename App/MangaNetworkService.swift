@@ -1240,6 +1240,56 @@ final class MangaNetworkService {
         let rateable_type: String
     }
 
+    // MARK: - Лайк главы / оценка перевода
+
+    /// "Спасибо" переводчикам (лайк главы) — ПОДТВЕРЖДЕНО реальным
+    /// перехватом: `POST /chapters/{id}/like`, без тела. Тоггл — сайт шлёт
+    /// тот же запрос повторно, чтобы снять лайк (is_liked туда-обратно).
+    /// Ответ содержит актуальные likes_count/is_liked — подставляем в UI
+    /// напрямую, не перезагружая главу целиком. Те же поля, кстати, уже
+    /// приходят и в самом ответе главы (см. ChapterPagesData.likesCount/
+    /// isLiked) — используются, чтобы сразу знать состояние при открытии.
+    func likeChapter(id: Int, siteId: Int? = nil) async throws -> (likesCount: Int, isLiked: Bool) {
+        let request = try makeRequest(path: "/chapters/\(id)/like", queryItems: [], siteId: siteId, method: "POST")
+        let response: APIObjectResponse<LikeChapterResult> = try await performToastAware(request)
+        return (response.data.chapter.likesCount, response.data.chapter.isLiked)
+    }
+
+    private struct LikeChapterResult: Decodable {
+        let chapter: LikeChapterInfo
+    }
+
+    private struct LikeChapterInfo: Decodable {
+        let likesCount: Int
+        let isLiked: Bool
+        enum CodingKeys: String, CodingKey {
+            case likesCount = "likes_count"
+            case isLiked = "is_liked"
+        }
+    }
+
+    /// Оценка перевода главы по 3 категориям (точность/адаптация/вёрстка,
+    /// каждая 1-10) — ПОДТВЕРЖДЕНО реальным перехватом: `POST /chapters/
+    /// {id}/translation-rating`, тело `{"translation_accuracy":Int,
+    /// "readability_adaptation":Int,"editing_formatting":Int}`. Ответ —
+    /// актуальный агрегат, тот же формат, что и translation_quality_rating
+    /// в ответе самой главы (см. ChapterPagesData.translationRating/
+    /// TranslationRating).
+    func rateTranslation(chapterId: Int, accuracy: Int, readability: Int, editing: Int, siteId: Int? = nil) async throws -> TranslationRating {
+        let payload = RateTranslationPayload(
+            translation_accuracy: accuracy, readability_adaptation: readability, editing_formatting: editing
+        )
+        let request = try makeJSONRequest(path: "/chapters/\(chapterId)/translation-rating", method: "POST", body: payload, siteId: siteId)
+        let response: APIObjectResponse<TranslationRating> = try await performToastAware(request)
+        return response.data
+    }
+
+    private struct RateTranslationPayload: Encodable {
+        let translation_accuracy: Int
+        let readability_adaptation: Int
+        let editing_formatting: Int
+    }
+
     // MARK: - Отзывы на тайтл
 
     /// `GET /reviews?page=&sort_by=newest&reviewable_type=manga&reviewable_id=` —
@@ -1352,7 +1402,14 @@ final class MangaNetworkService {
         }
         let request = try makeRequest(path: "/manga/\(encodePath(slug))/chapter", queryItems: items, siteId: siteId)
         let response: ChapterPagesResponse = try await perform(request)
-        return ChapterPagesResult(pages: response.data.pages, isViewed: response.data.isViewed ?? false)
+        return ChapterPagesResult(
+            pages: response.data.pages,
+            isViewed: response.data.isViewed ?? false,
+            teams: response.data.teams ?? [],
+            likesCount: response.data.likesCount,
+            isLiked: response.data.isLiked,
+            translationRating: response.data.translationRating
+        )
     }
 
     // MARK: - Request building

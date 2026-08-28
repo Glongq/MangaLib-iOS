@@ -9,6 +9,15 @@ final class ReaderViewModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var currentIndex: Int
 
+    /// Команда(ы)/лайк/оценка перевода ТЕКУЩЕЙ главы — см.
+    /// MangaReaderView.endHeader ("Над главой работали"/"Спасибо"/"Оценить
+    /// перевод"). Приходят прямо в ответе главы (см. ChapterPagesResult) —
+    /// пусто/nil у офлайн-скачанных глав (там своего ответа сервера нет).
+    @Published private(set) var chapterTeams: [ChapterTeam] = []
+    @Published private(set) var chapterLikesCount: Int?
+    @Published private(set) var chapterIsLiked: Bool?
+    @Published private(set) var chapterTranslationRating: TranslationRating?
+
     /// Пришёл ли сервер уже с отметкой "просмотрено" для текущей главы (см.
     /// ChapterPagesResult.isViewed) — если да, повторный markChapterViewed
     /// не отправляем, он не нужен.
@@ -107,7 +116,9 @@ final class ReaderViewModel: ObservableObject {
                     let pages = localFiles.enumerated().map { idx, url in
                         PageItem(id: idx, slug: nil, image: nil, url: url.absoluteString, width: nil, height: nil)
                     }
-                    self.pageCache[n] = ChapterPagesResult(pages: pages, isViewed: false)
+                    self.pageCache[n] = ChapterPagesResult(
+                        pages: pages, isViewed: false, teams: [], likesCount: nil, isLiked: nil, translationRating: nil
+                    )
                     return
                 }
                 if let result = try? await self.service.fetchPages(
@@ -163,6 +174,10 @@ final class ReaderViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         pages = []
+        chapterTeams = []
+        chapterLikesCount = nil
+        chapterIsLiked = nil
+        chapterTranslationRating = nil
 
         // Оффлайн/скачано: если у главы есть локально сохранённые страницы —
         // читаем их с диска, вообще не обращаясь к сети (см. DownloadsManager).
@@ -189,6 +204,10 @@ final class ReaderViewModel: ObservableObject {
             )
             pages = result.pages
             currentChapterAlreadyViewed = result.isViewed
+            chapterTeams = result.teams
+            chapterLikesCount = result.likesCount
+            chapterIsLiked = result.isLiked
+            chapterTranslationRating = result.translationRating
         } catch NetworkError.cancelled {
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -207,6 +226,10 @@ final class ReaderViewModel: ObservableObject {
             currentIndex = index
             pages = cached.pages
             currentChapterAlreadyViewed = cached.isViewed
+            chapterTeams = cached.teams
+            chapterLikesCount = cached.likesCount
+            chapterIsLiked = cached.isLiked
+            chapterTranslationRating = cached.translationRating
             recordProgress()
             prefetchNeighbors(of: index)
             return
@@ -340,6 +363,29 @@ final class ReaderViewModel: ObservableObject {
 
     /// Отметить текущую главу как последнюю прочитанную.
     func markProgress() { recordProgress() }
+
+    /// "Спасибо" переводчикам (лайк главы, кнопка на экране конца главы, см.
+    /// MangaReaderView.endHeader) — тоггл, см. MangaNetworkService.
+    /// likeChapter. Обновляет chapterLikesCount/chapterIsLiked прямо из
+    /// ответа сервера, не перезагружая главу целиком. Бросает ошибку дальше
+    /// — View сама решает, как показать (тост).
+    func toggleLike() async throws {
+        guard let chapter = currentChapter else { return }
+        let result = try await service.likeChapter(id: chapter.id, siteId: siteId)
+        chapterLikesCount = result.likesCount
+        chapterIsLiked = result.isLiked
+    }
+
+    /// Оценка перевода главы (3 категории, 1-10 каждая, см.
+    /// MangaNetworkService.rateTranslation) — обновляет
+    /// chapterTranslationRating прямо из ответа. Бросает ошибку дальше —
+    /// View сама решает, как показать (тост).
+    func submitTranslationRating(accuracy: Int, readability: Int, editing: Int) async throws {
+        guard let chapter = currentChapter else { return }
+        chapterTranslationRating = try await service.rateTranslation(
+            chapterId: chapter.id, accuracy: accuracy, readability: readability, editing: editing, siteId: siteId
+        )
+    }
 
     /// Кнопка-закладка в ридере как переключатель: add=true — добавить в «Читаю»
     /// (если ещё нет), add=false — РЕАЛЬНО убрать из закладок (BookmarksStore.
