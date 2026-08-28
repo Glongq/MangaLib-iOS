@@ -596,17 +596,25 @@ struct HomeView: View {
         .background(Theme.surfaceElevated, in: Capsule())
     }
 
-    /// Веер обложек как на сайте — СРЕДНЯЯ обложка по центру, БЕЗ поворота,
-    /// поверх остальных; крайние симметрично разъезжаются влево/вправо от
-    /// неё и поворачиваются в свою сторону (было — линейная лесенка слева
-    /// направо, из-за которой ПРАВАЯ обложка (не средняя) оказывалась
-    /// сверху и весь веер был сдвинут к левому краю, а не по центру).
+    /// Веер обложек 1-в-1 разбор реального сайта (по прямой просьбе,
+    /// точные углы/смещения/z-индексы): левая (-13°, x:-35, y:-4, самый
+    /// НИЖНИЙ слой) → центральная (0°, по центру, средний слой) → правая
+    /// (+7°, x:+30, y:+8, самый ВЕРХНИЙ слой, перекрывает центральную).
+    /// Вращение — от НИЖНЕГО центра каждой обложки (anchor: .bottom), не от
+    /// геометрического центра — так они расходятся веером из одной точки
+    /// внизу, а не проворачиваются на месте. Была симметричная версия
+    /// "центр всегда сверху" — по факту у сайта верхний слой ПРАВАЯ.
+    private static let fanTransforms: [(rotation: Double, x: CGFloat, y: CGFloat, z: Double)] = [
+        (-13, -35, -4, 0),
+        (0, 0, 0, 1),
+        (7, 30, 8, 2)
+    ]
+
     private func collectionPreviewStack(_ previews: [MangaCover]) -> some View {
         let items = Array(previews.prefix(3))
-        let mid = (items.count - 1) / 2
         return ZStack(alignment: .bottom) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, cover in
-                let delta = index - mid
+                let t = items.count == 3 ? Self.fanTransforms[index] : (rotation: 0, x: 0, y: 0, z: Double(index))
                 RemoteImage(url: cover.bestURL) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
@@ -614,15 +622,15 @@ struct HomeView: View {
                 } failure: {
                     Theme.surfaceElevated
                 }
-                .frame(width: 72, height: 104)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .rotationEffect(.degrees(Double(delta) * 8))
-                .offset(x: CGFloat(delta) * 26)
-                .zIndex(delta == 0 ? 1 : 0)
-                .clipped()
+                .frame(width: 72, height: 108)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .shadow(color: .black.opacity(0.4), radius: 6, x: 0, y: 4)
+                .rotationEffect(.degrees(t.rotation), anchor: .bottom)
+                .offset(x: t.x, y: t.y)
+                .zIndex(t.z)
             }
         }
-        .frame(height: 104)
+        .frame(height: 116)
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
