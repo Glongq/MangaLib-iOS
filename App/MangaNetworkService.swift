@@ -1340,11 +1340,17 @@ final class MangaNetworkService {
     /// Отметить прочитанными ВСЕ уведомления категории `notificationType`
     /// (та же категория, что и NotificationTypeFilter/typeFilter) —
     /// ПОДТВЕРЖДЕНО реальным перехватом: `PUT /notifications/bulk`, тело
-    /// `{"notification_type":"all"}` (или "card"/"comments"/... — в обоих
-    /// перехваченных примерах поле ровно одно, без is_read: действие не
-    /// зависит от текущей вкладки прочитанности — уже прочитанные просто не
-    /// меняются). Ответ — silent toast с человекочитаемым текстом
-    /// ("Уведомления помечены прочитанными"), тело не разбираем.
+    /// `{"notification_type":...}`, БЕЗ is_read (действие не зависит от
+    /// текущей вкладки прочитанности — уже прочитанные просто не меняются).
+    /// notification_type перехвачен буквально только как "all" и
+    /// "comments" — остальные категории (chapter/episode/message/card/
+    /// other) НЕ перехвачены отдельно для ИМЕННО этого эндпоинта, взяты по
+    /// аналогии с тем, что тот же параметр уже работает и в GET
+    /// /notifications, и в DELETE /notifications/bulk ниже (три разных
+    /// значения на двух bulk-эндпоинтах уже подтвердили, что поле
+    /// принимает полную таксономию, не только "all"). Ответ — silent toast
+    /// с человекочитаемым текстом ("Уведомления помечены прочитанными"),
+    /// тело не разбираем.
     func markAllNotificationsRead(notificationType: String) async throws {
         let payload = BulkNotificationTypePayload(notification_type: notificationType)
         let request = try makeJSONRequest(path: "/notifications/bulk", method: "PUT", body: payload)
@@ -1354,9 +1360,12 @@ final class MangaNetworkService {
     /// Удалить ВСЕ уведомления категории `notificationType`, дополнительно
     /// отфильтрованные по прочитанности — ПОДТВЕРЖДЕНО реальным перехватом:
     /// `DELETE /notifications/bulk`, тело `{"notification_type":...,
-    /// "is_read":...}`. `isRead` — ТА ЖЕ логика, что и текущая вкладка
-    /// readFilter: false у "Непрочитанные", true у "Прочитанные", nil у
-    /// "Все" (перехвачены оба варианта: false и null).
+    /// "is_read":...}`. notification_type перехвачен буквально как "all",
+    /// "card" и "chapter" на этом эндпоинте. `isRead` — ТА ЖЕ логика, что и
+    /// текущая вкладка readFilter: false у "Непрочитанные", true у
+    /// "Прочитанные", nil у "Все" — перехвачены ТОЛЬКО false и null
+    /// (несколько раз каждый), явный `is_read:true` (вкладка "Прочитанные")
+    /// ни разу не перехвачен — выведен по симметрии, не подтверждён.
     func deleteAllNotifications(notificationType: String, isRead: Bool?) async throws {
         let payload = BulkNotificationDeletePayload(notification_type: notificationType, is_read: isRead)
         let request = try makeJSONRequest(path: "/notifications/bulk", method: "DELETE", body: payload)

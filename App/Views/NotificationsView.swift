@@ -21,17 +21,20 @@ struct NotificationsView: View {
     @State private var lastScrollOffset: CGFloat = 0
     @State private var isHeaderAnimating = false
 
-    /// "Настройки" в "..." — эндпоинт настроек уведомлений нигде не
-    /// подтверждён перехватом, честная заглушка (тот же приём, что и у
-    /// остальных ещё не реализованных пунктов настроек — см.
-    /// AppSettingsView.settingsRow).
+    /// "Настройки" в "..." — честная заглушка. ЧТЕНИЕ подтверждено
+    /// перехватом (`GET /user/settings/notifications` → плоский набор
+    /// булевых тумблеров: manga/reading/plan_read/on_hold/completed/
+    /// favourites — похоже на "уведомлять о новых главах по папке
+    /// закладок", plus push_chapter/push_comments/push_episode/push_forum/
+    /// push_messages/notify_anime/disable_*_notif), но эндпоинт СОХРАНЕНИЯ
+    /// (PUT/POST) ни разу не перехвачен — экран с тумблерами без реальной
+    /// записи был бы хуже заглушки (см. CLAUDE.md — не полу-готовые
+    /// реализации), поэтому пока так и оставлено, до находки записи.
     @State private var showSettingsStub = false
     /// Подтверждение перед "Удалить все уведомления" — сам эндпоинт
-    /// удаления ВСЕХ уведомлений разом нигде не подтверждён перехватом,
-    /// поэтому реального запроса тут нет (см. deleteAllTapped) — но раз
-    /// кнопка красная/деструктивная, диалог подтверждения — на месте уже
-    /// сейчас, менять нужно будет только сам запрос внутри, когда эндпоинт
-    /// найдётся.
+    /// РЕАЛИЗОВАН (см. deleteAllTapped/NotificationsViewModel.
+    /// deleteAllInCurrentFilter) — диалог остаётся, т.к. действие
+    /// деструктивное и необратимое.
     @State private var showDeleteAllConfirm = false
 
     var body: some View {
