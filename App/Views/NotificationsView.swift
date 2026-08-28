@@ -134,7 +134,10 @@ struct NotificationsView: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 // Отступ текста ("Непрочитанные"/...) от шеврона уменьшен —
-                // было 4, по прямой просьбе.
+                // было 4, по прямой просьбе. Правый (внешний) паддинг тоже
+                // срезан — асимметрично, чтобы сократить именно видимое
+                // расстояние ДО "..." справа в этой же ToolbarItemGroup, не
+                // трогая левый край чипа.
                 HStack(spacing: 2) {
                     Text(viewModel.readFilter.title)
                         .font(.subheadline.weight(.medium))
@@ -142,7 +145,8 @@ struct NotificationsView: View {
                         .font(.caption2.weight(.semibold))
                 }
                 .foregroundStyle(Theme.textPrimary)
-                .padding(.horizontal, 14)
+                .padding(.leading, 14)
+                .padding(.trailing, 8)
                 .frame(height: Theme.pillControlHeight)
 
                 if let unread = viewModel.counts?.unread.all, unread > 0 {
