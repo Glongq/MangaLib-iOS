@@ -103,20 +103,24 @@ struct CollectionDetailView: View {
 
     // MARK: Заголовок — название+автор / дата / просмотры+тайтлы
 
-    /// Автор — по прямой просьбе теперь в самом верху справа (был отдельной
-    /// строкой ниже): ник сверху, подпись "Автор коллекции" под ним, аватар
-    /// у самого края.
+    /// Автор — по прямой просьбе САМАЯ верхняя строка страницы, справа
+    /// (в паре с "..." — та же высота-полоса, что и navbar с меню), сам по
+    /// себе, БЕЗ дублирования где-либо ещё: ник сверху, подпись "Автор
+    /// коллекции" под ним, аватар у самого края. Название — уже следующей
+    /// строкой, отдельно.
     private var titleHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top, spacing: 10) {
-                Text(vm.displayName)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let author = vm.detail?.user {
+            if let author = vm.detail?.user {
+                HStack {
+                    Spacer(minLength: 0)
                     authorChip(author)
                 }
             }
+
+            Text(vm.displayName)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 10) {
                 if let date = vm.detail?.createdAt {
@@ -216,6 +220,16 @@ struct CollectionDetailView: View {
                 favoriteChip
                 Spacer(minLength: 0)
                 voteChip
+            }
+
+            // Раньше сбой голоса/закладки (403/сеть/т.п.) тихо съедался
+            // try? — кнопка просто "не работала" без единого намёка почему.
+            // Теперь настоящий текст ошибки виден.
+            if let error = vm.actionError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.top, 6)

@@ -54,30 +54,45 @@ final class CollectionDetailViewModel: ObservableObject {
         isLoading = false
     }
 
+    /// Ошибка ИМЕННО от голоса/закладки (не от загрузки страницы) — раньше
+    /// try? тихо съедал любой сбой (403/404/сеть), кнопка просто "не
+    /// работала" без единого намёка почему. Теперь реальный текст ошибки
+    /// всплывает в actionsFooter.
+    @Published private(set) var actionError: String?
+
     func vote(up: Bool) {
         guard !isVoting else { return }
         isVoting = true
+        actionError = nil
         Task {
             defer { isVoting = false }
-            guard let v = try? await service.voteCollection(id: collectionId, direction: up ? 1 : 0) else { return }
-            votes = v
+            do {
+                votes = try await service.voteCollection(id: collectionId, direction: up ? 1 : 0)
+            } catch {
+                actionError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 
     func toggleFavorite() {
         guard !isTogglingFavorite else { return }
         isTogglingFavorite = true
+        actionError = nil
         Task {
             defer { isTogglingFavorite = false }
-            guard let result = try? await service.toggleFavorite(sourceId: collectionId, sourceType: "collection") else { return }
-            isSubscribed = result.isSubscribed
-            if let real = result.subscribersStat?.value {
-                favoritesCount = real
-            } else {
-                // Запасной вариант, если сервер вдруг не прислал meta.stats
-                // (в перехвате был всегда) — считаем на клиенте по
-                // направлению переключения, как и просили: +1/-1.
-                favoritesCount = max(0, (favoritesCount ?? 0) + (isSubscribed ? 1 : -1))
+            do {
+                let result = try await service.toggleFavorite(sourceId: collectionId, sourceType: "collection")
+                isSubscribed = result.isSubscribed
+                if let real = result.subscribersStat?.value {
+                    favoritesCount = real
+                } else {
+                    // Запасной вариант, если сервер вдруг не прислал meta.stats
+                    // (в перехвате был всегда) — считаем на клиенте по
+                    // направлению переключения, как и просили: +1/-1.
+                    favoritesCount = max(0, (favoritesCount ?? 0) + (isSubscribed ? 1 : -1))
+                }
+            } catch {
+                actionError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
     }
