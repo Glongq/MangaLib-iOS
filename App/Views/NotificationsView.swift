@@ -145,7 +145,8 @@ struct NotificationsView: View {
                 }
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.leading, 14)
-                .padding(.trailing, 8)
+                // Ещё чуть сократил (было 8) — по прямой повторной просьбе.
+                .padding(.trailing, 4)
                 .frame(height: Theme.pillControlHeight)
 
                 if let unread = viewModel.counts?.unread.all, unread > 0 {

@@ -118,6 +118,14 @@ struct BookmarksView: View {
                     // просьбе) — .tint() не красил её надёжно, поэтому
                     // явный .foregroundStyle на Image, тот же приём, что и
                     // у остальных иконок шапки в этом файле.
+                    // По прямой просьбе сократил расстояние между иконками —
+                    // ToolbarItemGroup не даёт прямого доступа к своему
+                    // межэлементному отступу (тот же вывод, что и у
+                    // readFilterChip/overflowMenu в NotificationsView),
+                    // поэтому вместо "spacing" сжимаю сам тап-фрейм каждой
+                    // иконки (было — дефолтный системный, обычно просторнее).
+                    // Не проверено вживую (нет сборки в этом окружении) —
+                    // если разница не заметна, скажи, поищу другой рычаг.
                     if !currentTitles.isEmpty {
                         Button {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -127,14 +135,17 @@ struct BookmarksView: View {
                         } label: {
                             Image(systemName: "checklist")
                                 .foregroundStyle(Theme.accent)
+                                .frame(width: 30, height: 30)
                         }
                     }
                     if !isSelecting {
                         Button { showFolderOrderSheet = true } label: {
                             Image(systemName: "pencil")
+                                .frame(width: 30, height: 30)
                         }
                         Button { showViewSortSheet = true } label: {
                             Image(systemName: "gearshape")
+                                .frame(width: 30, height: 30)
                         }
                     }
                 }
