@@ -85,7 +85,7 @@ struct AppSettingsView: View {
                     // аккаунта" ниже: он настоящий, реально разлогинивает.
                     settingsSection("Профиль") {
                         profileInfoRow
-                        settingsRow(icon: "bell", title: "Уведомления")
+                        notificationsSettingsRow
                         settingsRow(icon: "eye.slash", title: "Игнор-лист")
                         settingsRow(icon: "lock.shield", title: "Безопасность и вход")
                         settingsRow(icon: "slider.horizontal.3", title: "Фильтр контента")
@@ -231,6 +231,27 @@ struct AppSettingsView: View {
                 ProfileInfoEditView()
             } label: {
                 settingsRowLabel(icon: "info.circle", title: "Информация")
+            }
+            .buttonStyle(.plain)
+
+            Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14)
+        }
+    }
+
+    /// "Уведомления" — тот же реальный экран, что и в "..." вкладки
+    /// «Уведомления» (см. NotificationsView → NotificationSettingsView), по
+    /// прямой просьбе продублирован сюда, в Меню → Настройки → Профиль.
+    /// Там он открывается `.sheet` (щитом снизу) — здесь, внутри уже
+    /// открытого NavigationStack самого меню, обычным push через
+    /// NavigationLink, как и остальные реальные экраны на этой странице
+    /// (StorageSettingsView/PersonalizationSettingsView и т.д.), а не ещё
+    /// одним щитом поверх щита.
+    private var notificationsSettingsRow: some View {
+        VStack(spacing: 0) {
+            NavigationLink {
+                NotificationSettingsView()
+            } label: {
+                settingsRowLabel(icon: "bell", title: "Уведомления")
             }
             .buttonStyle(.plain)
 
