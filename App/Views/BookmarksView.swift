@@ -782,22 +782,26 @@ private struct FolderOrderSheet: View {
 
 /// Переименование/смена цвета кастомной папки — долгое нажатие на чип (см.
 /// folderContextMenu). ПОДТВЕРЖДЕНО перехватом `PUT /bookmarks/folder/{id}`
-/// (см. BookmarksStore.updateFolder) — сам эндпоинт требует ВСЕГДА полный
-/// объект, но notify/приватность здесь не редактируются (по прямой просьбе —
-/// пользователь пока не определился насчёт уведомлений папок), store сам
-/// подставляет уже известные значения при сохранении.
+/// (см. BookmarksStore.updateFolder) — тело ВСЕГДА полное, все 4 поля разом:
+/// название, цвет, "Публичная" (public) и "Уведомлять о новых главах"
+/// (notify) — по прямой просьбе, ровно то же самое, что предлагает реальный
+/// сайт в форме редактирования папки.
 private struct EditFolderSheet: View {
     @ObservedObject var store: BookmarksStore
     let folder: BookmarkFolder
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var color: Color
+    @State private var isPublic: Bool
+    @State private var notify: Bool
 
     init(store: BookmarksStore, folder: BookmarkFolder) {
         self.store = store
         self.folder = folder
         _name = State(initialValue: folder.name)
         _color = State(initialValue: Color(editFolderHex: folder.colorHex) ?? Theme.accent)
+        _isPublic = State(initialValue: folder.isPublic ?? true)
+        _notify = State(initialValue: folder.notify ?? false)
     }
 
     var body: some View {
@@ -822,6 +826,25 @@ private struct EditFolderSheet: View {
                     .padding(.horizontal, 16)
                     .frame(minHeight: 52)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    VStack(spacing: 0) {
+                        Toggle(isOn: $isPublic) {
+                            Text("Публичная").foregroundStyle(Theme.textPrimary)
+                        }
+                        .tint(Theme.accent)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 52)
+
+                        Divider().overlay(Theme.separator).padding(.leading, 16)
+
+                        Toggle(isOn: $notify) {
+                            Text("Уведомлять о новых главах").foregroundStyle(Theme.textPrimary)
+                        }
+                        .tint(Theme.accent)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 52)
+                    }
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .padding(16)
             }
@@ -834,7 +857,8 @@ private struct EditFolderSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Сохранить") {
-                        store.updateFolder(folder.id, name: name, colorHex: color.editFolderHexString)
+                        store.updateFolder(folder.id, name: name, colorHex: color.editFolderHexString,
+                                            notify: notify, isPublic: isPublic)
                         dismiss()
                     }
                     .fontWeight(.semibold)

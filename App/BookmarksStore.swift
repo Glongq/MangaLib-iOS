@@ -310,24 +310,24 @@ final class BookmarksStore: ObservableObject {
         return folder
     }
 
-    /// Переименовать/сменить цвет кастомной папки — ПОДТВЕРЖДЕНО перехватом:
-    /// `PUT /bookmarks/folder/{id}` (см. MangaNetworkService.
-    /// updateBookmarkFolder). Только для кастомных, уже подтверждённых
-    /// сервером папок (serverId != nil) — 5 стандартных на реальном сайте
-    /// вообще не переименовываются, там нет такого UI. Применяется локально
-    /// СРАЗУ (экран не ждёт сеть), пуш — в фоне; notify/isPublic шлём КАК
-    /// ЕСТЬ (см. поля выше) — PUT требует объект целиком, менять их тут
-    /// не просят.
-    func updateFolder(_ folderId: String, name: String, colorHex: String) {
+    /// Переименовать/сменить цвет/приватность/уведомления кастомной папки —
+    /// ПОДТВЕРЖДЕНО перехватом: `PUT /bookmarks/folder/{id}` (см.
+    /// MangaNetworkService.updateBookmarkFolder), тело ВСЕГДА полное — эти 4
+    /// поля шлём разом, частичного патча на сервере нет. Только для
+    /// кастомных, уже подтверждённых сервером папок (serverId != nil) — 5
+    /// стандартных на реальном сайте вообще не переименовываются, там нет
+    /// такого UI. Применяется локально СРАЗУ (экран не ждёт сеть), пуш — в
+    /// фоне.
+    func updateFolder(_ folderId: String, name: String, colorHex: String, notify: Bool, isPublic: Bool) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let idx = folders.firstIndex(where: { $0.id == folderId }),
               let serverId = folders[idx].serverId else { return }
         folders[idx].name = trimmed
         folders[idx].colorHex = colorHex
+        folders[idx].notify = notify
+        folders[idx].isPublic = isPublic
         persistFolders()
 
-        let notify = folders[idx].notify ?? false
-        let isPublic = folders[idx].isPublic ?? false
         Task {
             do {
                 try await MangaNetworkService.shared.updateBookmarkFolder(
