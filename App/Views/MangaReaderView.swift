@@ -441,7 +441,7 @@ struct MangaReaderView: View {
                 LazyVStack(spacing: CGFloat(verticalGap)) {
                     ForEach(viewModel.segments) { seg in
                         ForEach(Array(seg.pages.enumerated()), id: \.offset) { pageIndex, page in
-                            VerticalPageImage(candidates: viewModel.imageURLs(for: page))
+                            VerticalPageImage(candidates: viewModel.imageURLs(for: page), width: page.width, height: page.height)
                                 .background(
                                     GeometryReader { pageGeo in
                                         Color.clear.preference(
@@ -1688,7 +1688,28 @@ final class LayoutCallbackScrollView: UIScrollView {
 /// плейсхолдер фиксированной высоты со спиннером.
 struct VerticalPageImage: View {
     let candidates: [URL]
+    /// Реальные пиксельные размеры страницы с сервера (см. PageItem.width/
+    /// height, приходят в ответе главы ДО загрузки самой картинки) —
+    /// используются, чтобы placeholder СРАЗУ был нужных пропорций: высота
+    /// вебтун-страницы бывает в 10+ раз больше ширины, и с фиксированным
+    /// placeholder (было 480pt всегда) контент заметно "прыгал" при
+    /// подгрузке реальной картинки, особенно при быстрой прокрутке через
+    /// несколько ещё не загруженных страниц разом. nil/некорректные —
+    /// прежний фиксированный placeholder (сервер их не прислал).
+    let width: Int?
+    let height: Int?
     @State private var image: UIImage?
+
+    /// Высота placeholder'а под реальную ширину экрана — та же логика
+    /// "по факту загрузки" (scaledToFit + maxWidth: .infinity) даёт финальную
+    /// картинку, просто заранее просчитанная. Не учитывает vScale (зум) —
+    /// он временное состояние жеста, не стоит того, чтобы тащить сюда лишний
+    /// параметр ради долей секунды, что кто-то одновременно и зумит, и
+    /// именно эта картинка ещё грузится.
+    private var placeholderHeight: CGFloat {
+        guard let width, let height, width > 0, height > 0 else { return 480 }
+        return UIScreen.main.bounds.width * CGFloat(height) / CGFloat(width)
+    }
 
     var body: some View {
         Group {
@@ -1700,7 +1721,8 @@ struct VerticalPageImage: View {
             } else {
                 Rectangle()
                     .fill(Color.clear)
-                    .frame(height: 480)
+                    .frame(height: placeholderHeight)
+                    .frame(maxWidth: .infinity)
                     .overlay { ProgressView().tint(.white) }
             }
         }
