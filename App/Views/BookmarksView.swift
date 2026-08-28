@@ -40,6 +40,18 @@ struct BookmarksView: View {
     /// сайт при удалении непустой папки.
     @State private var deletingFolder: BookmarkFolder?
 
+    /// Мультивыбор тайтлов ("Выбрать" в шапке) — ПОДТВЕРЖДЕНО перехватом:
+    /// `PUT/DELETE /bookmarks/bulk` (см. BookmarksStore.bulkMove/bulkDelete).
+    /// Выбор — ТОЛЬКО в пределах текущей открытой папки (selectedFolderId) —
+    /// по прямой просьбе, повторяет замеченное поведение реального сайта
+    /// (переключение папки сбрасывает выбор — см. .onChange(of:
+    /// selectedFolderId) ниже).
+    @State private var isSelecting = false
+    @State private var selectedSlugs: Set<String> = []
+    @State private var showBulkMoveSheet = false
+    @State private var showBulkDeleteConfirm = false
+    @State private var isBulkProcessing = false
+
     /// Список/плитка — см. ViewSortSheet. Сохраняется между запусками.
     @AppStorage("bookmarks_view_mode") private var viewMode: BookmarksViewMode = .list
     /// Поле сортировки — см. ViewSortSheet.
@@ -91,16 +103,33 @@ struct BookmarksView: View {
             // скриншоте).
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { showViewSortSheet = true } label: {
-                        Image(systemName: "gearshape")
+                    // "Выбрать" — вкл/выкл мультивыбор (см. isSelecting) —
+                    // не показываем, пока список пуст, нет смысла.
+                    if !currentTitles.isEmpty {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                isSelecting.toggle()
+                                selectedSlugs.removeAll()
+                            }
+                        } label: {
+                            Text(isSelecting ? "Готово" : "Выбрать")
+                        }
                     }
-                    Button { showFolderOrderSheet = true } label: {
-                        Image(systemName: "pencil")
+                    if !isSelecting {
+                        Button { showViewSortSheet = true } label: {
+                            Image(systemName: "gearshape")
+                        }
+                        Button { showFolderOrderSheet = true } label: {
+                            Image(systemName: "pencil")
+                        }
                     }
                 }
             }
             .onAppear { applyPendingFolder() }
             .onChange(of: catalogNav.openBookmarksRequest) { _, _ in applyPendingFolder() }
+            // Смена открытой папки сбрасывает выбор — повторяет замеченное
+            // поведение реального сайта (см. isSelecting выше).
+            .onChange(of: selectedFolderId) { _, _ in selectedSlugs.removeAll() }
             .navigationDestination(for: BookmarkedTitle.self) { bm in
                 MangaDetailView(slug: bm.slug, fallbackTitle: bm.title,
                                 coverURL: bm.coverURL.flatMap(URL.init(string:)))
@@ -148,6 +177,21 @@ struct BookmarksView: View {
                 }
                 .preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
             }
+            // "Переместить" на панели мультивыбора (см. selectionBar) —
+            // выбор папки назначения, тот же PUT /bookmarks/bulk (см.
+            // BookmarksStore.bulkMove).
+            .sheet(isPresented: $showBulkMoveSheet) {
+                BulkMoveFolderSheet(store: store, excludingFolderId: selectedFolderId) { targetId in
+                    bulkMove(to: targetId)
+                }
+                .preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
+            }
+            .alert("Удалить \(selectedSlugs.count) \(pluralizedTitlesWord(selectedSlugs.count)) из закладок?", isPresented: $showBulkDeleteConfirm) {
+                Button("Отмена", role: .cancel) {}
+                Button("Удалить", role: .destructive) { bulkDelete() }
+            } message: {
+                Text("Действие необратимо.")
+            }
             // Полоска подкатегорий — снизу, над главной панелью. ВНУТРИ
             // NavigationStack (на корневом контенте), а не снаружи него: раньше
             // висела снаружи, чтобы обойти баг совместного расчёта с ВНЕШНИМ
@@ -158,10 +202,17 @@ struct BookmarksView: View {
             // не частью его корневого экрана — отсюда баг "подкатегории не
             // пропадают на карточке тайтла".
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                categoryMenu
-                    // 20 — та же ширина/выравнивание, что и у главной панели.
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
+                Group {
+                    if isSelecting {
+                        selectionBar
+                    } else {
+                        categoryMenu
+                    }
+                }
+                // 20 — та же ширина/выравнивание, что и у главной панели.
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+                .transition(.blurFade)
             }
         }
         .tint(Theme.accent)
@@ -275,6 +326,129 @@ struct BookmarksView: View {
         }
     }
 
+    // MARK: Мультивыбор ("Выбрать" в шапке)
+
+    /// Панель мультивыбора — заменяет собой categoryMenu на время выбора
+    /// (см. safeAreaInset выше). "N выбрано" + "Все"/"Снять" + Переместить/
+    /// Удалить, ПОДТВЕРЖДЕНО перехватом (PUT/DELETE /bookmarks/bulk, см.
+    /// BookmarksStore.bulkMove/bulkDelete).
+    private var selectionBar: some View {
+        HStack(spacing: 10) {
+            Button(selectedSlugs.count == currentTitles.count ? "Снять" : "Все") {
+                if selectedSlugs.count == currentTitles.count {
+                    selectedSlugs.removeAll()
+                } else {
+                    selectedSlugs = Set(currentTitles.map { $0.slug })
+                }
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Theme.accent)
+
+            Text("\(selectedSlugs.count) выбрано")
+                .font(.subheadline)
+                .foregroundStyle(Theme.textSecondary)
+
+            Spacer(minLength: 0)
+
+            if isBulkProcessing {
+                ProgressView().tint(Theme.accent)
+            } else {
+                Button {
+                    showBulkMoveSheet = true
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .disabled(selectedSlugs.isEmpty)
+
+                Button(role: .destructive) {
+                    showBulkDeleteConfirm = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .disabled(selectedSlugs.isEmpty)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: Theme.pillControlHeight + 12)
+        .background(Theme.surfaceElevated, in: Capsule())
+    }
+
+    private func bulkMove(to folderId: String) {
+        let slugs = Array(selectedSlugs)
+        isBulkProcessing = true
+        Task {
+            do {
+                try await store.bulkMove(slugs: slugs, toFolder: folderId)
+                selectedSlugs.removeAll()
+                isSelecting = false
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                DownloadsManager.shared.showBanner(message)
+            }
+            isBulkProcessing = false
+        }
+    }
+
+    private func bulkDelete() {
+        let slugs = Array(selectedSlugs)
+        isBulkProcessing = true
+        Task {
+            do {
+                try await store.bulkDelete(slugs: slugs)
+                selectedSlugs.removeAll()
+                isSelecting = false
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                DownloadsManager.shared.showBanner(message)
+            }
+            isBulkProcessing = false
+        }
+    }
+
+    /// Общая "плашка тапа" на строку/карточку тайтла — в обычном режиме
+    /// открывает карточку (NavigationLink) + долгое нажатие меняет папку
+    /// (bookmarkContextMenu), в режиме мультивыбора тап переключает выбор,
+    /// вместо навигации, с кружком-чекбоксом поверх обложки.
+    @ViewBuilder
+    private func bookmarkTapTarget<Content: View>(_ bm: BookmarkedTitle, @ViewBuilder content: () -> Content) -> some View {
+        let selected = selectedSlugs.contains(bm.slug)
+        let base = content().overlay(alignment: .topLeading) {
+            if isSelecting {
+                // ЗАМЕТКА: не .symbolRenderingMode(.palette) с двумя цветами
+                // — у "circle" всего один слой, вторая цветовая палитра для
+                // него молча игнорируется (проверено), кружок в невыбранном
+                // состоянии рисовался бы background-цветом, а не серым
+                // полупрозрачным. Поэтому явные Circle-фигуры, а не SF Symbol.
+                ZStack {
+                    Circle()
+                        .fill(selected ? Theme.accent : Color.black.opacity(0.35))
+                    if !selected {
+                        Circle().stroke(Color.white.opacity(0.8), lineWidth: 1.5)
+                    }
+                    if selected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Theme.background)
+                    }
+                }
+                .frame(width: 22, height: 22)
+                .padding(6)
+            }
+        }
+        if isSelecting {
+            Button {
+                if selected { selectedSlugs.remove(bm.slug) } else { selectedSlugs.insert(bm.slug) }
+            } label: {
+                base
+            }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink(value: bm) { base }
+                .buttonStyle(.plain)
+                .contextMenu { bookmarkContextMenu(bm) }
+        }
+    }
+
     private func categoryChip(title: String, id: String?) -> some View {
         let active = selectedFolderId == id
         return Button {
@@ -378,9 +552,7 @@ struct BookmarksView: View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 ForEach(currentTitles) { bm in
-                    NavigationLink(value: bm) { row(bm) }
-                        .buttonStyle(.plain)
-                        .contextMenu { bookmarkContextMenu(bm) }
+                    bookmarkTapTarget(bm) { row(bm) }
                 }
             }
             .padding(.horizontal, 12)
@@ -430,12 +602,10 @@ struct BookmarksView: View {
                         }
                         HStack(alignment: .top, spacing: Self.gridSpacing) {
                             ForEach(rowItems) { bm in
-                                NavigationLink(value: bm) {
+                                bookmarkTapTarget(bm) {
                                     bookmarkGridCell(bm, width: cardWidth,
                                                       twoLineTitle: twoLineTitle, twoLineProgress: twoLineProgress)
                                 }
-                                .buttonStyle(.plain)
-                                .contextMenu { bookmarkContextMenu(bm) }
                             }
                         }
                     }
@@ -1004,6 +1174,76 @@ private struct DeleteFolderSheet: View {
         if (2...4).contains(mod10) && !(12...14).contains(mod100) { return "тайтла" }
         return "тайтлов"
     }
+}
+
+/// Выбор папки назначения для группового перемещения (см. BookmarksView.
+/// selectionBar/bulkMove) — ПОДТВЕРЖДЕНО перехватом `PUT /bookmarks/bulk`.
+/// Простой список, без отложенного "Применить" (в отличие от
+/// AddToFolderSheet) — тап сразу вызывает onSelect и закрывает лист, т.к.
+/// это одноразовое действие над уже явно выбранной группой тайтлов.
+private struct BulkMoveFolderSheet: View {
+    @ObservedObject var store: BookmarksStore
+    /// Папка, из которой сейчас перемещают (если открыта конкретная, не
+    /// «Все») — исключаем её саму из списка целей, перенос "туда же" не нужен.
+    let excludingFolderId: String?
+    var onSelect: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var targets: [BookmarkFolder] {
+        store.allFolders.filter { $0.id != excludingFolderId }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(targets) { folder in
+                        Button {
+                            onSelect(folder.id)
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Text(folder.name)
+                                    .foregroundStyle(Theme.textPrimary)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 48)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(16)
+            }
+            .background(Theme.background)
+            .navigationTitle("Переместить в")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+        }
+        .tint(Theme.accent)
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+/// "тайтл"/"тайтла"/"тайтлов" — та же ru-плюрализация, что и у
+/// DeleteFolderSheet.titlesWord выше (своя копия — BookmarksView нужна для
+/// алерта группового удаления, см. selectionBar).
+private func pluralizedTitlesWord(_ n: Int) -> String {
+    let mod10 = n % 10, mod100 = n % 100
+    if mod10 == 1 && mod100 != 11 { return "тайтл" }
+    if (2...4).contains(mod10) && !(12...14).contains(mod100) { return "тайтла" }
+    return "тайтлов"
 }
 
 /// Свой парсер hex-цвета (тот же приём, что и в BookmarksStore/

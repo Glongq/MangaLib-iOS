@@ -148,6 +148,14 @@ struct BookmarkedTitle: Codable, Identifiable, Hashable {
     /// только чтобы не затереть его при сохранении rewatchHistory (сервер
     /// требует meta целиком, не частичный патч).
     var comment: String? = nil
+    /// Числовой id САМОГО ТАЙТЛА (`MangaItem.id`/`media.id`) — НЕ id записи
+    /// закладки (см. serverId выше) и не slug. ПОДТВЕРЖДЕНО перехватом:
+    /// нужен именно он для группового перемещения/удаления — `PUT/DELETE
+    /// /bookmarks/bulk` принимают `media_ids`, не id закладок (см.
+    /// BookmarksStore.bulkMove/bulkDelete, MangaNetworkService.
+    /// bulkMoveBookmarks/bulkDeleteBookmarks). Optional — заполняется из
+    /// entry.media.id при syncFromServer, до первого синка неизвестен.
+    var mediaId: Int? = nil
 
     var id: String { slug }
 }
@@ -564,6 +572,59 @@ final class BookmarksStore: ObservableObject {
         }
     }
 
+    // MARK: Групповые действия (мультивыбор)
+
+    enum BulkActionError: LocalizedError {
+        case unresolvedFolder
+        case noMediaIds
+
+        var errorDescription: String? {
+            switch self {
+            case .unresolvedFolder: return "Не удалось определить папку назначения."
+            case .noMediaIds: return "Для выбранных тайтлов ещё не известен их id — потяните экран вниз, чтобы обновить, и попробуйте снова."
+            }
+        }
+    }
+
+    /// Массово переместить выбранные тайтлы в другую папку — ПОДТВЕРЖДЕНО
+    /// перехватом: `PUT /bookmarks/bulk` (см. MangaNetworkService.
+    /// bulkMoveBookmarks). `async throws`, не fire-and-forget как большинство
+    /// остальных действий в этом файле — это МАССОВАЯ операция, экран должен
+    /// дождаться реального ответа сервера и показать ошибку, если что-то не
+    /// удалось, а не молча закрыться. Локально применяется ТОЛЬКО после
+    /// успешного ответа.
+    func bulkMove(slugs: [String], toFolder folderId: String) async throws {
+        guard let target = folders.first(where: { $0.id == folderId }),
+              let status = target.apiId ?? target.serverId else {
+            throw BulkActionError.unresolvedFolder
+        }
+        let mediaIds = slugs.compactMap { slug in items.first(where: { $0.slug == slug })?.mediaId }
+        guard !mediaIds.isEmpty else { throw BulkActionError.noMediaIds }
+
+        try await MangaNetworkService.shared.bulkMoveBookmarks(mediaIds: mediaIds, status: status)
+
+        for slug in slugs {
+            if let idx = items.firstIndex(where: { $0.slug == slug }) {
+                items[idx].folderId = folderId
+            }
+        }
+        persistItems()
+    }
+
+    /// Массово убрать выбранные тайтлы из закладок — ПОДТВЕРЖДЕНО
+    /// перехватом: `DELETE /bookmarks/bulk` (см. MangaNetworkService.
+    /// bulkDeleteBookmarks). Та же логика "ждём сеть", что и у bulkMove
+    /// выше.
+    func bulkDelete(slugs: [String]) async throws {
+        let mediaIds = slugs.compactMap { slug in items.first(where: { $0.slug == slug })?.mediaId }
+        guard !mediaIds.isEmpty else { throw BulkActionError.noMediaIds }
+
+        try await MangaNetworkService.shared.bulkDeleteBookmarks(mediaIds: mediaIds)
+
+        items.removeAll { slugs.contains($0.slug) }
+        persistItems()
+    }
+
     func remove(slug: String) {
         // Запоминаем serverId ДО удаления из items — он нужен для реального
         // запроса на сервер (см. ниже).
@@ -713,6 +774,7 @@ final class BookmarksStore: ObservableObject {
                 items[idx].myRating = entry.myScore
                 items[idx].rewatchHistory = entry.meta?.rewatchHistory ?? []
                 items[idx].comment = entry.meta?.comment
+                items[idx].mediaId = entry.media.id
             } else {
                 items.append(BookmarkedTitle(slug: slug, title: entry.media.displayTitle,
                                               coverURL: entry.media.coverURLString,
@@ -720,7 +782,8 @@ final class BookmarksStore: ObservableObject {
                                               rating: entry.media.rating?.value,
                                               myRating: entry.myScore,
                                               rewatchHistory: entry.meta?.rewatchHistory ?? [],
-                                              comment: entry.meta?.comment))
+                                              comment: entry.meta?.comment,
+                                              mediaId: entry.media.id))
             }
         }
         persistItems()

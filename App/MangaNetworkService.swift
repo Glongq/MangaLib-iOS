@@ -776,6 +776,37 @@ final class MangaNetworkService {
         let order: [Int]
     }
 
+    /// Массово переместить тайтлы в другую папку — ПОДТВЕРЖДЕНО перехватом:
+    /// `PUT /bookmarks/bulk`, тело `{"media_type","media_ids","status"}`.
+    /// ВАЖНО: `mediaIds` — числовые id САМИХ ТАЙТЛОВ (`media.id`), НЕ id
+    /// записей закладки (в отличие от одиночного removeBookmark(id:) выше,
+    /// где нужен именно id записи) — см. BookmarkedTitle.mediaId.
+    func bulkMoveBookmarks(mediaIds: [Int], status: Int) async throws {
+        let payload = BulkBookmarkMovePayload(media_type: "manga", media_ids: mediaIds, status: status)
+        let request = try makeJSONRequest(path: "/bookmarks/bulk", method: "PUT", body: payload)
+        try await performVoid(request)
+    }
+
+    private struct BulkBookmarkMovePayload: Encodable {
+        let media_type: String
+        let media_ids: [Int]
+        let status: Int
+    }
+
+    /// Массово убрать тайтлы из закладок — ПОДТВЕРЖДЕНО перехватом: `DELETE
+    /// /bookmarks/bulk`, тело `{"media_ids","media_type"}` — те же
+    /// media_ids (id тайтлов), что и у bulkMoveBookmarks выше.
+    func bulkDeleteBookmarks(mediaIds: [Int]) async throws {
+        let payload = BulkBookmarkDeletePayload(media_ids: mediaIds, media_type: "manga")
+        let request = try makeJSONRequest(path: "/bookmarks/bulk", method: "DELETE", body: payload)
+        try await performVoid(request)
+    }
+
+    private struct BulkBookmarkDeletePayload: Encodable {
+        let media_ids: [Int]
+        let media_type: String
+    }
+
     /// Отмечает главу просмотренной в РЕАЛЬНОМ аккаунте — настоящий,
     /// подтверждённый эндпоинт (перехвачен из Network сайта, ответ содержит
     /// `"message": "Глава помечена просмотренной"`). Это и есть настоящий
