@@ -116,8 +116,11 @@ struct CollectionDetailView: View {
 
     private var titleHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // Тот же размер, что и родные крупные заголовки вкладок
+            // (Закладки/Уведомления/Читают — везде .navigationBarTitleDisplayMode(.large),
+            // системный .largeTitle) — по прямой просьбе, было мельче (.title2).
             Text(vm.displayName)
-                .font(.title2.weight(.bold))
+                .font(.largeTitle.weight(.bold))
                 .foregroundStyle(Theme.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
