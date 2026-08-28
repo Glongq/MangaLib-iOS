@@ -635,6 +635,54 @@ final class MangaNetworkService {
         return try? decoder.decode(APIObjectResponse<BookmarkRecordID>.self, from: data).data.id
     }
 
+    /// Сохранить историю перечитываний ("Прочитано N раз") + комментарий
+    /// закладки — ПОДТВЕРЖДЕНО перехватом: тот же `POST /bookmarks`, что и
+    /// смена папки (см. setBookmarkStatus выше), но с непустым meta. Сервер
+    /// требует meta ЦЕЛИКОМ вместе с bookmark.status — comment шлём КАК
+    /// ЕСТЬ (round-trip из последнего известного значения, см.
+    /// BookmarkedTitle.comment — в UI не редактируется), чтобы не затереть
+    /// то, что могло быть выставлено на сайте. `nil` comment → `false`,
+    /// ровно то, что реально приходит с сервера для пустого комментария
+    /// (см. BookmarkMeta) — уверенности, что именно `false`, а не омиссия
+    /// ключа, подходит и на запись, НЕТ (перехвачен только непустой
+    /// comment на запись) — сделан наиболее вероятный выбор по аналогии
+    /// с чтением.
+    func updateBookmarkMeta(slug: String, status: Int, comment: String?, rewatchHistory: [RewatchPeriod]) async throws {
+        let payload = BookmarkMetaPayload(
+            media_type: "manga", media_slug: slug,
+            bookmark: .init(status: status),
+            meta: .init(comment: comment, rewatches_history: rewatchHistory)
+        )
+        let request = try makeJSONRequest(path: "/bookmarks", method: "POST", body: payload)
+        try await performVoid(request)
+    }
+
+    private struct BookmarkMetaPayload: Encodable {
+        let media_type: String
+        let media_slug: String
+        let bookmark: Bookmark
+        let meta: Meta
+
+        struct Bookmark: Encodable { let status: Int }
+
+        struct Meta: Encodable {
+            let comment: String?
+            let rewatches_history: [RewatchPeriod]
+
+            private enum CodingKeys: String, CodingKey { case comment, rewatches_history }
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                if let comment {
+                    try container.encode(comment, forKey: .comment)
+                } else {
+                    try container.encode(false, forKey: .comment)
+                }
+                try container.encode(rewatches_history, forKey: .rewatches_history)
+            }
+        }
+    }
+
     /// Убрать тайтл из закладок аккаунта — `DELETE /bookmarks/{id}`, где id —
     /// ЧИСЛОВОЙ id самой записи закладки (см. setBookmarkStatus выше), а НЕ
     /// slug тайтла. ВАЖНО: путь с id подтверждён перехватом, но тело — НЕТ,

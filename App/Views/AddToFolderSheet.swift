@@ -41,6 +41,28 @@ struct AddToFolderSheet: View {
                         }
 
                         if store.isBookmarked(slug: slug) {
+                            // "Прочитано N раз" — ПОДТВЕРЖДЕНО перехватом
+                            // (meta.rewatches_history, см. RewatchHistorySheet/
+                            // BookmarksStore.startRewatch). NavigationLink, не
+                            // .sheet — этот лист уже сам в NavigationStack.
+                            NavigationLink {
+                                RewatchHistorySheet(slug: slug, title: title)
+                            } label: {
+                                HStack {
+                                    Image(systemName: "arrow.clockwise")
+                                        .foregroundStyle(Theme.textSecondary)
+                                    Text("Прочитано \(store.rewatchCount(forSlug: slug)) раз")
+                                        .foregroundStyle(Theme.textPrimary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(Theme.textSecondary.opacity(0.6))
+                                }
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 48)
+                            }
+                            .padding(.top, 8)
+
                             Button(role: .destructive) {
                                 store.remove(slug: slug)
                                 dismiss()
@@ -148,6 +170,95 @@ struct AddToFolderSheet: View {
             }
         }
     }
+}
+
+/// "Прочитано N раз" — история перечитываний тайтла (см.
+/// AddToFolderSheet — строка-вход выше). ПОДТВЕРЖДЕНО перехватом:
+/// `meta.rewatches_history` в теле `POST /bookmarks` (тот же запрос, что и
+/// смена папки) — массив периодов `{start,end}`, `end == nil` — период ещё
+/// не закрыт ("сейчас перечитывает"). См. BookmarksStore.startRewatch/
+/// finishRewatch/deleteRewatchPeriod.
+struct RewatchHistorySheet: View {
+    let slug: String
+    let title: String
+
+    @ObservedObject private var store = BookmarksStore.shared
+
+    private var history: [RewatchPeriod] {
+        store.items.first { $0.slug == slug }?.rewatchHistory ?? []
+    }
+    private var hasOpenPeriod: Bool { history.contains { $0.end == nil } }
+
+    var body: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
+            if history.isEmpty {
+                ContentUnavailableView(
+                    "Пока не отмечено",
+                    systemImage: "arrow.clockwise",
+                    description: Text("«\(title)» ещё не перечитывался.")
+                )
+            } else {
+                List {
+                    ForEach(history) { period in
+                        periodRow(period)
+                            .listRowBackground(Theme.surface)
+                    }
+                    .onDelete { offsets in store.deleteRewatchPeriod(forSlug: slug, at: offsets) }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+        }
+        .navigationTitle("Прочитано \(history.count) раз")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if hasOpenPeriod {
+                    Button("Завершить") { store.finishRewatch(forSlug: slug) }
+                } else {
+                    Button("Начать ещё раз") { store.startRewatch(forSlug: slug) }
+                }
+            }
+        }
+    }
+
+    private func periodRow(_ period: RewatchPeriod) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: period.end == nil ? "book.fill" : "checkmark.circle")
+                .foregroundStyle(period.end == nil ? Theme.accent : Theme.textSecondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(formatted(period.start))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(period.end.map { "по \(formatted($0))" } ?? "сейчас читает")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+    }
+
+    /// Даты приходят/уходят как "yyyy-MM-dd" (см. RewatchPeriod) — показываем
+    /// более читаемо (напр. "28 авг 2026"), с фолбэком на сырую строку, если
+    /// формат вдруг не совпал.
+    private func formatted(_ raw: String) -> String {
+        guard let date = Self.isoFormatter.date(from: raw) else { return raw }
+        return Self.displayFormatter.string(from: date)
+    }
+
+    private static let isoFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
+    private static let displayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d MMM yyyy"
+        formatter.locale = Locale(identifier: "ru_RU")
+        return formatter
+    }()
 }
 
 #Preview {

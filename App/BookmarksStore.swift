@@ -136,6 +136,18 @@ struct BookmarkedTitle: Codable, Identifiable, Hashable {
     /// этого поля) декодируются нормально, просто без даты (сортировка
     /// такие записи считает "самыми старыми", см. BookmarksView.sortByDate).
     var addedAt: Date? = nil
+    /// "Прочитано N раз" — ПОДТВЕРЖДЕНО перехватом: meta.rewatches_history в
+    /// теле `POST /bookmarks` (тот же запрос, что и смена папки — см.
+    /// BookmarksStore.startRewatch/finishRewatch/deleteRewatchPeriod,
+    /// MangaNetworkService.updateBookmarkMeta). nil — ещё не знаем (старые
+    /// локальные записи без этого поля, или пока не пришёл первый
+    /// syncFromServer) — трактуется как "пусто", не как ошибка.
+    var rewatchHistory: [RewatchPeriod]? = nil
+    /// Личный комментарий к закладке — ПОДТВЕРЖДЕНО перехватом (meta.comment,
+    /// тот же объект, что и rewatchHistory). В UI НЕ редактируется — хранится
+    /// только чтобы не затереть его при сохранении rewatchHistory (сервер
+    /// требует meta целиком, не частичный патч).
+    var comment: String? = nil
 
     var id: String { slug }
 }
@@ -478,6 +490,80 @@ final class BookmarksStore: ObservableObject {
         persistItems()
     }
 
+    // MARK: "Прочитано N раз" (перечитывания)
+
+    /// Сколько раз тайтл был (пере)прочитан — см. BookmarkedTitle.
+    /// rewatchHistory. Включает текущий незакрытый период, если есть —
+    /// ровно как считает сам сервер (rewatches = count(rewatches_history)).
+    func rewatchCount(forSlug slug: String) -> Int {
+        items.first { $0.slug == slug }?.rewatchHistory?.count ?? 0
+    }
+
+    /// Начать новый период перечитывания — добавляет открытый период
+    /// (start = сегодня, end = nil) в конец истории. No-op, если уже есть
+    /// незакрытый период (сперва нужно его завершить — см. finishRewatch).
+    func startRewatch(forSlug slug: String) {
+        guard let idx = items.firstIndex(where: { $0.slug == slug }) else { return }
+        var history = items[idx].rewatchHistory ?? []
+        guard !history.contains(where: { $0.end == nil }) else { return }
+        history.append(RewatchPeriod(start: Self.rewatchDateFormatter.string(from: Date()), end: nil))
+        items[idx].rewatchHistory = history
+        persistItems()
+        pushMeta(forSlug: slug)
+    }
+
+    /// Закрыть текущий открытый период — end = сегодня. No-op, если
+    /// открытого периода нет.
+    func finishRewatch(forSlug slug: String) {
+        guard let idx = items.firstIndex(where: { $0.slug == slug }),
+              var history = items[idx].rewatchHistory,
+              let openIdx = history.firstIndex(where: { $0.end == nil }) else { return }
+        history[openIdx].end = Self.rewatchDateFormatter.string(from: Date())
+        items[idx].rewatchHistory = history
+        persistItems()
+        pushMeta(forSlug: slug)
+    }
+
+    /// Удалить период (например, добавленный по ошибке) — свайп в
+    /// RewatchHistorySheet.
+    func deleteRewatchPeriod(forSlug slug: String, at offsets: IndexSet) {
+        guard let idx = items.firstIndex(where: { $0.slug == slug }), var history = items[idx].rewatchHistory else { return }
+        history.remove(atOffsets: offsets)
+        items[idx].rewatchHistory = history
+        persistItems()
+        pushMeta(forSlug: slug)
+    }
+
+    private static let rewatchDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
+    /// Пушит meta (comment+rewatchHistory) текущего состояния тайтла на
+    /// сервер — общий хвост для start/finish/deleteRewatchPeriod выше.
+    /// ПОДТВЕРЖДЕНО перехватом: тот же `POST /bookmarks`, что и смена
+    /// папки — нужен ИЗВЕСТНЫЙ числовой status папки (apiId/serverId), без
+    /// него молча не пушит: локальное состояние уже применено, а следующий
+    /// syncFromServer всё равно перезапишет его реальным.
+    private func pushMeta(forSlug slug: String) {
+        guard let item = items.first(where: { $0.slug == slug }),
+              let folder = folders.first(where: { $0.id == item.folderId }),
+              let status = folder.apiId ?? folder.serverId else { return }
+        let comment = item.comment
+        let history = item.rewatchHistory ?? []
+        Task {
+            do {
+                try await MangaNetworkService.shared.updateBookmarkMeta(
+                    slug: slug, status: status, comment: comment, rewatchHistory: history)
+            } catch {
+                print("[BookmarksStore] не удалось сохранить историю перечитываний (\(slug)) на сервере: \(error)")
+            }
+        }
+    }
+
     func remove(slug: String) {
         // Запоминаем serverId ДО удаления из items — он нужен для реального
         // запроса на сервер (см. ниже).
@@ -625,12 +711,16 @@ final class BookmarksStore: ObservableObject {
                 items[idx].serverId = entry.id
                 items[idx].rating = entry.media.rating?.value
                 items[idx].myRating = entry.myScore
+                items[idx].rewatchHistory = entry.meta?.rewatchHistory ?? []
+                items[idx].comment = entry.meta?.comment
             } else {
                 items.append(BookmarkedTitle(slug: slug, title: entry.media.displayTitle,
                                               coverURL: entry.media.coverURLString,
                                               folderId: folder.id, serverId: entry.id,
                                               rating: entry.media.rating?.value,
-                                              myRating: entry.myScore))
+                                              myRating: entry.myScore,
+                                              rewatchHistory: entry.meta?.rewatchHistory ?? [],
+                                              comment: entry.meta?.comment))
             }
         }
         persistItems()

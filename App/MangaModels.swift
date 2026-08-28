@@ -1080,6 +1080,49 @@ struct BookmarkListEntry: Decodable {
         guard let rating, rating > 0 else { return nil }
         return rating
     }
+
+    /// "Прочитано/перечитано N раз" + личный комментарий к закладке —
+    /// ПОДТВЕРЖДЕНО перехватом `POST /bookmarks` (то же тело, что и смена
+    /// папки — meta шлётся ВМЕСТЕ со status, целиком). Optional — старые
+    /// перехваченные ответы этот ключ вообще не содержали, если история
+    /// пуста (см. BookmarkMeta).
+    let meta: BookmarkMeta?
+}
+
+/// meta-объект закладки — ПОДТВЕРЖДЕНО перехватом двумя формами:
+/// `{"comment":false,"rewatches":null,"item_number":null}` (пусто) и
+/// `{"item_number":119,"rewatches":3,"rewatches_history":[{"start":
+/// "2026-08-01","end":"2026-08-07"},...,{"start":"2026-08-28","end":null}],
+/// "comment":"текст","notes":0}` (заполнено). `rewatches` — просто
+/// count(rewatches_history), сервер сам не хранит отдельно — мы его вообще
+/// не читаем, копируем только сам массив. `comment` — смешанный тип:
+/// `false` у пустых, строка у заполненных.
+struct BookmarkMeta: Decodable {
+    let comment: String?
+    let rewatchHistory: [RewatchPeriod]
+
+    private enum CodingKeys: String, CodingKey { case comment, rewatchHistory = "rewatches_history" }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let text = try? container.decode(String.self, forKey: .comment), !text.isEmpty {
+            comment = text
+        } else {
+            comment = nil
+        }
+        rewatchHistory = (try? container.decode([RewatchPeriod].self, forKey: .rewatchHistory)) ?? []
+    }
+}
+
+/// Один период перечитывания — ПОДТВЕРЖДЕНО перехватом:
+/// `{"start":"yyyy-MM-dd","end":"yyyy-MM-dd"|null}`. `end == nil` — период
+/// ещё не закрыт ("сейчас перечитывает"). Реального id у периода на
+/// сервере нет — это просто элемент массива, не отдельная сущность.
+struct RewatchPeriod: Codable, Identifiable, Hashable {
+    var start: String
+    var end: String?
+
+    var id: String { start + "_" + (end ?? "open") }
 }
 
 // MARK: - Summary rich-text (ProseMirror/TipTap)
