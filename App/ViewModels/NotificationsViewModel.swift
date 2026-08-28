@@ -99,4 +99,34 @@ final class NotificationsViewModel: ObservableObject {
     private func loadCounts() async {
         counts = try? await service.fetchNotificationCounts()
     }
+
+    /// "Отметить всё прочитанным" (см. NotificationsView.overflowMenu) —
+    /// ПОДТВЕРЖДЕНО реальным перехватом (PUT /notifications/bulk, см.
+    /// MangaNetworkService.markAllNotificationsRead). Действует на ТЕКУЩУЮ
+    /// выбранную категорию (typeFilter), не зависит от вкладки
+    /// прочитанности — ошибку бросает дальше, View сама решает, как
+    /// показать (тост, см. NotificationsView.markAllReadTapped).
+    func markAllRead() async throws {
+        try await service.markAllNotificationsRead(notificationType: typeFilter.rawValue)
+        await refresh()
+    }
+
+    /// "Удалить все уведомления" (см. NotificationsView.overflowMenu) —
+    /// ПОДТВЕРЖДЕНО реальным перехватом (DELETE /notifications/bulk, см.
+    /// MangaNetworkService.deleteAllNotifications). Действует на ТЕКУЩУЮ
+    /// категорию (typeFilter) И текущую вкладку прочитанности (readFilter →
+    /// isRead: unread→false, read→true, all→nil — оба варианта
+    /// подтверждены перехватом), т.е. "все" здесь — в рамках того, что
+    /// сейчас реально видно на экране, а не буквально ВСЕ уведомления
+    /// аккаунта разом.
+    func deleteAllInCurrentFilter() async throws {
+        let isRead: Bool?
+        switch readFilter {
+        case .unread: isRead = false
+        case .read: isRead = true
+        case .all: isRead = nil
+        }
+        try await service.deleteAllNotifications(notificationType: typeFilter.rawValue, isRead: isRead)
+        await refresh()
+    }
 }

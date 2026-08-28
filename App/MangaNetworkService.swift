@@ -1287,6 +1287,57 @@ final class MangaNetworkService {
         return response.data
     }
 
+    /// Отметить прочитанными ВСЕ уведомления категории `notificationType`
+    /// (та же категория, что и NotificationTypeFilter/typeFilter) —
+    /// ПОДТВЕРЖДЕНО реальным перехватом: `PUT /notifications/bulk`, тело
+    /// `{"notification_type":"all"}` (или "card"/"comments"/... — в обоих
+    /// перехваченных примерах поле ровно одно, без is_read: действие не
+    /// зависит от текущей вкладки прочитанности — уже прочитанные просто не
+    /// меняются). Ответ — silent toast с человекочитаемым текстом
+    /// ("Уведомления помечены прочитанными"), тело не разбираем.
+    func markAllNotificationsRead(notificationType: String) async throws {
+        let payload = BulkNotificationTypePayload(notification_type: notificationType)
+        let request = try makeJSONRequest(path: "/notifications/bulk", method: "PUT", body: payload)
+        _ = try await performOptionalData(request)
+    }
+
+    /// Удалить ВСЕ уведомления категории `notificationType`, дополнительно
+    /// отфильтрованные по прочитанности — ПОДТВЕРЖДЕНО реальным перехватом:
+    /// `DELETE /notifications/bulk`, тело `{"notification_type":...,
+    /// "is_read":...}`. `isRead` — ТА ЖЕ логика, что и текущая вкладка
+    /// readFilter: false у "Непрочитанные", true у "Прочитанные", nil у
+    /// "Все" (перехвачены оба варианта: false и null).
+    func deleteAllNotifications(notificationType: String, isRead: Bool?) async throws {
+        let payload = BulkNotificationDeletePayload(notification_type: notificationType, is_read: isRead)
+        let request = try makeJSONRequest(path: "/notifications/bulk", method: "DELETE", body: payload)
+        _ = try await performOptionalData(request)
+    }
+
+    private struct BulkNotificationTypePayload: Encodable {
+        let notification_type: String
+    }
+
+    /// Кастомный encode — ПОДТВЕРЖДЕНО перехватом, что "all" (nil isRead)
+    /// шлётся как ЯВНЫЙ `"is_read":null`, а не отсутствующий ключ (дефолтный
+    /// синтезированный Encodable у Optional-поля через encodeIfPresent
+    /// пропустил бы ключ целиком при nil — не то, что реально уходит с сайта).
+    private struct BulkNotificationDeletePayload: Encodable {
+        let notification_type: String
+        let is_read: Bool?
+
+        private enum CodingKeys: String, CodingKey { case notification_type, is_read }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(notification_type, forKey: .notification_type)
+            if let is_read {
+                try container.encode(is_read, forKey: .is_read)
+            } else {
+                try container.encodeNil(forKey: .is_read)
+            }
+        }
+    }
+
     /// Страницы конкретной главы + признак "уже просмотрена" (см.
     /// ChapterPagesData.isViewed — не подтверждено перехватом, декодируется
     /// защитно, по умолчанию false).

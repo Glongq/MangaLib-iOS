@@ -122,7 +122,9 @@ struct MangaReviewsView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // 24 — тот же радиус, что у подложек комментариев в карточке тайтла
+        // (см. MangaDetailView, Theme.surface + cornerRadius: 24), был 16.
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private func emptyState(icon: String, text: String) -> some View {

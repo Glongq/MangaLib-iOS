@@ -92,11 +92,14 @@ struct NotificationsView: View {
         .sheet(isPresented: $showSettingsStub) {
             NavigationStack { StubView(title: "Настройки уведомлений") }
         }
-        .alert("Удалить все уведомления?", isPresented: $showDeleteAllConfirm) {
+        .alert("Удалить уведомления?", isPresented: $showDeleteAllConfirm) {
             Button("Отмена", role: .cancel) {}
             Button("Удалить", role: .destructive) { deleteAllTapped() }
         } message: {
-            Text("Действие необратимо.")
+            // Удаление реально ограничено текущей категорией и вкладкой
+            // прочитанности (см. deleteAllTapped) — так же ведёт себя и
+            // сам сайт, поэтому явно уточняем, а не "все уведомления".
+            Text("Будут удалены уведомления категории «\(viewModel.typeFilter.title)» (\(viewModel.readFilter.title.lowercased())). Действие необратимо.")
         }
     }
 
@@ -130,7 +133,9 @@ struct NotificationsView: View {
             .pickerStyle(.inline)
         } label: {
             ZStack(alignment: .topTrailing) {
-                HStack(spacing: 4) {
+                // Отступ текста ("Непрочитанные"/...) от шеврона уменьшен —
+                // было 4, по прямой просьбе.
+                HStack(spacing: 2) {
                     Text(viewModel.readFilter.title)
                         .font(.subheadline.weight(.medium))
                     Image(systemName: "chevron.down")
@@ -181,19 +186,34 @@ struct NotificationsView: View {
         }
     }
 
-    /// "Отметить всё прочитанным" — эндпоинт нигде не подтверждён
-    /// перехватом (в отличие от read_type=фильтра — это просто параметр
-    /// запроса, а не мутация), поэтому пока честно ничего не отправляем на
-    /// сервер — только тост с объяснением, чтобы не выглядело "нажал и
-    /// ничего не произошло" молча.
+    /// "Отметить всё прочитанным" — ПОДТВЕРЖДЕНО реальным перехватом (см.
+    /// NotificationsViewModel.markAllRead/MangaNetworkService.
+    /// markAllNotificationsRead).
     private func markAllReadTapped() {
-        DownloadsManager.shared.showBanner("Пока не реализовано")
+        Task {
+            do {
+                try await viewModel.markAllRead()
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                DownloadsManager.shared.showBanner(message)
+            }
+        }
     }
 
-    /// См. showDeleteAllConfirm — эндпоинт удаления ВСЕХ уведомлений разом
-    /// нигде не подтверждён перехватом, поэтому реального запроса тут нет.
+    /// См. showDeleteAllConfirm — ПОДТВЕРЖДЕНО реальным перехватом (см.
+    /// NotificationsViewModel.deleteAllInCurrentFilter/MangaNetworkService.
+    /// deleteAllNotifications) — удаляет в рамках текущей выбранной
+    /// категории и вкладки прочитанности, а не буквально все уведомления
+    /// аккаунта разом (так же ведёт себя и сам сайт).
     private func deleteAllTapped() {
-        DownloadsManager.shared.showBanner("Пока не реализовано")
+        Task {
+            do {
+                try await viewModel.deleteAllInCurrentFilter()
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                DownloadsManager.shared.showBanner(message)
+            }
+        }
     }
 
     /// Строка категорий (было "Категория" внутри общего меню-кнопки —
