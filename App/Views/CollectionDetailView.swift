@@ -1,14 +1,16 @@
 import SwiftUI
 
 /// Страница одной коллекции — GET /collections/{id} (см.
-/// CollectionDetailViewModel). Сверху заголовок (название слева, автор
-/// справа: ник над подписью "Автор коллекции", аватар у края) и строка
-/// дата/просмотры+тайтлы, затем описание, затем сами тайтлы — единым
-/// списком или разбитые на именованные разделы (см. CollectionDetail.
-/// blocks). "..." в навбаре — Поделиться/Пожаловаться. Внизу — кнопка
-/// "Комментарии" и чипы "В закладки"/голос. Сетка тайтлов учитывает
-/// "Количество карточек в ряд" из Персонализации — тот же @AppStorage-ключ,
-/// что и в Каталоге/Закладках (см. CardsPerRow.swift).
+/// CollectionDetailViewModel). Автор — В САМОМ НАВБАРЕ, рядом с "..."
+/// (см. toolbar в body): ник над подписью "Автор коллекции", аватар у
+/// края — не в прокручиваемом контенте, тот отдельный, более низкий слой
+/// (см. комментарий у .toolbar). Ниже, уже в контенте — название, строка
+/// дата/просмотры+тайтлы, описание, сами тайтлы (единым списком или по
+/// именованным разделам, см. CollectionDetail.blocks). "..." в навбаре —
+/// Поделиться/Пожаловаться. Внизу — кнопка "Комментарии" и чипы "В
+/// закладки"/голос. Сетка тайтлов учитывает "Количество карточек в ряд"
+/// из Персонализации — тот же @AppStorage-ключ, что и в Каталоге/Закладках
+/// (см. CardsPerRow.swift).
 struct CollectionDetailView: View {
     let collectionId: Int
     let fallback: MangaCollection?
@@ -65,8 +67,17 @@ struct CollectionDetailView: View {
         .background(Theme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // "..." справа сверху — тот же паттерн, что и у карточки тайтла
-            // (см. MangaDetailView.actionMenuItems): Menu + ellipsis.circle,
+            // Автор — по прямой просьбе РЕАЛЬНО на уровне "..." (в самом
+            // навбаре, не первой строкой прокручиваемого контента: контент
+            // начинается НИЖЕ навбара — это отдельный, более низкий слой,
+            // тот самый "мёртвая зона" между ними, из-за которой прошлая
+            // попытка "первой строкой страницы" физически не могла
+            // оказаться на одной высоте с "...").
+            ToolbarItem(placement: .topBarTrailing) {
+                if let author = vm.detail?.user { toolbarAuthorChip(author) }
+            }
+            // "..." — тот же паттерн, что и у карточки тайтла (см.
+            // MangaDetailView.actionMenuItems): Menu + ellipsis.circle,
             // никакой самодельной кнопки поверх системного бара.
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -101,22 +112,10 @@ struct CollectionDetailView: View {
         URL(string: "https://\(SiteSession.shared.activeSite.host)/ru/collections/\(collectionId)")
     }
 
-    // MARK: Заголовок — название+автор / дата / просмотры+тайтлы
+    // MARK: Заголовок — название / дата / просмотры+тайтлы (автор — см. toolbar выше)
 
-    /// Автор — по прямой просьбе САМАЯ верхняя строка страницы, справа
-    /// (в паре с "..." — та же высота-полоса, что и navbar с меню), сам по
-    /// себе, БЕЗ дублирования где-либо ещё: ник сверху, подпись "Автор
-    /// коллекции" под ним, аватар у самого края. Название — уже следующей
-    /// строкой, отдельно.
     private var titleHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let author = vm.detail?.user {
-                HStack {
-                    Spacer(minLength: 0)
-                    authorChip(author)
-                }
-            }
-
             Text(vm.displayName)
                 .font(.title2.weight(.bold))
                 .foregroundStyle(Theme.textPrimary)
@@ -144,24 +143,28 @@ struct CollectionDetailView: View {
         .foregroundStyle(Theme.textSecondary)
     }
 
-    private func authorChip(_ author: FriendUser) -> some View {
+    /// Компактная версия под реальную высоту навбара (обычная строка была
+    /// бы слишком высокой) — ник сверху, подпись "Автор коллекции" под ним,
+    /// аватар у самого края, тут же рядом с "...".
+    private func toolbarAuthorChip(_ author: FriendUser) -> some View {
         Button { profileUser = ProfileUserId(id: author.id) } label: {
-            HStack(spacing: 8) {
-                VStack(alignment: .trailing, spacing: 1) {
+            HStack(spacing: 6) {
+                VStack(alignment: .trailing, spacing: 0) {
                     Text(author.username)
-                        .font(.subheadline.weight(.medium))
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Text("Автор коллекции")
-                        .font(.caption2)
+                        .font(.system(size: 9))
                         .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
                 }
                 RemoteImage(url: author.avatarURL) { img in
                     img.resizable().scaledToFill()
                 } placeholder: {
                     Circle().fill(Theme.surfaceElevated)
                 }
-                .frame(width: 36, height: 36)
+                .frame(width: 26, height: 26)
                 .clipShape(Circle())
             }
         }
