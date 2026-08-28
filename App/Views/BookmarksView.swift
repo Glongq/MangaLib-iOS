@@ -102,9 +102,13 @@ struct BookmarksView: View {
             // .glassEffect накладывался вторым слоем ("призрачный" pill на
             // скриншоте).
             .toolbar {
+                // Порядок и иконки — 1-в-1 с реальным сайтом (по прямой
+                // просьбе): список-с-галочками (мультивыбор) → карандаш
+                // (порядок списков) → шестерёнка (Вид/Сортировка).
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    // "Выбрать" — вкл/выкл мультивыбор (см. isSelecting) —
-                    // не показываем, пока список пуст, нет смысла.
+                    // Мультивыбор — не показываем, пока список пуст, нет
+                    // смысла. Активен — та же иконка, тонирована акцентом
+                    // (тап всегда переключает вкл/выкл).
                     if !currentTitles.isEmpty {
                         Button {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -112,15 +116,16 @@ struct BookmarksView: View {
                                 selectedSlugs.removeAll()
                             }
                         } label: {
-                            Text(isSelecting ? "Готово" : "Выбрать")
+                            Image(systemName: "checklist")
                         }
+                        .tint(isSelecting ? Theme.accent : nil)
                     }
                     if !isSelecting {
-                        Button { showViewSortSheet = true } label: {
-                            Image(systemName: "gearshape")
-                        }
                         Button { showFolderOrderSheet = true } label: {
                             Image(systemName: "pencil")
+                        }
+                        Button { showViewSortSheet = true } label: {
+                            Image(systemName: "gearshape")
                         }
                     }
                 }
@@ -243,9 +248,16 @@ struct BookmarksView: View {
     private func sorted(_ titles: [BookmarkedTitle]) -> [BookmarkedTitle] {
         switch sortOption {
         case .titleAsc:
-            return titles.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            // "По названию (A-Z)" — оригинальное/англ. название (см.
+            // BookmarkedTitle.originalTitle, ПОДТВЕРЖДЕНО перехватом:
+            // sort_by=name), общий sortDirection ниже, как и у всех
+            // остальных полей (не зашитое направление, как было раньше).
+            return sortedByTitle(titles) { $0.originalTitle ?? $0.title }
         case .titleDesc:
-            return titles.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending }
+            // "По названию (А-Я)" — русское название (BookmarkedTitle.title
+            // уже приоритезирует rusName, см. syncFromServer), ПОДТВЕРЖДЕНО
+            // перехватом: sort_by=rus_name.
+            return sortedByTitle(titles) { $0.title }
         case .dateAdded:
             return sortedByDate(titles) { $0.addedAt }
         case .userRating:
@@ -271,6 +283,16 @@ struct BookmarksView: View {
             // данными (см. project.yml/CLAUDE.md — принцип "не полу-готовые
             // реализации").
             return titles
+        }
+    }
+
+    /// Общий компаратор для обоих "По названию" — .newestFirst здесь значит
+    /// то же, что и у дат/оценки: "по убыванию" (Z-A/Я-А), не завязано на
+    /// конкретное поле.
+    private func sortedByTitle(_ titles: [BookmarkedTitle], key: (BookmarkedTitle) -> String) -> [BookmarkedTitle] {
+        titles.sorted { a, b in
+            let cmp = key(a).localizedCaseInsensitiveCompare(key(b))
+            return sortDirection == .newestFirst ? cmp == .orderedDescending : cmp == .orderedAscending
         }
     }
 
@@ -881,18 +903,27 @@ enum BookmarksViewMode: String {
 
 /// Поле сортировки списка закладок — см. BookmarksView.sorted(_:).
 enum BookmarksSortOption: String, CaseIterable, Identifiable {
+    // titleAsc/titleDesc — ИМЕНА оставлены как есть (raw value = ключ
+    // @AppStorage) для двух РАЗНЫХ полей, не направлений одного и того же:
+    // ПОДТВЕРЖДЕНО перехватом (GET /bookmarks?sort_by=...) — сервер знает
+    // ОТДЕЛЬНО `sort_by=name` (оригинальное/англ. название, "A-Z") И
+    // `sort_by=rus_name` (русское, "А-Я") — каждое с СОБСТВЕННЫМ asc/desc.
+    // Раньше здесь по ошибке было "направление зашито в вариант" (titleAsc/
+    // titleDesc = один и тот же текст, А-Я/Я-А) — по факту это два разных
+    // ПОЛЯ сортировки, оба подчиняются общему sortDirection ниже, как и
+    // остальные пункты.
     case titleAsc, titleDesc, dateAdded, userRating, chapterUpdated, dateRead
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .titleAsc:       return "По названию (А-Я)"
-        case .titleDesc:      return "По названию (Я-А)"
-        case .dateAdded:      return "По дате добавления"
-        case .userRating:     return "Оценке пользователя"
-        case .chapterUpdated: return "Дате обновления глав"
-        case .dateRead:       return "Дате чтения"
+        case .titleAsc:        return "По названию (A-Z)"
+        case .titleDesc:       return "По названию (А-Я)"
+        case .dateAdded:       return "По дате добавления"
+        case .userRating:      return "Оценке пользователя"
+        case .chapterUpdated:  return "Дате обновления глав"
+        case .dateRead:        return "Дате чтения"
         }
     }
 }

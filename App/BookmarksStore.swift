@@ -156,6 +156,12 @@ struct BookmarkedTitle: Codable, Identifiable, Hashable {
     /// bulkMoveBookmarks/bulkDeleteBookmarks). Optional — заполняется из
     /// entry.media.id при syncFromServer, до первого синка неизвестен.
     var mediaId: Int? = nil
+    /// Оригинальное (не русское) название — ПОДТВЕРЖДЕНО перехватом:
+    /// `MangaItem.name`, отдельное от `title` выше (тот уже приоритезирует
+    /// rusName, см. MangaItem.displayTitle) — нужно для сортировки "По
+    /// названию (A-Z)" в BookmarksView (сервер знает `sort_by=name` И
+    /// `sort_by=rus_name` как ДВА разных поля, не одно направление).
+    var originalTitle: String? = nil
 
     var id: String { slug }
 }
@@ -806,6 +812,7 @@ final class BookmarksStore: ObservableObject {
                 items[idx].rewatchHistory = entry.meta?.rewatchHistory ?? []
                 items[idx].comment = entry.meta?.comment
                 items[idx].mediaId = entry.media.id
+                items[idx].originalTitle = entry.media.name
             } else {
                 items.append(BookmarkedTitle(slug: slug, title: entry.media.displayTitle,
                                               coverURL: entry.media.coverURLString,
@@ -814,7 +821,8 @@ final class BookmarksStore: ObservableObject {
                                               myRating: entry.myScore,
                                               rewatchHistory: entry.meta?.rewatchHistory ?? [],
                                               comment: entry.meta?.comment,
-                                              mediaId: entry.media.id))
+                                              mediaId: entry.media.id,
+                                              originalTitle: entry.media.name))
             }
         }
 
