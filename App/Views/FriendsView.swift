@@ -13,6 +13,7 @@ struct FriendsView: View {
     @StateObject private var vm: FriendsViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var profileUser: ProfileUserId?
+    @FocusState private var searchFocused: Bool
 
     init(userId: Int, showsOwnHeader: Bool = true) {
         self.userId = userId
@@ -23,7 +24,10 @@ struct FriendsView: View {
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            content
+            VStack(spacing: 0) {
+                if vm.tab != .mutual { searchField.padding(.horizontal, 16).padding(.top, 8) }
+                content
+            }
         }
         // showsOwnHeader — обычный push (не встроен в профиль): родной
         // системный заголовок + системный back chevron, никакого своего
@@ -44,6 +48,28 @@ struct FriendsView: View {
         .sheet(item: $profileUser) { pu in
             ProfileView(userId: pu.id).preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
         }
+    }
+
+    /// "Поиск по имени" — ПОДТВЕРЖДЕНО перехватом `&q=` на реальном сайте
+    /// (см. FriendsViewModel.query/MangaNetworkService.fetchFriends). НЕ
+    /// показывается на табе "Общие" — там q не подтверждён.
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
+            TextField("", text: $vm.query,
+                      prompt: Text("Поиск по имени").foregroundColor(Theme.textSecondary))
+                .foregroundStyle(Theme.textPrimary)
+                .focused($searchFocused)
+                .submitLabel(.search)
+            if !vm.query.isEmpty {
+                Button { vm.query = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 
     // MARK: Контент
@@ -84,11 +110,12 @@ struct FriendsView: View {
     }
 
     private var emptyText: String {
+        if !vm.query.isEmpty { return "Никого не нашлось" }
         switch vm.tab {
         case .friends:  return "Друзей пока нет"
         case .mutual:   return "Общих друзей нет"
-        case .incoming: return "Входящих заявок нет"
-        case .outgoing: return "Исходящих заявок нет"
+        case .incoming: return "Заявок в друзья нет"
+        case .outgoing: return "Отправленных запросов нет"
         }
     }
 
@@ -187,9 +214,9 @@ struct FriendsView: View {
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    /// Хвост строки — обычный chevron у "Друзья"/"Общие", а у "Входящие"/
-    /// "Исходящие" реальные действия (см. FriendsViewModel.respond/
-    /// cancelOutgoing) вместо просто перехода в профиль.
+    /// Хвост строки — обычный chevron у "Друзья"/"Общие", а у "Заявки в
+    /// друзья"/"Отправленные запросы" реальные действия (см.
+    /// FriendsViewModel.respond/cancelOutgoing) вместо просто перехода в профиль.
     @ViewBuilder
     private func friendRowTrailing(_ entry: FriendshipEntry, isResponding: Bool) -> some View {
         switch vm.tab {
@@ -257,8 +284,8 @@ struct FriendsView: View {
                 // FriendsViewModel.isOwnAccount): чужие заявки сервер и не
                 // отдаст, показывать пустые табы на чужом профиле незачем.
                 if vm.isOwnAccount {
-                    tabButton("Входящие", tab: .incoming, badge: vm.incoming.count)
-                    tabButton("Исходящие", tab: .outgoing)
+                    tabButton("Заявки в друзья", tab: .incoming, badge: vm.incoming.count)
+                    tabButton("Отправленные запросы", tab: .outgoing)
                 }
             }
             .padding(.horizontal, 20)

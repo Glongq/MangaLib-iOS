@@ -14,6 +14,15 @@ final class FriendsViewModel: ObservableObject {
 
     @Published var tab: Tab = .friends
 
+    /// "Поиск по имени" — ПОДТВЕРЖДЕНО перехватом `&q=` на всех трёх формах
+    /// `GET /friendship` (друзья/входящие/исходящие). У /mutual поиск не
+    /// перехвачен — не применяется на табе "Общие".
+    @Published var query: String = "" {
+        didSet { if oldValue != query { scheduleSearchReload() } }
+    }
+    private var searchTask: Task<Void, Never>?
+    private let searchDebounce: Duration = .milliseconds(350)
+
     @Published private(set) var friends: [FriendshipEntry] = []
     @Published private(set) var mutual: [FriendshipEntry] = []
     @Published private(set) var incoming: [FriendshipEntry] = []
@@ -67,33 +76,53 @@ final class FriendsViewModel: ObservableObject {
         }
     }
 
-    func loadIfNeeded() async {
+    func selectTab(_ t: Tab) {
+        guard tab != t else { return }
+        tab = t
+        // Активный поиск переживает переключение таба — активная строка
+        // должна отфильтровать и новый таб, а не показать его "как есть"
+        // (didLoad* иначе решил бы, что грузить нечего, и оставил бы
+        // немного другой — незафильтрованный — прошлый результат).
+        Task { await loadIfNeeded(force: !query.isEmpty) }
+    }
+
+    /// Debounce поиска (см. query.didSet) — перезагружает ТЕКУЩИЙ таб (кроме
+    /// "Общие" — там q не подтверждён, см. reloadMutual).
+    private func scheduleSearchReload() {
+        searchTask?.cancel()
+        searchTask = Task { [weak self] in
+            guard let self else { return }
+            do { try await Task.sleep(for: self.searchDebounce) } catch { return }
+            switch self.tab {
+            case .friends:  await self.reloadFriends()
+            case .mutual:   return
+            case .incoming: await self.reloadIncoming()
+            case .outgoing: await self.reloadOutgoing()
+            }
+        }
+    }
+
+    func loadIfNeeded(force: Bool = false) async {
         switch tab {
         case .friends:
-            guard !didLoadFriends, !isLoading else { return }
+            guard force || (!didLoadFriends && !isLoading) else { return }
             await reloadFriends()
         case .mutual:
             guard !didLoadMutual, !isLoading else { return }
             await reloadMutual()
         case .incoming:
-            guard !didLoadIncoming, !isLoading else { return }
+            guard force || (!didLoadIncoming && !isLoading) else { return }
             await reloadIncoming()
         case .outgoing:
-            guard !didLoadOutgoing, !isLoading else { return }
+            guard force || (!didLoadOutgoing && !isLoading) else { return }
             await reloadOutgoing()
         }
-    }
-
-    func selectTab(_ t: Tab) {
-        guard tab != t else { return }
-        tab = t
-        Task { await loadIfNeeded() }
     }
 
     func reloadFriends() async {
         isLoading = true; errorMessage = nil; friendsPage = 1; friendsHasNext = true
         do {
-            let r = try await service.fetchFriends(userId: userId, page: 1)
+            let r = try await service.fetchFriends(userId: userId, page: 1, query: query)
             friends = r.friends
             friendsHasNext = r.hasNextPage
             didLoadFriends = true
@@ -123,7 +152,7 @@ final class FriendsViewModel: ObservableObject {
     func reloadIncoming() async {
         isLoading = true; errorMessage = nil; incomingPage = 1; incomingHasNext = true
         do {
-            let r = try await service.fetchFriendRequests(userId: userId, incoming: true, page: 1)
+            let r = try await service.fetchFriendRequests(userId: userId, incoming: true, page: 1, query: query)
             incoming = r.requests
             incomingHasNext = r.hasNextPage
             didLoadIncoming = true
@@ -153,7 +182,7 @@ final class FriendsViewModel: ObservableObject {
     func reloadOutgoing() async {
         isLoading = true; errorMessage = nil; outgoingPage = 1; outgoingHasNext = true
         do {
-            let r = try await service.fetchFriendRequests(userId: userId, incoming: false, page: 1)
+            let r = try await service.fetchFriendRequests(userId: userId, incoming: false, page: 1, query: query)
             outgoing = r.requests
             outgoingHasNext = r.hasNextPage
             didLoadOutgoing = true
@@ -174,7 +203,7 @@ final class FriendsViewModel: ObservableObject {
             isLoadingMore = true
             let next = friendsPage + 1
             do {
-                let r = try await service.fetchFriends(userId: userId, page: next)
+                let r = try await service.fetchFriends(userId: userId, page: next, query: query)
                 let existing = Set(friends.map(\.id))
                 friends.append(contentsOf: r.friends.filter { !existing.contains($0.id) })
                 friendsPage = next; friendsHasNext = r.hasNextPage
@@ -194,7 +223,7 @@ final class FriendsViewModel: ObservableObject {
             isLoadingMore = true
             let next = incomingPage + 1
             do {
-                let r = try await service.fetchFriendRequests(userId: userId, incoming: true, page: next)
+                let r = try await service.fetchFriendRequests(userId: userId, incoming: true, page: next, query: query)
                 let existing = Set(incoming.map(\.id))
                 incoming.append(contentsOf: r.requests.filter { !existing.contains($0.id) })
                 incomingPage = next; incomingHasNext = r.hasNextPage
@@ -204,7 +233,7 @@ final class FriendsViewModel: ObservableObject {
             isLoadingMore = true
             let next = outgoingPage + 1
             do {
-                let r = try await service.fetchFriendRequests(userId: userId, incoming: false, page: next)
+                let r = try await service.fetchFriendRequests(userId: userId, incoming: false, page: next, query: query)
                 let existing = Set(outgoing.map(\.id))
                 outgoing.append(contentsOf: r.requests.filter { !existing.contains($0.id) })
                 outgoingPage = next; outgoingHasNext = r.hasNextPage

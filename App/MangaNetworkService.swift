@@ -499,13 +499,16 @@ final class MangaNetworkService {
     }
 
     /// Список друзей пользователя — ПОДТВЕРЖДЕНО перехватом
-    /// `GET /friendship?page=&user_id=&status=1`.
-    func fetchFriends(userId: Int, page: Int = 1) async throws -> (friends: [FriendshipEntry], hasNextPage: Bool) {
-        let items = [
+    /// `GET /friendship?page=&user_id=&status=1`, поиск по имени — тем же
+    /// перехватом с `&q=` (поле "Поиск по имени" на реальном сайте).
+    func fetchFriends(userId: Int, page: Int = 1, query: String = "") async throws -> (friends: [FriendshipEntry], hasNextPage: Bool) {
+        var items = [
             URLQueryItem(name: "page", value: String(max(page, 1))),
             URLQueryItem(name: "user_id", value: String(userId)),
             URLQueryItem(name: "status", value: "1")
         ]
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
         let request = try makeRequest(path: "/friendship", queryItems: items)
         let response: LossyListResponse<FriendshipEntry> = try await perform(request)
         return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
@@ -515,14 +518,16 @@ final class MangaNetworkService {
     /// только для СВОЕГО аккаунта, не для чужого профиля) — ПОДТВЕРЖДЕНО
     /// перехватом `GET /friendship?user_id=&status=0&sender=0` (входящие —
     /// заявки, отправленные МНЕ) и `&sender=1` (исходящие — отправленные
-    /// МНОЙ). Та же форма записи/пагинации, что и у fetchFriends.
-    func fetchFriendRequests(userId: Int, incoming: Bool, page: Int = 1) async throws -> (requests: [FriendshipEntry], hasNextPage: Bool) {
-        let items = [
+    /// МНОЙ), поиск — тем же `&q=`, что и у fetchFriends.
+    func fetchFriendRequests(userId: Int, incoming: Bool, page: Int = 1, query: String = "") async throws -> (requests: [FriendshipEntry], hasNextPage: Bool) {
+        var items = [
             URLQueryItem(name: "page", value: String(max(page, 1))),
             URLQueryItem(name: "user_id", value: String(userId)),
             URLQueryItem(name: "status", value: "0"),
             URLQueryItem(name: "sender", value: incoming ? "0" : "1")
         ]
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
         let request = try makeRequest(path: "/friendship", queryItems: items)
         let response: LossyListResponse<FriendshipEntry> = try await perform(request)
         return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
