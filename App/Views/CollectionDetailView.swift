@@ -223,12 +223,17 @@ struct CollectionDetailView: View {
 
     /// Подписка/избранное — тот же generic POST /favorites, что и у команд/
     /// франшиз, source_type="collection" (см. CollectionDetailViewModel.
-    /// toggleFavorite).
+    /// toggleFavorite). Число рядом — сколько ВСЕГО людей добавили эту
+    /// коллекцию в закладки, по нажатию реально +1/-1 (сразу же
+    /// перезаписывается настоящим числом с сервера, см. vm.toggleFavorite).
     private var favoriteChip: some View {
         Button { vm.toggleFavorite() } label: {
             HStack(spacing: 6) {
                 Image(systemName: vm.isSubscribed ? "bookmark.fill" : "bookmark")
                 Text(vm.isSubscribed ? "В закладках" : "В закладки")
+                if let count = vm.favoritesCount {
+                    Text("\(count)").foregroundStyle(Theme.textSecondary)
+                }
             }
             .font(.footnote.weight(.medium))
             .foregroundStyle(vm.isSubscribed ? Theme.accent : Theme.textPrimary)

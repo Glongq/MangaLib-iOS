@@ -18,12 +18,18 @@ final class CollectionDetailViewModel: ObservableObject {
     /// чтобы UI обновлялся мгновенно, не дожидаясь полной перезагрузки.
     @Published private(set) var votes: SimilarVotes?
     @Published private(set) var isSubscribed = false
+    /// Сколько ВСЕГО людей добавили коллекцию в закладки — сразу после
+    /// toggleFavorite() обновляется РЕАЛЬНЫМ числом с сервера (см.
+    /// FavoriteToggleResponse.subscribersStat — тот же `meta.stats.value`,
+    /// что и у команд/франшиз), а не просто +1/-1 на клиенте.
+    @Published private(set) var favoritesCount: Int?
 
     private let service = MangaNetworkService.shared
 
     init(collectionId: Int, fallback: MangaCollection? = nil) {
         self.collectionId = collectionId
         self.fallback = fallback
+        favoritesCount = fallback?.favoritesCount
     }
 
     var displayName: String { detail?.name ?? fallback?.name ?? "" }
@@ -40,6 +46,7 @@ final class CollectionDetailViewModel: ObservableObject {
             detail = d
             votes = d.votes
             isSubscribed = d.isSubscribed
+            favoritesCount = d.favoritesCount
         } catch NetworkError.cancelled {
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -64,6 +71,14 @@ final class CollectionDetailViewModel: ObservableObject {
             defer { isTogglingFavorite = false }
             guard let result = try? await service.toggleFavorite(sourceId: collectionId, sourceType: "collection") else { return }
             isSubscribed = result.isSubscribed
+            if let real = result.subscribersStat?.value {
+                favoritesCount = real
+            } else {
+                // Запасной вариант, если сервер вдруг не прислал meta.stats
+                // (в перехвате был всегда) — считаем на клиенте по
+                // направлению переключения, как и просили: +1/-1.
+                favoritesCount = max(0, (favoritesCount ?? 0) + (isSubscribed ? 1 : -1))
+            }
         }
     }
 }
