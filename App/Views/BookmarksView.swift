@@ -188,6 +188,19 @@ struct BookmarksView: View {
             return titles.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending }
         case .dateAdded:
             return sortedByDate(titles) { $0.addedAt }
+        case .userRating:
+            // Личная оценка (см. BookmarkedTitle.myRating — уже реальная,
+            // приходит с сервером синхронно с закладками, см.
+            // BookmarksStore.syncFromServer) — без оценки всегда в конец,
+            // тот же принцип, что и у sortedByDate ниже.
+            return titles.sorted { a, b in
+                switch (a.myRating, b.myRating) {
+                case let (ra?, rb?): return sortDirection == .newestFirst ? ra > rb : ra < rb
+                case (nil, .some): return false
+                case (.some, nil): return true
+                case (nil, nil): return false
+                }
+            }
         case .dateRead:
             return sortedByDate(titles) { store.readingProgress(forSlug: $0.slug)?.lastReadAt }
         case .chapterUpdated:
@@ -689,7 +702,7 @@ enum BookmarksViewMode: String {
 
 /// Поле сортировки списка закладок — см. BookmarksView.sorted(_:).
 enum BookmarksSortOption: String, CaseIterable, Identifiable {
-    case titleAsc, titleDesc, dateAdded, chapterUpdated, dateRead
+    case titleAsc, titleDesc, dateAdded, userRating, chapterUpdated, dateRead
 
     var id: String { rawValue }
 
@@ -698,6 +711,7 @@ enum BookmarksSortOption: String, CaseIterable, Identifiable {
         case .titleAsc:       return "По названию (А-Я)"
         case .titleDesc:      return "По названию (Я-А)"
         case .dateAdded:      return "По дате добавления"
+        case .userRating:     return "Оценке пользователя"
         case .chapterUpdated: return "Дате обновления глав"
         case .dateRead:       return "Дате чтения"
         }
@@ -712,7 +726,12 @@ enum BookmarksSortDirection: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String { self == .newestFirst ? "Сначала новые" : "Сначала старые" }
+    /// "По убыванию"/"По возрастанию" — 1-в-1 подписи реального сайта (по
+    /// прямой просьбе, скриншот "Настройки" списков закладок), нейтральные
+    /// к полю сортировки — годятся и для дат, и для оценки пользователя
+    /// (raw-значения newestFirst/oldestFirst не переименовывал — это только
+    /// ключ для @AppStorage, смена сломала бы уже сохранённый выбор).
+    var title: String { self == .newestFirst ? "По убыванию" : "По возрастанию" }
 }
 
 /// Щит редактирования порядка списков (иконка карандаша в шапке Закладок) —
