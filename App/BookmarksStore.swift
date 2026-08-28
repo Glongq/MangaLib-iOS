@@ -43,6 +43,11 @@ struct BookmarkFolder: Codable, Identifiable, Hashable {
     /// локальных записей без этого поля); у 5 стандартных не используются.
     var notify: Bool? = nil
     var isPublic: Bool? = nil
+    /// Реальная позиция в общем порядке с сервера — ПОДТВЕРЖДЕНО перехватом
+    /// (см. UserBookmarkFolder.order/syncFoldersFromServer). Optional — до
+    /// первого синка неизвестна, тогда используется текущая позиция в
+    /// массиве folders как есть.
+    var order: Int? = nil
 
     static let reading   = BookmarkFolder(id: "reading",   name: "Читаю",     isDefault: true)
     static let planned   = BookmarkFolder(id: "planned",   name: "В планах",  isDefault: true)
@@ -191,6 +196,18 @@ final class BookmarksStore: ObservableObject {
     @Published private(set) var progress: [String: ReadingProgress]
     @Published private(set) var isSyncing = false
 
+    /// Порядок slug'ов, полученный НАПРЯМУЮ с сервера для текущей выбранной
+    /// папки+поля сортировки (см. refreshRemoteOrder) — ПОДТВЕРЖДЕНО
+    /// перехватом (тот же GET /bookmarks, что и полный синк, но с реальными
+    /// sort_by/sort_type вместо захардкоженных). Прямая жалоба: "одинаковые
+    /// настройки — разный порядок" — клиентская сортировка (см.
+    /// BookmarksView.sorted) не может гарантированно повторить серверную
+    /// коллацию строк. nil — ещё не запрошен/сеть не удалась — тогда экран
+    /// показывает клиентскую сортировку как приближение, пока не придёт
+    /// реальный ответ.
+    @Published private(set) var remoteOrderedSlugs: [String]?
+    private var remoteOrderTask: Task<Void, Never>?
+
     /// Настоящая история просмотров аккаунта — `GET /user/chapters/history`
     /// (см. syncHistoryFromServer). В отличие от items (только то, что реально
     /// добавлено в папку закладок), сюда попадает ВСЁ, что читалось на сайте,
@@ -327,6 +344,7 @@ final class BookmarksStore: ObservableObject {
                     self.folders[idx].notify = serverFolder.notify
                     self.folders[idx].isPublic = serverFolder.isPublic
                     self.folders[idx].siteIds = serverFolder.siteIds
+                    self.folders[idx].order = serverFolder.order
                     self.persistFolders()
                 }
             } catch {
@@ -687,17 +705,29 @@ final class BookmarksStore: ObservableObject {
         guard let userId = AuthSession.shared.userId,
               let remoteFolders = try? await MangaNetworkService.shared.fetchUserBookmarkFolders(userId: userId) else { return }
         var changed = false
-        for remote in remoteFolders where !(1...5).contains(remote.id) {
+        for remote in remoteFolders {
+            if (1...5).contains(remote.id) {
+                // Стандартная папка — имя/цвет/apiId остаются хардкодом (см.
+                // BookmarkFolder.defaults), но РЕАЛЬНЫЙ order с сервера всё
+                // равно нужен — иначе видимый порядок среди стандартных
+                // папок не совпадёт с сайтом, если их там переставили.
+                if let idx = folders.firstIndex(where: { $0.apiId == remote.id }), folders[idx].order != remote.order {
+                    folders[idx].order = remote.order
+                    changed = true
+                }
+                continue
+            }
             if let idx = folders.firstIndex(where: { $0.serverId == remote.id }) {
                 if folders[idx].name != remote.name { folders[idx].name = remote.name; changed = true }
                 if folders[idx].colorHex != remote.colorHex { folders[idx].colorHex = remote.colorHex; changed = true }
                 if folders[idx].siteIds != remote.siteIds { folders[idx].siteIds = remote.siteIds; changed = true }
                 if folders[idx].notify != remote.notify { folders[idx].notify = remote.notify; changed = true }
                 if folders[idx].isPublic != remote.isPublic { folders[idx].isPublic = remote.isPublic; changed = true }
+                if folders[idx].order != remote.order { folders[idx].order = remote.order; changed = true }
             } else {
                 folders.append(BookmarkFolder(id: "server-\(remote.id)", name: remote.name, isDefault: false,
                                                serverId: remote.id, colorHex: remote.colorHex, siteIds: remote.siteIds,
-                                               notify: remote.notify, isPublic: remote.isPublic))
+                                               notify: remote.notify, isPublic: remote.isPublic, order: remote.order))
                 changed = true
             }
         }
@@ -716,7 +746,14 @@ final class BookmarksStore: ObservableObject {
             folders.removeAll { removedFolderIds.contains($0.id) }
             changed = true
         }
-        if changed { persistFolders() }
+        if changed {
+            // Прямая жалоба: "не синхронизируется порядок (номер) списка" —
+            // видимый порядок ДОЛЖЕН отражать реальный order с сервера, не
+            // порядок обнаружения/хардкода. Папки без известного order (ещё
+            // не синканные) остаются в конце, а не переставляются на 0.
+            folders.sort { ($0.order ?? Int.max) < ($1.order ?? Int.max) }
+            persistFolders()
+        }
     }
 
     /// Подтягивает реальные закладки аккаунта с сервера в 5 стандартных папок.
@@ -841,6 +878,54 @@ final class BookmarksStore: ObservableObject {
 
         persistItems()
         print("[BookmarksStore][debug] syncFromServer() завершён: \(items.count) закладок локально, из них с serverId — \(items.filter { $0.serverId != nil }.count)")
+    }
+
+    /// Запросить у сервера РЕАЛЬНЫЙ порядок для выбранной папки+поля
+    /// сортировки — вызывать при каждой смене папки/варианта сортировки/
+    /// направления в BookmarksView (см. remoteOrderedSlugs выше). Отменяет
+    /// предыдущий незавершённый запрос — быстрые переключения (пощёлкать
+    /// туда-сюда) не гоняются друг с другом за право записать результат.
+    /// `folderId == nil` — вкладка «Все» (status=0).
+    func refreshRemoteOrder(folderId: String?, sortBy: String, sortType: String) {
+        remoteOrderTask?.cancel()
+        let status: Int
+        if let folderId {
+            guard let folder = folders.first(where: { $0.id == folderId }),
+                  let resolved = folder.apiId ?? folder.serverId else {
+                remoteOrderedSlugs = nil
+                return
+            }
+            status = resolved
+        } else {
+            status = 0
+        }
+        remoteOrderedSlugs = nil
+        remoteOrderTask = Task {
+            var slugs: [String] = []
+            var page = 1
+            var succeeded = true
+            while page <= 40 {
+                guard !Task.isCancelled else { return }
+                do {
+                    let result = try await MangaNetworkService.shared.fetchBookmarksAccountList(
+                        status: status, page: page, sortBy: sortBy, sortType: sortType)
+                    guard !result.items.isEmpty else { break }
+                    slugs.append(contentsOf: result.items.map { $0.media.apiSlug })
+                    guard result.hasNextPage else { break }
+                    page += 1
+                } catch {
+                    print("[BookmarksStore] не удалось получить реальный порядок (\(sortBy)/\(sortType)) с сервера: \(error)")
+                    succeeded = false
+                    break
+                }
+            }
+            guard !Task.isCancelled else { return }
+            // succeeded=false → nil, не частичный список: иначе неудачная
+            // сеть выглядела бы как "сервер подтвердил порядок из 0/N
+            // тайтлов" — экран должен остаться на клиентском приближении,
+            // а не показать пустоту/произвольный порядок.
+            remoteOrderedSlugs = succeeded ? slugs : nil
+        }
     }
 
     /// Подтягивает НАСТОЯЩУЮ историю чтения аккаунта — `GET

@@ -134,7 +134,10 @@ struct BookmarksView: View {
             .onChange(of: catalogNav.openBookmarksRequest) { _, _ in applyPendingFolder() }
             // Смена открытой папки сбрасывает выбор — повторяет замеченное
             // поведение реального сайта (см. isSelecting выше).
-            .onChange(of: selectedFolderId) { _, _ in selectedSlugs.removeAll() }
+            .onChange(of: selectedFolderId) { _, _ in
+                selectedSlugs.removeAll()
+                refreshRemoteOrder()
+            }
             // Открытая папка могла реально исчезнуть (удалена на сайте/
             // другом устройстве, подтягивается через store.syncFoldersFromServer
             // при потянуть-обновить) — без этого экран молча показывал бы
@@ -144,6 +147,13 @@ struct BookmarksView: View {
                     selectedFolderId = nil
                 }
             }
+            // Реальный порядок с сервера (см. currentTitles/
+            // refreshRemoteOrder) — перезапрашивается при смене поля/
+            // направления сортировки, папки (см. выше) и при первом
+            // открытии экрана.
+            .onChange(of: sortOption) { _, _ in refreshRemoteOrder() }
+            .onChange(of: sortDirection) { _, _ in refreshRemoteOrder() }
+            .task { refreshRemoteOrder() }
             .navigationDestination(for: BookmarkedTitle.self) { bm in
                 MangaDetailView(slug: bm.slug, fallbackTitle: bm.title,
                                 coverURL: bm.coverURL.flatMap(URL.init(string:)))
@@ -240,7 +250,39 @@ struct BookmarksView: View {
         let base = store.titles(in: selectedFolderId)
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let filtered = trimmed.isEmpty ? base : base.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
+        // Реальный порядок с сервера, если уже пришёл (см.
+        // store.remoteOrderedSlugs/refreshRemoteOrder) — гарантированно
+        // совпадает с сайтом 1-в-1, в отличие от клиентской sorted(_:)
+        // ниже, которая лишь приближение (использовалось как fallback на
+        // время загрузки/при сетевой ошибке).
+        if let remoteOrder = store.remoteOrderedSlugs {
+            let orderIndex = Dictionary(uniqueKeysWithValues: remoteOrder.enumerated().map { ($1, $0) })
+            return filtered.sorted { (orderIndex[$0.slug] ?? Int.max) < (orderIndex[$1.slug] ?? Int.max) }
+        }
         return sorted(filtered)
+    }
+
+    /// sort_by/sort_type для refreshRemoteOrder — ПОДТВЕРЖДЕНО перехватом
+    /// для всех, КРОМЕ dateRead: "updated_at" там — обоснованная догадка
+    /// (updated_at у самой ЗАПИСИ закладки меняется, когда двигается
+    /// прогресс чтения), а не буквально перехваченный пример с "датой
+    /// чтения" — если оно вдруг не совпадёт с сайтом, значит поле другое.
+    private var serverSortParams: (sortBy: String, sortType: String) {
+        let sortBy: String
+        switch sortOption {
+        case .titleAsc:       sortBy = "name"
+        case .titleDesc:      sortBy = "rus_name"
+        case .dateAdded:      sortBy = "created_at"
+        case .userRating:     sortBy = "rating"
+        case .chapterUpdated: sortBy = "last_chapter_at"
+        case .dateRead:       sortBy = "updated_at"
+        }
+        return (sortBy, sortDirection == .newestFirst ? "desc" : "asc")
+    }
+
+    private func refreshRemoteOrder() {
+        let params = serverSortParams
+        store.refreshRemoteOrder(folderId: selectedFolderId, sortBy: params.sortBy, sortType: params.sortType)
     }
 
     // MARK: Сортировка (см. ViewSortSheet)

@@ -588,7 +588,12 @@ final class MangaNetworkService {
     /// Теперь вместо броска — при отсутствии кэша донтягиваем /auth/me прямо
     /// здесь и кэшируем результат обратно в AuthSession, чтобы больше не
     /// зависеть от того, успел ли параллельный refreshProfile() отработать.
-    func fetchBookmarksAccountList(status: Int = 0, page: Int = 1) async throws -> (items: [BookmarkListEntry], hasNextPage: Bool) {
+    /// `sortBy`/`sortType` — ПОДТВЕРЖДЕНО перехватом: реальный сайт умеет
+    /// `sort_by` = `name`/`rus_name`/`created_at`/`updated_at`/
+    /// `last_chapter_at`/`rating`, каждое с `sort_type` `asc`/`desc`.
+    /// Дефолты ("name"/"desc") — как было раньше, для полного синка
+    /// (syncFromServer), которому важен не порядок, а полный список.
+    func fetchBookmarksAccountList(status: Int = 0, page: Int = 1, sortBy: String = "name", sortType: String = "desc") async throws -> (items: [BookmarkListEntry], hasNextPage: Bool) {
         let userId: Int
         if let cached = AuthSession.shared.userId {
             userId = cached
@@ -599,8 +604,8 @@ final class MangaNetworkService {
         }
         let items: [URLQueryItem] = [
             URLQueryItem(name: "page", value: String(max(page, 1))),
-            URLQueryItem(name: "sort_by", value: "name"),
-            URLQueryItem(name: "sort_type", value: "desc"),
+            URLQueryItem(name: "sort_by", value: sortBy),
+            URLQueryItem(name: "sort_type", value: sortType),
             URLQueryItem(name: "status", value: String(status)),
             URLQueryItem(name: "user_id", value: String(userId))
         ]

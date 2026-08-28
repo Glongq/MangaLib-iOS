@@ -500,9 +500,17 @@ struct UserBookmarkFolder: Decodable, Identifiable, Hashable {
     /// BookmarksStore.syncFoldersFromServer(), чтобы вкладка «Закладки»
     /// тоже фильтровала по активному сайту, как настоящий сайт.
     var siteIds: [Int]
+    /// Позиция папки в общем порядке — ПОДТВЕРЖДЕНО перехватом (тот же
+    /// объект, что и в `PUT /bookmarks/folder/order`, см. BookmarksStore.
+    /// syncFoldersFromServer/moveFolders). Прямая жалоба: "не
+    /// синхронизируется порядок (номер) списка" — раньше это поле вообще не
+    /// читалось, локальный видимый порядок был просто "как в массиве"
+    /// (хардкод для 5 стандартных + порядок обнаружения для кастомных), не
+    /// РЕАЛЬНЫЙ порядок с сервера.
+    var order: Int
 
     enum CodingKeys: String, CodingKey {
-        case id, name, count, colorHex = "color", notify, isPublic = "public", siteIds = "site_ids"
+        case id, name, count, colorHex = "color", notify, isPublic = "public", siteIds = "site_ids", order
     }
 }
 
