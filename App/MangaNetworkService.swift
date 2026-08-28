@@ -543,7 +543,7 @@ final class MangaNetworkService {
         return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
     }
 
-    // MARK: Коллекции пользователя
+    // MARK: Коллекции
 
     /// Коллекции, созданные пользователем — ПОДТВЕРЖДЕНО перехватом
     /// `GET /collections?page=&sort_by=newest&sort_type=desc&subscriptions=0&
@@ -562,6 +562,48 @@ final class MangaNetworkService {
         let request = try makeRequest(path: "/collections", queryItems: items)
         let response: LossyListResponse<MangaCollection> = try await perform(request)
         return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// Общая лента коллекций сайта (экран "Коллекции" в Каталоге, без
+    /// привязки к пользователю) — ПОДТВЕРЖДЕНО перехватом `GET /collections
+    /// ?limit=15&page=1&sort_by=newest` (путь и полная форма непустого
+    /// элемента — тем же перехватом, что и CollectionDetail). `sortBy: nil`
+    /// — не слать sort_by вообще (см. CollectionsListViewModel.fetchPage —
+    /// сервер в этой экосистеме строго валидирует sort_by и отвечает 422 на
+    /// неизвестное значение, см. тот же приём в TeamViewModel/
+    /// DirectoryListViewModel).
+    func fetchCollections(page: Int = 1, sortBy: String?, period: String? = nil) async throws -> (collections: [MangaCollection], hasNextPage: Bool) {
+        var items = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "limit", value: "15")
+        ]
+        if let sortBy { items.append(URLQueryItem(name: "sort_by", value: sortBy)) }
+        if let period { items.append(URLQueryItem(name: "period", value: period)) }
+        let request = try makeRequest(path: "/collections", queryItems: items)
+        let response: LossyListResponse<MangaCollection> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// Полная страница коллекции — ПОДТВЕРЖДЕНО перехватом `GET
+    /// /collections/{id}` (см. CollectionDetail).
+    func fetchCollectionDetail(id: Int) async throws -> CollectionDetail {
+        let request = try makeRequest(path: "/collections/\(id)", queryItems: [])
+        let response: APIObjectResponse<CollectionDetail> = try await perform(request)
+        return response.data
+    }
+
+    /// Голосование за коллекцию — ПОДТВЕРЖДЕНО перехватом `POST
+    /// /collection/{id}/vote` (ЕДИНСТВЕННОЕ число "collection", не
+    /// "collections" — так в реальном пути), тело `{"vote":1}` (плюс) /
+    /// `{"vote":0}` (минус) → `{"up","down","user"}` — та же форма и та же
+    /// конвенция (1=плюс/0=минус/null=не голосовал), что и у voteComment/
+    /// voteSimilar, поэтому переиспользуем SimilarVotes.
+    @discardableResult
+    func voteCollection(id: Int, direction: Int) async throws -> SimilarVotes {
+        let request = try makeJSONRequest(path: "/collection/\(id)/vote", method: "POST",
+                                           body: CommentVotePayload(vote: direction))
+        let response: APIObjectResponse<SimilarVotes> = try await perform(request)
+        return response.data
     }
 
     // MARK: Закладки другого пользователя («Списки тайтлов» в чужом профиле)

@@ -517,7 +517,10 @@ struct HomeView: View {
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 12) {
                         ForEach(viewModel.collections) { collection in
-                            collectionCard(collection)
+                            NavigationLink { CollectionDetailView(collectionId: collection.id, fallback: collection) } label: {
+                                collectionCard(collection)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 16)

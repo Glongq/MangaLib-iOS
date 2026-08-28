@@ -1,47 +1,43 @@
 import SwiftUI
 
-/// Вкладка «Коллекции» в профиле пользователя — список подборок, которые он
-/// создал. Карточка — та же форма, что и на главной («Читают», см.
-/// HomeView.collectionCard): название, статистика (просмотры/тайтлов/в
-/// избранном), голоса, веер из превью обложек. Данные: GET /collections?
-/// user_id=&page=.
-struct UserCollectionsView: View {
-    let userId: Int
-    /// false — встроен в ProfileView без своей шапки (см.
-    /// UserBookmarksView.showsOwnHeader).
-    var showsOwnHeader: Bool = true
-
-    @StateObject private var vm: UserCollectionsViewModel
-
-    init(userId: Int, showsOwnHeader: Bool = true) {
-        self.userId = userId
-        self.showsOwnHeader = showsOwnHeader
-        _vm = StateObject(wrappedValue: UserCollectionsViewModel(userId: userId))
-    }
+/// Экран "Коллекции" (Меню → Каталог → Коллекции) — общая лента коллекций
+/// сайта. Внизу слева — "Создать свою коллекцию" (эндпоинта создания в
+/// перехвате НЕТ — честная заглушка, см. StubView в SideMenuView.swift),
+/// справа — "Фильтры" с сортировкой (см. CollectionsListViewModel.Sort).
+/// Карточка — та же форма, что и в профиле (см. UserCollectionsView.
+/// collectionCard), но здесь реально ведёт на CollectionDetailView.
+struct CollectionsListView: View {
+    @StateObject private var vm = CollectionsListViewModel()
+    @State private var showCreateStub = false
 
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
             content
         }
-        // showsOwnHeader — обычный push (не встроен в профиль): родной
-        // системный заголовок + системный back chevron, никакого своего
-        // кода (эталон — Настройки/Загрузки). Без него — навбар скрыт,
-        // шапку рисует ProfileView.topBar (см. AccountInfoView).
         .navigationTitle("Коллекции")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(showsOwnHeader ? .visible : .hidden, for: .navigationBar)
+        .safeAreaInset(edge: .bottom, spacing: 0) { controlsBar }
         .task { await vm.loadIfNeeded() }
+        .sheet(isPresented: $showCreateStub) {
+            NavigationStack { StubView(title: "Создать коллекцию") }
+        }
     }
+
+    // MARK: Контент
 
     @ViewBuilder
     private var content: some View {
         if vm.isLoading && vm.collections.isEmpty {
             skeletonList
         } else if let error = vm.errorMessage, vm.collections.isEmpty {
-            emptyState(icon: "wifi.exclamationmark", text: error)
+            ScrollView { emptyState(icon: "wifi.exclamationmark", text: error).containerRelativeFrame(.vertical) }
+                .scrollIndicators(.hidden)
+                .refreshable { await vm.reload() }
         } else if vm.collections.isEmpty && vm.didLoad {
-            emptyState(icon: "square.stack", text: "Коллекций пока нет")
+            ScrollView { emptyState(icon: "square.stack", text: "Коллекций пока нет").containerRelativeFrame(.vertical) }
+                .scrollIndicators(.hidden)
+                .refreshable { await vm.reload() }
         } else {
             ScrollView {
                 LazyVStack(spacing: 10) {
@@ -58,15 +54,13 @@ struct UserCollectionsView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
-                .padding(.bottom, 40)
+                .padding(.bottom, 90)
             }
             .scrollIndicators(.hidden)
+            .refreshable { await vm.reload() }
         }
     }
 
-    /// Скелетон на первую загрузку — по прямой просьбе, вместо голого
-    /// спиннера. Упрощённая форма collectionCard ниже (название + строка
-    /// статистики + место под веер превью), на плейсхолдерах SkeletonBar/Box.
     private var skeletonList: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
@@ -92,6 +86,8 @@ struct UserCollectionsView: View {
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
+    /// 1-в-1 UserCollectionsView.collectionCard (своя копия — та приватна к
+    /// своему файлу): название + чипы статистики + голоса + веер превью.
     private func collectionCard(_ collection: MangaCollection) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
@@ -166,8 +162,42 @@ struct UserCollectionsView: View {
         .frame(maxWidth: .infinity)
         .padding(32)
     }
+
+    // MARK: Нижняя панель — "Создать" + "Фильтры"
+
+    private var controlsBar: some View {
+        HStack(spacing: 10) {
+            Button { showCreateStub = true } label: {
+                pill(icon: "plus", text: "Создать свою коллекцию")
+            }
+            Spacer(minLength: 0)
+            Menu {
+                Picker("Сортировка", selection: $vm.sort) {
+                    ForEach(CollectionsListViewModel.Sort.allCases) { s in
+                        Text(s.title).tag(s)
+                    }
+                }
+            } label: {
+                pill(icon: "line.3.horizontal.decrease", text: "Фильтры")
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
+        .padding(.bottom, 20)
+    }
+
+    private func pill(icon: String, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.footnote.weight(.semibold))
+            Text(text).font(.footnote.weight(.medium)).lineLimit(1)
+        }
+        .foregroundStyle(Theme.textPrimary)
+        .padding(.horizontal, 14)
+        .frame(minHeight: Theme.pillControlHeight)
+        .glassEffect(.regular.interactive(), in: Capsule())
+    }
 }
 
 #Preview {
-    UserCollectionsView(userId: 1).preferredColorScheme(.dark)
+    NavigationStack { CollectionsListView() }.preferredColorScheme(.dark)
 }

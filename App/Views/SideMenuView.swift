@@ -51,7 +51,7 @@ struct SideMenuView: View {
     // История/Настройки/Загрузки теперь не sheet, а обычные PUSH-переходы внутри
     // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
     private enum MenuRoute: Hashable {
-        case history, settings, downloads, comments, franchises, friends
+        case history, settings, downloads, comments, franchises, friends, collections
         case teams, characters, people, publishers, users
     }
     // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
@@ -121,6 +121,7 @@ struct SideMenuView: View {
                 case .comments:   MyCommentsView(embedded: true)
                 case .franchises: FranchiseListView()
                 case .friends:    if let uid = auth.userId { FriendsView(userId: uid) }
+                case .collections: CollectionsListView()
                 case .teams:      DirectoryListView(kind: .team)
                 case .characters: DirectoryListView(kind: .character)
                 case .people:     DirectoryListView(kind: .people)
@@ -264,7 +265,7 @@ struct SideMenuView: View {
                 withAnimation(.easeInOut(duration: 0.2)) { catalogShowingTypes = true }
             })
             row("Сейчас читают", icon: "flame")
-            row("Коллекции", icon: "square.stack")
+            row("Коллекции", icon: "square.stack", action: { path.append(MenuRoute.collections) })
             row("Команды", icon: "person.3", action: { path.append(MenuRoute.teams) })
             row("Люди", icon: "person.crop.rectangle", action: { path.append(MenuRoute.people) })
             row("Персонажи", icon: "face.smiling", action: { path.append(MenuRoute.characters) })

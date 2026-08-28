@@ -3003,6 +3003,110 @@ struct MangaCollectionVotes: Decodable, Hashable {
     let down: Int
 }
 
+// MARK: - Детали коллекции (GET /collections/{id})
+
+/// Полная страница коллекции — ПОДТВЕРЖДЕНО реальным перехватом (proxypin,
+/// 2026-08-28): `{id, name, description:{ProseMirror}, attachments, type,
+/// views, favorites_count, items_count, comments_count, votes:{up,down,
+/// user}, user, user_id, site_id, created_at, updated_at, spoiler,
+/// interactive, adult, subscription:{is_subscribed,...}, blocks:[...]}`.
+/// `blocks` — тайтлы РАЗБИТЫ на именованные разделы (не единый список), см.
+/// CollectionBlock. `user` — автор, та же форма, что и в FriendshipEntry
+/// (переиспользуем FriendUser, лишние поля там просто игнорируются).
+struct CollectionDetail: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let description: String?
+    let user: FriendUser?
+    let isSubscribed: Bool
+    let votes: SimilarVotes?
+    let views: Int?
+    let favoritesCount: Int?
+    let itemsCount: Int?
+    let commentsCount: Int?
+    let adult: Bool?
+    let blocks: [CollectionBlock]
+
+    private struct Subscription: Decodable {
+        let isSubscribed: Bool?
+        enum CodingKeys: String, CodingKey { case isSubscribed = "is_subscribed" }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, votes, views, adult, user, blocks
+        case subscription
+        case favoritesCount = "favorites_count"
+        case itemsCount = "items_count"
+        case commentsCount = "comments_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        user = (try? c.decodeIfPresent(FriendUser.self, forKey: .user)) ?? nil
+        votes = (try? c.decodeIfPresent(SimilarVotes.self, forKey: .votes)) ?? nil
+        views = (try? c.decodeIfPresent(Int.self, forKey: .views)) ?? nil
+        favoritesCount = (try? c.decodeIfPresent(Int.self, forKey: .favoritesCount)) ?? nil
+        itemsCount = (try? c.decodeIfPresent(Int.self, forKey: .itemsCount)) ?? nil
+        commentsCount = (try? c.decodeIfPresent(Int.self, forKey: .commentsCount)) ?? nil
+        adult = (try? c.decodeIfPresent(Bool.self, forKey: .adult)) ?? nil
+        let sub = (try? c.decodeIfPresent(Subscription.self, forKey: .subscription)) ?? nil
+        isSubscribed = sub?.isSubscribed ?? false
+        blocks = ((try? c.decodeIfPresent([CollectionBlock].self, forKey: .blocks)) ?? nil) ?? []
+
+        // ProseMirror-документ — та же логика разбора, что и у TeamDetail.
+        // description (см. её комментарий): AnyJSON.extractReadableText()
+        // сохраняет разбивку на абзацы.
+        if let generic = (try? c.decodeIfPresent(AnyJSON.self, forKey: .description)) ?? nil {
+            let t = generic.extractReadableText()
+            description = t.isEmpty ? nil : t
+        } else {
+            description = nil
+        }
+    }
+}
+
+/// Именованный раздел коллекции ("Гейши"/"Таю"/"Юдзё"/"Ойран" или "РАЗДЕЛ
+/// I..IV" — оба варианта реально встречены перехватом) — коллекция может
+/// содержать несколько таких блоков, каждый со своим списком тайтлов.
+struct CollectionBlock: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let items: [CollectionBlockItem]
+
+    enum CodingKeys: String, CodingKey {
+        case id = "uuid", name, items
+    }
+}
+
+/// Один тайтл внутри блока — ПОДТВЕРЖДЕНО перехватом для `item_type:
+/// "manga"` (related — полноценный объект в форме MangaItem). Другие
+/// item_type (например "character") перехватом не пойманы, но `related` в
+/// этой экосистеме везде использует одни и те же имена полей (id/name/
+/// slug/cover/...) — декодируем тем же MangaItem, лишние/недостающие поля
+/// не ломают декод (там всё, кроме id/name/slug, Optional). Если и это не
+/// подошло — try? отдаёт nil, и такая карточка просто не показывается,
+/// вместо падения декода всей коллекции.
+struct CollectionBlockItem: Decodable, Identifiable {
+    let id: Int
+    let itemType: String
+    let comment: String?
+    let related: MangaItem?
+
+    enum CodingKeys: String, CodingKey {
+        case itemId = "item_id", itemType = "item_type", comment, related
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .itemId)) ?? 0
+        itemType = (try? c.decodeIfPresent(String.self, forKey: .itemType)) ?? "manga"
+        comment = (try? c.decodeIfPresent(String.self, forKey: .comment)) ?? nil
+        related = (try? c.decodeIfPresent(MangaItem.self, forKey: .related)) ?? nil
+    }
+}
+
 // MARK: - Отзывы на тайтл (GET /reviews?reviewable_type=manga&reviewable_id=)
 
 /// Отзыв на тайтл — ПОДТВЕРЖДЕНО реальным перехватом (proxypin, 2026-08-26):
