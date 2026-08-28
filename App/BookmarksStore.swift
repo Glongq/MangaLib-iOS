@@ -16,6 +16,13 @@ struct BookmarkFolder: Codable, Identifiable, Hashable {
     /// они не создаются через этот эндпоинт, у них фиксированные id 1-5.
     /// Optional — до ответа сервера (или если запрос не удался) остаётся nil.
     var serverId: Int?
+    /// Цвет папки С СЕРВЕРА (hex, напр. "#ff9b40") — только у папок,
+    /// подтянутых/смерженных через syncFoldersFromServer() (см. ниже), у 5
+    /// стандартных папок цвет по-прежнему берётся из badgeColor напрямую
+    /// (там же и у чисто локальных, ещё не запушенных папок). Optional со
+    /// значением по умолчанию — старые локальные записи без этого поля
+    /// декодируются нормально.
+    var colorHex: String? = nil
 
     static let reading   = BookmarkFolder(id: "reading",   name: "Читаю",     isDefault: true)
     static let planned   = BookmarkFolder(id: "planned",   name: "В планах",  isDefault: true)
@@ -49,8 +56,28 @@ struct BookmarkFolder: Codable, Identifiable, Hashable {
         case "dropped":  return .red
         case "finished": return .green
         case "favorite": return Theme.accent
-        default:         return Theme.textSecondary
+        default:
+            // Пользовательская папка (своя из createFolder() или подтянутая
+            // с сервера через syncFoldersFromServer()) — используем реальный
+            // цвет с сервера, если он известен, иначе нейтральный серый.
+            if let hex = colorHex, let color = Color(bookmarkFolderHex: hex) { return color }
+            return Theme.textSecondary
         }
+    }
+}
+
+/// Свой парсер hex-цвета папки (тот же приём, что и в UserBookmarksView/
+/// NotificationSettingsView — там он `private` и не виден отсюда).
+private extension Color {
+    init?(bookmarkFolderHex hex: String) {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let value = UInt32(s, radix: 16) else { return nil }
+        let r = Double((value >> 16) & 0xFF) / 255
+        let g = Double((value >> 8) & 0xFF) / 255
+        let b = Double(value & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
     }
 }
 
@@ -356,6 +383,37 @@ final class BookmarksStore: ObservableObject {
 
     // MARK: Синхронизация с аккаунтом
 
+    /// Подтягивает РЕАЛЬНЫЙ список папок аккаунта — `GET /bookmarks/folder/
+    /// {userId}` (см. MangaNetworkService.fetchUserBookmarkFolders) — тот же
+    /// эндпоинт, что уже используется для чужих публичных списков
+    /// (UserBookmarksView) и для настроек уведомлений
+    /// (NotificationSettingsView). Раньше папки, созданные НЕ через это
+    /// приложение (на сайте/другом клиенте), были не видны — теперь ЛЮБАЯ
+    /// небазовая (id не 1-5) папка аккаунта появляется в folders с реальным
+    /// serverId, и закладки в ней (см. syncFromServer ниже) больше не
+    /// пропускаются. 5 стандартных (id 1-5) не трогаем — они уже
+    /// представлены хардкодом (BookmarkFolder.defaults, apiId 1-5).
+    /// Мержит по serverId, не создаёт дублей при повторных вызовах и не
+    /// теряет уже созданные ЭТИМ приложением папки (createFolder() выставляет
+    /// serverId сразу после POST /bookmarks/folder — тут они просто найдутся
+    /// по тому же id и обновятся, а не задублируются).
+    private func syncFoldersFromServer() async {
+        guard let userId = AuthSession.shared.userId,
+              let remoteFolders = try? await MangaNetworkService.shared.fetchUserBookmarkFolders(userId: userId) else { return }
+        var changed = false
+        for remote in remoteFolders where !(1...5).contains(remote.id) {
+            if let idx = folders.firstIndex(where: { $0.serverId == remote.id }) {
+                if folders[idx].name != remote.name { folders[idx].name = remote.name; changed = true }
+                if folders[idx].colorHex != remote.colorHex { folders[idx].colorHex = remote.colorHex; changed = true }
+            } else {
+                folders.append(BookmarkFolder(id: "server-\(remote.id)", name: remote.name, isDefault: false,
+                                               serverId: remote.id, colorHex: remote.colorHex))
+                changed = true
+            }
+        }
+        if changed { persistFolders() }
+    }
+
     /// Подтягивает реальные закладки аккаунта с сервера в 5 стандартных папок.
     /// Использует НАСТОЯЩИЙ эндпоинт "мои закладки" — `GET /bookmarks?...&
     /// user_id=` (см. MangaNetworkService.fetchBookmarksAccountList) — вместо
@@ -378,6 +436,12 @@ final class BookmarksStore: ObservableObject {
         }
         isSyncing = true
         defer { isSyncing = false }
+
+        // Сначала мержим РЕАЛЬНЫЙ список папок аккаунта (см.
+        // syncFoldersFromServer) — иначе закладки в кастомных папках,
+        // созданных не через это приложение, ниже не смогут найти свою
+        // папку по status и будут пропущены.
+        await syncFoldersFromServer()
 
         // status=0 — "все папки" одним проходом (подтверждено перехваченным
         // запросом сайта, вкладка "Все"). Листаем страницы, пока сервер не
@@ -408,13 +472,12 @@ final class BookmarksStore: ObservableObject {
             // "status" здесь — то же самое поле, что и для стандартных папок
             // (apiId 1-5), но у ЗАКЛАДКИ В ПОЛЬЗОВАТЕЛЬСКОЙ папке в нём лежит
             // числовой id САМОЙ папки (подтверждено перехватом — см. add()
-            // выше). Поэтому ищем сперва среди стандартных (apiId), потом
-            // среди СВОИХ пользовательских папок (serverId, проставляется в
-            // createFolder()). Папки, созданные НЕ в этом приложении (на
-            // сайте/другом клиенте), нам пока не видны — у нас нет
-            // подтверждённого эндпоинта "список моих пользовательских папок",
-            // поэтому такие закладки по-прежнему пропускаются, а не теряются
-            // молча под чужим/неверным именем.
+            // выше). Ищем сперва среди стандартных (apiId), потом среди
+            // ЛЮБЫХ пользовательских папок аккаунта (serverId) — включая
+            // созданные не через это приложение (на сайте/другом клиенте):
+            // syncFoldersFromServer() выше уже смержил их все в folders по
+            // РЕАЛЬНОМУ `GET /bookmarks/folder/{userId}`, так что теперь они
+            // тоже находятся, а не пропускаются молча.
             guard let folder = folders.first(where: { $0.apiId == status })
                     ?? folders.first(where: { $0.serverId == status }) else { continue }
             let slug = entry.media.apiSlug
