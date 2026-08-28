@@ -471,9 +471,12 @@ struct FriendshipEntry: Decodable, Identifiable, Hashable {
 // MARK: - Папки закладок другого пользователя («Списки тайтлов» в профиле)
 
 /// Папка закладок — ПОДТВЕРЖДЕНО перехватом `GET /bookmarks/folder/{userId}`:
-/// `{id,name,public,notify,color,textColor,order,count,site_ids}`. Отдельно
-/// от ServerBookmarkFolder (та — ответ создания СВОЕЙ папки, без count/color)
-/// — тут нужны count (сколько тайтлов) и цвет чипа для отображения.
+/// `{id,name,public,notify,color,textColor,order,count,site_ids}`. Та же
+/// форма и у ответа `POST /bookmarks/folder` (создание своей папки) —
+/// используется и как decode-target для MangaNetworkService.
+/// createBookmarkFolder. У ответа `PUT /bookmarks/folder/{id}` (переименование)
+/// поле `count` уже ОТСУТСТВУЕТ — для него этот тип НЕ подходит, см.
+/// updateBookmarkFolder (тело ответа там просто не разбирается).
 struct UserBookmarkFolder: Decodable, Identifiable, Hashable {
     let id: Int
     let name: String
@@ -483,6 +486,12 @@ struct UserBookmarkFolder: Decodable, Identifiable, Hashable {
     /// экраном настроек уведомлений (см. NotificationSettingsView), сам
     /// список закладок пользователя (UserBookmarksView) это поле не читает.
     var notify: Bool
+    /// Приватность папки — ПОДТВЕРЖДЕНО перехватом: у 5 стандартных папок
+    /// всегда `true`, у ЛЮБОЙ новой кастомной (`POST /bookmarks/folder`) —
+    /// `false` по умолчанию. Нужно для BookmarksStore.updateFolder — `PUT
+    /// /bookmarks/folder/{id}` шлёт этот флаг ВМЕСТЕ с именем/цветом (весь
+    /// объект целиком), терять его при простом переименовании нельзя.
+    var isPublic: Bool
     /// На каких сайтах сети видна эта папка — ПОДТВЕРЖДЕНО перехватом
     /// (`GET /bookmarks/folder/{userId}` отдаёт ПОЛНЫЙ список аккаунта СРАЗУ
     /// по всем сайтам, без учёта Site-Id запроса; фильтрация "какие папки
@@ -492,7 +501,9 @@ struct UserBookmarkFolder: Decodable, Identifiable, Hashable {
     /// тоже фильтровала по активному сайту, как настоящий сайт.
     var siteIds: [Int]
 
-    enum CodingKeys: String, CodingKey { case id, name, count, colorHex = "color", notify, siteIds = "site_ids" }
+    enum CodingKeys: String, CodingKey {
+        case id, name, count, colorHex = "color", notify, isPublic = "public", siteIds = "site_ids"
+    }
 }
 
 // MARK: - Настройки уведомлений аккаунта
@@ -1069,17 +1080,6 @@ struct BookmarkListEntry: Decodable {
         guard let rating, rating > 0 else { return nil }
         return rating
     }
-}
-
-/// Ответ настоящего эндпоинта создания папки закладок — `POST /bookmarks/folder`
-/// (подтверждено перехватом: тело `{"name":"она"}` → 201 Created, `{"data":
-/// {"id":2717854,"name":"она","public":false,"notify":false,"color":"#b051ff",
-/// "textColor":"#fff","order":5,"count":0,"site_ids":[1]}}`). Нам нужен только
-/// числовой id — сохраняется как BookmarkFolder.serverId (см. BookmarksStore) —
-/// остальные поля сервер присваивает сам, локально нам их дублировать незачем.
-struct ServerBookmarkFolder: Decodable {
-    let id: Int
-    let name: String
 }
 
 // MARK: - Summary rich-text (ProseMirror/TipTap)

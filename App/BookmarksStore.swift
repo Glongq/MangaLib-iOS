@@ -34,6 +34,15 @@ struct BookmarkFolder: Codable, Identifiable, Hashable {
     /// стандартных папок это поле не используется (они и так всегда видны
     /// через isDefault).
     var siteIds: [Int]? = nil
+    /// notify/isPublic — остальные два поля полного объекта `PUT
+    /// /bookmarks/folder/{id}` (см. MangaNetworkService.updateBookmarkFolder),
+    /// нужны ТОЛЬКО чтобы не затереть их при простом переименовании/смене
+    /// цвета — сами по себе в UI сейчас не редактируются (см. EditFolderSheet
+    /// в BookmarksView). Optional, как colorHex/siteIds выше — nil, пока не
+    /// подтянуты через createFolder()/syncFoldersFromServer() (или у старых
+    /// локальных записей без этого поля); у 5 стандартных не используются.
+    var notify: Bool? = nil
+    var isPublic: Bool? = nil
 
     static let reading   = BookmarkFolder(id: "reading",   name: "Читаю",     isDefault: true)
     static let planned   = BookmarkFolder(id: "planned",   name: "В планах",  isDefault: true)
@@ -280,14 +289,18 @@ final class BookmarksStore: ObservableObject {
 
         // Локально папка уже создана (экран не ждёт сеть) — пушим создание в
         // РЕАЛЬНЫЙ аккаунт через подтверждённый `POST /bookmarks/folder` (см.
-        // MangaNetworkService.createBookmarkFolder). Сохраняем вернувшийся
-        // числовой id записи — пригодится для настоящего удаления/
-        // переименования папки на сервере, если/когда эти эндпоинты найдутся.
+        // MangaNetworkService.createBookmarkFolder). Ответ теперь та же
+        // форма, что и у GET /bookmarks/folder/{userId} (UserBookmarkFolder)
+        // — забираем РЕАЛЬНЫЕ color/notify/public/site_ids, а не гадаем.
         Task {
             do {
                 let serverFolder = try await MangaNetworkService.shared.createBookmarkFolder(name: trimmed)
                 if let idx = self.folders.firstIndex(where: { $0.id == folder.id }) {
                     self.folders[idx].serverId = serverFolder.id
+                    self.folders[idx].colorHex = serverFolder.colorHex
+                    self.folders[idx].notify = serverFolder.notify
+                    self.folders[idx].isPublic = serverFolder.isPublic
+                    self.folders[idx].siteIds = serverFolder.siteIds
                     self.persistFolders()
                 }
             } catch {
@@ -295,6 +308,68 @@ final class BookmarksStore: ObservableObject {
             }
         }
         return folder
+    }
+
+    /// Переименовать/сменить цвет кастомной папки — ПОДТВЕРЖДЕНО перехватом:
+    /// `PUT /bookmarks/folder/{id}` (см. MangaNetworkService.
+    /// updateBookmarkFolder). Только для кастомных, уже подтверждённых
+    /// сервером папок (serverId != nil) — 5 стандартных на реальном сайте
+    /// вообще не переименовываются, там нет такого UI. Применяется локально
+    /// СРАЗУ (экран не ждёт сеть), пуш — в фоне; notify/isPublic шлём КАК
+    /// ЕСТЬ (см. поля выше) — PUT требует объект целиком, менять их тут
+    /// не просят.
+    func updateFolder(_ folderId: String, name: String, colorHex: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let idx = folders.firstIndex(where: { $0.id == folderId }),
+              let serverId = folders[idx].serverId else { return }
+        folders[idx].name = trimmed
+        folders[idx].colorHex = colorHex
+        persistFolders()
+
+        let notify = folders[idx].notify ?? false
+        let isPublic = folders[idx].isPublic ?? false
+        Task {
+            do {
+                try await MangaNetworkService.shared.updateBookmarkFolder(
+                    id: serverId, name: trimmed, colorHex: colorHex, notify: notify, isPublic: isPublic)
+            } catch {
+                print("[BookmarksStore] не удалось переименовать папку (\(trimmed)) на сервере: \(error)")
+            }
+        }
+    }
+
+    /// Удалить кастомную папку — ПОДТВЕРЖДЕНО перехватом: `DELETE
+    /// /bookmarks/folder/{id}` (см. MangaNetworkService.deleteBookmarkFolder).
+    /// `moveTo` — id ДРУГОЙ локальной папки, куда перенести тайтлы из
+    /// удаляемой (реальный сайт делает перенос ЭТИМ ЖЕ запросом, не отдельным
+    /// — сервер сам переставляет status у затронутых закладок). `nil` —
+    /// тайтлы удаляемой папки пропадают вместе с ней (ровно то же самое
+    /// поведение, что и на сайте по умолчанию — там перенос отдельная,
+    /// самостоятельно включаемая галочка). Только для кастомных папок с
+    /// известным serverId — 5 стандартных не удаляются никогда.
+    func deleteFolder(_ folderId: String, moveTo targetFolderId: String?) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderId }), let serverId = folders[idx].serverId else { return }
+        let targetFolder = targetFolderId.flatMap { id in folders.first(where: { $0.id == id }) }
+        let moveToServerId = targetFolder?.apiId ?? targetFolder?.serverId
+
+        if let targetFolder, moveToServerId != nil {
+            for i in items.indices where items[i].folderId == folderId {
+                items[i].folderId = targetFolder.id
+            }
+        } else {
+            items.removeAll { $0.folderId == folderId }
+        }
+        folders.remove(at: idx)
+        persistItems()
+        persistFolders()
+
+        Task {
+            do {
+                try await MangaNetworkService.shared.deleteBookmarkFolder(id: serverId, moveTo: moveToServerId)
+            } catch {
+                print("[BookmarksStore] не удалось удалить папку на сервере (serverId: \(serverId)): \(error)")
+            }
+        }
     }
 
     /// Меняет порядок папок (см. BookmarksView — щит редактирования списков
@@ -309,11 +384,28 @@ final class BookmarksStore: ObservableObject {
         var newVisibleOrder = allFolders
         newVisibleOrder.move(fromOffsets: fromOffsets, toOffset: toOffset)
         let visibleIds = Set(newVisibleOrder.map { $0.id })
+        // Числовые id для пуша на сервер — считаем ДО того, как очередь ниже
+        // израсходует newVisibleOrder через removeFirst().
+        let pushOrder = newVisibleOrder.compactMap { $0.apiId ?? $0.serverId }
+        var queue = newVisibleOrder
         folders = folders.map { folder in
             guard visibleIds.contains(folder.id) else { return folder }
-            return newVisibleOrder.removeFirst()
+            return queue.removeFirst()
         }
         persistFolders()
+
+        // Реальный сервер поддерживает сортировку — ПОДТВЕРЖДЕНО перехватом
+        // (см. MangaNetworkService.saveBookmarkFolderOrder). Best-effort,
+        // тихо — экран не ждёт сеть и не показывает ошибку при неудаче,
+        // локальный порядок уже применён.
+        guard AuthSession.shared.isLoggedIn, pushOrder.count == newVisibleOrder.count else { return }
+        Task {
+            do {
+                try await MangaNetworkService.shared.saveBookmarkFolderOrder(pushOrder)
+            } catch {
+                print("[BookmarksStore] не удалось запушить порядок папок на сервер: \(error)")
+            }
+        }
     }
 
     // MARK: Закладки
@@ -447,9 +539,12 @@ final class BookmarksStore: ObservableObject {
                 if folders[idx].name != remote.name { folders[idx].name = remote.name; changed = true }
                 if folders[idx].colorHex != remote.colorHex { folders[idx].colorHex = remote.colorHex; changed = true }
                 if folders[idx].siteIds != remote.siteIds { folders[idx].siteIds = remote.siteIds; changed = true }
+                if folders[idx].notify != remote.notify { folders[idx].notify = remote.notify; changed = true }
+                if folders[idx].isPublic != remote.isPublic { folders[idx].isPublic = remote.isPublic; changed = true }
             } else {
                 folders.append(BookmarkFolder(id: "server-\(remote.id)", name: remote.name, isDefault: false,
-                                               serverId: remote.id, colorHex: remote.colorHex, siteIds: remote.siteIds))
+                                               serverId: remote.id, colorHex: remote.colorHex, siteIds: remote.siteIds,
+                                               notify: remote.notify, isPublic: remote.isPublic))
                 changed = true
             }
         }

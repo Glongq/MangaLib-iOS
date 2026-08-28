@@ -666,15 +666,66 @@ final class MangaNetworkService {
     /// Создать пользовательскую папку закладок в РЕАЛЬНОМ аккаунте —
     /// `POST /bookmarks/folder`, подтверждено перехваченным запросом: тело
     /// всего лишь `{"name": "<строка>"}`, сервер сам присваивает id/цвет/
-    /// порядок/site_ids. Ответ (201 Created) — `{"data":{"id":N,"name":...,
-    /// "public":false,"notify":false,"color":"#...","textColor":"#...",
-    /// "order":N,"count":0,"site_ids":[...]}}`. Нам из ответа нужен только
-    /// числовой id — он потребуется, если понадобится настоящее удаление/
-    /// переименование папки на сервере (эти эндпоинты пока не перехвачены).
-    func createBookmarkFolder(name: String) async throws -> ServerBookmarkFolder {
+    /// порядок/site_ids/notify(false)/public(false). Ответ (201 Created) —
+    /// та же форма, что и у `GET /bookmarks/folder/{userId}` (см.
+    /// UserBookmarkFolder) — decode прямо в неё, чтобы сразу знать
+    /// РЕАЛЬНЫЕ color/notify/public/site_ids новой папки, а не гадать.
+    func createBookmarkFolder(name: String) async throws -> UserBookmarkFolder {
         let request = try makeJSONRequest(path: "/bookmarks/folder", method: "POST", body: CreateFolderPayload(name: name))
-        let response: APIObjectResponse<ServerBookmarkFolder> = try await perform(request)
+        let response: APIObjectResponse<UserBookmarkFolder> = try await perform(request)
         return response.data
+    }
+
+    /// Переименование/цвет/notify/приватность кастомной папки — ПОДТВЕРЖДЕНО
+    /// перехватом: `PUT /bookmarks/folder/{id}`, тело ВСЕГДА полное —
+    /// `{"name","color","notify","public"}` разом, не частичный патч (та же
+    /// логика, что у NotificationSettings/PUT /user/settings/notifications).
+    /// Значит переименование/смена цвета ОБЯЗАНЫ прислать текущие
+    /// notify/public неизменными — см. BookmarksStore.updateFolder. Ответ —
+    /// объект БЕЗ поля count (в отличие от GET/POST) — тело не разбираем.
+    func updateBookmarkFolder(id: Int, name: String, colorHex: String, notify: Bool, isPublic: Bool) async throws {
+        let payload = UpdateFolderPayload(name: name, color: colorHex, notify: notify, isPublic: isPublic)
+        let request = try makeJSONRequest(path: "/bookmarks/folder/\(id)", method: "PUT", body: payload)
+        try await performVoid(request)
+    }
+
+    private struct UpdateFolderPayload: Encodable {
+        let name: String
+        let color: String
+        let notify: Bool
+        let isPublic: Bool
+        enum CodingKeys: String, CodingKey { case name, color, notify, isPublic = "public" }
+    }
+
+    /// Удаление кастомной папки — ПОДТВЕРЖДЕНО перехватом: `DELETE
+    /// /bookmarks/folder/{id}`. Тело `{}` (папка пуста ИЛИ реальный сайт
+    /// специально решил не переносить тайтлы — по умолчанию на сайте это
+    /// НЕ отмечено, тайтлы просто уходят вместе с папкой) — либо
+    /// `{"move_to": <id другой папки>}`, если явно выбрали перенос. `nil`
+    /// здесь → ключ move_to не уйдёт вовсе (синтезированный Encodable у
+    /// Optional делает encodeIfPresent) — ровно то, что перехвачено для
+    /// пустого случая.
+    func deleteBookmarkFolder(id: Int, moveTo: Int?) async throws {
+        let request = try makeJSONRequest(path: "/bookmarks/folder/\(id)", method: "DELETE", body: DeleteFolderPayload(move_to: moveTo))
+        try await performVoid(request)
+    }
+
+    private struct DeleteFolderPayload: Encodable {
+        let move_to: Int?
+    }
+
+    /// Сортировка папок ТЕКУЩЕГО сайта — ПОДТВЕРЖДЕНО перехватом: `PUT
+    /// /bookmarks/folder/order`, тело `{"order":[id,id,...]}` — массив
+    /// РЕАЛЬНЫХ числовых id (apiId у стандартных / serverId у кастомных) в
+    /// новом порядке. У реального клиента массив содержит ТОЛЬКО папки
+    /// активного сайта — см. BookmarksStore.moveFolders.
+    func saveBookmarkFolderOrder(_ ids: [Int]) async throws {
+        let request = try makeJSONRequest(path: "/bookmarks/folder/order", method: "PUT", body: FolderOrderPayload(order: ids))
+        try await performVoid(request)
+    }
+
+    private struct FolderOrderPayload: Encodable {
+        let order: [Int]
     }
 
     /// Отмечает главу просмотренной в РЕАЛЬНОМ аккаунте — настоящий,

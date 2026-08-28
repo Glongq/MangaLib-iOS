@@ -30,6 +30,16 @@ struct BookmarksView: View {
     /// Щит "Вид"/"Сортировка" (иконка шестерёнки в шапке).
     @State private var showViewSortSheet = false
 
+    /// Папка, которую сейчас переименовывают/меняют цвет — открывается
+    /// долгим нажатием на чип папки (см. categoryMenu/folderContextMenu),
+    /// только для кастомных папок (см. EditFolderSheet).
+    @State private var editingFolder: BookmarkFolder?
+    /// Папка, которую сейчас удаляют — отдельный щит (не просто alert),
+    /// потому что нужен выбор "перенести тайтлы в другую папку или нет"
+    /// (см. DeleteFolderSheet) — ровно то же самое, что предлагает реальный
+    /// сайт при удалении непустой папки.
+    @State private var deletingFolder: BookmarkFolder?
+
     /// Список/плитка — см. ViewSortSheet. Сохраняется между запусками.
     @AppStorage("bookmarks_view_mode") private var viewMode: BookmarksViewMode = .list
     /// Поле сортировки — см. ViewSortSheet.
@@ -122,6 +132,22 @@ struct BookmarksView: View {
                 ViewSortSheet(viewMode: $viewMode, sortOption: $sortOption, sortDirection: $sortDirection)
                     .preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
             }
+            // Долгое нажатие на чип кастомной папки → переименовать/сменить
+            // цвет (см. folderContextMenu) — ПОДТВЕРЖДЕНО перехватом `PUT
+            // /bookmarks/folder/{id}` (см. EditFolderSheet).
+            .sheet(item: $editingFolder) { folder in
+                EditFolderSheet(store: store, folder: folder)
+                    .preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
+            }
+            // Долгое нажатие → "Удалить папку" (см. folderContextMenu) —
+            // ПОДТВЕРЖДЕНО перехватом `DELETE /bookmarks/folder/{id}` (см.
+            // DeleteFolderSheet).
+            .sheet(item: $deletingFolder) { folder in
+                DeleteFolderSheet(store: store, folder: folder) {
+                    if selectedFolderId == folder.id { selectedFolderId = nil }
+                }
+                .preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
+            }
             // Полоска подкатегорий — снизу, над главной панелью. ВНУТРИ
             // NavigationStack (на корневом контенте), а не снаружи него: раньше
             // висела снаружи, чтобы обойти баг совместного расчёта с ВНЕШНИМ
@@ -201,12 +227,39 @@ struct BookmarksView: View {
             HStack(spacing: 8) {
                 categoryChip(title: "Все", id: nil)
                 ForEach(store.allFolders) { folder in
-                    categoryChip(title: folder.name, id: folder.id)
+                    if folder.isDefault {
+                        // 5 стандартных папок на реальном сайте вообще не
+                        // переименовываются/не удаляются — там нет такого UI,
+                        // поэтому долгое нажатие тут ничего не открывает.
+                        categoryChip(title: folder.name, id: folder.id)
+                    } else {
+                        categoryChip(title: folder.name, id: folder.id)
+                            .contextMenu { folderContextMenu(folder) }
+                    }
                 }
                 addFolderChip
             }
         }
         .scrollIndicators(.hidden)
+    }
+
+    /// Долгое нажатие на чип кастомной папки — ПОДТВЕРЖДЕНО перехватом:
+    /// переименование/цвет (`PUT /bookmarks/folder/{id}`) и удаление
+    /// (`DELETE /bookmarks/folder/{id}`, см. BookmarksStore.updateFolder/
+    /// deleteFolder).
+    private func folderContextMenu(_ folder: BookmarkFolder) -> some View {
+        Group {
+            Button {
+                editingFolder = folder
+            } label: {
+                Label("Изменить", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                deletingFolder = folder
+            } label: {
+                Label("Удалить папку", systemImage: "trash")
+            }
+        }
     }
 
     private func categoryChip(title: String, id: String?) -> some View {
@@ -724,6 +777,212 @@ private struct FolderOrderSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+    }
+}
+
+/// Переименование/смена цвета кастомной папки — долгое нажатие на чип (см.
+/// folderContextMenu). ПОДТВЕРЖДЕНО перехватом `PUT /bookmarks/folder/{id}`
+/// (см. BookmarksStore.updateFolder) — сам эндпоинт требует ВСЕГДА полный
+/// объект, но notify/приватность здесь не редактируются (по прямой просьбе —
+/// пользователь пока не определился насчёт уведомлений папок), store сам
+/// подставляет уже известные значения при сохранении.
+private struct EditFolderSheet: View {
+    @ObservedObject var store: BookmarksStore
+    let folder: BookmarkFolder
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var color: Color
+
+    init(store: BookmarksStore, folder: BookmarkFolder) {
+        self.store = store
+        self.folder = folder
+        _name = State(initialValue: folder.name)
+        _color = State(initialValue: Color(editFolderHex: folder.colorHex) ?? Theme.accent)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Название").font(.footnote).foregroundStyle(Theme.textSecondary)
+                        TextField("Название папки", text: $name)
+                            .textFieldStyle(.plain)
+                            .padding(.horizontal, 14)
+                            .frame(height: 44)
+                            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+
+                    HStack {
+                        Text("Цвет").foregroundStyle(Theme.textPrimary)
+                        Spacer(minLength: 0)
+                        ColorPicker("", selection: $color, supportsOpacity: false)
+                            .labelsHidden()
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 52)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .padding(16)
+            }
+            .background(Theme.background)
+            .navigationTitle("Изменить папку")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Отмена") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Сохранить") {
+                        store.updateFolder(folder.id, name: name, colorHex: color.editFolderHexString)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .tint(Theme.accent)
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+/// Удаление кастомной папки — долгое нажатие на чип (см. folderContextMenu).
+/// ПОДТВЕРЖДЕНО перехватом `DELETE /bookmarks/folder/{id}`, опционально
+/// `{"move_to":<id>}` (см. BookmarksStore.deleteFolder). "Перенести тайтлы"
+/// — ВЫКЛЮЧЕНО по умолчанию, ровно как на реальном сайте (там это
+/// отдельная, самостоятельно включаемая галочка — по умолчанию тайтлы
+/// удаляются вместе с папкой).
+private struct DeleteFolderSheet: View {
+    @ObservedObject var store: BookmarksStore
+    let folder: BookmarkFolder
+    /// Вызывается сразу после реального удаления — вызывающий экран
+    /// сбрасывает выбранный фильтр, если он указывал на эту папку.
+    var onDeleted: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var moveItems = false
+    @State private var targetFolderId: String?
+
+    private var itemsCount: Int { store.titlesCount(in: folder.id) }
+    private var otherFolders: [BookmarkFolder] { store.allFolders.filter { $0.id != folder.id } }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                VStack(spacing: 6) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.red)
+                    Text("Удалить «\(folder.name)»?")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    if itemsCount > 0 {
+                        Text("В папке \(itemsCount) \(titlesWord(itemsCount)). Без переноса они будут удалены вместе с папкой — как на сайте.")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
+                    }
+                }
+                .padding(.top, 12)
+
+                if itemsCount > 0 {
+                    VStack(spacing: 0) {
+                        Toggle(isOn: $moveItems.animation(.easeInOut(duration: 0.2))) {
+                            Text("Перенести тайтлы в другую папку").foregroundStyle(Theme.textPrimary)
+                        }
+                        .tint(Theme.accent)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 52)
+
+                        if moveItems, !otherFolders.isEmpty {
+                            Divider().overlay(Theme.separator).padding(.leading, 16)
+                            HStack {
+                                Text("Куда").foregroundStyle(Theme.textPrimary)
+                                Spacer(minLength: 0)
+                                Picker("", selection: $targetFolderId) {
+                                    ForEach(otherFolders) { f in
+                                        Text(f.name).tag(Optional(f.id))
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .tint(Theme.accent)
+                            }
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 52)
+                        }
+                    }
+                    .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.horizontal, 16)
+                }
+
+                Spacer(minLength: 0)
+
+                Button(role: .destructive) {
+                    store.deleteFolder(folder.id, moveTo: moveItems ? targetFolderId : nil)
+                    onDeleted()
+                    dismiss()
+                } label: {
+                    Text("Удалить папку")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 46)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+            }
+            .background(Theme.background)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            // Дефолт — "Читаю", как на реальном сайте (там перенос по
+            // умолчанию целится в id 1/21, стандартную папку "в процессе").
+            targetFolderId = otherFolders.first(where: { $0.id == "reading" })?.id ?? otherFolders.first?.id
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func titlesWord(_ n: Int) -> String {
+        let mod10 = n % 10, mod100 = n % 100
+        if mod10 == 1 && mod100 != 11 { return "тайтл" }
+        if (2...4).contains(mod10) && !(12...14).contains(mod100) { return "тайтла" }
+        return "тайтлов"
+    }
+}
+
+/// Свой парсер hex-цвета (тот же приём, что и в BookmarksStore/
+/// UserBookmarksView/NotificationSettingsView — там он `private` и не виден
+/// отсюда) — плюс обратная конвертация Color → hex, нужна только здесь
+/// (сохранение выбора ColorPicker, см. EditFolderSheet).
+private extension Color {
+    init?(editFolderHex hex: String?) {
+        guard var s = hex?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let value = UInt32(s, radix: 16) else { return nil }
+        let r = Double((value >> 16) & 0xFF) / 255
+        let g = Double((value >> 8) & 0xFF) / 255
+        let b = Double(value & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
+    }
+
+    var editFolderHexString: String {
+        let uiColor = UIColor(self)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return String(format: "#%02x%02x%02x", Int((r * 255).rounded()), Int((g * 255).rounded()), Int((b * 255).rounded()))
     }
 }
 
