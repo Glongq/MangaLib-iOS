@@ -23,6 +23,17 @@ struct BookmarkFolder: Codable, Identifiable, Hashable {
     /// значением по умолчанию — старые локальные записи без этого поля
     /// декодируются нормально.
     var colorHex: String? = nil
+    /// На каких сайтах сети (LibSite.rawValue) видна эта папка —
+    /// ПОДТВЕРЖДЕНО перехватом: `GET /bookmarks/folder/{userId}` отдаёт
+    /// ПОЛНЫЙ список аккаунта сразу по всем сайтам, фильтрация "что
+    /// показывать на этом сайте" — целиком на фронтенде, по этому полю (см.
+    /// allFolders ниже). nil = ещё не знаем область (старые локальные папки
+    /// до этого поля — синтезированный Codable сам обрабатывает Optional как
+    /// decodeIfPresent, значит они декодируются нормально, просто без этого
+    /// поля) — трактуем как "видна везде", а не прячем — см. allFolders. У 5
+    /// стандартных папок это поле не используется (они и так всегда видны
+    /// через isDefault).
+    var siteIds: [Int]? = nil
 
     static let reading   = BookmarkFolder(id: "reading",   name: "Читаю",     isDefault: true)
     static let planned   = BookmarkFolder(id: "planned",   name: "В планах",  isDefault: true)
@@ -229,8 +240,19 @@ final class BookmarksStore: ObservableObject {
 
     // MARK: Папки
 
-    /// Все категории (по умолчанию + пользовательские).
-    var allFolders: [BookmarkFolder] { folders }
+    /// Категории, видимые на ТЕКУЩЕМ активном сайте — прямая просьба "хочу
+    /// чтобы от активного сайта зависели папки в закладках", как на
+    /// реальном сайте (там это foldersBySiteId() во фронтенде, сам GET
+    /// отдаёт папки СРАЗУ по всем сайтам без фильтра, см. siteIds).
+    /// 5 стандартных всегда видны (site_ids:[0,1,2,3,4] подтверждено
+    /// перехватом — то есть везде, кроме "сайта 5"/аниме, которого в
+    /// LibSite вообще нет). siteIds == nil (см. комментарий у поля) —
+    /// тоже показываем, а не прячем: не хотим, чтобы папка "пропадала"
+    /// только из-за того, что мы ещё не знаем её реальную область.
+    var allFolders: [BookmarkFolder] {
+        let activeSiteId = SiteSession.shared.activeSite.rawValue
+        return folders.filter { $0.isDefault || ($0.siteIds?.contains(activeSiteId) ?? true) }
+    }
 
     func titlesCount(in folderId: String?) -> Int {
         guard let folderId else { return items.count }   // nil = «Все»
@@ -246,7 +268,13 @@ final class BookmarksStore: ObservableObject {
     func createFolder(name: String) -> BookmarkFolder? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let folder = BookmarkFolder(id: UUID().uuidString, name: trimmed, isDefault: false)
+        // siteIds — сразу текущий активный сайт (POST /bookmarks/folder
+        // ниже реально уходит с его Site-Id — см. MangaNetworkService.
+        // createBookmarkFolder/baseURL(siteId:)), чтобы новая папка сразу
+        // была видна только там, где её создали, не дожидаясь следующего
+        // syncFoldersFromServer().
+        let folder = BookmarkFolder(id: UUID().uuidString, name: trimmed, isDefault: false,
+                                     siteIds: [SiteSession.shared.activeSite.rawValue])
         folders.append(folder)
         persistFolders()
 
@@ -270,11 +298,21 @@ final class BookmarksStore: ObservableObject {
     }
 
     /// Меняет порядок папок (см. BookmarksView — щит редактирования списков
-    /// по иконке карандаша) — определяет порядок чипов внизу Закладок.
-    /// Чисто локальная настройка отображения — никакого серверного аналога
-    /// у порядка папок нет.
+    /// по иконке карандаша) — определяет порядок чипов внизу Закладок. Чисто
+    /// локальная настройка отображения — реальный `PUT /bookmarks/folder/
+    /// order` на сервере ЕСТЬ (перехвачено), но пока не подключён.
+    /// `fromOffsets`/`toOffset` — индексы из ОТОБРАЖАЕМОГО списка
+    /// (allFolders, отфильтрован по активному сайту — см. выше), не из
+    /// полного folders, поэтому переставляем именно видимую сейчас
+    /// подпоследовательность, не трогая позиции папок других сайтов.
     func moveFolders(fromOffsets: IndexSet, toOffset: Int) {
-        folders.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        var newVisibleOrder = allFolders
+        newVisibleOrder.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        let visibleIds = Set(newVisibleOrder.map { $0.id })
+        folders = folders.map { folder in
+            guard visibleIds.contains(folder.id) else { return folder }
+            return newVisibleOrder.removeFirst()
+        }
         persistFolders()
     }
 
@@ -396,7 +434,10 @@ final class BookmarksStore: ObservableObject {
     /// Мержит по serverId, не создаёт дублей при повторных вызовах и не
     /// теряет уже созданные ЭТИМ приложением папки (createFolder() выставляет
     /// serverId сразу после POST /bookmarks/folder — тут они просто найдутся
-    /// по тому же id и обновятся, а не задублируются).
+    /// по тому же id и обновятся, а не задублируются). Заодно подтягивает
+    /// siteIds — реальную область видимости папки (см. BookmarkFolder.
+    /// siteIds/allFolders), ПОДТВЕРЖДЕНО перехватом: GET отдаёт папки СРАЗУ
+    /// по всем сайтам аккаунта, без фильтра по Site-Id запроса.
     private func syncFoldersFromServer() async {
         guard let userId = AuthSession.shared.userId,
               let remoteFolders = try? await MangaNetworkService.shared.fetchUserBookmarkFolders(userId: userId) else { return }
@@ -405,9 +446,10 @@ final class BookmarksStore: ObservableObject {
             if let idx = folders.firstIndex(where: { $0.serverId == remote.id }) {
                 if folders[idx].name != remote.name { folders[idx].name = remote.name; changed = true }
                 if folders[idx].colorHex != remote.colorHex { folders[idx].colorHex = remote.colorHex; changed = true }
+                if folders[idx].siteIds != remote.siteIds { folders[idx].siteIds = remote.siteIds; changed = true }
             } else {
                 folders.append(BookmarkFolder(id: "server-\(remote.id)", name: remote.name, isDefault: false,
-                                               serverId: remote.id, colorHex: remote.colorHex))
+                                               serverId: remote.id, colorHex: remote.colorHex, siteIds: remote.siteIds))
                 changed = true
             }
         }

@@ -483,8 +483,16 @@ struct UserBookmarkFolder: Decodable, Identifiable, Hashable {
     /// экраном настроек уведомлений (см. NotificationSettingsView), сам
     /// список закладок пользователя (UserBookmarksView) это поле не читает.
     var notify: Bool
+    /// На каких сайтах сети видна эта папка — ПОДТВЕРЖДЕНО перехватом
+    /// (`GET /bookmarks/folder/{userId}` отдаёт ПОЛНЫЙ список аккаунта СРАЗУ
+    /// по всем сайтам, без учёта Site-Id запроса; фильтрация "какие папки
+    /// показывать" — целиком на фронтенде, по этому полю). 5 стандартных
+    /// папок — `[0,1,2,3,4]`; кастомные — сайт, на котором их создали. Нужно
+    /// BookmarksStore.syncFoldersFromServer(), чтобы вкладка «Закладки»
+    /// тоже фильтровала по активному сайту, как настоящий сайт.
+    var siteIds: [Int]
 
-    enum CodingKeys: String, CodingKey { case id, name, count, colorHex = "color", notify }
+    enum CodingKeys: String, CodingKey { case id, name, count, colorHex = "color", notify, siteIds = "site_ids" }
 }
 
 // MARK: - Настройки уведомлений аккаунта
