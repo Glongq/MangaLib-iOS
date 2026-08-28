@@ -3,19 +3,23 @@ import UIKit
 
 /// "Персонализация" — набор пунктов персонализации приложения, каждый в
 /// своей отдельной карточке-подложке (по прямой просьбе, вместо одной общей
-/// секции, как в AppSettingsView). "Значок приложения"/"Стартовая
-/// страница" — пока обычные переходы-заглушки (StubView), тот же приём, что
-/// и у остальных ещё не реализованных пунктов настроек (см.
-/// AppSettingsView.settingsRow). "Компактный вид нижнего меню"/"Изображения
-/// в комментариях" — реальные, СОХРАНЯЮЩИЕСЯ тумблеры (@AppStorage), но пока
-/// без применения к самому поведению приложения — тот же принцип "заглушка,
-/// но не выдуманная", что уже используется в MangaDetailView
-/// (commentsDisabledInReader/commentsDisabledOnCard). "Количество
-/// отображаемого контента" — реальный параметр (см. CardsPerRow), который
-/// теперь читают сетки Каталога и Закладок (режим "Плитка"). "Главная
-/// страница" (homeSectionsCard) — порядок (drag) и видимость (чекбокс)
-/// разделов вкладки «Читают», реально применяется там же (см.
-/// HomeSectionsStore/HomeView.content).
+/// секции, как в AppSettingsView). Порядок пунктов — тоже по прямой просьбе
+/// (скриншот-пример), "Главная страница" специально в самом низу.
+/// "Значок приложения"/"Стартовая страница" — пока обычные переходы-заглушки
+/// (StubView), тот же приём, что и у остальных ещё не реализованных пунктов
+/// настроек (см. AppSettingsView.settingsRow). "Компактный вид нижнего
+/// меню"/"Цензурировать изображения в комментариях" — реальные,
+/// СОХРАНЯЮЩИЕСЯ тумблеры (@AppStorage), но пока без применения к самому
+/// поведению приложения — тот же принцип "заглушка, но не выдуманная", что
+/// уже используется в MangaDetailView (commentsDisabledInReader/
+/// commentsDisabledOnCard). "Тёмная тема"/"OLED-режим" — каждый в СВОЕЙ
+/// подложке, подпись под ней (не внутри строки тумблера) — эталон "Резервная
+/// копия в iCloud" в системных Настройках iOS. "Количество отображаемого
+/// контента" — реальный параметр (см. CardsPerRow), который теперь читают
+/// сетки Каталога и Закладок (режим "Плитка"). "Главная страница"
+/// (homeSectionsCard) — порядок (drag) и видимость (чекбокс) разделов
+/// вкладки «Читают», реально применяется там же (см. HomeSectionsStore/
+/// HomeView.content).
 struct PersonalizationSettingsView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     /// Порядок/видимость разделов главной — см. homeSectionsCard.
@@ -29,6 +33,10 @@ struct PersonalizationSettingsView: View {
         ZStack {
             Theme.background.ignoresSafeArea()
             ScrollView {
+                // Порядок — по прямой просьбе (скриншот-пример):
+                // Значок → Стартовая → Компактное меню → Цензура
+                // комментариев → Тёмная тема → OLED → Кол-во карточек →
+                // Главная страница (порядок разделов) в самом низу.
                 VStack(spacing: 20) {
                     card {
                         NavigationLink {
@@ -48,8 +56,6 @@ struct PersonalizationSettingsView: View {
                         .buttonStyle(.plain)
                     }
 
-                    card { homeSectionsCard }
-
                     card {
                         Toggle(isOn: $compactTabBar) {
                             Text("Компактный вид нижнего меню").foregroundStyle(Theme.textPrimary)
@@ -61,60 +67,73 @@ struct PersonalizationSettingsView: View {
 
                     card {
                         Toggle(isOn: $censorCommentImages) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Изображения в комментариях").foregroundStyle(Theme.textPrimary)
-                                Text(censorCommentImages ? "Цензурировать" : "Показывать")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
+                            Text("Цензурировать изображения в комментариях").foregroundStyle(Theme.textPrimary)
                         }
                         .tint(Theme.accent)
                         .padding(.horizontal, 16)
                         .frame(minHeight: 52)
                     }
 
-                    card {
-                        Toggle(isOn: $themeManager.isDarkTheme) {
-                            HStack(spacing: 10) {
-                                darkThemeIcon
-                                VStack(alignment: .leading, spacing: 2) {
+                    // Тёмная тема и OLED — теперь ДВЕ РАЗНЫЕ подложки (было
+                    // одна общая с разделителем), подпись — под подложкой,
+                    // не внутри строки тумблера, эталон — "Резервная копия в
+                    // iCloud" в системных Настройках iOS (по прямой просьбе,
+                    // со скриншотом).
+                    VStack(alignment: .leading, spacing: 8) {
+                        card {
+                            Toggle(isOn: $themeManager.isDarkTheme) {
+                                HStack(spacing: 10) {
+                                    darkThemeIcon
                                     Text("Тёмная тема").foregroundStyle(Theme.textPrimary)
-                                    Text("Выключи для белой темы. Не влияет на тему читалки — она настраивается отдельно.")
-                                        .font(.caption)
-                                        .foregroundStyle(Theme.textSecondary)
                                 }
                             }
+                            .tint(Theme.accent)
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 52)
                         }
-                        .tint(Theme.accent)
-                        .padding(.horizontal, 16)
-                        .frame(minHeight: 52)
+                        Text("Выключи для белой темы. Не влияет на тему читалки — она настраивается отдельно.")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 4)
+                    }
 
-                        Divider().overlay(Theme.separator).padding(.leading, 16)
-
-                        // Отдельный, независимый тумблер — не альтернатива
-                        // светлой/тёмной теме (та выше), а "ещё темнее" ПОВЕРХ
-                        // уже тёмной: чистый чёрный фон вместо #0E0F13 и т.д.
-                        // (см. Theme.OLED). На белой теме визуально ничего не
-                        // меняет — выключен (disabled), пока тёмная тема выключена.
-                        Toggle(isOn: $themeManager.isOLEDTheme) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("OLED-режим")
-                                    .foregroundStyle(themeManager.isDarkTheme ? Theme.textPrimary : Theme.textSecondary)
-                                Text("Делает тёмную тему ещё темнее — фон почти чистый чёрный.")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.textSecondary)
+                    // Отдельный, независимый тумблер — не альтернатива
+                    // светлой/тёмной теме (та выше), а "ещё темнее" ПОВЕРХ
+                    // уже тёмной: чистый чёрный фон вместо #0E0F13 и т.д.
+                    // (см. Theme.OLED). На белой теме визуально ничего не
+                    // меняет — выключен (disabled), пока тёмная тема выключена.
+                    VStack(alignment: .leading, spacing: 8) {
+                        card {
+                            Toggle(isOn: $themeManager.isOLEDTheme) {
+                                HStack(spacing: 6) {
+                                    Text("OLED-режим")
+                                        .foregroundStyle(themeManager.isDarkTheme ? Theme.textPrimary : Theme.textSecondary)
+                                    // Квадратик справа от названия — по
+                                    // прямой просьбе, тот же чёрный квадрат,
+                                    // что и в darkThemeIcon.
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .fill(Color.black)
+                                        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(Theme.separator, lineWidth: 1))
+                                        .frame(width: 16, height: 16)
+                                }
                             }
+                            .tint(Theme.accent)
+                            .disabled(!themeManager.isDarkTheme)
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 52)
                         }
-                        .tint(Theme.accent)
-                        .disabled(!themeManager.isDarkTheme)
-                        .padding(.horizontal, 16)
-                        .frame(minHeight: 52)
+                        Text("Делает тёмную тему ещё темнее — фон почти чистый чёрный.")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 4)
                     }
 
                     card {
                         cardsPerRowSection
                             .padding(16)
                     }
+
+                    card { homeSectionsCard }
 
                     Spacer(minLength: 0)
                 }
