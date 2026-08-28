@@ -130,6 +130,15 @@ struct BookmarksView: View {
             // Смена открытой папки сбрасывает выбор — повторяет замеченное
             // поведение реального сайта (см. isSelecting выше).
             .onChange(of: selectedFolderId) { _, _ in selectedSlugs.removeAll() }
+            // Открытая папка могла реально исчезнуть (удалена на сайте/
+            // другом устройстве, подтягивается через store.syncFoldersFromServer
+            // при потянуть-обновить) — без этого экран молча показывал бы
+            // пустой список без активного чипа и без объяснения.
+            .onChange(of: store.folders) { _, _ in
+                if let id = selectedFolderId, !store.allFolders.contains(where: { $0.id == id }) {
+                    selectedFolderId = nil
+                }
+            }
             .navigationDestination(for: BookmarkedTitle.self) { bm in
                 MangaDetailView(slug: bm.slug, fallbackTitle: bm.title,
                                 coverURL: bm.coverURL.flatMap(URL.init(string:)))

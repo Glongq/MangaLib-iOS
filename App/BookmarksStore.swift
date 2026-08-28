@@ -695,6 +695,21 @@ final class BookmarksStore: ObservableObject {
                 changed = true
             }
         }
+        // Убираем локальные кастомные папки, которых больше нет в свежем
+        // ответе — реально удалены где-то ещё (на сайте, с другого
+        // устройства). fetchUserBookmarkFolders — ОДИН запрос без пагинации
+        // (в отличие от закладок ниже), поэтому раз try? вернул значение —
+        // это ПОЛНЫЙ список, пруним без риска частичной выборки. 5
+        // стандартных (id 1-5) никогда не трогаем — они хардкод, не отсюда.
+        let remoteIds = Set(remoteFolders.map { $0.id })
+        let removedFolderIds = Set(folders.compactMap { folder -> String? in
+            guard let sid = folder.serverId, !(1...5).contains(sid), !remoteIds.contains(sid) else { return nil }
+            return folder.id
+        })
+        if !removedFolderIds.isEmpty {
+            folders.removeAll { removedFolderIds.contains($0.id) }
+            changed = true
+        }
         if changed { persistFolders() }
     }
 
@@ -713,6 +728,12 @@ final class BookmarksStore: ObservableObject {
     /// Пишет serverId/folderId/title/coverURL НАПРЯМУЮ (не через add()) — сюда
     /// нельзя пускать pushToServer-логику: мы читаем состояние С сервера, а не
     /// собираемся тут же отправлять его обратно.
+    /// В конце УДАЛЯЕТ локальные записи, которых больше нет в свежем полном
+    /// списке с сервера (см. fetchFullySucceeded ниже) — иначе потянуть-
+    /// обновить не отражало бы закладки, реально удалённые в другом месте
+    /// (на сайте, с другого устройства, через syncFromServer вне этого
+    /// приложения) — раньше "потянуть вниз" в «Закладках» умел только
+    /// добавлять/обновлять, никогда не убирал устаревшее.
     func syncFromServer() async {
         guard AuthSession.shared.isLoggedIn, !isSyncing else {
             print("[BookmarksStore][debug] syncFromServer() пропущен — isLoggedIn=\(AuthSession.shared.isLoggedIn), isSyncing=\(isSyncing)")
@@ -732,6 +753,12 @@ final class BookmarksStore: ObservableObject {
         // скажет, что дальше пусто.
         var allEntries: [BookmarkListEntry] = []
         var page = 1
+        // false, если синк оборвался на ошибке ДО того, как реально дошёл до
+        // последней страницы — тогда allEntries НЕПОЛНЫЙ (например, страница
+        // 3 из 5 не пришла), и ниже НЕЛЬЗЯ считать "нет в allEntries" за
+        // "удалено на сервере" — иначе временный сетевой сбой стёр бы
+        // локальные закладки, которые сервер на самом деле не терял.
+        var fetchFullySucceeded = true
         while page <= 40 {
             do {
                 let result = try await MangaNetworkService.shared.fetchBookmarksAccountList(status: 0, page: page)
@@ -745,11 +772,15 @@ final class BookmarksStore: ObservableObject {
                 // не делал без единого следа в консоли. Теперь видно ТОЧНУЮ
                 // причину (network/decoding/401 и т.д.), если она есть.
                 print("[BookmarksStore][debug] fetchBookmarksAccountList(page: \(page)) упал: \(error)")
+                fetchFullySucceeded = false
                 break
             }
         }
         print("[BookmarksStore][debug] syncFromServer() получил \(allEntries.count) закладок с сервера (userId=\(AuthSession.shared.userId.map(String.init) ?? "nil"))")
-        guard !allEntries.isEmpty else { return }
+        // Неполный/неудачный синк — не трогаем уже известное локальное
+        // состояние вообще (ни обновление, ни тем более удаление), чтобы
+        // временная сетевая ошибка не стёрла реальные данные.
+        guard fetchFullySucceeded else { return }
 
         for entry in allEntries {
             guard let status = entry.status else { continue }
@@ -786,6 +817,20 @@ final class BookmarksStore: ObservableObject {
                                               mediaId: entry.media.id))
             }
         }
+
+        // Синк дошёл до конца успешно (fetchFullySucceeded) — теперь можно
+        // безопасно убрать локальные записи, которых нет в свежем полном
+        // списке: они реально удалены на сервере. Трогаем ТОЛЬКО те, что уже
+        // были подтверждены сервером (serverId известен) — чисто локальные,
+        // ещё не запушенные записи (serverId == nil, POST ещё не ответил или
+        // не удался) НЕ трогаем, иначе можно потерять то, что пользователь
+        // только что добавил в этом же приложении.
+        let syncedSlugs = Set(allEntries.map { $0.media.apiSlug })
+        items.removeAll { item in
+            guard item.serverId != nil else { return false }
+            return !syncedSlugs.contains(item.slug)
+        }
+
         persistItems()
         print("[BookmarksStore][debug] syncFromServer() завершён: \(items.count) закладок локально, из них с serverId — \(items.filter { $0.serverId != nil }.count)")
     }
