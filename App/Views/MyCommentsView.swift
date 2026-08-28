@@ -45,9 +45,21 @@ struct MyCommentsView: View {
         if vm.isLoading && vm.comments.isEmpty {
             skeletonList
         } else if let error = vm.errorMessage, vm.comments.isEmpty {
-            emptyState(icon: "wifi.exclamationmark", text: error) { Task { await vm.reload() } }
+            // ScrollView (не голый VStack) — иначе .refreshable ниже не от
+            // чего было бы тянуть при пустом/ошибочном списке.
+            ScrollView {
+                emptyState(icon: "wifi.exclamationmark", text: error) { Task { await vm.reload() } }
+                    .containerRelativeFrame(.vertical)
+            }
+            .scrollIndicators(.hidden)
+            .refreshable { await vm.reload() }
         } else if vm.visible.isEmpty && vm.didLoad {
-            emptyState(icon: "text.bubble", text: "Комментариев нет", retry: nil)
+            ScrollView {
+                emptyState(icon: "text.bubble", text: "Комментариев нет", retry: nil)
+                    .containerRelativeFrame(.vertical)
+            }
+            .scrollIndicators(.hidden)
+            .refreshable { await vm.reload() }
         } else {
             ScrollView {
                 LazyVStack(spacing: 10) {
@@ -64,6 +76,7 @@ struct MyCommentsView: View {
                 .padding(.bottom, 90)
             }
             .scrollIndicators(.hidden)
+            .refreshable { await vm.reload() }
         }
     }
 
@@ -82,6 +95,9 @@ struct MyCommentsView: View {
         .allowsHitTesting(false)
     }
 
+    /// Раньше без своей подложки/паддинга — во время загрузки список
+    /// выглядел плоским текстом, а не карточками (как в реальном
+    /// commentCard). Теперь 1-в-1 форма настоящей карточки.
     private var commentSkeletonRow: some View {
         HStack(alignment: .top, spacing: 12) {
             SkeletonBox()
@@ -93,7 +109,11 @@ struct MyCommentsView: View {
                 SkeletonBar(width: 170, height: 10)
                 SkeletonBar(width: 70, height: 10)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     @ViewBuilder

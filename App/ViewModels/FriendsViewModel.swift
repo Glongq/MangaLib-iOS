@@ -58,6 +58,46 @@ final class FriendsViewModel: ObservableObject {
     private var outgoingPage = 1
     private var outgoingHasNext = true
 
+    // MARK: Кэш с таймаутом (по прямой просьбе: "не обновляло при каждом
+    // заходе список") — FriendsViewModel пересоздаётся с нуля при каждом
+    // повторном заходе на экран (обычный push, не "живущий" под-экран
+    // профиля), поэтому didLoad*-флаги сами по себе не спасают — кэш
+    // намеренно static (переживает пересоздание ViewModel), с TTL, а не
+    // навсегда: первая свежая сетевая загрузка обновляет и список, и кэш.
+    // .refreshable (см. FriendsView) всегда идёт в сеть напрямую, минуя
+    // кэш, и сам его обновляет. Кэшируется только НЕотфильтрованный
+    // результат (query пуст) — активный поиск в кэш не попадает.
+    private struct CachedList {
+        let items: [FriendshipEntry]
+        let hasNext: Bool
+        let loadedAt: Date
+    }
+    private static var cache: [String: CachedList] = [:]
+    private static let cacheTTL: TimeInterval = 90
+
+    private func cacheKey(_ t: Tab) -> String { "\(userId):\(t)" }
+
+    /// Свежий (моложе cacheTTL) результат таба — применяет мгновенно, без
+    /// сети, и возвращает true.
+    private func tryUseCache(_ t: Tab) -> Bool {
+        guard query.isEmpty, let cached = Self.cache[cacheKey(t)],
+              Date().timeIntervalSince(cached.loadedAt) < Self.cacheTTL else { return false }
+        switch t {
+        case .friends:  friends = cached.items;  friendsHasNext = cached.hasNext;  didLoadFriends = true
+        case .mutual:   mutual = cached.items;   mutualHasNext = cached.hasNext;   didLoadMutual = true
+        case .incoming: incoming = cached.items; incomingHasNext = cached.hasNext; didLoadIncoming = true
+        case .outgoing: outgoing = cached.items; outgoingHasNext = cached.hasNext; didLoadOutgoing = true
+        }
+        return true
+    }
+
+    private func saveCache(_ t: Tab, items: [FriendshipEntry], hasNext: Bool) {
+        guard query.isEmpty else { return }
+        Self.cache[cacheKey(t)] = CachedList(items: items, hasNext: hasNext, loadedAt: Date())
+    }
+
+    private func invalidateCache(_ t: Tab) { Self.cache.removeValue(forKey: cacheKey(t)) }
+
     var visible: [FriendshipEntry] {
         switch tab {
         case .friends:  return friends
@@ -106,16 +146,32 @@ final class FriendsViewModel: ObservableObject {
         switch tab {
         case .friends:
             guard force || (!didLoadFriends && !isLoading) else { return }
+            if !force, tryUseCache(.friends) { return }
             await reloadFriends()
         case .mutual:
             guard !didLoadMutual, !isLoading else { return }
+            if tryUseCache(.mutual) { return }
             await reloadMutual()
         case .incoming:
             guard force || (!didLoadIncoming && !isLoading) else { return }
+            if !force, tryUseCache(.incoming) { return }
             await reloadIncoming()
         case .outgoing:
             guard force || (!didLoadOutgoing && !isLoading) else { return }
+            if !force, tryUseCache(.outgoing) { return }
             await reloadOutgoing()
+        }
+    }
+
+    /// Свайп-обновление (см. FriendsView.refreshable) — ВСЕГДА идёт в сеть
+    /// напрямую (минуя кэш), но обновлённым результатом сам же кэш и
+    /// перезаписывает (см. reload* ниже).
+    func refreshCurrentTab() async {
+        switch tab {
+        case .friends:  await reloadFriends()
+        case .mutual:   await reloadMutual()
+        case .incoming: await reloadIncoming()
+        case .outgoing: await reloadOutgoing()
         }
     }
 
@@ -126,6 +182,7 @@ final class FriendsViewModel: ObservableObject {
             friends = r.friends
             friendsHasNext = r.hasNextPage
             didLoadFriends = true
+            saveCache(.friends, items: friends, hasNext: friendsHasNext)
         } catch NetworkError.cancelled {
         } catch {
             friends = []; didLoadFriends = true
@@ -141,6 +198,7 @@ final class FriendsViewModel: ObservableObject {
             mutual = r.friends
             mutualHasNext = r.hasNextPage
             didLoadMutual = true
+            saveCache(.mutual, items: mutual, hasNext: mutualHasNext)
         } catch NetworkError.cancelled {
         } catch {
             mutual = []; didLoadMutual = true
@@ -156,6 +214,7 @@ final class FriendsViewModel: ObservableObject {
             incoming = r.requests
             incomingHasNext = r.hasNextPage
             didLoadIncoming = true
+            saveCache(.incoming, items: incoming, hasNext: incomingHasNext)
         } catch NetworkError.cancelled {
         } catch {
             incoming = []; didLoadIncoming = true
@@ -172,9 +231,11 @@ final class FriendsViewModel: ObservableObject {
     /// увидит didLoadIncoming уже true и просто переиспользует эти данные.
     func prefetchIncomingCount() async {
         guard !didLoadIncoming else { return }
+        if tryUseCache(.incoming) { return }
         if let r = try? await service.fetchFriendRequests(userId: userId, incoming: true, page: 1) {
             incoming = r.requests
             incomingHasNext = r.hasNextPage
+            saveCache(.incoming, items: incoming, hasNext: incomingHasNext)
         }
         didLoadIncoming = true
     }
@@ -186,6 +247,7 @@ final class FriendsViewModel: ObservableObject {
             outgoing = r.requests
             outgoingHasNext = r.hasNextPage
             didLoadOutgoing = true
+            saveCache(.outgoing, items: outgoing, hasNext: outgoingHasNext)
         } catch NetworkError.cancelled {
         } catch {
             outgoing = []; didLoadOutgoing = true
@@ -252,11 +314,13 @@ final class FriendsViewModel: ObservableObject {
         do {
             _ = try await service.respondToFriendRequest(id: entry.id, accept: accept)
             incoming.removeAll { $0.id == entry.id }
+            invalidateCache(.incoming)
             if accept {
                 // Приняли — запись переезжает в "Друзья", но только если тот
                 // список уже когда-то грузился (иначе он подтянется сам при
                 // первом открытии таба).
                 if didLoadFriends { friends.insert(entry, at: 0) }
+                invalidateCache(.friends)
             }
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -272,6 +336,7 @@ final class FriendsViewModel: ObservableObject {
         do {
             try await service.cancelFriendRequest(friendshipId: entry.id)
             outgoing.removeAll { $0.id == entry.id }
+            invalidateCache(.outgoing)
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
@@ -287,6 +352,8 @@ final class FriendsViewModel: ObservableObject {
         do {
             try await service.acceptAllFriendRequests()
             incoming = []
+            invalidateCache(.incoming)
+            invalidateCache(.friends)
             didLoadFriends = false
             if tab == .friends { await reloadFriends() }
         } catch {

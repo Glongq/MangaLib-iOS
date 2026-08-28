@@ -25,7 +25,9 @@ struct FriendsView: View {
         ZStack {
             Theme.background.ignoresSafeArea()
             VStack(spacing: 0) {
-                if vm.tab != .mutual { searchField.padding(.horizontal, 16).padding(.top, 8) }
+                // Больше отступ снизу поля поиска (был только сверху,
+                // список начинался сразу под ним) — по прямой просьбе.
+                if vm.tab != .mutual { searchField.padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 12) }
                 content
             }
         }
@@ -79,12 +81,22 @@ struct FriendsView: View {
         if vm.isLoading && vm.visible.isEmpty {
             skeletonList
         } else if let error = vm.errorMessage, vm.visible.isEmpty {
-            emptyState(icon: "wifi.exclamationmark", text: error)
+            // ScrollView (не голый VStack) — иначе .refreshable ниже не от
+            // чего было бы тянуть, свайп-обновление работало бы только
+            // когда список уже не пуст.
+            // containerRelativeFrame — иначе Spacer() внутри emptyState не
+            // от чего было бы центрироваться (ScrollView сам не задаёт
+            // высоту контенту, только скроллит его).
+            ScrollView { emptyState(icon: "wifi.exclamationmark", text: error).containerRelativeFrame(.vertical) }
+                .scrollIndicators(.hidden)
+                .refreshable { await vm.refreshCurrentTab() }
         } else if vm.visible.isEmpty && vm.didLoadCurrent {
-            emptyState(icon: emptyIcon, text: emptyText)
+            ScrollView { emptyState(icon: emptyIcon, text: emptyText).containerRelativeFrame(.vertical) }
+                .scrollIndicators(.hidden)
+                .refreshable { await vm.refreshCurrentTab() }
         } else {
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: 10) {
                     if vm.tab == .incoming { acceptAllButton }
                     ForEach(vm.visible) { entry in
                         friendRow(entry)
@@ -94,11 +106,14 @@ struct FriendsView: View {
                         ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 12)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-                .padding(.bottom, 90)
+                // Тот же эталон отступов, что и в "Уведомления" (см.
+                // NotificationsView.list) — по прямой просьбе.
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 120)
             }
             .scrollIndicators(.hidden)
+            .refreshable { await vm.refreshCurrentTab() }
         }
     }
 
@@ -145,23 +160,23 @@ struct FriendsView: View {
         }
     }
 
-    /// Скругление подложки-строки — деф 24 (как у большинства карточек в
-    /// приложении, см. SideMenuView.cardCornerRadius), было 16. Аватар
-    /// теперь заподлицо с подложкой (без внутреннего паддинга, высота строки
-    /// = высоте аватара) — тот же приём и тот же радиус "угол в угол", что и
-    /// у BookmarksView.row (обложка вместо аватара, тот же принцип).
-    static let cardCornerRadius: CGFloat = 24
+    /// Скругление подложки-строки — 16, как в разделе "Уведомления" (см.
+    /// NotificationsView.row) — по прямой просьбе привести к тому же
+    /// эталону (было 24). Аватар заподлицо с подложкой (без внутреннего
+    /// паддинга, высота строки = высоте аватара) — тот же приём и тот же
+    /// радиус "угол в угол", что и у NotificationsView.row/BookmarksView.row.
+    static let cardCornerRadius: CGFloat = 16
     static let avatarSize: CGFloat = 60
 
     /// Скелетон на первую загрузку — по прямой просьбе, вместо голого
     /// спиннера. Форма строки повторяет friendRow ниже.
     private var skeletonList: some View {
         ScrollView {
-            LazyVStack(spacing: 12) {
+            LazyVStack(spacing: 10) {
                 ForEach(0..<6, id: \.self) { _ in friendSkeletonRow }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
         }
         .scrollIndicators(.hidden)
         .allowsHitTesting(false)
@@ -290,13 +305,16 @@ struct FriendsView: View {
         ScrollView(.horizontal) {
             HStack(spacing: 10) {
                 tabButton("Список друзей", tab: .friends)
-                tabButton("Общие друзья", tab: .mutual)
-                // Входящие/исходящие заявки — только на СВОЁМ профиле (см.
-                // FriendsViewModel.isOwnAccount): чужие заявки сервер и не
-                // отдаст, показывать пустые табы на чужом профиле незачем.
+                // На СВОЁМ профиле (см. FriendsViewModel.isOwnAccount) —
+                // заявки вместо "Общие друзья": общих друзей с самим собой
+                // не бывает, а входящие/исходящие заявки — как раз наоборот,
+                // видны ТОЛЬКО на своём (сервер чужие и не отдаст). По
+                // прямой просьбе "Общие друзья" на своём профиле убраны.
                 if vm.isOwnAccount {
                     tabButton("Заявки в друзья", tab: .incoming, badge: vm.incoming.count)
                     tabButton("Отправленные запросы", tab: .outgoing)
+                } else {
+                    tabButton("Общие друзья", tab: .mutual)
                 }
             }
             .padding(.horizontal, 20)

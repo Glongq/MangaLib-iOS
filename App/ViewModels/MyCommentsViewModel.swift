@@ -59,8 +59,31 @@ final class MyCommentsViewModel: ObservableObject {
 
     private var userId: Int? { explicitUserId ?? AuthSession.shared.userId }
 
+    // MARK: Кэш с таймаутом (см. FriendsViewModel — тот же приём и тот же
+    // повод: экран пересоздаёт ViewModel с нуля при каждом повторном
+    // заходе, didLoad сам по себе не спасает от лишнего запроса). static —
+    // переживает пересоздание ViewModel, TTL — не подвисает навсегда.
+    // .refreshable (см. MyCommentsView) идёт в сеть напрямую и сам
+    // обновляет кэш через reload().
+    private struct CachedComments {
+        let items: [UserComment]
+        let hasNext: Bool
+        let loadedAt: Date
+    }
+    private static var cache: [String: CachedComments] = [:]
+    private static let cacheTTL: TimeInterval = 90
+
+    private func cacheKey() -> String? { userId.map { "\($0):\(sort.rawValue)" } }
+
     func loadIfNeeded() async {
         guard !didLoad, !isLoading else { return }
+        if let key = cacheKey(), let cached = Self.cache[key],
+           Date().timeIntervalSince(cached.loadedAt) < Self.cacheTTL {
+            comments = cached.items
+            hasNext = cached.hasNext
+            didLoad = true
+            return
+        }
         await reload()
     }
 
@@ -72,6 +95,9 @@ final class MyCommentsViewModel: ObservableObject {
             comments = r.comments
             hasNext = r.hasNextPage
             didLoad = true
+            if let key = cacheKey() {
+                Self.cache[key] = CachedComments(items: comments, hasNext: hasNext, loadedAt: Date())
+            }
         } catch NetworkError.cancelled {
         } catch {
             comments = []
@@ -103,6 +129,7 @@ final class MyCommentsViewModel: ObservableObject {
         do {
             try await service.deleteComment(id: comment.id)
             comments.removeAll { $0.id == comment.id }
+            if let key = cacheKey() { Self.cache.removeValue(forKey: key) }
             return true
         } catch {
             return false
