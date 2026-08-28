@@ -83,8 +83,8 @@ struct PersonalizationSettingsView: View {
                         card {
                             Toggle(isOn: $themeManager.isDarkTheme) {
                                 HStack(spacing: 10) {
-                                    darkThemeIcon
                                     Text("Тёмная тема").foregroundStyle(Theme.textPrimary)
+                                    darkThemeIcon
                                 }
                             }
                             .tint(Theme.accent)
