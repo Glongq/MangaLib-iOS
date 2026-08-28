@@ -48,6 +48,19 @@ struct BookmarkFolder: Codable, Identifiable, Hashable {
     /// первого синка неизвестна, тогда используется текущая позиция в
     /// массиве folders как есть.
     var order: Int? = nil
+    /// Момент локального создания папки (см. BookmarksStore.createFolder) —
+    /// ТОЛЬКО чтобы дать серверу время на eventual-consistency между
+    /// записью (`POST /bookmarks/folder`) и чтением (`GET /bookmarks/
+    /// folder/{userId}`). Живое наблюдение (не HAR, реальный тест):
+    /// создал папку, она синканулась — но если руками обновить РАНЬШЕ,
+    /// чем сервер успел это увидеть на чтение, папка на несколько секунд
+    /// пропадает, потом сама снова появляется на следующем синке — сервер
+    /// её не терял, просто GET ещё не успел подхватить свежую запись. Пока
+    /// не прошло BookmarksStore.recentChangeGracePeriod с этого момента,
+    /// syncFoldersFromServer() НЕ удаляет папку локально, даже если её нет
+    /// в свежем ответе — см. пруninг там. Сбрасывается в nil, как только
+    /// папка реально подтвердилась в ответе сервера.
+    var recentlyCreatedAt: Date? = nil
 
     static let reading   = BookmarkFolder(id: "reading",   name: "Читаю",     isDefault: true)
     static let planned   = BookmarkFolder(id: "planned",   name: "В планах",  isDefault: true)
@@ -167,6 +180,12 @@ struct BookmarkedTitle: Codable, Identifiable, Hashable {
     /// названию (A-Z)" в BookmarksView (сервер знает `sort_by=name` И
     /// `sort_by=rus_name` как ДВА разных поля, не одно направление).
     var originalTitle: String? = nil
+    /// Симметрично BookmarkFolder.recentlyCreatedAt — момент локального
+    /// добавления тайтла в закладки (см. BookmarksStore.add), та же защита
+    /// от eventual-consistency при пруне в syncFromServer(): только что
+    /// добавленный тайтл не удаляется как "не найден на сервере", пока не
+    /// прошло recentChangeGracePeriod.
+    var recentlyAddedAt: Date? = nil
 
     var id: String { slug }
 }
@@ -190,6 +209,14 @@ struct ReadingProgress: Codable, Hashable {
 final class BookmarksStore: ObservableObject {
 
     static let shared = BookmarksStore()
+
+    /// Сколько ждать после локального создания папки/добавления тайтла,
+    /// прежде чем разрешить синку удалить запись как "не найдена на
+    /// сервере" — см. BookmarkFolder.recentlyCreatedAt/BookmarkedTitle.
+    /// recentlyAddedAt. Живое наблюдение: реальная задержка между записью
+    /// и тем, что GET её видит, была порядка нескольких секунд — 90 с
+    /// большим запасом, не HAR-подтверждённое число, а инженерный запас.
+    private static let recentChangeGracePeriod: TimeInterval = 90
 
     @Published private(set) var folders: [BookmarkFolder]
     @Published private(set) var items: [BookmarkedTitle]
@@ -326,7 +353,7 @@ final class BookmarksStore: ObservableObject {
         // была видна только там, где её создали, не дожидаясь следующего
         // syncFoldersFromServer().
         let folder = BookmarkFolder(id: UUID().uuidString, name: trimmed, isDefault: false,
-                                     siteIds: [SiteSession.shared.activeSite.rawValue])
+                                     siteIds: [SiteSession.shared.activeSite.rawValue], recentlyCreatedAt: Date())
         folders.append(folder)
         persistFolders()
 
@@ -471,11 +498,13 @@ final class BookmarksStore: ObservableObject {
             items[index].folderId = folderId
             items[index].title = title
             items[index].coverURL = coverURL
+            items[index].recentlyAddedAt = Date()
             // Не затираем уже известную оценку nil'ом, если вызывающий код её
             // не знает (например, авто-добавление в "Читаю" из ReaderViewModel).
             if let rating { items[index].rating = rating }
         } else {
-            items.append(BookmarkedTitle(slug: slug, title: title, coverURL: coverURL, folderId: folderId, rating: rating, addedAt: Date()))
+            items.append(BookmarkedTitle(slug: slug, title: title, coverURL: coverURL, folderId: folderId, rating: rating,
+                                          addedAt: Date(), recentlyAddedAt: Date()))
         }
         persistItems()
 
@@ -736,6 +765,9 @@ final class BookmarksStore: ObservableObject {
                 if folders[idx].notify != remote.notify { folders[idx].notify = remote.notify; changed = true }
                 if folders[idx].isPublic != remote.isPublic { folders[idx].isPublic = remote.isPublic; changed = true }
                 if folders[idx].order != remote.order { folders[idx].order = remote.order; changed = true }
+                // Подтвердилась в ответе сервера — защита от преждевременного
+                // удаления больше не нужна (см. recentlyCreatedAt).
+                if folders[idx].recentlyCreatedAt != nil { folders[idx].recentlyCreatedAt = nil; changed = true }
             } else {
                 folders.append(BookmarkFolder(id: "server-\(remote.id)", name: remote.name, isDefault: false,
                                                serverId: remote.id, colorHex: remote.colorHex, siteIds: remote.siteIds,
@@ -749,9 +781,18 @@ final class BookmarksStore: ObservableObject {
         // (в отличие от закладок ниже), поэтому раз try? вернул значение —
         // это ПОЛНЫЙ список, пруним без риска частичной выборки. 5
         // стандартных (id 1-5) никогда не трогаем — они хардкод, не отсюда.
+        // ИСКЛЮЧЕНИЕ — папки внутри recentChangeGracePeriod после создания
+        // (см. recentlyCreatedAt): живое наблюдение показало, что сервер
+        // может не успеть отдать только что созданную папку на GET сразу
+        // же после POST (eventual consistency) — раннее ручное обновление
+        // в этом окне иначе стирало бы реально существующую папку.
         let remoteIds = Set(remoteFolders.map { $0.id })
+        let now = Date()
         let removedFolderIds = Set(folders.compactMap { folder -> String? in
             guard let sid = folder.serverId, !(1...5).contains(sid), !remoteIds.contains(sid) else { return nil }
+            if let createdAt = folder.recentlyCreatedAt, now.timeIntervalSince(createdAt) < Self.recentChangeGracePeriod {
+                return nil
+            }
             return folder.id
         })
         if !removedFolderIds.isEmpty {
@@ -867,6 +908,9 @@ final class BookmarksStore: ObservableObject {
                 items[idx].comment = entry.meta?.comment
                 items[idx].mediaId = entry.media.id
                 items[idx].originalTitle = entry.media.name
+                // Подтвердился в ответе сервера — защита от преждевременного
+                // удаления больше не нужна (см. recentlyAddedAt).
+                items[idx].recentlyAddedAt = nil
             } else {
                 items.append(BookmarkedTitle(slug: slug, title: entry.media.displayTitle,
                                               coverURL: entry.media.coverURLString,
@@ -887,9 +931,17 @@ final class BookmarksStore: ObservableObject {
         // ещё не запушенные записи (serverId == nil, POST ещё не ответил или
         // не удался) НЕ трогаем, иначе можно потерять то, что пользователь
         // только что добавил в этом же приложении.
+        // Та же защита от eventual-consistency, что и у папок (см.
+        // syncFoldersFromServer/recentlyCreatedAt) — недавно добавленный
+        // тайтл не удаляем как "не найден на сервере" в течение
+        // recentChangeGracePeriod после добавления.
         let syncedSlugs = Set(allEntries.map { $0.media.apiSlug })
+        let pruneNow = Date()
         items.removeAll { item in
             guard item.serverId != nil else { return false }
+            if let addedAt = item.recentlyAddedAt, pruneNow.timeIntervalSince(addedAt) < Self.recentChangeGracePeriod {
+                return false
+            }
             return !syncedSlugs.contains(item.slug)
         }
 
