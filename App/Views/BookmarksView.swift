@@ -81,7 +81,14 @@ struct BookmarksView: View {
             // сервера (GET /bookmarks, тот же store.syncFromServer, что и
             // при открытии вкладки), без сессии — no-op. Тот же принцип,
             // что и в Читают/Уведомлениях/Каталоге.
-            .refreshable { await store.syncFromServer() }
+            .refreshable {
+                await store.syncFromServer()
+                // syncFromServer() уже сбросил кэш реального порядка (см.
+                // BookmarksStore.remoteOrderCache) — потянуть-обновить и
+                // есть тот самый жест, которым он должен реально
+                // освежиться (не на каждое переключение папки/сортировки).
+                refreshRemoteOrder()
+            }
             // Родной системный поиск (сам выезжает сверху, свой Cancel, своя
             // анимация — высоту менять нельзя, это контролирует iOS) +
             // .large — эталон App Store (см. тот же приём в MangaCatalogView):
@@ -116,9 +123,14 @@ struct BookmarksView: View {
                                 selectedSlugs.removeAll()
                             }
                         } label: {
+                            // .tint() не красил иконку toolbar-кнопки
+                            // надёжно (прямая просьба: "забыл поставить
+                            // акцентный цвет") — явный .foregroundStyle на
+                            // Image, тот же приём, что и у остальных иконок
+                            // шапки в этом файле.
                             Image(systemName: "checklist")
+                                .foregroundStyle(isSelecting ? Theme.accent : Theme.textPrimary)
                         }
-                        .tint(isSelecting ? Theme.accent : nil)
                     }
                     if !isSelecting {
                         Button { showFolderOrderSheet = true } label: {
@@ -442,7 +454,10 @@ struct BookmarksView: View {
             }
         }
         .padding(.horizontal, 16)
-        .frame(height: Theme.pillControlHeight + 12)
+        // Высота — ТА ЖЕ, что и у чипов categoryMenu (Theme.pillControlHeight,
+        // была +12 лишних) — по прямой просьбе, обе строки внизу должны
+        // выглядеть одного роста.
+        .frame(height: Theme.pillControlHeight)
         // Стекло — по прямой просьбе, тот же приём, что и у чипов
         // categoryMenu (.regular.interactive() в Capsule).
         .glassEffect(.regular.interactive(), in: Capsule())
@@ -1087,7 +1102,7 @@ private struct EditFolderSheet: View {
                             .textFieldStyle(.plain)
                             .padding(.horizontal, 14)
                             .frame(height: 44)
-                            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                     }
 
                     HStack {
@@ -1098,7 +1113,7 @@ private struct EditFolderSheet: View {
                     }
                     .padding(.horizontal, 16)
                     .frame(minHeight: 52)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
 
                     VStack(spacing: 0) {
                         Toggle(isOn: $isPublic) {
@@ -1117,7 +1132,7 @@ private struct EditFolderSheet: View {
                         .padding(.horizontal, 16)
                         .frame(minHeight: 52)
                     }
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                 }
                 .padding(16)
             }
@@ -1248,7 +1263,10 @@ private struct DeleteFolderSheet: View {
             // умолчанию целится в id 1/21, стандартную папку "в процессе").
             targetFolderId = otherFolders.first(where: { $0.id == "reading" })?.id ?? otherFolders.first?.id
         }
-        .presentationDetents([.medium])
+        // На 25% короче .medium (~0.5) — по прямой просьбе, контент
+        // короткий (заголовок + опционально тумблер переноса + кнопка),
+        // .medium оставлял много пустого места снизу.
+        .presentationDetents([.fraction(0.375)])
         .presentationDragIndicator(.visible)
     }
 

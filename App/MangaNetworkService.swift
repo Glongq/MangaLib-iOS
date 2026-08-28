@@ -678,11 +678,12 @@ final class MangaNetworkService {
 
             func encode(to encoder: Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                if let comment {
-                    try container.encode(comment, forKey: .comment)
-                } else {
-                    try container.encode(false, forKey: .comment)
-                }
+                // ИСПРАВЛЕНО перехватом: реальные записи с пустым
+                // комментарием шлют `""` (пустая строка), НЕ `false` —
+                // `false` встречался только на ЧТЕНИЕ (GET), никогда на
+                // запись. Прошлое предположение ("шлём false по аналогии с
+                // GET") не подтвердилось.
+                try container.encode(comment ?? "", forKey: .comment)
                 try container.encode(rewatches_history, forKey: .rewatches_history)
             }
         }

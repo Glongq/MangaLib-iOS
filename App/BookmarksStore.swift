@@ -143,7 +143,7 @@ struct BookmarkedTitle: Codable, Identifiable, Hashable {
     var addedAt: Date? = nil
     /// "Прочитано N раз" — ПОДТВЕРЖДЕНО перехватом: meta.rewatches_history в
     /// теле `POST /bookmarks` (тот же запрос, что и смена папки — см.
-    /// BookmarksStore.startRewatch/finishRewatch/deleteRewatchPeriod,
+    /// BookmarksStore.startRewatch/updateRewatchPeriod/deleteRewatchPeriod,
     /// MangaNetworkService.updateBookmarkMeta). nil — ещё не знаем (старые
     /// локальные записи без этого поля, или пока не пришёл первый
     /// syncFromServer) — трактуется как "пусто", не как ошибка.
@@ -533,24 +533,13 @@ final class BookmarksStore: ObservableObject {
 
     /// Начать новый период перечитывания — добавляет открытый период
     /// (start = сегодня, end = nil) в конец истории. No-op, если уже есть
-    /// незакрытый период (сперва нужно его завершить — см. finishRewatch).
+    /// незакрытый период (сперва нужно его завершить — тап на "Завершено" в
+    /// RewatchHistorySheet, см. updateRewatchPeriod).
     func startRewatch(forSlug slug: String) {
         guard let idx = items.firstIndex(where: { $0.slug == slug }) else { return }
         var history = items[idx].rewatchHistory ?? []
         guard !history.contains(where: { $0.end == nil }) else { return }
         history.append(RewatchPeriod(start: Self.rewatchDateFormatter.string(from: Date()), end: nil))
-        items[idx].rewatchHistory = history
-        persistItems()
-        pushMeta(forSlug: slug)
-    }
-
-    /// Закрыть текущий открытый период — end = сегодня. No-op, если
-    /// открытого периода нет.
-    func finishRewatch(forSlug slug: String) {
-        guard let idx = items.firstIndex(where: { $0.slug == slug }),
-              var history = items[idx].rewatchHistory,
-              let openIdx = history.firstIndex(where: { $0.end == nil }) else { return }
-        history[openIdx].end = Self.rewatchDateFormatter.string(from: Date())
         items[idx].rewatchHistory = history
         persistItems()
         pushMeta(forSlug: slug)
@@ -566,7 +555,30 @@ final class BookmarksStore: ObservableObject {
         pushMeta(forSlug: slug)
     }
 
-    private static let rewatchDateFormatter: DateFormatter = {
+    /// Изменить даты конкретного периода (правка "Начато"/"Завершено" по
+    /// тапу в RewatchHistorySheet) — по позиции в массиве, у периодов нет
+    /// реального id на сервере (см. RewatchPeriod). `end == nil` — период
+    /// снова становится незакрытым ("ещё читает").
+    /// ПОДТВЕРЖДЕНО перехватом: дата не может быть позже сегодняшней и
+    /// "Завершено" не может быть раньше "Начато" (422: `«Дата окончания»
+    /// должна быть дата после или равняться «Дата начала»`) — здесь это
+    /// уже НЕВОЗМОЖНО ввести через UI (см. DateEditSheet ограничивает
+    /// диапазон пикера), guard ниже — просто защитный дубль на случай
+    /// рассинхрона.
+    @discardableResult
+    func updateRewatchPeriod(forSlug slug: String, at index: Int, start: String, end: String?) -> Bool {
+        guard let idx = items.firstIndex(where: { $0.slug == slug }),
+              var history = items[idx].rewatchHistory, history.indices.contains(index) else { return false }
+        let today = Self.rewatchDateFormatter.string(from: Date())
+        guard start <= today, (end.map { $0 <= today } ?? true), (end.map { $0 >= start } ?? true) else { return false }
+        history[index] = RewatchPeriod(start: start, end: end)
+        items[idx].rewatchHistory = history
+        persistItems()
+        pushMeta(forSlug: slug)
+        return true
+    }
+
+    static let rewatchDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -785,6 +797,11 @@ final class BookmarksStore: ObservableObject {
         isSyncing = true
         defer { isSyncing = false }
 
+        // Потянуть-обновить — тот самый жест, при котором кэш реального
+        // порядка (см. remoteOrderCache/refreshRemoteOrder) должен реально
+        // освежиться, а не при каждом переключении папки/сортировки.
+        remoteOrderCache.removeAll()
+
         // Сначала мержим РЕАЛЬНЫЙ список папок аккаунта (см.
         // syncFoldersFromServer) — иначе закладки в кастомных папках,
         // созданных не через это приложение, ниже не смогут найти свою
@@ -886,6 +903,14 @@ final class BookmarksStore: ObservableObject {
     /// предыдущий незавершённый запрос — быстрые переключения (пощёлкать
     /// туда-сюда) не гоняются друг с другом за право записать результат.
     /// `folderId == nil` — вкладка «Все» (status=0).
+    /// Кэш реального порядка на время сессии, по ключу "status|sortBy|
+    /// sortType" — прямая жалоба: "менял туда-сюда и получил запросов
+    /// слишком много". Повторное переключение на уже виденную комбинацию
+    /// папка+сортировка теперь берётся из памяти, без сети. Сбрасывается
+    /// целиком при потянуть-обновить (см. syncFromServer) — так и просили:
+    /// "обновлять иногда и когда свайп сделаю", а не на каждый тап.
+    private var remoteOrderCache: [String: [String]] = [:]
+
     func refreshRemoteOrder(folderId: String?, sortBy: String, sortType: String) {
         remoteOrderTask?.cancel()
         let status: Int
@@ -899,8 +924,19 @@ final class BookmarksStore: ObservableObject {
         } else {
             status = 0
         }
+        let cacheKey = "\(status)|\(sortBy)|\(sortType)"
+        if let cached = remoteOrderCache[cacheKey] {
+            remoteOrderedSlugs = cached
+            return
+        }
         remoteOrderedSlugs = nil
         remoteOrderTask = Task {
+            // Небольшая задержка ПЕРЕД реальным запросом — быстрое
+            // "пощёлкать туда-сюда" по чипам/сортировке отменяет
+            // предыдущий Task (см. remoteOrderTask?.cancel() выше) ДО
+            // сети, а не шлёт по запросу на каждый промежуточный тап.
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
             var slugs: [String] = []
             var page = 1
             var succeeded = true
@@ -925,6 +961,7 @@ final class BookmarksStore: ObservableObject {
             // тайтлов" — экран должен остаться на клиентском приближении,
             // а не показать пустоту/произвольный порядок.
             remoteOrderedSlugs = succeeded ? slugs : nil
+            if succeeded { remoteOrderCache[cacheKey] = slugs }
         }
     }
 
