@@ -167,6 +167,10 @@ struct CollectionDetailView: View {
                 .frame(width: 26, height: 26)
                 .clipShape(Circle())
             }
+            // Системная капсула тулбара (iOS 26, Liquid Glass) обтягивает
+            // контент впритык — без запаса ник упирался левым краем прямо в
+            // край капсулы. Немного горизонтального воздуха внутри.
+            .padding(.horizontal, 6)
         }
         .buttonStyle(.plain)
     }
