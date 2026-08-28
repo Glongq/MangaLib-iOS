@@ -443,7 +443,9 @@ struct BookmarksView: View {
         }
         .padding(.horizontal, 16)
         .frame(height: Theme.pillControlHeight + 12)
-        .background(Theme.surfaceElevated, in: Capsule())
+        // Стекло — по прямой просьбе, тот же приём, что и у чипов
+        // categoryMenu (.regular.interactive() в Capsule).
+        .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     private func bulkMove(to folderId: String) {
