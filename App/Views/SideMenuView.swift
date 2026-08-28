@@ -51,7 +51,7 @@ struct SideMenuView: View {
     // История/Настройки/Загрузки теперь не sheet, а обычные PUSH-переходы внутри
     // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
     private enum MenuRoute: Hashable {
-        case history, settings, downloads, comments, franchises
+        case history, settings, downloads, comments, franchises, friends
         case teams, characters, people, publishers, users
     }
     // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
@@ -120,6 +120,7 @@ struct SideMenuView: View {
                 case .downloads:  DownloadsView(embedded: true)
                 case .comments:   MyCommentsView(embedded: true)
                 case .franchises: FranchiseListView()
+                case .friends:    if let uid = auth.userId { FriendsView(userId: uid) }
                 case .teams:      DirectoryListView(kind: .team)
                 case .characters: DirectoryListView(kind: .character)
                 case .people:     DirectoryListView(kind: .people)
@@ -225,7 +226,13 @@ struct SideMenuView: View {
     private var profileSection: some View {
         collapsibleCard("Профиль") {
             row("Комментарии", icon: "text.bubble", action: { path.append(MenuRoute.comments) })
-            row("Список друзей", icon: "person.2")
+            // Раньше вела на StubView (заглушку) — реальный экран друзей
+            // (FriendsView) давно есть в профиле, просто не был подключён
+            // здесь. Без аккаунта своих друзей нет — как и остальные
+            // персональные пункты, ведёт на вход вместо пустого экрана.
+            row("Список друзей", icon: "person.2", action: {
+                if auth.userId != nil { path.append(MenuRoute.friends) } else { onOpenLogin() }
+            })
             row("Избранное", icon: "heart")
             row("Коллекции", icon: "square.stack")
             row("Игнор-лист", icon: "hand.raised")

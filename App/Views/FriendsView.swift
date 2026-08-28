@@ -84,7 +84,7 @@ struct FriendsView: View {
             emptyState(icon: emptyIcon, text: emptyText)
         } else {
             ScrollView {
-                LazyVStack(spacing: 10) {
+                LazyVStack(spacing: 12) {
                     if vm.tab == .incoming { acceptAllButton }
                     ForEach(vm.visible) { entry in
                         friendRow(entry)
@@ -145,12 +145,19 @@ struct FriendsView: View {
         }
     }
 
+    /// Скругление подложки-строки — деф 24 (как у большинства карточек в
+    /// приложении, см. SideMenuView.cardCornerRadius), было 16. Аватар
+    /// теперь заподлицо с подложкой (без внутреннего паддинга, высота строки
+    /// = высоте аватара) — тот же приём и тот же радиус "угол в угол", что и
+    /// у BookmarksView.row (обложка вместо аватара, тот же принцип).
+    static let cardCornerRadius: CGFloat = 24
+    static let avatarSize: CGFloat = 60
+
     /// Скелетон на первую загрузку — по прямой просьбе, вместо голого
-    /// спиннера. Форма строки повторяет friendRow ниже (аватар 52×52 +
-    /// пара строк текста).
+    /// спиннера. Форма строки повторяет friendRow ниже.
     private var skeletonList: some View {
         ScrollView {
-            LazyVStack(spacing: 10) {
+            LazyVStack(spacing: 12) {
                 ForEach(0..<6, id: \.self) { _ in friendSkeletonRow }
             }
             .padding(.horizontal, 16)
@@ -163,15 +170,17 @@ struct FriendsView: View {
     private var friendSkeletonRow: some View {
         HStack(spacing: 12) {
             SkeletonBox()
-                .frame(width: 52, height: 52)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .frame(width: Self.avatarSize, height: Self.avatarSize)
+                .clipShape(RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous))
             VStack(alignment: .leading, spacing: 6) {
                 SkeletonBar(width: 130)
                 SkeletonBar(width: 80, height: 10)
             }
             Spacer(minLength: 0)
         }
-        .padding(10)
+        .padding(.trailing, 12)
+        .frame(height: Self.avatarSize)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous))
     }
 
     private func friendRow(_ entry: FriendshipEntry) -> some View {
@@ -188,8 +197,9 @@ struct FriendsView: View {
                     } failure: {
                         ZStack { Theme.surfaceElevated; Image(systemName: "person.fill").foregroundStyle(Theme.textSecondary) }
                     }
-                    .frame(width: 52, height: 52)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .frame(width: Self.avatarSize, height: Self.avatarSize)
+                    .clipShape(RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous))
+                    .clipped()
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(entry.user.username)
@@ -209,9 +219,10 @@ struct FriendsView: View {
 
             friendRowTrailing(entry, isResponding: isResponding)
         }
-        .padding(10)
+        .padding(.trailing, 12)
+        .frame(height: Self.avatarSize)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous))
     }
 
     /// Хвост строки — обычный chevron у "Друзья"/"Общие", а у "Заявки в
