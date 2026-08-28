@@ -47,6 +47,19 @@ final class TeamViewModel: ObservableObject {
     @Published private(set) var didLoadOnce = false
     @Published private(set) var errorMessage: String?
 
+    // Вкладка "Обновления" — ПОДТВЕРЖДЕНО GET /teams/{id}/chapters (см.
+    // MangaNetworkService.fetchTeamChapters), тот же пагинация-паттерн, что
+    // и у грида тайтлов выше (page/hasNextPage/pageTask), только своё
+    // состояние — переключение вкладок не должно сбрасывать уже
+    // загруженный список тайтлов и наоборот.
+    @Published private(set) var updates: [TeamChapterGroup] = []
+    @Published private(set) var isLoadingUpdates = false
+    @Published private(set) var isLoadingMoreUpdates = false
+    @Published private(set) var didLoadUpdatesOnce = false
+    private var updatesPage = 1
+    private var updatesHasNextPage = true
+    private var updatesPageTask: Task<Void, Never>?
+
     private let service: MangaNetworkService
     private let debounce: Duration
     private var reloadTask: Task<Void, Never>?
@@ -147,6 +160,49 @@ final class TeamViewModel: ObservableObject {
     func loadMoreIfNeeded(_ item: MangaItem) {
         guard let index = titles.firstIndex(of: item), index >= titles.count - 6 else { return }
         loadMore()
+    }
+
+    // MARK: Вкладка "Обновления"
+
+    /// Первая загрузка ленты — вызывается лениво (см. TeamView.onChange(of:
+    /// selectedTab)) только когда пользователь реально открыл вкладку, а не
+    /// сразу вместе с тайтлами/деталями команды.
+    func loadUpdatesIfNeeded() async {
+        guard !didLoadUpdatesOnce, !isLoadingUpdates else { return }
+        isLoadingUpdates = true
+        do {
+            let result = try await service.fetchTeamChapters(teamId: teamId, page: 1)
+            updates = result.items
+            updatesHasNextPage = result.hasNextPage
+            updatesPage = 1
+        } catch {
+            updates = []
+        }
+        didLoadUpdatesOnce = true
+        isLoadingUpdates = false
+    }
+
+    func loadMoreUpdatesIfNeeded(_ group: TeamChapterGroup) {
+        guard let index = updates.firstIndex(of: group), index >= updates.count - 4 else { return }
+        guard updatesHasNextPage, !isLoadingUpdates, !isLoadingMoreUpdates, updatesPageTask == nil else { return }
+        updatesPageTask = Task { [weak self] in
+            guard let self else { return }
+            await self.fetchNextUpdatesPage()
+            self.updatesPageTask = nil
+        }
+    }
+
+    private func fetchNextUpdatesPage() async {
+        isLoadingMoreUpdates = true
+        let next = updatesPage + 1
+        do {
+            let result = try await service.fetchTeamChapters(teamId: teamId, page: next)
+            let existing = Set(updates.map(\.id))
+            updates.append(contentsOf: result.items.filter { !existing.contains($0.id) })
+            updatesPage = next
+            updatesHasNextPage = result.hasNextPage
+        } catch {}
+        isLoadingMoreUpdates = false
     }
 
     private func scheduleReload(debounced: Bool) {

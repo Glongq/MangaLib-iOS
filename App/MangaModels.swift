@@ -1770,6 +1770,73 @@ struct TeamDetail: Decodable, Identifiable {
     }
 }
 
+// MARK: - Обновления команды (вкладка "Обновления" у TeamView)
+
+/// Одна группа в ленте "Обновления" команды — ПОДТВЕРЖДЕНО перехватом
+/// `GET /teams/{id}/chapters?page=`: `data` — список групп ПО ТАЙТЛУ
+/// (обычно одна глава на группу, `chapters_count` совпадает с реальной
+/// длиной `chapters`, но группа может содержать несколько глав, если
+/// команда выложила их разом). `manga`/`media` в перехваченном ответе — два
+/// поля с ОДИНАКОВЫМ содержимым (та же форма, что и MangaItem: id/name/
+/// rus_name/eng_name/slug/slug_url/cover/ageRestriction/site/type/status),
+/// декодируем только `manga`.
+struct TeamChapterGroup: Decodable, Identifiable, Hashable {
+    let chaptersCount: Int
+    let chapters: [TeamChapterSummary]
+    let manga: MangaItem
+
+    /// Не просто manga.id — один тайтл теоретически может встретиться в
+    /// ленте дважды (разные партии глав), синтетический id разбивает такое
+    /// совпадение вместо того, чтобы ForEach молча схлопнул строки.
+    var id: String { "\(manga.id)_\(chapters.first?.id ?? 0)" }
+    var latest: TeamChapterSummary? { chapters.first }
+
+    enum CodingKeys: String, CodingKey {
+        case chaptersCount = "chapters_count"
+        case chapters, manga
+    }
+
+    static func == (lhs: TeamChapterGroup, rhs: TeamChapterGroup) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+/// Одна глава внутри группы — только поля, реально нужные строке ленты
+/// (том/номер/название/дата); полная форма главы (branch_id/teams/user/…)
+/// здесь не нужна, в отличие от ChapterItem (список глав самого тайтла).
+struct TeamChapterSummary: Decodable, Identifiable, Hashable {
+    let id: Int
+    let volume: String
+    let number: String
+    let name: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, volume, number
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        volume = try Self.flexibleString(c, .volume) ?? "1"
+        number = try Self.flexibleString(c, .number) ?? "0"
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        createdAt = try? c.decodeIfPresent(String.self, forKey: .createdAt) ?? nil
+    }
+
+    /// Тот же приём, что и ChapterItem.flexibleString (та же серверная
+    /// непоследовательность volume/number: то строка, то число) — копия, не
+    /// переиспользование: там private к своему типу.
+    private static func flexibleString(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) throws -> String? {
+        if let s = try? c.decodeIfPresent(String.self, forKey: key) { return s }
+        if let i = try? c.decodeIfPresent(Int.self, forKey: key) { return String(i) }
+        if let d = try? c.decodeIfPresent(Double.self, forKey: key) {
+            return d.rounded() == d ? String(Int(d)) : String(d)
+        }
+        return nil
+    }
+}
+
 // MARK: - Франшиза
 
 /// Франшиза — ПОДТВЕРЖДЕНО перехватом `GET /franchise` (список) и

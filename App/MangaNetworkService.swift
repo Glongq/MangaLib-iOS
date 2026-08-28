@@ -1226,6 +1226,20 @@ final class MangaNetworkService {
         return response.data.filter { $0.userId != 0 }
     }
 
+    /// "Обновления" на TeamView (вкладка рядом с "Тайтлы") — ПОДТВЕРЖДЕНО
+    /// перехватом `GET /teams/{id}/chapters?page=` → `{data:[{chapters_count,
+    /// chapters:[...], manga:{...}}], meta:{has_next_page}}`, та же форма
+    /// пагинации (APIMeta.hasNextPage), что и у fetchLatestUpdates. Численный
+    /// id команды, не slug_url (см. TeamViewModel.teamId). LossyListResponse —
+    /// на случай группы с битым/удалённым тайтлом (та же причина, что у
+    /// fetchBookmarksAccountList).
+    func fetchTeamChapters(teamId: Int, page: Int = 1) async throws -> (items: [TeamChapterGroup], hasNextPage: Bool) {
+        let items: [URLQueryItem] = [URLQueryItem(name: "page", value: String(max(page, 1)))]
+        let request = try makeRequest(path: "/teams/\(teamId)/chapters", queryItems: items)
+        let response: LossyListResponse<TeamChapterGroup> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
     // MARK: Каталожные сущности (команды/персонажи/люди/издательства)
 
     /// Список одного вида каталожной сущности — ПОДТВЕРЖДЕНО перехватом

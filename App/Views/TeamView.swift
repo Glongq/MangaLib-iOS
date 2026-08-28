@@ -35,6 +35,31 @@ struct TeamView: View {
     /// т.к. та константа fileprivate к своему файлу.
     private static let metaChipHeight: CGFloat = 44
 
+    // MARK: Константы строки "Обновления" — 1-в-1 HomeView.updateRow
+    // (обложка BookmarksView.bookmarkCoverWidth/Height, те же формулы
+    // шрифтов/высоты), своя копия: там всё private к HomeView.
+    private static var updatesTitleUIFont: UIFont {
+        let base = UIFont.preferredFont(forTextStyle: .caption1)
+        return UIFont.systemFont(ofSize: base.pointSize * 1.2, weight: .medium)
+    }
+    private static var updatesTitleFont: Font { Font(updatesTitleUIFont) }
+    private static var updatesTypeUIFont: UIFont {
+        let base = UIFont.preferredFont(forTextStyle: .caption2)
+        return UIFont.systemFont(ofSize: base.pointSize * 1.2, weight: .regular)
+    }
+    private static var updatesTypeFont: Font { Font(updatesTypeUIFont) }
+    private static let updatesTextSpacing: CGFloat = 4
+    private static let updatesCoverWidth: CGFloat = BookmarksView.bookmarkCoverWidth
+    private static let updatesCoverHeight: CGFloat = BookmarksView.bookmarkCoverHeight
+    private static var updatesRowHeight: CGFloat {
+        let textBlockHeight = (updatesTitleUIFont.lineHeight * 2).rounded(.up)
+            + updatesTextSpacing
+            + (updatesTypeUIFont.lineHeight * 2).rounded(.up)
+            + updatesTextSpacing
+            + updatesTypeUIFont.lineHeight.rounded(.up)
+        return max(updatesCoverHeight, textBlockHeight)
+    }
+
     private enum Tab: String, CaseIterable, Identifiable {
         case titles = "Тайтлы"
         case updates = "Обновления"
@@ -78,7 +103,7 @@ struct TeamView: View {
                             titlesControls
                             grid(cardWidth: cardWidth)
                         } else {
-                            updatesPlaceholder
+                            updatesSection
                         }
                     }
                     .padding(.horizontal, 16)
@@ -114,6 +139,11 @@ struct TeamView: View {
         }
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
         .sheet(isPresented: $showAllMembers) { TeamMembersSheet(members: vm.members) }
+        // Лениво — только когда реально открыли вкладку "Обновления" (не
+        // вместе с тайтлами/деталями при входе на экран, см. vm.task выше).
+        .onChange(of: selectedTab) { _, tab in
+            if tab == .updates { Task { await vm.loadUpdatesIfNeeded() } }
+        }
     }
 
     /// alt_name с сервера — одна строка через запятую ("DIT, дед, деды, …") —
@@ -464,15 +494,101 @@ struct TeamView: View {
         .pickerStyle(.segmented)
     }
 
-    /// "Обновления" — эндпоинт последних глав именно ЭТОЙ команды в
-    /// перехвате не подтверждён (только общая /latest-updates без фильтра по
-    /// команде) — честная заглушка вместо выдумывания запроса.
-    private var updatesPlaceholder: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "clock.arrow.circlepath").font(.largeTitle).foregroundStyle(Theme.textSecondary)
-            Text("Раздел в разработке").font(.subheadline).foregroundStyle(Theme.textSecondary)
+    /// "Обновления" — ПОДТВЕРЖДЕНО перехватом `GET /teams/{id}/chapters`
+    /// (см. MangaNetworkService.fetchTeamChapters/TeamViewModel.updates):
+    /// список глав именно ЭТОЙ команды, сгруппированный по тайтлу. Строка —
+    /// 1-в-1 стиль HomeView.updateRow ("Мои обновления"), по прямой просьбе.
+    @ViewBuilder
+    private var updatesSection: some View {
+        if vm.updates.isEmpty && vm.isLoadingUpdates {
+            ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, minHeight: 140)
+        } else if vm.updates.isEmpty && vm.didLoadUpdatesOnce {
+            VStack(spacing: 10) {
+                Image(systemName: "clock.arrow.circlepath").font(.largeTitle).foregroundStyle(Theme.textSecondary)
+                Text("Обновлений пока нет").font(.subheadline).foregroundStyle(Theme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 140)
+        } else {
+            LazyVStack(spacing: 10) {
+                ForEach(vm.updates) { group in
+                    NavigationLink {
+                        MangaDetailView(
+                            slug: group.manga.apiSlug,
+                            fallbackTitle: group.manga.displayTitle,
+                            coverURL: group.manga.cover?.bestURL,
+                            item: group.manga
+                        )
+                    } label: {
+                        updateRow(group)
+                    }
+                    .buttonStyle(.plain)
+                    .onAppear { vm.loadMoreUpdatesIfNeeded(group) }
+                }
+            }
+
+            if vm.isLoadingMoreUpdates {
+                ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 16)
+            }
         }
-        .frame(maxWidth: .infinity, minHeight: 140)
+    }
+
+    /// Название (макс 2 строки) + "Том X Глава Y — Название" (макс 2
+    /// строки, только название главы приглушённое) + дата — та же схема,
+    /// что и у HomeView.updateRow/chapterAttributedLine.
+    private func updateRow(_ group: TeamChapterGroup) -> some View {
+        HStack(spacing: 12) {
+            RemoteImage(url: group.manga.cover?.thumbnailURL ?? group.manga.cover?.bestURL) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                SkeletonBox()
+            } failure: {
+                ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
+            }
+            .frame(width: Self.updatesCoverWidth, height: Self.updatesCoverHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipped()
+
+            VStack(alignment: .leading, spacing: Self.updatesTextSpacing) {
+                Text(group.manga.displayTitle)
+                    .font(Self.updatesTitleFont)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                chapterAttributedLine(for: group)
+                    .font(Self.updatesTypeFont)
+                    .lineLimit(2)
+                if let date = group.latest?.createdAt.flatMap(APIISODate.parse) {
+                    Text(date.relativeRussianString)
+                        .font(Self.updatesTypeFont)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.trailing, 12)
+        .frame(height: Self.updatesRowHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    /// "Том X Глава Y — Название" — приглушённые название главы и "+ ещё N"
+    /// (chaptersCount у группы > 1, редкий случай разовой выкладки пачкой).
+    private func chapterAttributedLine(for group: TeamChapterGroup) -> Text {
+        guard let chapter = group.latest else {
+            return Text("").foregroundColor(Theme.textSecondary)
+        }
+        var parts: [String] = []
+        if !chapter.volume.isEmpty { parts.append("Том \(chapter.volume)") }
+        if !chapter.number.isEmpty { parts.append("Глава \(chapter.number)") }
+        let base = parts.joined(separator: " ")
+        var result = Text(base).foregroundColor(Theme.textPrimary)
+        if let name = chapter.name, !name.isEmpty {
+            result = result + Text(" — \(name)").foregroundColor(Theme.textSecondary)
+        }
+        if group.chaptersCount > 1 {
+            result = result + Text(" + ещё \(group.chaptersCount - 1)").foregroundColor(Theme.textSecondary)
+        }
+        return result
     }
 
     // MARK: Поиск + управление (тип контента / фильтры / сортировка) — 1-в-1 CharacterView
