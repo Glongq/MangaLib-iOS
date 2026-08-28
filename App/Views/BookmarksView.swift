@@ -114,8 +114,10 @@ struct BookmarksView: View {
                 // (порядок списков) → шестерёнка (Вид/Сортировка).
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     // Мультивыбор — не показываем, пока список пуст, нет
-                    // смысла. Активен — та же иконка, тонирована акцентом
-                    // (тап всегда переключает вкл/выкл).
+                    // смысла. Иконка всегда акцентного цвета (по прямой
+                    // просьбе) — .tint() не красил её надёжно, поэтому
+                    // явный .foregroundStyle на Image, тот же приём, что и
+                    // у остальных иконок шапки в этом файле.
                     if !currentTitles.isEmpty {
                         Button {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -123,13 +125,8 @@ struct BookmarksView: View {
                                 selectedSlugs.removeAll()
                             }
                         } label: {
-                            // .tint() не красил иконку toolbar-кнопки
-                            // надёжно (прямая просьба: "забыл поставить
-                            // акцентный цвет") — явный .foregroundStyle на
-                            // Image, тот же приём, что и у остальных иконок
-                            // шапки в этом файле.
                             Image(systemName: "checklist")
-                                .foregroundStyle(isSelecting ? Theme.accent : Theme.textPrimary)
+                                .foregroundStyle(Theme.accent)
                         }
                     }
                     if !isSelecting {
