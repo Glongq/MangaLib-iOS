@@ -89,7 +89,7 @@ struct AppSettingsView: View {
                         settingsRow(icon: "eye.slash", title: "Игнор-лист")
                         settingsRow(icon: "lock.shield", title: "Безопасность и вход")
                         settingsRow(icon: "slider.horizontal.3", title: "Фильтр контента")
-                        settingsRow(icon: "hand.raised", title: "Приватность")
+                        privacySettingsRow
                         settingsRow(icon: "creditcard", title: "Платежи", showDivider: false)
                     }
 
@@ -268,6 +268,20 @@ struct AppSettingsView: View {
                 StorageSettingsView()
             } label: {
                 settingsRowLabel(icon: "internaldrive", title: "Данные и память")
+            }
+            .buttonStyle(.plain)
+
+            Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14)
+        }
+    }
+
+    /// "Приватность" — реальный экран вместо StubView (см. PrivacySettingsView).
+    private var privacySettingsRow: some View {
+        VStack(spacing: 0) {
+            NavigationLink {
+                PrivacySettingsView()
+            } label: {
+                settingsRowLabel(icon: "hand.raised", title: "Приватность")
             }
             .buttonStyle(.plain)
 

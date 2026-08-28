@@ -601,6 +601,51 @@ enum OldCommentsThreshold: Equatable, Codable {
     }
 }
 
+// MARK: - Приватность (Меню → Настройки → Профиль → Приватность)
+
+/// Настройки приватности профиля — ПОДТВЕРЖДЕНО реальным перехватом:
+/// `GET /user/settings/privacy` → `{profile_visibility, statistics_visibility,
+/// statistics_site_ids, previous_usernames_visibility, previous_usernames}`;
+/// `PUT` тем же путём отправляет ВЕСЬ объект целиком (full-object write, как
+/// и у NotificationSettings) — ответ на PUT только тост "Настройки
+/// обновлены", без данных, поэтому после сохранения просто доверяем
+/// локальному состоянию. `previous_usernames` — похоже, список только для
+/// отображения (в перехвате пуст), сюда не редактируется.
+struct PrivacySettings: Codable, Equatable {
+    var profileVisibility: Int
+    var statisticsVisibility: Int
+    var statisticsSiteIds: [Int]
+    var previousUsernamesVisibility: Int
+    var previousUsernames: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case profileVisibility = "profile_visibility"
+        case statisticsVisibility = "statistics_visibility"
+        case statisticsSiteIds = "statistics_site_ids"
+        case previousUsernamesVisibility = "previous_usernames_visibility"
+        case previousUsernames = "previous_usernames"
+    }
+}
+
+/// Подписи вариантов — ПОДТВЕРЖДЕНО перехватом `GET /constants?fields[]=
+/// prefsProfileVisibility&fields[]=prefsPreviousUsernamesVisibility`.
+/// `statisticsVisibility` СВОЕГО отдельного /constants в перехвате не было —
+/// разумное предположение, что это тот же 4-вариантный набор, что и у
+/// profileOptions (те же 0..3), НЕ подтверждено напрямую отдельным перехватом.
+enum PrivacyVisibilityOptions {
+    /// 0 Публичный / 1 Только для друзей / 2 Для всех кроме игнор-листа / 3 Приватный.
+    static let profile: [(id: Int, label: String)] = [
+        (0, "Публичный"), (1, "Только для друзей"), (2, "Для всех кроме игнор листа"), (3, "Приватный")
+    ]
+    /// Та же форма — см. комментарий типа выше (НЕ подтверждено отдельно).
+    static let statistics: [(id: Int, label: String)] = profile
+    /// 0 Публичный / 1 Только для друзей / 3 Приватный — БЕЗ варианта "2",
+    /// это другой enum, не переиспользование profile.
+    static let previousUsernames: [(id: Int, label: String)] = [
+        (0, "Публичный"), (1, "Только для друзей"), (3, "Приватный")
+    ]
+}
+
 // MARK: - История чтения (реальный аккаунт)
 
 /// Одна запись реальной истории просмотров аккаунта —

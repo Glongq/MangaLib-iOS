@@ -1635,6 +1635,22 @@ final class MangaNetworkService {
         try await performVoid(request)
     }
 
+    /// Настройки приватности — ПОДТВЕРЖДЕНО реальным перехватом (см.
+    /// PrivacySettings): `GET /user/settings/privacy`.
+    func fetchPrivacySettings() async throws -> PrivacySettings {
+        let request = try makeRequest(path: "/user/settings/privacy", queryItems: [])
+        let response: APIObjectResponse<PrivacySettings> = try await perform(request)
+        return response.data
+    }
+
+    /// Сохранить настройки приватности — ПОДТВЕРЖДЕНО реальным перехватом:
+    /// `PUT /user/settings/privacy`, тело — ВЕСЬ объект целиком (см.
+    /// комментарий у PrivacySettings). Ответ — silent-тост, тело не разбираем.
+    func savePrivacySettings(_ settings: PrivacySettings) async throws {
+        let request = try makeJSONRequest(path: "/user/settings/privacy", method: "PUT", body: settings)
+        try await performVoid(request)
+    }
+
     /// Тумблер "уведомлять" по каждой папке закладок — ПОДТВЕРЖДЕНО реальным
     /// перехватом: `PUT /bookmarks/folder/notifications`, тело — ВЕСЬ список
     /// папок целиком, `{"folders":[{"id":Int,"notify":Bool},...]}`.
