@@ -135,12 +135,17 @@ struct CollectionsListView: View {
         .background(Theme.surfaceElevated, in: Capsule())
     }
 
-    /// Веер обложек по центру — ZStack сам сжимается по границе детей,
-    /// .frame(maxWidth:.infinity, center) снаружи центрирует весь веер, а
-    /// не только первую (левую) обложку.
+    /// Веер обложек как на сайте — СРЕДНЯЯ обложка по центру, БЕЗ поворота,
+    /// поверх остальных; крайние симметрично разъезжаются влево/вправо от
+    /// неё и поворачиваются в свою сторону (было — линейная лесенка слева
+    /// направо, из-за которой ПРАВАЯ обложка (не средняя) оказывалась
+    /// сверху и весь веер был сдвинут к левому краю, а не по центру).
     private func previewStack(_ previews: [MangaCover]) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            ForEach(Array(previews.prefix(3).enumerated()), id: \.offset) { index, cover in
+        let items = Array(previews.prefix(3))
+        let mid = (items.count - 1) / 2
+        return ZStack(alignment: .bottom) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, cover in
+                let delta = index - mid
                 RemoteImage(url: cover.bestURL) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
@@ -150,8 +155,9 @@ struct CollectionsListView: View {
                 }
                 .frame(width: 72, height: 104)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .rotationEffect(.degrees(Double(index) * 4 - 4))
-                .offset(x: CGFloat(index) * 30)
+                .rotationEffect(.degrees(Double(delta) * 8))
+                .offset(x: CGFloat(delta) * 26)
+                .zIndex(delta == 0 ? 1 : 0)
                 .clipped()
             }
         }

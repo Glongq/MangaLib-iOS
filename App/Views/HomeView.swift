@@ -536,13 +536,21 @@ struct HomeView: View {
         }
     }
 
-    /// 1-в-1 референс с реального сайта (по прямой просьбе, скриншот): всё
-    /// по центру — название, три чипа-пилюли статов (просмотры/тайтлы/
-    /// избранное) в один ряд, голос отдельной пилюлей под ними, веер
-    /// обложек по центру. Масштаб крупнее прежнего (была компактная версия
-    /// без подложек у чипов) — своя копия у каждого места, где показываются
-    /// коллекции (см. тот же комментарий в UserCollectionsView/
-    /// CollectionsListView).
+    /// 1-в-1 референс с реального сайта: всё по центру — название, три
+    /// чипа-пилюли статов (просмотры/тайтлы/избранное) в один ряд, голос
+    /// отдельной пилюлей под ними, веер обложек по центру. Своя копия у
+    /// каждого места, где показываются коллекции (см. тот же комментарий в
+    /// UserCollectionsView/CollectionsListView).
+    ///
+    /// Ширина — ~70% экрана (по прямой просьбе, было фикс 260) — карточки в
+    /// горизонтальном скролле, так следующая всегда чуть выглядывает
+    /// сбоку. Высота названия — фикс на ДВЕ строки (было "плавала" в
+    /// зависимости от реальной длины имени: 1-строчные названия давали
+    /// более короткую и от этого визуально "прыгающую" карточку в ряду
+    /// разных карточек).
+    private static var collectionCardWidth: CGFloat { UIScreen.main.bounds.width * 0.7 }
+    private static let collectionTitleHeight: CGFloat = 50
+
     private func collectionCard(_ collection: MangaCollection) -> some View {
         VStack(spacing: 12) {
             HStack(spacing: 6) {
@@ -559,6 +567,7 @@ struct HomeView: View {
                         .background(Color.red, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
             }
+            .frame(height: Self.collectionTitleHeight, alignment: .top)
 
             HStack(spacing: 10) {
                 if let views = collection.views { statPill(icon: "eye", text: "\(views)") }
@@ -572,7 +581,7 @@ struct HomeView: View {
             collectionPreviewStack(collection.previews ?? [])
         }
         .padding(18)
-        .frame(width: 260)
+        .frame(width: Self.collectionCardWidth)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
@@ -587,13 +596,17 @@ struct HomeView: View {
         .background(Theme.surfaceElevated, in: Capsule())
     }
 
-    /// Три обложки веером по центру, как на сайте — каждая следующая чуть
-    /// смещена вправо/вниз и повёрнута на пару градусов (ZStack сам
-    /// сжимается по границе детей — .frame(maxWidth:.infinity, center)
-    /// снаружи центрирует весь веер целиком, а не только первую обложку).
+    /// Веер обложек как на сайте — СРЕДНЯЯ обложка по центру, БЕЗ поворота,
+    /// поверх остальных; крайние симметрично разъезжаются влево/вправо от
+    /// неё и поворачиваются в свою сторону (было — линейная лесенка слева
+    /// направо, из-за которой ПРАВАЯ обложка (не средняя) оказывалась
+    /// сверху и весь веер был сдвинут к левому краю, а не по центру).
     private func collectionPreviewStack(_ previews: [MangaCover]) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            ForEach(Array(previews.prefix(3).enumerated()), id: \.offset) { index, cover in
+        let items = Array(previews.prefix(3))
+        let mid = (items.count - 1) / 2
+        return ZStack(alignment: .bottom) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, cover in
+                let delta = index - mid
                 RemoteImage(url: cover.bestURL) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
@@ -603,8 +616,9 @@ struct HomeView: View {
                 }
                 .frame(width: 72, height: 104)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .rotationEffect(.degrees(Double(index) * 4 - 4))
-                .offset(x: CGFloat(index) * 30)
+                .rotationEffect(.degrees(Double(delta) * 8))
+                .offset(x: CGFloat(delta) * 26)
+                .zIndex(delta == 0 ? 1 : 0)
                 .clipped()
             }
         }
@@ -1089,14 +1103,14 @@ struct HomeView: View {
             LazyHStack(spacing: 12) {
                 ForEach(0..<3, id: \.self) { _ in
                     VStack(spacing: 12) {
-                        skeletonBar(width: 140, height: 20)
+                        skeletonBar(width: 140, height: Self.collectionTitleHeight)
                         skeletonBar(width: 180, height: 32)
                         SkeletonBox()
-                            .frame(width: 260 - 36, height: 104)
+                            .frame(width: Self.collectionCardWidth - 36, height: 104)
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                     .padding(18)
-                    .frame(width: 260)
+                    .frame(width: Self.collectionCardWidth)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
             }
