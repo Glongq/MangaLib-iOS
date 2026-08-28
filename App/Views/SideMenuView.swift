@@ -51,7 +51,7 @@ struct SideMenuView: View {
     // История/Настройки/Загрузки теперь не sheet, а обычные PUSH-переходы внутри
     // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
     private enum MenuRoute: Hashable {
-        case history, settings, downloads, comments, franchises, friends, collections
+        case history, settings, downloads, comments, franchises, friends, collections, myCollections
         case teams, characters, people, publishers, users
     }
     // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
@@ -122,6 +122,7 @@ struct SideMenuView: View {
                 case .franchises: FranchiseListView()
                 case .friends:    if let uid = auth.userId { FriendsView(userId: uid) }
                 case .collections: CollectionsListView()
+                case .myCollections: if let uid = auth.userId { UserCollectionsView(userId: uid) }
                 case .teams:      DirectoryListView(kind: .team)
                 case .characters: DirectoryListView(kind: .character)
                 case .people:     DirectoryListView(kind: .people)
@@ -235,7 +236,13 @@ struct SideMenuView: View {
                 if auth.userId != nil { path.append(MenuRoute.friends) } else { onOpenLogin() }
             })
             row("Избранное", icon: "heart")
-            row("Коллекции", icon: "square.stack")
+            // Раньше вела на StubView — реальный экран (UserCollectionsView,
+            // "мои коллекции") давно есть в профиле, просто не был
+            // подключён здесь (в отличие от Каталог → Коллекции — та уже
+            // вела на общую ленту CollectionsListView).
+            row("Коллекции", icon: "square.stack", action: {
+                if auth.userId != nil { path.append(MenuRoute.myCollections) } else { onOpenLogin() }
+            })
             row("Игнор-лист", icon: "hand.raised")
             row("История банов", icon: "nosign", showDivider: false)
         }
