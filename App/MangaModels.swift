@@ -3025,6 +3025,7 @@ struct CollectionDetail: Decodable, Identifiable {
     let itemsCount: Int?
     let commentsCount: Int?
     let adult: Bool?
+    let createdAt: Date?
     let blocks: [CollectionBlock]
 
     private struct Subscription: Decodable {
@@ -3038,6 +3039,7 @@ struct CollectionDetail: Decodable, Identifiable {
         case favoritesCount = "favorites_count"
         case itemsCount = "items_count"
         case commentsCount = "comments_count"
+        case createdAt = "created_at"
     }
 
     init(from decoder: Decoder) throws {
@@ -3054,6 +3056,11 @@ struct CollectionDetail: Decodable, Identifiable {
         let sub = (try? c.decodeIfPresent(Subscription.self, forKey: .subscription)) ?? nil
         isSubscribed = sub?.isSubscribed ?? false
         blocks = ((try? c.decodeIfPresent([CollectionBlock].self, forKey: .blocks)) ?? nil) ?? []
+        if let raw = ((try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? nil), !raw.isEmpty {
+            createdAt = APIISODate.parse(raw)
+        } else {
+            createdAt = nil
+        }
 
         // ProseMirror-документ — та же логика разбора, что и у TeamDetail.
         // description (см. её комментарий): AnyJSON.extractReadableText()
