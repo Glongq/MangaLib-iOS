@@ -34,6 +34,10 @@ struct ProfileView: View {
     /// отмены (см. friendshipRow/cancelFriendRequest).
     @State private var showCancelFriendRequestConfirm = false
     @State private var cancellingFriendRequest = false
+    /// Принять/отклонить входящую заявку (см. friendshipRow, ветка
+    /// isAwaitingConfirmation) — коды status для PUT /friendship/{id}
+    /// теперь ПОДТВЕРЖДЕНЫ (см. MangaNetworkService.respondToFriendRequest).
+    @State private var respondingToFriendRequest = false
     /// Какой из "быстрых" разделов сейчас открыт ВНУТРИ профиля, вместо
     /// push'а через NavigationLink на отдельный экран — по прямой просьбе
     /// сделать так, чтобы левая кнопка шапки (щит ↔ назад) плавно перетекала
@@ -473,11 +477,34 @@ struct ProfileView: View {
                 .buttonStyle(.plain)
                 .disabled(cancellingFriendRequest)
             } else if status?.isAwaitingConfirmation == true {
-                // Заявка ОТ этого пользователя — принять/отклонить не
-                // реализовано: коды status для PUT /friendship/{id} не
-                // подтверждены ни одним перехватом (см. capture 2026-08-25),
-                // рисковать записью в реальный аккаунт наугад не стал.
-                friendshipLabel("Ожидает вашего решения", icon: "person.crop.circle.badge.questionmark", tint: Theme.textSecondary)
+                // Заявка ОТ этого пользователя — ПОДТВЕРЖДЕНО перехватом:
+                // PUT /friendship/{id} {"status":2} отклоняет (см.
+                // MangaNetworkService.respondToFriendRequest), status:1 —
+                // принять (по аналогии с PUT /friendship/bulk).
+                if respondingToFriendRequest {
+                    friendshipLabel("Секунду...", icon: "clock", tint: Theme.textSecondary)
+                } else {
+                    Button { Task { await respondToFriendRequest(accept: false) } } label: {
+                        Image(systemName: "xmark")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                            .frame(width: 36, height: 36)
+                            .background(Theme.surfaceElevated, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    Button { Task { await respondToFriendRequest(accept: true) } } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark")
+                            Text("Принять")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.background)
+                        .padding(.horizontal, 14)
+                        .frame(height: 36)
+                        .background(Theme.accent, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
             } else {
                 Button {
                     Task { await sendFriendRequest() }
@@ -599,6 +626,16 @@ struct ProfileView: View {
                 }.buttonStyle(.plain)
             }
 
+            // "Личка" — эндпоинты личных сообщений (GET /messenger/threads?
+            // page=&archived=, GET /messenger/threads/find/{userId}) реально
+            // ПОДТВЕРЖДЕНЫ перехватом, но список в капче был пуст — форма
+            // отдельного треда/сообщения ни разу не перехвачена, поэтому
+            // честная заглушка (тот же StubListView, что и "Избранное"),
+            // а не выдуманный экран переписки.
+            NavigationLink { StubListView(title: "Сообщения") } label: {
+                quickRow("Сообщения", "message")
+            }.buttonStyle(.plain)
+
             NavigationLink { StubListView(title: "Избранное") } label: {
                 quickRow("Избранное", "heart")
             }.buttonStyle(.plain)
@@ -673,16 +710,30 @@ struct ProfileView: View {
     }
 
     private func cancelFriendRequest() async {
-        guard let id = resolvedId, !cancellingFriendRequest else { return }
+        // DELETE /friendship/{id записи}, не {id пользователя} — см.
+        // MangaNetworkService.cancelFriendRequest.
+        guard let friendshipId = friendship?.id, !cancellingFriendRequest else { return }
         cancellingFriendRequest = true
         friendRequestMessage = nil
         do {
-            try await MangaNetworkService.shared.cancelFriendRequest(userId: id)
+            try await MangaNetworkService.shared.cancelFriendRequest(friendshipId: friendshipId)
             friendship = nil
         } catch {
             friendRequestMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         cancellingFriendRequest = false
+    }
+
+    private func respondToFriendRequest(accept: Bool) async {
+        guard let friendshipId = friendship?.id, !respondingToFriendRequest else { return }
+        respondingToFriendRequest = true
+        friendRequestMessage = nil
+        do {
+            friendship = try await MangaNetworkService.shared.respondToFriendRequest(id: friendshipId, accept: accept)
+        } catch {
+            friendRequestMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        respondingToFriendRequest = false
     }
 }
 

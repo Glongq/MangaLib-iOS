@@ -445,15 +445,46 @@ final class MangaNetworkService {
 
     private struct FriendRequestPayload: Encodable { let recipient_id: Int }
 
-    /// Отменить отправленную заявку (или разорвать уже принятую дружбу) —
-    /// эндпоинт НЕ подтверждён прямым перехватом (отмену/удаление друга ни
-    /// разу не поймали в капчах), это разумное предположение по аналогии с
-    /// уже подтверждённым `GET /friendship/{userId}` — тот же REST-ресурс,
-    /// адресуется id ЦЕЛЕВОГО пользователя (не id самой записи дружбы), так
-    /// что здесь `DELETE /friendship/{userId}`. Если сервер ожидает другую
-    /// форму — поправить по факту первого реального перехвата.
-    func cancelFriendRequest(userId: Int) async throws {
-        let request = try makeRequest(path: "/friendship/\(userId)", queryItems: [], method: "DELETE")
+    /// Разорвать дружбу — ПОДТВЕРЖДЕНО перехватом `DELETE /friendship/{id}`,
+    /// где id — id САМОЙ ЗАПИСИ дружбы (FriendshipEntry.id), НЕ id
+    /// пользователя (более ранняя догадка "по id пользователя" была не
+    /// подтверждена и, судя по этому перехвату, неверна — поправлено).
+    /// Отмена ЕЩЁ НЕ принятой исходящей заявки прямым перехватом не поймана,
+    /// но это тот же REST-ресурс и тот же метод — по аналогии тоже должен
+    /// работать через id записи.
+    func cancelFriendRequest(friendshipId: Int) async throws {
+        let request = try makeRequest(path: "/friendship/\(friendshipId)", queryItems: [], method: "DELETE")
+        try await performVoid(request)
+    }
+
+    /// Принять/отклонить входящую заявку в друзья — ПОДТВЕРЖДЕНО перехватом
+    /// `PUT /friendship/{id} {"status":2}` → отклонение (в ответе
+    /// `is_friend/is_requested/is_awaiting_confirmation` все false). Именно
+    /// этот код ранее был неизвестен (см. историю в AccountInfoView.
+    /// friendshipRow — раньше принять/отклонить было НЕ реализовано из-за
+    /// этого). `status:1` = принять — напрямую для ОДИНОЧНОЙ заявки в
+    /// перехвате не поймано, но `PUT /friendship/bulk {"status":1}` (см.
+    /// acceptAllFriendRequests) с тем же полем `status` и тем же значением
+    /// массово ПРИНИМАЕТ все заявки — по аналогии то же значение работает и
+    /// здесь для одной записи.
+    @discardableResult
+    func respondToFriendRequest(id: Int, accept: Bool) async throws -> FriendshipEntry {
+        let request = try makeJSONRequest(path: "/friendship/\(id)", method: "PUT",
+                                           body: FriendshipStatusPayload(status: accept ? 1 : 2))
+        let response: APIObjectResponse<FriendshipEntry> = try await perform(request)
+        return response.data
+    }
+
+    private struct FriendshipStatusPayload: Encodable { let status: Int }
+
+    /// Принять ВСЕ входящие заявки разом — ПОДТВЕРЖДЕНО перехватом
+    /// `PUT /friendship/bulk {"status":1}` → `{"data":{"toast":{"type":
+    /// "success","message":"Все ваши заявки были успешно приняты"}}}`, тело
+    /// ответа не несёт списка записей — после успеха вызывающий код
+    /// перезагружает список входящих сам.
+    func acceptAllFriendRequests() async throws {
+        let request = try makeJSONRequest(path: "/friendship/bulk", method: "PUT",
+                                           body: FriendshipStatusPayload(status: 1))
         try await performVoid(request)
     }
 
@@ -474,6 +505,23 @@ final class MangaNetworkService {
             URLQueryItem(name: "page", value: String(max(page, 1))),
             URLQueryItem(name: "user_id", value: String(userId)),
             URLQueryItem(name: "status", value: "1")
+        ]
+        let request = try makeRequest(path: "/friendship", queryItems: items)
+        let response: LossyListResponse<FriendshipEntry> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// Входящие/исходящие заявки в друзья (свои — этот запрос имеет смысл
+    /// только для СВОЕГО аккаунта, не для чужого профиля) — ПОДТВЕРЖДЕНО
+    /// перехватом `GET /friendship?user_id=&status=0&sender=0` (входящие —
+    /// заявки, отправленные МНЕ) и `&sender=1` (исходящие — отправленные
+    /// МНОЙ). Та же форма записи/пагинации, что и у fetchFriends.
+    func fetchFriendRequests(userId: Int, incoming: Bool, page: Int = 1) async throws -> (requests: [FriendshipEntry], hasNextPage: Bool) {
+        let items = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "user_id", value: String(userId)),
+            URLQueryItem(name: "status", value: "0"),
+            URLQueryItem(name: "sender", value: incoming ? "0" : "1")
         ]
         let request = try makeRequest(path: "/friendship", queryItems: items)
         let response: LossyListResponse<FriendshipEntry> = try await perform(request)
