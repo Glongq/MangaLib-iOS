@@ -1,13 +1,14 @@
 import SwiftUI
 
 /// Страница одной коллекции — GET /collections/{id} (см.
-/// CollectionDetailViewModel). Сверху заголовок (название коллекции), под
-/// ним дата слева / просмотры+кол-во тайтлов справа, автор, описание,
-/// сами тайтлы — единым списком или разбитые на именованные разделы (см.
-/// CollectionDetail.blocks). Внизу — кнопка "Комментарии" и чипы "В
-/// закладки"/"Пожаловаться"/голос — по прямой просьбе. Сетка тайтлов
-/// учитывает "Количество карточек в ряд" из Персонализации — тот же
-/// @AppStorage-ключ, что и в Каталоге/Закладках (см. CardsPerRow.swift).
+/// CollectionDetailViewModel). Сверху заголовок (название слева, автор
+/// справа: ник над подписью "Автор коллекции", аватар у края) и строка
+/// дата/просмотры+тайтлы, затем описание, затем сами тайтлы — единым
+/// списком или разбитые на именованные разделы (см. CollectionDetail.
+/// blocks). "..." в навбаре — Поделиться/Пожаловаться. Внизу — кнопка
+/// "Комментарии" и чипы "В закладки"/голос. Сетка тайтлов учитывает
+/// "Количество карточек в ряд" из Персонализации — тот же @AppStorage-ключ,
+/// что и в Каталоге/Закладках (см. CardsPerRow.swift).
 struct CollectionDetailView: View {
     let collectionId: Int
     let fallback: MangaCollection?
@@ -37,10 +38,6 @@ struct CollectionDetailView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     titleHeader
 
-                    if let author = vm.detail?.user {
-                        authorRow(author)
-                    }
-
                     if let desc = vm.detail?.description, !desc.isEmpty {
                         ExpandableDescription(text: desc)
                     }
@@ -67,6 +64,25 @@ struct CollectionDetailView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // "..." справа сверху — тот же паттерн, что и у карточки тайтла
+            // (см. MangaDetailView.actionMenuItems): Menu + ellipsis.circle,
+            // никакой самодельной кнопки поверх системного бара.
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    if let shareURL {
+                        ShareLink(item: shareURL) {
+                            Label("Поделиться", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                    Button { showReportStub = true } label: {
+                        Label("Пожаловаться", systemImage: "flag")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
         .task { await vm.loadIfNeeded() }
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
         .sheet(isPresented: $showReportStub) {
@@ -78,13 +94,29 @@ struct CollectionDetailView: View {
         }
     }
 
-    // MARK: Заголовок — название / дата / просмотры+тайтлы
+    /// Та же ссылка на страницу, что и у тайтла (см. MangaDetailView.
+    /// shareURL) — реальный домен активного сайта + подтверждённый путь
+    /// (пользователь сам прислал `/ru/collections/{id}` реальной ссылкой).
+    private var shareURL: URL? {
+        URL(string: "https://\(SiteSession.shared.activeSite.host)/ru/collections/\(collectionId)")
+    }
 
+    // MARK: Заголовок — название+автор / дата / просмотры+тайтлы
+
+    /// Автор — по прямой просьбе теперь в самом верху справа (был отдельной
+    /// строкой ниже): ник сверху, подпись "Автор коллекции" под ним, аватар
+    /// у самого края.
     private var titleHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(vm.displayName)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(Theme.textPrimary)
+            HStack(alignment: .top, spacing: 10) {
+                Text(vm.displayName)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let author = vm.detail?.user {
+                    authorChip(author)
+                }
+            }
 
             HStack(spacing: 10) {
                 if let date = vm.detail?.createdAt {
@@ -108,11 +140,18 @@ struct CollectionDetailView: View {
         .foregroundStyle(Theme.textSecondary)
     }
 
-    // MARK: Автор
-
-    private func authorRow(_ author: FriendUser) -> some View {
+    private func authorChip(_ author: FriendUser) -> some View {
         Button { profileUser = ProfileUserId(id: author.id) } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(author.username)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    Text("Автор коллекции")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
                 RemoteImage(url: author.avatarURL) { img in
                     img.resizable().scaledToFill()
                 } placeholder: {
@@ -120,13 +159,6 @@ struct CollectionDetailView: View {
                 }
                 .frame(width: 36, height: 36)
                 .clipShape(Circle())
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Автор коллекции").font(.caption2).foregroundStyle(Theme.textSecondary)
-                    Text(author.username).font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textSecondary)
             }
         }
         .buttonStyle(.plain)
@@ -182,7 +214,6 @@ struct CollectionDetailView: View {
 
             HStack(spacing: 10) {
                 favoriteChip
-                reportChip
                 Spacer(minLength: 0)
                 voteChip
             }
@@ -207,21 +238,6 @@ struct CollectionDetailView: View {
         }
         .buttonStyle(.plain)
         .disabled(vm.isTogglingFavorite)
-    }
-
-    private var reportChip: some View {
-        Button { showReportStub = true } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "flag")
-                Text("Пожаловаться")
-            }
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(Theme.textPrimary)
-            .padding(.horizontal, 12)
-            .frame(height: 34)
-            .background(Theme.surfaceElevated, in: Capsule())
-        }
-        .buttonStyle(.plain)
     }
 
     /// Голос "+"/"-" — POST /collection/{id}/vote, 1=плюс/0=минус/null=не
