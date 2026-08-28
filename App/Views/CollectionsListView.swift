@@ -74,27 +74,31 @@ struct CollectionsListView: View {
     }
 
     private var collectionSkeletonCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SkeletonBar(width: 160, height: 16)
-            SkeletonBar(width: 200, height: 10)
+        VStack(spacing: 12) {
+            SkeletonBar(width: 160, height: 20)
+            SkeletonBar(width: 200, height: 32)
             SkeletonBox()
-                .frame(height: 56)
+                .frame(height: 104)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .center)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    /// 1-в-1 UserCollectionsView.collectionCard (своя копия — та приватна к
-    /// своему файлу): название + чипы статистики + голоса + веер превью.
+    /// 1-в-1 референс с реального сайта (по прямой просьбе, скриншот): всё
+    /// по центру — название, три чипа-пилюли статов (просмотры/тайтлы/
+    /// избранное) в один ряд, голос отдельной пилюлей под ними, веер
+    /// обложек по центру. Своя копия у каждого места, где показываются
+    /// коллекции (см. тот же комментарий в HomeView/UserCollectionsView).
     private func collectionCard(_ collection: MangaCollection) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(spacing: 12) {
             HStack(spacing: 6) {
                 Text(collection.name)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.title3.weight(.bold))
                     .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
                 if collection.adult == true {
                     Text("18+")
                         .font(.caption2.weight(.bold))
@@ -104,32 +108,36 @@ struct CollectionsListView: View {
                 }
             }
 
-            HStack(spacing: 14) {
-                if let views = collection.views { statLabel(icon: "eye", value: views) }
-                if let itemsCount = collection.itemsCount { statLabel(icon: "square.stack", value: itemsCount) }
-                if let favoritesCount = collection.favoritesCount { statLabel(icon: "bookmark", value: favoritesCount) }
-                if let commentsCount = collection.commentsCount { statLabel(icon: "text.bubble", value: commentsCount) }
+            HStack(spacing: 10) {
+                if let views = collection.views { statPill(icon: "eye", text: "\(views)") }
+                if let itemsCount = collection.itemsCount { statPill(icon: "square.stack", text: "\(itemsCount)") }
+                if let favoritesCount = collection.favoritesCount { statPill(icon: "bookmark", text: "\(favoritesCount)") }
             }
             if let votes = collection.votes {
-                statLabel(icon: "star.fill", value: votes.up, secondary: votes.down)
+                statPill(icon: "star.fill", text: "\(votes.up) / \(votes.down)")
             }
 
             previewStack(collection.previews ?? [])
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .center)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func statLabel(icon: String, value: Int, secondary: Int? = nil) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon).font(.caption2)
-            Text(secondary.map { "\(value)/\($0)" } ?? "\(value)")
-                .font(.caption2)
+    private func statPill(icon: String, text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.caption)
+            Text(text).font(.caption.weight(.medium))
         }
-        .foregroundStyle(Theme.textSecondary)
+        .foregroundStyle(Theme.textPrimary)
+        .padding(.horizontal, 11)
+        .frame(height: 32)
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 
+    /// Веер обложек по центру — ZStack сам сжимается по границе детей,
+    /// .frame(maxWidth:.infinity, center) снаружи центрирует весь веер, а
+    /// не только первую (левую) обложку.
     private func previewStack(_ previews: [MangaCover]) -> some View {
         ZStack(alignment: .bottomLeading) {
             ForEach(Array(previews.prefix(3).enumerated()), id: \.offset) { index, cover in
@@ -140,16 +148,15 @@ struct CollectionsListView: View {
                 } failure: {
                     Theme.surfaceElevated
                 }
-                .frame(width: 60, height: 84)
+                .frame(width: 72, height: 104)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .rotationEffect(.degrees(Double(index) * 4 - 4))
-                .offset(x: CGFloat(index) * 26)
+                .offset(x: CGFloat(index) * 30)
                 .clipped()
             }
         }
-        .frame(height: 84, alignment: .leading)
-        .padding(.leading, 4)
-        .padding(.trailing, previews.count > 1 ? CGFloat(previews.prefix(3).count - 1) * 26 + 20 : 0)
+        .frame(height: 104)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private func emptyState(icon: String, text: String) -> some View {

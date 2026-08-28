@@ -536,40 +536,61 @@ struct HomeView: View {
         }
     }
 
+    /// 1-в-1 референс с реального сайта (по прямой просьбе, скриншот): всё
+    /// по центру — название, три чипа-пилюли статов (просмотры/тайтлы/
+    /// избранное) в один ряд, голос отдельной пилюлей под ними, веер
+    /// обложек по центру. Масштаб крупнее прежнего (была компактная версия
+    /// без подложек у чипов) — своя копия у каждого места, где показываются
+    /// коллекции (см. тот же комментарий в UserCollectionsView/
+    /// CollectionsListView).
     private func collectionCard(_ collection: MangaCollection) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(collection.name)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
+        VStack(spacing: 12) {
+            HStack(spacing: 6) {
+                Text(collection.name)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                if collection.adult == true {
+                    Text("18+")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Color.red, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
+            }
 
-            HStack(spacing: 14) {
-                if let views = collection.views { statLabel(icon: "eye", value: views) }
-                if let itemsCount = collection.itemsCount { statLabel(icon: "square.stack", value: itemsCount) }
-                if let favoritesCount = collection.favoritesCount { statLabel(icon: "bookmark", value: favoritesCount) }
+            HStack(spacing: 10) {
+                if let views = collection.views { statPill(icon: "eye", text: "\(views)") }
+                if let itemsCount = collection.itemsCount { statPill(icon: "square.stack", text: "\(itemsCount)") }
+                if let favoritesCount = collection.favoritesCount { statPill(icon: "bookmark", text: "\(favoritesCount)") }
             }
             if let votes = collection.votes {
-                statLabel(icon: "star.fill", value: votes.up, secondary: votes.down)
+                statPill(icon: "star.fill", text: "\(votes.up) / \(votes.down)")
             }
 
             collectionPreviewStack(collection.previews ?? [])
         }
-        .padding(14)
-        .frame(width: 220)
+        .padding(18)
+        .frame(width: 260)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func statLabel(icon: String, value: Int, secondary: Int? = nil) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon).font(.caption2)
-            Text(secondary.map { "\(value)/\($0)" } ?? "\(value)")
-                .font(.caption2)
+    private func statPill(icon: String, text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.caption)
+            Text(text).font(.caption.weight(.medium))
         }
-        .foregroundStyle(Theme.textSecondary)
+        .foregroundStyle(Theme.textPrimary)
+        .padding(.horizontal, 11)
+        .frame(height: 32)
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 
-    /// Три обложки веером, как на сайте — каждая следующая чуть смещена
-    /// вправо/вниз и повёрнута на пару градусов.
+    /// Три обложки веером по центру, как на сайте — каждая следующая чуть
+    /// смещена вправо/вниз и повёрнута на пару градусов (ZStack сам
+    /// сжимается по границе детей — .frame(maxWidth:.infinity, center)
+    /// снаружи центрирует весь веер целиком, а не только первую обложку).
     private func collectionPreviewStack(_ previews: [MangaCover]) -> some View {
         ZStack(alignment: .bottomLeading) {
             ForEach(Array(previews.prefix(3).enumerated()), id: \.offset) { index, cover in
@@ -580,14 +601,15 @@ struct HomeView: View {
                 } failure: {
                     Theme.surfaceElevated
                 }
-                .frame(width: 60, height: 84)
+                .frame(width: 72, height: 104)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .rotationEffect(.degrees(Double(index) * 4 - 4))
-                .offset(x: CGFloat(index) * 26)
+                .offset(x: CGFloat(index) * 30)
                 .clipped()
             }
         }
-        .frame(height: 84, alignment: .leading)
+        .frame(height: 104)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     // MARK: Топ активных недели
@@ -1060,20 +1082,21 @@ struct HomeView: View {
         .padding(.horizontal, 16)
     }
 
-    /// Копия макета collectionCard (заголовок + строка статов + веер обложек).
+    /// Копия макета collectionCard (по центру, тот же масштаб) — заголовок +
+    /// ряд чипов-пилюль + веер обложек, всё по центру карточки.
     private var collectionsSkeleton: some View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 12) {
                 ForEach(0..<3, id: \.self) { _ in
-                    VStack(alignment: .leading, spacing: 10) {
-                        skeletonBar(width: 130, height: 14)
-                        skeletonBar(width: 90, height: 10)
+                    VStack(spacing: 12) {
+                        skeletonBar(width: 140, height: 20)
+                        skeletonBar(width: 180, height: 32)
                         SkeletonBox()
-                            .frame(width: 220 - 28, height: 84)
+                            .frame(width: 260 - 36, height: 104)
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
-                    .padding(14)
-                    .frame(width: 220)
+                    .padding(18)
+                    .frame(width: 260)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
             }
