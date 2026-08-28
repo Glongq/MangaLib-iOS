@@ -479,8 +479,99 @@ struct UserBookmarkFolder: Decodable, Identifiable, Hashable {
     let name: String
     let count: Int
     let colorHex: String?
+    /// Тумблер "уведомлять о новых главах в этой папке" — используется
+    /// экраном настроек уведомлений (см. NotificationSettingsView), сам
+    /// список закладок пользователя (UserBookmarksView) это поле не читает.
+    var notify: Bool
 
-    enum CodingKeys: String, CodingKey { case id, name, count, colorHex = "color" }
+    enum CodingKeys: String, CodingKey { case id, name, count, colorHex = "color", notify }
+}
+
+// MARK: - Настройки уведомлений аккаунта
+
+/// `GET/PUT /user/settings/notifications` — ПОДТВЕРЖДЕНО реальным
+/// перехватом (несколько десятков пар запрос/ответ, все 17 полей
+/// присутствуют всегда). PUT шлёт ВЕСЬ объект целиком, не частичный патч —
+/// значит поля, не показанные в UI настроек (notify_anime,
+/// disable_card_drop_notif, push_*, reading/plan_read/on_hold/completed/
+/// favourites), нужно сохранять НЕИЗМЕНЁННЫМИ, взятыми из последнего GET
+/// (см. NotificationSettingsView).
+struct NotificationSettings: Codable, Equatable {
+    let userId: Int
+    var manga: Bool
+    var disableFriendsNotif: Bool
+    var mediaStatusFinished: Bool
+    var disableOldCommentsNotif: OldCommentsThreshold
+    var disableChapterEarlyAccessNotif: Bool
+    var disableCardDropNotif: Bool
+    var reading: Bool
+    var planRead: Bool
+    var onHold: Bool
+    var completed: Bool
+    var favourites: Bool
+    var pushChapter: Bool
+    var pushComments: Bool
+    var pushEpisode: Bool
+    var pushForum: Bool
+    var pushMessages: Bool
+    var notifyAnime: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case manga
+        case disableFriendsNotif = "disable_friends_notif"
+        case mediaStatusFinished = "media_status_finished"
+        case disableOldCommentsNotif = "disable_old_comments_notif"
+        case disableChapterEarlyAccessNotif = "disable_chapter_early_access_notif"
+        case disableCardDropNotif = "disable_card_drop_notif"
+        case reading
+        case planRead = "plan_read"
+        case onHold = "on_hold"
+        case completed
+        case favourites
+        case pushChapter = "push_chapter"
+        case pushComments = "push_comments"
+        case pushEpisode = "push_episode"
+        case pushForum = "push_forum"
+        case pushMessages = "push_messages"
+        case notifyAnime = "notify_anime"
+    }
+}
+
+/// `disable_old_comments_notif` — ЕДИНСТВЕННОЕ поле объекта со смешанным
+/// типом на проводе: на ЧТЕНИЕ (`GET`, значение только что созданного
+/// аккаунта/никогда не тронутая настройка) перехвачено как `false`; на
+/// ЗАПИСЬ (`PUT`, реальный клиент) — ТОЛЬКО `0` (Int, явно выключено) ИЛИ
+/// строка-число дней — `"7"`/`"14"`/`"30"`/`"180"`/`"360"` (выбран порог в
+/// Picker'е); `PUT` с буквальным `false` НИ РАЗУ не перехвачен, поэтому
+/// при сохранении шлём именно `0` для "выключено" — так делает реальный
+/// клиент.
+enum OldCommentsThreshold: Equatable, Codable {
+    case off
+    case days(Int)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let intValue = try? container.decode(Int.self) {
+            self = intValue > 0 ? .days(intValue) : .off
+            return
+        }
+        if let stringValue = try? container.decode(String.self), let intValue = Int(stringValue) {
+            self = intValue > 0 ? .days(intValue) : .off
+            return
+        }
+        // Bool(false, дефолт непотроганного аккаунта) или что-то
+        // непредвиденное — трактуем как "выключено".
+        self = .off
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .off: try container.encode(0)
+        case .days(let days): try container.encode(String(days))
+        }
+    }
 }
 
 // MARK: - История чтения (реальный аккаунт)

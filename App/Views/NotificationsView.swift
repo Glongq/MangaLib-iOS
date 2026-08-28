@@ -21,25 +21,12 @@ struct NotificationsView: View {
     @State private var lastScrollOffset: CGFloat = 0
     @State private var isHeaderAnimating = false
 
-    /// "Настройки" в "..." — заглушка, ОСОЗНАННО оставлена как есть по
-    /// прямой просьбе ("пока не строй, только анализ"), хотя и чтение, И
-    /// запись теперь ПОДТВЕРЖДЕНЫ перехватом — реальный экран можно
-    /// собрать в любой момент:
-    /// - `GET/PUT /user/settings/notifications` — ПОЛНЫЙ объект: user_id,
-    ///   manga, notify_anime, reading/plan_read/on_hold/completed/
-    ///   favourites (булевы — вероятно "уведомлять о новых главах по
-    ///   СТАТУСУ закладки", пересекается по смыслу с notify ниже, но
-    ///   эндпоинт другой), disable_friends_notif, media_status_finished,
-    ///   disable_chapter_early_access_notif, disable_card_drop_notif,
-    ///   push_chapter/push_comments/push_episode/push_forum/push_messages —
-    ///   все булевы; disable_old_comments_notif — ИСКЛЮЧЕНИЕ, смешанный
-    ///   тип: false/0 ИЛИ строка-число дней ("7"/"14"/"30"/"180"/"360",
-    ///   видимо Picker "не уведомлять о комментариях старше N дней") — PUT
-    ///   шлёт ВЕСЬ объект целиком, не частично.
-    /// - `PUT /bookmarks/folder/notifications` — отдельно, тумблер notify
-    ///   ПО КАЖДОЙ папке закладок: {"folders":[{"id":Int,"notify":Bool},
-    ///   ...]}, тоже весь список целиком.
-    @State private var showSettingsStub = false
+    /// "Настройки" в "..." — реальный экран (см. NotificationSettingsView),
+    /// собран по прямой просьбе после скриншота реального сайта — оба
+    /// эндпоинта (`GET/PUT /user/settings/notifications` и `PUT /bookmarks/
+    /// folder/notifications`) ПОДТВЕРЖДЕНЫ перехватом, подробности — в
+    /// комментариях самого NotificationSettingsView/NotificationSettings.
+    @State private var showSettings = false
     /// Подтверждение перед "Удалить все уведомления" — сам эндпоинт
     /// РЕАЛИЗОВАН (см. deleteAllTapped/NotificationsViewModel.
     /// deleteAllInCurrentFilter) — диалог остаётся, т.к. действие
@@ -101,8 +88,8 @@ struct NotificationsView: View {
                 Task { await viewModel.refresh() }
             }
         }
-        .sheet(isPresented: $showSettingsStub) {
-            NavigationStack { StubView(title: "Настройки уведомлений") }
+        .sheet(isPresented: $showSettings) {
+            NavigationStack { NotificationSettingsView() }
         }
         .alert("Удалить уведомления?", isPresented: $showDeleteAllConfirm) {
             Button("Отмена", role: .cancel) {}
@@ -181,11 +168,11 @@ struct NotificationsView: View {
         }
     }
 
-    /// "..." — Настройки (заглушка, эндпоинт не подтверждён)/Отметить всё
+    /// "..." — Настройки (см. NotificationSettingsView)/Отметить всё
     /// прочитанным/Удалить все уведомления (красным).
     private var overflowMenu: some View {
         Menu {
-            Button { showSettingsStub = true } label: {
+            Button { showSettings = true } label: {
                 Label("Настройки", systemImage: "gearshape")
             }
             Button { markAllReadTapped() } label: {

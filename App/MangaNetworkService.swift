@@ -1372,6 +1372,42 @@ final class MangaNetworkService {
         _ = try await performOptionalData(request)
     }
 
+    /// Настройки уведомлений аккаунта — ПОДТВЕРЖДЕНО реальным перехватом
+    /// (см. NotificationSettings): `GET /user/settings/notifications`
+    /// возвращает текущий объект целиком.
+    func fetchNotificationSettings() async throws -> NotificationSettings {
+        let request = try makeRequest(path: "/user/settings/notifications", queryItems: [])
+        let response: APIObjectResponse<NotificationSettings> = try await perform(request)
+        return response.data
+    }
+
+    /// Сохранить настройки уведомлений — ПОДТВЕРЖДЕНО реальным перехватом:
+    /// `PUT /user/settings/notifications`, тело — ВЕСЬ объект целиком (см.
+    /// комментарий у NotificationSettings). Ответ — silent-тост, тело не
+    /// разбираем.
+    func saveNotificationSettings(_ settings: NotificationSettings) async throws {
+        let request = try makeJSONRequest(path: "/user/settings/notifications", method: "PUT", body: settings)
+        try await performVoid(request)
+    }
+
+    /// Тумблер "уведомлять" по каждой папке закладок — ПОДТВЕРЖДЕНО реальным
+    /// перехватом: `PUT /bookmarks/folder/notifications`, тело — ВЕСЬ список
+    /// папок целиком, `{"folders":[{"id":Int,"notify":Bool},...]}`.
+    func saveBookmarkFolderNotifications(_ folders: [UserBookmarkFolder]) async throws {
+        let payload = FolderNotifyListPayload(folders: folders.map { FolderNotifyPayload(id: $0.id, notify: $0.notify) })
+        let request = try makeJSONRequest(path: "/bookmarks/folder/notifications", method: "PUT", body: payload)
+        try await performVoid(request)
+    }
+
+    private struct FolderNotifyPayload: Encodable {
+        let id: Int
+        let notify: Bool
+    }
+
+    private struct FolderNotifyListPayload: Encodable {
+        let folders: [FolderNotifyPayload]
+    }
+
     private struct BulkNotificationTypePayload: Encodable {
         let notification_type: String
     }
