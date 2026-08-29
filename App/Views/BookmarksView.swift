@@ -276,7 +276,17 @@ struct BookmarksView: View {
         // ниже, которая лишь приближение (использовалось как fallback на
         // время загрузки/при сетевой ошибке).
         if let remoteOrder = store.remoteOrderedSlugs {
-            let orderIndex = Dictionary(uniqueKeysWithValues: remoteOrder.enumerated().map { ($1, $0) })
+            // РЕАЛЬНЫЙ КРАШ (найден по стектрейсу пользователя, EXC_BREAKPOINT
+            // в Dictionary.init(uniqueKeysWithValues:)): remoteOrder может
+            // содержать дубликат slug, если порядок на сервере сдвинулся
+            // между постраничными запросами прямо во время подтяжки (см.
+            // BookmarksStore.refreshRemoteOrder) — uniqueKeysWithValues на
+            // дубликате падает намертво. Ручной цикл держит индекс ПЕРВОГО
+            // вхождения и никогда не крашится.
+            var orderIndex: [String: Int] = [:]
+            for (index, slug) in remoteOrder.enumerated() where orderIndex[slug] == nil {
+                orderIndex[slug] = index
+            }
             return filtered.sorted { (orderIndex[$0.slug] ?? Int.max) < (orderIndex[$1.slug] ?? Int.max) }
         }
         return sorted(filtered)

@@ -1008,12 +1008,22 @@ final class BookmarksStore: ObservableObject {
                 }
             }
             guard !Task.isCancelled else { return }
+            // Дедупликация (первое вхождение побеждает) — если порядок на
+            // сервере сдвинулся между запросами СОСЕДНИХ страниц (сортировка
+            // по updated_at/прогрессу чтения может дёрнуться прямо во время
+            // постраничной подтяжки), один и тот же slug мог попасть на две
+            // страницы разом. Без этого — реальный краш (найден по
+            // стектрейсу пользователя): BookmarksView.currentTitles строит
+            // Dictionary(uniqueKeysWithValues:) из этого списка, и дубликат
+            // ключа роняет его намертво.
+            var seenSlugs = Set<String>()
+            let dedupedSlugs = slugs.filter { seenSlugs.insert($0).inserted }
             // succeeded=false → nil, не частичный список: иначе неудачная
             // сеть выглядела бы как "сервер подтвердил порядок из 0/N
             // тайтлов" — экран должен остаться на клиентском приближении,
             // а не показать пустоту/произвольный порядок.
-            remoteOrderedSlugs = succeeded ? slugs : nil
-            if succeeded { remoteOrderCache[cacheKey] = slugs }
+            remoteOrderedSlugs = succeeded ? dedupedSlugs : nil
+            if succeeded { remoteOrderCache[cacheKey] = dedupedSlugs }
         }
     }
 
