@@ -54,6 +54,26 @@ struct MangaCardView: View {
     // не только при следующей перезагрузке экрана.
     @ObservedObject private var bookmarks = BookmarksStore.shared
 
+    /// Та же настройка, что и в MangaCatalogView/BookmarksView/DirectoryDetailView/
+    /// CharacterView/TeamView (см. CardsPerRow) — читается напрямую, а не
+    /// прокидывается параметром, чтобы не менять сигнатуру во всех местах,
+    /// где уже используется MangaCardView.
+    @AppStorage("personalization_cards_per_row") private var cardsPerRow: CardsPerRow = .auto
+
+    /// Равномерный масштаб чипов на обложке (statusBadge/ratingBadge) под
+    /// выбранную сетку — по прямой просьбе: на 3 колонки (и "Авто", тоже 3)
+    /// НЕ трогаем, это исходный размер, под который всё изначально
+    /// считалось; при 2 колонках карточки крупнее — чипы чуть крупнее; при 4
+    /// — карточки мельче — чипы чуть мельче. Единый коэффициент на шрифт и
+    /// все паддинги разом, чтобы форма чипа (капсула) не искажалась.
+    private var chipScale: CGFloat {
+        switch cardsPerRow.columns {
+        case ..<3: return 1.15
+        case 3: return 1.0
+        default: return 0.85
+        }
+    }
+
     /// Текст под обложкой в каталоге увеличен в 1.2х от стандартного
     /// caption — коэффициент общий для titleFont/typeFont И их UIFont-
     /// аналогов ниже, чтобы визуальный размер и расчёт высоты блока
@@ -205,13 +225,13 @@ struct MangaCardView: View {
         if let folderId = bookmarks.folderId(forSlug: item.apiSlug),
            let folder = bookmarks.allFolders.first(where: { $0.id == folderId }) {
             Text(folder.name)
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(size: 9 * chipScale, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
+                .padding(.horizontal, 6 * chipScale)
+                .padding(.vertical, 3 * chipScale)
                 .background(folder.badgeColor, in: Capsule())
-                .padding(6)
+                .padding(6 * chipScale)
         }
     }
 
@@ -230,8 +250,16 @@ struct MangaCardView: View {
     /// явно попросили, "если 0.0 то серым", а не скрывает бэйдж вовсе).
     private var ratingBadge: some View {
         // fontSize/horizontalPadding — совпадают со statusBadge (тот же
-        // 9pt/6h), чтобы оба чипа на одной обложке были одной высоты.
-        RatingChip(rating: item.rating?.value, fontSize: 9, horizontalPadding: 6)
+        // 9pt/6h), чтобы оба чипа на одной обложке были одной высоты; тот же
+        // chipScale, что и у statusBadge, чтобы оба масштабировались
+        // синхронно под выбранную сетку.
+        RatingChip(
+            rating: item.rating?.value,
+            fontSize: 9 * chipScale,
+            horizontalPadding: 6 * chipScale,
+            verticalPadding: 3 * chipScale,
+            outerPadding: 6 * chipScale
+        )
     }
 }
 

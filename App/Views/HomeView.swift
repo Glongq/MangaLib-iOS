@@ -563,8 +563,14 @@ struct HomeView: View {
         ViewThatFits(in: .horizontal) {
             collectionTitleContent(collection, lineLimit: 1, fixedSize: true)
                 .frame(height: Self.collectionTitleHeight, alignment: .center)
+            // .clipped() — при очень длинном названии (или увеличенном
+            // системном размере шрифта) 2 строки title3.weight(.bold) могут
+            // чуть превысить отведённые 50pt; без обрезки текст визуально
+            // вылезал бы под соседнюю строку статов (иконка количества
+            // тайтлов/обложек ниже) — по прямой просьбе такого быть не должно.
             collectionTitleContent(collection, lineLimit: 2, fixedSize: false)
                 .frame(height: Self.collectionTitleHeight, alignment: .top)
+                .clipped()
         }
     }
 

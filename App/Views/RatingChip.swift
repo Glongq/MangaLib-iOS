@@ -28,6 +28,10 @@ struct RatingChip: View {
     var fontSize: CGFloat? = nil
     var horizontalPadding: CGFloat = 7
     var verticalPadding: CGFloat = 3
+    /// Отступ чипа от края обложки — по умолчанию 6, как и раньше везде;
+    /// параметризован отдельно для MangaCardView.chipScale (масштаб чипов
+    /// каталога под выбранную в Персонализации сетку 2/3/4).
+    var outerPadding: CGFloat = 6
 
     private func color(for value: Double) -> Color {
         switch value {
@@ -48,7 +52,7 @@ struct RatingChip: View {
                 .padding(.horizontal, horizontalPadding)
                 .padding(.vertical, verticalPadding)
                 .background(color(for: rating), in: Capsule())
-                .padding(6)
+                .padding(outerPadding)
         }
     }
 }
