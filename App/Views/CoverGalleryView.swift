@@ -70,22 +70,47 @@ struct CoverGalleryView: View {
     }
 
     var body: some View {
-        ZStack {
-            background
+        // Крестик закрытия — ОТДЕЛЬНЫЙ слой поверх (alignment: .topTrailing
+        // у ВНЕШНЕГО ZStack), а не .overlay поверх уже .ignoresSafeArea()'нутого
+        // контента: раньше кнопка была overlay'ем НА содержимом с
+        // .ignoresSafeArea() (нужен для полноэкранного фона/листалки), из-за
+        // чего её собственная позиция ТОЖЕ считалась от буквального верха
+        // экрана, а не от реальной safe area — с захардкоженным
+        // .padding(.top, 6) это давало "кнопка выше нужного" на устройствах
+        // с большим вырезом/Dynamic Island (было подобрано под одно
+        // устройство: "6 = 54 (позиция '...' на карточке тайтла) - 48").
+        // Вынесена сюда — считается от НАСТОЯЩЕЙ safe area (так же, как и
+        // системная кнопка "..." на карточке тайтла), фон/листалка при этом
+        // по-прежнему полноэкранные (их .ignoresSafeArea() ниже не тронут).
+        ZStack(alignment: .topTrailing) {
+            ZStack {
+                background
 
-            TabView(selection: $currentIndex) {
-                ForEach(images.indices, id: \.self) { index in
-                    page(images[index], index: index)
-                        .tag(index)
+                TabView(selection: $currentIndex) {
+                    ForEach(images.indices, id: \.self) { index in
+                        page(images[index], index: index)
+                            .tag(index)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+            }
+            .ignoresSafeArea()
+            .overlay(alignment: .bottom) {
+                // Тот же стеклянный бабл, что у номера страницы в читалке манги
+                // (см. MangaReaderView.pageBubble) — тот же шрифт/паддинг/капсула,
+                // просто белый текст (в читалке fg зависит от темы страницы, тут
+                // всегда поверх фото/блюра).
+                if images.count > 1 {
+                    Text("\(currentIndex + 1)/\(images.count)")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .glassEffect(.regular, in: Capsule())
+                        .padding(.bottom, 24)
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-        }
-        .ignoresSafeArea()
-        .overlay(alignment: .topTrailing) {
-            // .padding(.top, 6) = 54 (позиция "..." на карточке тайтла) - 48
-            // (высота самой кнопки) — "подними на высоту, которую сам крестик
-            // занимает".
+
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 17, weight: .semibold))
@@ -94,22 +119,6 @@ struct CoverGalleryView: View {
                     .glassEffect(.regular, in: Circle())
             }
             .padding(.trailing, 16)
-            .padding(.top, 6)
-        }
-        .overlay(alignment: .bottom) {
-            // Тот же стеклянный бабл, что у номера страницы в читалке манги
-            // (см. MangaReaderView.pageBubble) — тот же шрифт/паддинг/капсула,
-            // просто белый текст (в читалке fg зависит от темы страницы, тут
-            // всегда поверх фото/блюра).
-            if images.count > 1 {
-                Text("\(currentIndex + 1)/\(images.count)")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .glassEffect(.regular, in: Capsule())
-                    .padding(.bottom, 24)
-            }
         }
         .persistentSystemOverlays(.hidden)
         .navigationTransition(.zoom(sourceID: transitionSourceID, in: transitionNamespace))
