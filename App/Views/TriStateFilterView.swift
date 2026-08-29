@@ -129,7 +129,7 @@ struct TriStateFilterView: View {
                 }
             }
             .padding(8)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
@@ -146,18 +146,7 @@ struct TriStateFilterView: View {
         }
         .padding(.horizontal, 12)
         .frame(minHeight: 44)
-        .background(fillColor(for: state), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(Rectangle())
-    }
-
-    /// Лёгкая цветная заливка строки в зависимости от трёхпозиционного состояния
-    /// (без собственного стекла — состояние подсвечивается на общей подложке списка).
-    private func fillColor(for state: TriState) -> Color {
-        switch state {
-        case .neutral: return .clear
-        case .include: return Color.green.opacity(0.18)
-        case .exclude: return Color.red.opacity(0.16)
-        }
     }
 
     @ViewBuilder
