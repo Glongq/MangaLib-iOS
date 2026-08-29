@@ -124,7 +124,10 @@ struct TriStateFilterView: View {
                     .buttonStyle(.plain)
 
                     if index < filtered.count - 1 {
-                        Divider().overlay(Theme.separator).padding(.leading, 16)
+                        // 12 (padding строки) + 24 (ширина чекбокса, см. triBox) +
+                        // 12 (spacing до текста) — разделитель начинается ровно
+                        // там же, где текст, и не заходит под чекбокс.
+                        Divider().overlay(Theme.separator).padding(.leading, 12 + 24 + 12)
                     }
                 }
             }
@@ -151,20 +154,21 @@ struct TriStateFilterView: View {
 
     @ViewBuilder
     private func triBox(_ state: TriState) -> some View {
-        switch state {
-        case .neutral:
-            Image(systemName: "square")
-                .font(.title3)
-                .foregroundStyle(Theme.textSecondary)
-        case .include:
-            Image(systemName: "plus.square.fill")
-                .font(.title3)
-                .foregroundStyle(.green)
-        case .exclude:
-            Image(systemName: "minus.square.fill")
-                .font(.title3)
-                .foregroundStyle(.red)
+        Group {
+            switch state {
+            case .neutral:
+                Image(systemName: "square")
+                    .foregroundStyle(Theme.textSecondary)
+            case .include:
+                Image(systemName: "plus.square.fill")
+                    .foregroundStyle(.green)
+            case .exclude:
+                Image(systemName: "minus.square.fill")
+                    .foregroundStyle(.red)
+            }
         }
+        .font(.title3)
+        .frame(width: 24)
     }
 
     // MARK: Подвал
