@@ -1038,7 +1038,11 @@ private struct FolderOrderSheet: View {
                 ForEach(store.allFolders) { folder in
                     Text(folder.name)
                         .foregroundStyle(Theme.textPrimary)
-                        .listRowBackground(Theme.surface)
+                        // surfaceElevated — тот же цвет подложки, что и в
+                        // остальных щитах меню (см. ViewSortSheet.card/
+                        // SideMenuView.card), был Theme.surface (заметно
+                        // темнее), из-за чего подложка выделялась цветом.
+                        .listRowBackground(Theme.surfaceElevated)
                 }
                 .onMove { from, to in store.moveFolders(fromOffsets: from, toOffset: to) }
             }
