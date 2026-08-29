@@ -948,6 +948,15 @@ struct MangaItem: Decodable, Identifiable, Hashable {
     /// код с MangaItem их не требует.
     let lastItemAt: String?
     let metadata: MangaItemMetadata?
+    /// Число просмотров за период — приходит ТОЛЬКО у элементов "Сейчас
+    /// читают" (см. MangaNetworkService.fetchTopViewsList), и только ОДНО
+    /// из трёх полей — то, что соответствует запрошенному `time=`
+    /// (день/неделя/месяц), сервер не присылает остальные два. Везде
+    /// больше эти поля отсутствуют (nil) — на остальной код с MangaItem не
+    /// влияет.
+    let viewsDay: Int?
+    let viewsWeek: Int?
+    let viewsMonth: Int?
 
     /// Название для отображения: русское, если есть, иначе оригинальное.
     var displayTitle: String { rusName?.isEmpty == false ? rusName! : name }
@@ -965,6 +974,9 @@ struct MangaItem: Decodable, Identifiable, Hashable {
     /// Сколько ЕЩЁ глав вышло, кроме показанной latestChapter (для "+ ещё N").
     var extraLatestChaptersCount: Int { max(0, (metadata?.latestItems?.count ?? 1) - 1) }
     var lastItemDate: Date? { lastItemAt.flatMap(APIISODate.parse) ?? latestChapter?.createdAt.flatMap(APIISODate.parse) }
+    /// Число просмотров за выбранный период — первое непустое из трёх (см.
+    /// viewsDay/viewsWeek/viewsMonth).
+    var topViewsCount: Int? { viewsDay ?? viewsWeek ?? viewsMonth }
 
     enum CodingKeys: String, CodingKey {
         case id, name, slug, cover, rating, status, type, site, metadata
@@ -973,6 +985,9 @@ struct MangaItem: Decodable, Identifiable, Hashable {
         case slugURL = "slug_url"
         case ageRestriction = "ageRestriction"
         case lastItemAt = "last_item_at"
+        case viewsDay = "views_day"
+        case viewsWeek = "views_week"
+        case viewsMonth = "views_month"
     }
 
     static func == (lhs: MangaItem, rhs: MangaItem) -> Bool { lhs.id == rhs.id }
@@ -2935,15 +2950,15 @@ struct NotificationCategoryCounts: Decodable {
 
 // MARK: - Главная / вкладка «Читают» (см. HomeView/HomeViewModel)
 
-/// «Сейчас читают» — подвкладка виджета на главной. ПОДТВЕРЖДЁН только сам
-/// путь эндпоинта (см. MangaNetworkService.fetchTopViews); за какие именно
-/// query-параметры отвечают три вкладки скриншота (Новинки/Набирающее
-/// популярность/Популярное) — НЕ подтверждено перехватом (таблица параметров
-/// в присланном дампе дошла обрывочно). Значения ниже — лучшая догадка по
-/// аналогии с sort_by каталога (см. SortOption.apiSortBy); сервер молча
-/// игнорирует незнакомые параметры (проверено на других эндпоинтах этого же
-/// API — см. genres_and/tags_and в fetchCatalog), так что худший случай
-/// неверной догадки — вкладка визуально не меняет список, а не ломает его.
+/// «Сейчас читают» — три вкладки (виджет главной И полноэкранный список, см.
+/// MangaNetworkService.fetchTopViews/fetchTopViewsList). Заголовки и
+/// нумерация ("popularity"=1/2/3) — ТЕПЕРЬ ПОДТВЕРЖДЕНЫ перехватом
+/// полноэкранного списка: активная вкладка на скриншоте — "Новинки", и
+/// popularity=1 первым элементом даёт РОВНО тот же тайтл (id 267876, те же
+/// views), что показан на скриншоте под ней — однозначное совпадение, не
+/// догадка. "Набирающие популярность"/"Популярное" (2/3) — порядок вкладок
+/// тот же, что на скриншоте, тексты по нему же (третья вкладка на
+/// скриншоте не видна — перекрыта раскрытым списком сортировки).
 enum TopViewsSort: String, CaseIterable, Identifiable {
     case newest, rising, popular
     var id: String { rawValue }
@@ -2951,19 +2966,15 @@ enum TopViewsSort: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .newest:  return "Новинки"
-        case .rising:  return "Набирающее популярность"
+        case .rising:  return "Набирающие популярность"
         case .popular: return "Популярное"
         }
     }
 
-    /// Ключ группы в `TopViewsPayload.items` ("1"/"2"/"3") — сама нумерация
-    /// ПОДТВЕРЖДЕНА реальным 200-ответом (два дампа, time=week и
-    /// time=month), но КАКОЙ ключ значит какую вкладку сервер нигде не
-    /// подписывает. Судя по составу — "3" стабильно содержит устоявшуюся
-    /// классику с максимальным числом просмотров (One Piece, Grand Blue) →
-    /// похоже на "Популярное"; "1" — недавно добавленные тайтлы → похоже на
-    /// "Новинки"; "2" — то, что осталось, → "Набирающее популярность". Тот
-    /// же порядок, что на исходном скриншоте вкладок.
+    /// Значение параметра `popularity` (полноэкранный список) И ключ группы
+    /// в `TopViewsPayload.items` ("1"/"2"/"3", виджет главной) — один и тот
+    /// же номер вкладки в обоих режимах одного эндпоинта (см.
+    /// MangaNetworkService.fetchTopViews/fetchTopViewsList).
     var groupKey: String {
         switch self {
         case .newest:  return "1"

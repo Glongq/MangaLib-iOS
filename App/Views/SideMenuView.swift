@@ -52,7 +52,7 @@ struct SideMenuView: View {
     // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
     private enum MenuRoute: Hashable {
         case history, settings, downloads, comments, franchises, friends, collections, myCollections
-        case teams, characters, people, publishers, users
+        case teams, characters, people, publishers, users, nowReading
     }
     // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
     // NavigationLink(value:) ВНУТРИ этих экранов (например, History →
@@ -128,6 +128,7 @@ struct SideMenuView: View {
                 case .people:     DirectoryListView(kind: .people)
                 case .publishers: DirectoryListView(kind: .publisher)
                 case .users:      UserListView()
+                case .nowReading: TopViewsListView()
                 }
             }
         }
@@ -271,7 +272,7 @@ struct SideMenuView: View {
             row("Тайтлы", icon: "book", action: {
                 withAnimation(.easeInOut(duration: 0.2)) { catalogShowingTypes = true }
             })
-            row("Сейчас читают", icon: "flame")
+            row("Сейчас читают", icon: "flame", action: { path.append(MenuRoute.nowReading) })
             row("Коллекции", icon: "square.stack", action: { path.append(MenuRoute.collections) })
             row("Команды", icon: "person.3", action: { path.append(MenuRoute.teams) })
             row("Люди", icon: "person.crop.rectangle", action: { path.append(MenuRoute.people) })

@@ -284,17 +284,45 @@ final class MangaNetworkService {
         return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
     }
 
-    /// «Сейчас читают» — ПОДТВЕРЖДЕНО реальным перехватом (пользователь
-    /// прислал два ПОЛНЫХ тела ответа: `time=week` и `time=month`, оба 200):
-    /// `GET /media/top-views?time=` одним запросом отдаёт сразу все три
-    /// категории, см. TopViewsPayload. Имя параметра — `time` (не `period`,
-    /// см. историю в этом файле), никаких `page`/`sort_by` в подтверждённых
-    /// ответах нет вообще — ни пагинации, ни отдельного запроса на категорию.
+    /// «Сейчас читают» — КОМПАКТНЫЙ виджет на главной (см. HomeView), ОДИН
+    /// запрос сразу отдаёт все три категории (без page/popularity — тот же
+    /// путь БЕЗ этих параметров возвращает сгруппированную форму, см.
+    /// TopViewsPayload). ПОДТВЕРЖДЕНО перехватом (`time=week`/`time=month`,
+    /// оба 200).
+    ///
+    /// ИСПРАВЛЕНИЕ прежнего комментария здесь ("page/popularity нет вообще")
+    /// — был неправ: более полный перехват (см. fetchTopViewsList ниже)
+    /// подтвердил, что ТОТ ЖЕ путь С этими параметрами отдаёт СОВСЕМ другую,
+    /// постраничную форму ответа — это тот же эндпоинт в двух режимах
+    /// (виджет vs полноэкранный список), не опечатка/устаревшее поведение.
     func fetchTopViews(period: TopViewsPeriod = .day) async throws -> TopViewsPayload {
         let items: [URLQueryItem] = [URLQueryItem(name: "time", value: period.rawValue)]
         let request = try makeRequest(path: "/media/top-views", queryItems: items)
         let response: APIObjectResponse<TopViewsPayload> = try await perform(request)
         return response.data
+    }
+
+    /// «Сейчас читают» — ПОЛНЫЙ постраничный экран (Меню → Каталог → Сейчас
+    /// читают, см. TopViewsListView), В ОТЛИЧИЕ от компактного виджета
+    /// главной (fetchTopViews(period:) выше). ПОДТВЕРЖДЕНО перехватом (более
+    /// полный дамп, все 9 комбинаций time×popularity встречены): `GET
+    /// /media/top-views?time=day|week|month&popularity=1|2|3&page=N` — тот
+    /// же путь, что и у виджета, но с этими тремя параметрами отдаёт
+    /// ПЛОСКИЙ постраничный список (`data:[MangaItem]`, `meta.has_next_page`),
+    /// а не сгруппированный `items."1"/"2"/"3"`. `popularity` — та же
+    /// нумерация вкладок, что и `TopViewsSort.groupKey` (см. там же:
+    /// 1=Новинки/2=Набирающее популярность/3=Популярное — сверено с реальным
+    /// скриншотом: popularity=1 первым элементом даёт ровно тот тайтл,
+    /// что показан на активной вкладке "Новинки").
+    func fetchTopViewsList(sort: TopViewsSort, period: TopViewsPeriod, page: Int) async throws -> (items: [MangaItem], hasNextPage: Bool) {
+        let queryItems = [
+            URLQueryItem(name: "time", value: period.rawValue),
+            URLQueryItem(name: "popularity", value: sort.groupKey),
+            URLQueryItem(name: "page", value: String(max(page, 1)))
+        ]
+        let request = try makeRequest(path: "/media/top-views", queryItems: queryItems)
+        let response: LossyListResponse<MangaItem> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
     }
 
     /// Виджеты главной страницы (коллекции + топ активных читателей недели,
