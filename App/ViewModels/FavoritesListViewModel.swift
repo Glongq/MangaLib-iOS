@@ -19,6 +19,7 @@ final class FavoritesListViewModel: ObservableObject {
     @Published private(set) var isLoadingMore = false
     @Published private(set) var didLoadOnce = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var removingIds: Set<Int> = []
 
     private let service = MangaNetworkService.shared
     private let debounce: Duration = .milliseconds(350)
@@ -37,6 +38,30 @@ final class FavoritesListViewModel: ObservableObject {
     func loadMoreIfNeeded(currentItem item: DirectoryEntity, userId: Int) {
         guard let index = items.firstIndex(of: item), index >= items.count - 6 else { return }
         loadMore(userId: userId)
+    }
+
+    func isRemoving(_ id: Int) -> Bool { removingIds.contains(id) }
+
+    /// Убрать из избранного (красная мусорка) — ПОДТВЕРЖДЕНО перехватом:
+    /// тот же `POST /favorites {source_id, source_type}`, что и
+    /// toggleFavorite (DirectoryListViewModel/FranchiseListViewModel) —
+    /// повторный вызов на уже избранном снимает его (is_subscribed:false в
+    /// ответе), отдельного DELETE-эндпоинта не существует. Строку убираем
+    /// из списка ТОЛЬКО когда сервер реально подтвердил is_subscribed:false
+    /// — не оптимистично, и только если категория за время запроса не
+    /// сменилась (иначе можно случайно убрать элемент из УЖЕ ДРУГОГО списка).
+    func remove(_ entity: DirectoryEntity) {
+        guard !removingIds.contains(entity.id) else { return }
+        removingIds.insert(entity.id)
+        let requestedCategory = category
+        let sourceType = requestedCategory.sourceType
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.removingIds.remove(entity.id) }
+            guard let result = try? await self.service.toggleFavorite(sourceId: entity.id, sourceType: sourceType) else { return }
+            guard !result.isSubscribed, self.category == requestedCategory else { return }
+            self.items.removeAll { $0.id == entity.id }
+        }
     }
 
     // MARK: Загрузка

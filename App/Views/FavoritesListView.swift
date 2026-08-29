@@ -155,6 +155,8 @@ struct FavoritesListView: View {
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            removeButton(entity).padding(.trailing, 10)
         }
         .frame(height: Self.rowCoverHeight)
         .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -163,18 +165,45 @@ struct FavoritesListView: View {
     }
 
     private func franchiseRowContent(_ entity: DirectoryEntity) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(entity.displayName)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(2)
-            statsChipsRow(entity)
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entity.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                statsChipsRow(entity)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            removeButton(entity)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .contentShape(Rectangle())
+    }
+
+    /// Убрать из избранного — красная мусорка справа в строке (по прямой
+    /// просьбе). Обычный Button ВНУТРИ лейбла NavigationLink — тот же приём,
+    /// что и у subscribeBell в DirectoryListView/FranchiseListView: тап по
+    /// нему не запускает переход на карточку сущности, система сама отдаёт
+    /// приоритет вложенной кнопке.
+    private func removeButton(_ entity: DirectoryEntity) -> some View {
+        Button {
+            vm.remove(entity)
+        } label: {
+            ZStack {
+                Circle().fill(Theme.surface)
+                if vm.isRemoving(entity.id) {
+                    ProgressView().scaleEffect(0.7).tint(.red)
+                } else {
+                    Image(systemName: "trash").foregroundStyle(.red)
+                }
+            }
+            .frame(width: 36, height: 36)
+        }
+        .buttonStyle(.plain)
+        .disabled(vm.isRemoving(entity.id))
     }
 
     /// Короткие чипы-метаданные — 1-в-1 DirectoryListView.statsChipsRow
@@ -255,6 +284,7 @@ struct FavoritesListView: View {
             .frame(width: width, height: (width * 3 / 2).rounded())
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
+            .overlay(alignment: .topTrailing) { removeBadge(entity) }
 
             Text(entity.displayName)
                 .font(.caption.weight(.medium))
@@ -264,6 +294,29 @@ struct FavoritesListView: View {
                 .frame(width: width, alignment: .topLeading)
         }
         .frame(width: width, alignment: .top)
+    }
+
+    /// Убрать из избранного — красная мусорка справа сверху обложки (по
+    /// прямой просьбе, "на персонажей на обложку справа сверху"), тот же
+    /// приём "Button внутри лейбла NavigationLink", что и у removeButton в
+    /// списках.
+    private func removeBadge(_ entity: DirectoryEntity) -> some View {
+        Button {
+            vm.remove(entity)
+        } label: {
+            ZStack {
+                Circle().fill(.black.opacity(0.55))
+                if vm.isRemoving(entity.id) {
+                    ProgressView().scaleEffect(0.55).tint(.white)
+                } else {
+                    Image(systemName: "trash.fill").font(.system(size: 11)).foregroundStyle(.red)
+                }
+            }
+            .frame(width: 26, height: 26)
+        }
+        .buttonStyle(.plain)
+        .disabled(vm.isRemoving(entity.id))
+        .padding(6)
     }
 
     // MARK: Навигация — те же экраны, что и у обычных списков
