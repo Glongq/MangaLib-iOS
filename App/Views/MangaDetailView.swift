@@ -2821,6 +2821,12 @@ private struct CreditsChip: View {
     let sheetTitle: String
 
     @State private var showSheet = false
+    /// Кого выбрали в CreditsSheet — пушится ОТДЕЛЬНЫМ обычным экраном через
+    /// navigationDestination(item:) в основном NavigationStack, ПОСЛЕ того как
+    /// щит выбора закрылся (см. CreditsSheet.body: сначала selectedPerson =
+    /// person, потом dismiss()), а не ещё одним щитом поверх щита выбора —
+    /// по прямой просьбе ("пусть открывает отдельно меню а не щит поверх него").
+    @State private var selectedPerson: DirectoryEntity?
 
     private var shown: [DirectoryEntity] { Array(people.prefix(2)) }
     private var remaining: Int { people.count - shown.count }
@@ -2838,11 +2844,14 @@ private struct CreditsChip: View {
                     chipLabel
                 }
                 .sheet(isPresented: $showSheet) {
-                    CreditsSheet(title: sheetTitle, people: people, kind: kind)
+                    CreditsSheet(title: sheetTitle, people: people, kind: kind, selectedPerson: $selectedPerson)
                 }
             }
         }
         .buttonStyle(.plain)
+        .navigationDestination(item: $selectedPerson) { person in
+            DirectoryDetailView(kind: kind, slugURL: person.slugURL, fallbackName: person.displayName, coverURL: person.coverURL)
+        }
     }
 
     private var chipLabel: some View {
@@ -2883,16 +2892,17 @@ private struct CreditsChip: View {
 /// 2 колонки, что и TeamMembersSheet (участники команды). Тап по человеку —
 /// НЕ NavigationLink-пуш (это протолкнуло бы полноценную DirectoryDetailView
 /// внутрь ЭТОГО ЖЕ маленького, подогнанного по контенту листа — см.
-/// sheetHeight, отсюда и была жалоба "открывается в том же маленьком щите"),
-/// а отдельный полноразмерный .sheet(item:) поверх — тот же приём, что и у
-/// TeamMembersSheet.profileUser/ProfileView.
+/// sheetHeight), и НЕ ещё один .sheet(item:) поверх этого щита (была жалоба
+/// "открывается в щит поверх щита"): вместо этого щит выбора закрывается
+/// (dismiss()), а карточка человека пушится ОБЫЧНЫМ экраном в родительском
+/// NavigationStack — см. CreditsChip.selectedPerson/navigationDestination.
 private struct CreditsSheet: View {
     let title: String
     let people: [DirectoryEntity]
     let kind: DirectoryKind
+    @Binding var selectedPerson: DirectoryEntity?
 
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedPerson: DirectoryEntity?
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -2919,6 +2929,7 @@ private struct CreditsSheet: View {
                     ForEach(people) { person in
                         Button {
                             selectedPerson = person
+                            dismiss()
                         } label: {
                             personCell(person)
                         }
@@ -2942,11 +2953,6 @@ private struct CreditsSheet: View {
         }
         .presentationDetents([.height(sheetHeight)])
         .presentationDragIndicator(.visible)
-        .sheet(item: $selectedPerson) { person in
-            NavigationStack {
-                DirectoryDetailView(kind: kind, slugURL: person.slugURL, fallbackName: person.displayName, coverURL: person.coverURL)
-            }
-        }
     }
 
     private func personCell(_ person: DirectoryEntity) -> some View {
