@@ -1329,6 +1329,29 @@ final class MangaNetworkService {
         return try await perform(request)
     }
 
+    /// "Избранное" (Меню → Профиль → Избранное, см. FavoritesListView) —
+    /// ПОДТВЕРЖДЕНО перехватом (два дампа, обычный и 18+-сайт, все 5
+    /// категорий): `GET /favorites?user_id=&source_type=team|people|
+    /// character|franchise|publisher&page=&q=` (q — поиск по названию,
+    /// подтверждён перехватом с реальным вводом текста). `relation` внутри
+    /// каждого элемента — та же форма DirectoryEntity, что и у обычных
+    /// списков (см. FavoriteEntry). meta без has_next_page (в отличие от
+    /// большинства других списков) — считаем сами из current_page/last_page.
+    func fetchFavorites(userId: Int, category: FavoritesCategory, page: Int = 1, query: String = "") async throws -> (items: [DirectoryEntity], hasNextPage: Bool) {
+        var items = [
+            URLQueryItem(name: "user_id", value: String(userId)),
+            URLQueryItem(name: "source_type", value: category.sourceType),
+            URLQueryItem(name: "page", value: String(max(page, 1)))
+        ]
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
+        let request = try makeRequest(path: "/favorites", queryItems: items)
+        let response: FavoritesResponse = try await perform(request)
+        let currentPage = response.meta?.currentPage ?? page
+        let lastPage = response.meta?.lastPage ?? currentPage
+        return (response.data.map(\.relation), currentPage < lastPage)
+    }
+
     private struct FavoritePayload: Encodable {
         let source_id: Int
         let source_type: String

@@ -52,7 +52,7 @@ struct SideMenuView: View {
     // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
     private enum MenuRoute: Hashable {
         case history, settings, downloads, comments, franchises, friends, collections, myCollections
-        case teams, characters, people, publishers, users, nowReading
+        case teams, characters, people, publishers, users, nowReading, favorites
     }
     // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
     // NavigationLink(value:) ВНУТРИ этих экранов (например, History →
@@ -129,6 +129,7 @@ struct SideMenuView: View {
                 case .publishers: DirectoryListView(kind: .publisher)
                 case .users:      UserListView()
                 case .nowReading: TopViewsListView()
+                case .favorites:  if let uid = auth.userId { FavoritesListView(userId: uid) }
                 }
             }
         }
@@ -236,7 +237,9 @@ struct SideMenuView: View {
             row("Список друзей", icon: "person.2", action: {
                 if auth.userId != nil { path.append(MenuRoute.friends) } else { onOpenLogin() }
             })
-            row("Избранное", icon: "heart")
+            row("Избранное", icon: "heart", action: {
+                if auth.userId != nil { path.append(MenuRoute.favorites) } else { onOpenLogin() }
+            })
             // Раньше вела на StubView — реальный экран (UserCollectionsView,
             // "мои коллекции") давно есть в профиле, просто не был
             // подключён здесь (в отличие от Каталог → Коллекции — та уже

@@ -2046,6 +2046,35 @@ struct DirectoryEntity: Decodable, Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
+/// Один элемент "Избранное" (см. MangaNetworkService.fetchFavorites) —
+/// ПОДТВЕРЖДЕНО перехватом для всех 5 категорий (source_type = team/people/
+/// character/franchise/publisher): `{is_subscribed, source_type, source_id,
+/// relation: {...}}`. `relation` — ТА ЖЕ форма, что и у обычных списков
+/// команд/персонажей/людей/издательств (см. DirectoryEntity — её lossy-
+/// декодер уже умеет и в форму франшизы: id/slug/model/name/stats/
+/// titles_count_details есть, cover/subscription просто отсутствуют → nil).
+struct FavoriteEntry: Decodable {
+    let relation: DirectoryEntity
+}
+
+/// meta у /favorites — own форма (current_page/last_page/total), БЕЗ
+/// has_next_page (в отличие от большинства других списковых эндпоинтов, см.
+/// APIMeta) — своя лёгкая структура вместо переиспользования APIMeta, чтобы
+/// не считать "есть следующая страница" по ложному фолбэку "непустой ответ".
+struct FavoritesMeta: Decodable {
+    let currentPage: Int?
+    let lastPage: Int?
+    enum CodingKeys: String, CodingKey {
+        case currentPage = "current_page"
+        case lastPage = "last_page"
+    }
+}
+
+struct FavoritesResponse: Decodable {
+    let data: [FavoriteEntry]
+    let meta: FavoritesMeta?
+}
+
 /// Один аккаунт в справочнике пользователей — ПОДТВЕРЖДЕНО перехватом
 /// `GET /user?page=&sort_by=id&sort_type=desc`: `{id, username, avatar:
 /// {filename,url}, last_online_at, can_view_profile, created_at,
