@@ -15,7 +15,7 @@ struct ProfileInfoEditView: View {
 
     @State private var username = ""
     @State private var about = ""
-    @State private var genderId = 2 // 2 = Мужской — дефолт до загрузки реального профиля
+    @State private var genderId = 0 // 0 = Не указан — дефолт до загрузки реального профиля
 
     @State private var avatarURL: URL?
     @State private var avatarFilename: String?
@@ -26,7 +26,7 @@ struct ProfileInfoEditView: View {
     @State private var backgroundFilename: String?
     @State private var showBackgroundUploadNotWiredAlert = false
 
-    private static let genders: [(id: Int, label: String)] = [(1, "Женский"), (2, "Мужской")]
+    private static let genders: [(id: Int, label: String)] = [(0, "Не указан"), (1, "Женский"), (2, "Мужской")]
 
     var body: some View {
         ZStack {
@@ -277,7 +277,7 @@ struct ProfileInfoEditView: View {
             let profile = try await MangaNetworkService.shared.fetchUserProfile(id: userId)
             username = profile.username
             about = profile.about ?? ""
-            genderId = profile.genderId ?? 2
+            genderId = profile.genderId ?? 0
             avatarURL = profile.avatarFilename != nil ? profile.avatarURL : nil
             avatarFilename = profile.avatarFilename
             backgroundURL = profile.backgroundFilename != nil ? profile.backgroundURL : nil

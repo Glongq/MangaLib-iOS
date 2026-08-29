@@ -107,8 +107,9 @@ struct UserProfile: Decodable {
     let backgroundFilename: String?
     let about: String?
     let genderLabel: String?
-    /// Числовой id пола (1=Женский, 2=Мужской — ПОДТВЕРЖДЕНО перехватом) —
-    /// нужен для редактирования (genderLabel — только для отображения).
+    /// Числовой id пола (0=Не указан, 1=Женский, 2=Мужской — ПОДТВЕРЖДЕНО
+    /// перехватом) — нужен для редактирования (genderLabel — только для
+    /// отображения).
     let genderId: Int?
     let level: Int?
     let totalPoints: Int?

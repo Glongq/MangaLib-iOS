@@ -428,16 +428,18 @@ final class MangaNetworkService {
     }
 
     /// Сохранение блока "Информация" профиля — ПОДТВЕРЖДЕНО перехватом
-    /// `PATCH /user/{id}` с телом `{update_type:"info", avatar, cover,
-    /// username, gender, about}`. avatar/cover — либо filename из
-    /// uploadAvatarImage(_:filename:mimeType:) выше (новая картинка), либо
-    /// НЕИЗМЕНЁННОЕ текущее значение (чтобы не затереть его null), либо nil
-    /// (явно убрать — ПОДТВЕРЖДЕНО, null = "без аватара/фона").
+    /// `PUT /user/{id}` (не PATCH — метод уточнён более свежим перехватом) с
+    /// телом `{update_type:"info", avatar, cover, username, gender, about}`.
+    /// avatar/cover — либо filename из uploadAvatarImage(_:filename:mimeType:)
+    /// выше (новая картинка), либо НЕИЗМЕНЁННОЕ текущее значение (чтобы не
+    /// затереть его null), либо nil (явно убрать — ПОДТВЕРЖДЕНО, null = "без
+    /// аватара/фона"). gender — ПОДТВЕРЖДЕНО перехватом 0/1/2 (0 = "Не
+    /// указан", 1 = "Женский", 2 = "Мужской", см. /constants?fields[]=genders).
     func updateProfileInfo(userId: Int, avatarFilename: String?, coverFilename: String?,
                             username: String, genderId: Int, about: String) async throws -> UserProfile {
         let body = ProfileInfoUpdateBody(avatar: avatarFilename, cover: coverFilename,
                                           username: username, gender: genderId, about: about)
-        let request = try makeJSONRequest(path: "/user/\(userId)", method: "PATCH", body: body)
+        let request = try makeJSONRequest(path: "/user/\(userId)", method: "PUT", body: body)
         let response: APIObjectResponse<UserProfile> = try await perform(request)
         return response.data
     }
