@@ -372,7 +372,17 @@ struct HomeView: View {
         if hasAnyItems || viewModel.isLoadingCurrentlyReading || viewModel.currentlyReadingErrorMessage != nil {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    sectionHeader("Сейчас читают")
+                    // Быстрый переход в полноэкранное "Сейчас читают" по
+                    // тапу на заголовок секции — по прямой просьбе. Только
+                    // здесь: sectionHeader() в остальных секциях главной
+                    // остаётся декоративным, как и был.
+                    NavigationLink {
+                        TopViewsListView()
+                    } label: {
+                        sectionHeader("Сейчас читают")
+                    }
+                    .buttonStyle(.plain)
+
                     Spacer(minLength: 0)
                     periodMenu
                 }
