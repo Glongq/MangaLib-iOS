@@ -19,6 +19,23 @@ struct TopViewsListView: View {
     private let gridSpacing: CGFloat = 12
     private let gridHorizontalPadding: CGFloat = 16
 
+    // Название/тип под обложкой — ТЕ ЖЕ шрифты, что и в MangaCardView
+    // (эталон Каталога/Закладок: caption1/caption2 × 1.2, см. её
+    // titleUIFont/typeUIFont) — раньше здесь были свои .caption(.semibold)/
+    // .caption2, из-за чего масштаб текста визуально не совпадал с
+    // остальными вкладками (по прямой просьбе выровнено).
+    private static let textScale: CGFloat = 1.2
+    private var titleFont: Font { Font(Self.titleUIFont) }
+    private var typeFont: Font { Font(Self.typeUIFont) }
+    private static var titleUIFont: UIFont {
+        let base = UIFont.preferredFont(forTextStyle: .caption1)
+        return UIFont.systemFont(ofSize: base.pointSize * textScale, weight: .medium)
+    }
+    private static var typeUIFont: UIFont {
+        let base = UIFont.preferredFont(forTextStyle: .caption2)
+        return UIFont.systemFont(ofSize: base.pointSize * textScale, weight: .regular)
+    }
+
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
@@ -146,7 +163,7 @@ struct TopViewsListView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     SkeletonBox()
                         .frame(width: cardWidth, height: (cardWidth * 3 / 2).rounded())
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     SkeletonBar(width: cardWidth, height: 12)
                     SkeletonBar(width: cardWidth * 0.6, height: 10)
                 }
@@ -197,7 +214,7 @@ struct TopViewsListView: View {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
             .frame(width: width, height: (width * 3 / 2).rounded())
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
             .overlay(alignment: .topTrailing) {
                 RatingChip(rating: item.rating?.value, fontSize: 9, horizontalPadding: 6, verticalPadding: 3, outerPadding: 6)
@@ -205,7 +222,7 @@ struct TopViewsListView: View {
             .overlay(alignment: .bottomLeading) { topViewsViewsBadge(item.topViewsCount) }
 
             Text(item.displayTitle)
-                .font(.caption.weight(.semibold))
+                .font(titleFont)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
@@ -213,7 +230,7 @@ struct TopViewsListView: View {
 
             if let typeLabel = item.type?.label, !typeLabel.isEmpty {
                 Text(typeLabel)
-                    .font(.caption2)
+                    .font(typeFont)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                     .frame(width: width, alignment: .leading)
