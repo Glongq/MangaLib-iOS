@@ -23,7 +23,11 @@ struct TeamView: View {
     @State private var selectedTab: Tab = .titles
     @FocusState private var searchFocused: Bool
 
-    private let gridColumnsCount = 3
+    /// Персонализация (2/3/4/Авто) — тот же @AppStorage, что и в
+    /// MangaCatalogView/BookmarksView, теперь влияет и на сетку тайтлов
+    /// карточки Команды (раньше было жёстко 3).
+    @AppStorage("personalization_cards_per_row") private var cardsPerRow: CardsPerRow = .auto
+    private var gridColumnsCount: Int { cardsPerRow.columns }
     private let gridSpacing: CGFloat = 12
 
     private static let heroTitleSpacing: CGFloat = 10
