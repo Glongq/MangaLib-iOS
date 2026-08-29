@@ -1366,12 +1366,13 @@ struct ReaderSettingsSheet: View {
                     } else {
                         Button { showPaging = true } label: {
                             HStack {
-                                Text("Переключение страниц").font(.system(size: 17)).foregroundStyle(palette.foreground)
+                                Text("Переключение страниц").foregroundStyle(palette.foreground)
                                 Spacer()
                                 Image(systemName: "chevron.right").foregroundStyle(palette.secondary)
                             }
-                            .padding(14)
-                            .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 52)
+                            .background(palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -1385,7 +1386,9 @@ struct ReaderSettingsSheet: View {
 
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 20)
+                // Горизонтальный отступ — 16, тот же, что и в
+                // PersonalizationSettingsView (было 20).
+                .padding(.horizontal, 16)
                 .padding(.top, 40)
                 .padding(.bottom, 24)
             }
@@ -1403,26 +1406,35 @@ struct ReaderSettingsSheet: View {
     private func label(_ text: String) -> some View {
         Text(text).font(.system(size: 22.5, weight: .semibold)).foregroundStyle(palette.secondary)
     }
+    // footnote + отступ 4 — тот же стиль, что и у подписей под подложками в
+    // PersonalizationSettingsView (см. "Выключи для белой темы..." и т.д.).
     private func caption(_ text: String) -> some View {
-        Text(text).font(.caption).foregroundStyle(palette.secondary)
+        Text(text).font(.footnote).foregroundStyle(palette.secondary).padding(.horizontal, 4)
     }
+    // Без явного .font() — то же самое, что и у Toggle-строк в
+    // PersonalizationSettingsView (там текст тоже без своего размера,
+    // обычный системный), и те же паддинг/высота/закругление (16/52/24),
+    // что и у card()-подложек там же — по прямой просьбе выровнять.
     private func toggleRow(_ text: String, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) {
-            Text(text).font(.system(size: 17)).foregroundStyle(palette.foreground)
+            Text(text).foregroundStyle(palette.foreground)
         }
         .tint(Theme.accent)
-        .padding(14)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16)
+        .frame(minHeight: 52)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     /// Ползунок «Отступ между картинками» (только вертикальный режим) —
     /// оформление как у слайдера сворачивания комментариев: живая подпись
-    /// сверху + короткая вибрация на каждый шаг.
+    /// сверху + короткая вибрация на каждый шаг. Паддинг/закругление — как у
+    /// многострочных подложек в PersonalizationSettingsView (cardsPerRowSection
+    /// и т.д.): .padding(16) со всех сторон, cornerRadius 24.
     private var gapSlider: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Отступ между картинками")
-                    .font(.system(size: 17)).foregroundStyle(palette.foreground)
+                    .foregroundStyle(palette.foreground)
                 Spacer()
                 Text("\(Int(verticalGap)) px")
                     .font(.subheadline.weight(.semibold))
@@ -1440,8 +1452,8 @@ struct ReaderSettingsSheet: View {
                 Text("50 px").font(.caption2).foregroundStyle(palette.secondary)
             }
         }
-        .padding(14)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(16)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     /// Под-лист «Переключение страниц».
@@ -1461,7 +1473,9 @@ struct ReaderSettingsSheet: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 20)
+            // Горизонтальный отступ — 16, тот же, что и в основном шите
+            // настроек читалки/PersonalizationSettingsView (было 20).
+            .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 20)
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
