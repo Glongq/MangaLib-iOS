@@ -551,23 +551,44 @@ struct HomeView: View {
     private static var collectionCardWidth: CGFloat { UIScreen.main.bounds.width * 0.7 }
     private static let collectionTitleHeight: CGFloat = 50
 
+    /// Название в 1 строку — центрируем по вертикали в отведённой под
+    /// заголовок высоте (иначе короткое название "прилипает" к верху
+    /// пустой коробки и выглядит криво); в 2 строки — как раньше, сверху,
+    /// коробка и так заполняется целиком. ViewThatFits — стандартный трюк
+    /// узнать, влезает ли текст в 1 строку без переноса: у первого варианта
+    /// `.fixedSize(horizontal: true)` — его "естественная" ширина всегда
+    /// равна ширине текста в 1 строку, и если она не влезает в доступную
+    /// ширину, ViewThatFits сам переключается на второй (2-строчный) вариант.
+    private func collectionTitleRow(_ collection: MangaCollection) -> some View {
+        ViewThatFits(in: .horizontal) {
+            collectionTitleContent(collection, lineLimit: 1, fixedSize: true)
+                .frame(height: Self.collectionTitleHeight, alignment: .center)
+            collectionTitleContent(collection, lineLimit: 2, fixedSize: false)
+                .frame(height: Self.collectionTitleHeight, alignment: .top)
+        }
+    }
+
+    private func collectionTitleContent(_ collection: MangaCollection, lineLimit: Int, fixedSize: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(collection.name)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(Theme.textPrimary)
+                .multilineTextAlignment(.center)
+                .lineLimit(lineLimit)
+                .fixedSize(horizontal: fixedSize, vertical: false)
+            if collection.adult == true {
+                Text("18+")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(Color.red, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+        }
+    }
+
     private func collectionCard(_ collection: MangaCollection) -> some View {
         VStack(spacing: 12) {
-            HStack(spacing: 6) {
-                Text(collection.name)
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                if collection.adult == true {
-                    Text("18+")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(Color.red, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                }
-            }
-            .frame(height: Self.collectionTitleHeight, alignment: .top)
+            collectionTitleRow(collection)
 
             HStack(spacing: 10) {
                 if let views = collection.views { statPill(icon: "eye", text: "\(views)") }
