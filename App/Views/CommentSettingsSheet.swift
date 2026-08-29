@@ -13,45 +13,61 @@ struct CommentSettingsSheet: View {
     @Binding var disabledInReader: Bool
     @Binding var disabledOnCard: Bool
     @Binding var collapseFromLevel: Double
-    /// Палитра — чтобы шит выглядел корректно и в светлой теме читалки
-    /// (по умолчанию тёмная, как на карточке тайтла).
-    var palette: ReaderPalette = ReaderPalette(isLight: false)
+    /// Палитра читалки — задаётся ТОЛЬКО когда шит открыт из читалки (см.
+    /// ChapterCommentsSheet, тема читалки независима от темы приложения). nil
+    /// (по умолчанию — так открывает MangaDetailView, "карточка тайтла") —
+    /// используем настоящую тему приложения (Theme.xxx, см. background/
+    /// foreground/... ниже), которая правильно учитывает OLED. Раньше здесь
+    /// был жёстко зашит ReaderPalette(isLight: false) даже для карточки
+    /// тайтла — фон не был чёрным на OLED, потому что ReaderPalette всегда
+    /// берёт ФИКСИРОВАННУЮ Theme.Dark, а не настоящую Theme.background.
+    var palette: ReaderPalette? = nil
 
     @Environment(\.dismiss) private var dismiss
+    /// Нужен только для реактивности (пересчёт body при смене темы/OLED) и
+    /// для .preferredColorScheme в ветке без ReaderPalette — см. комментарий
+    /// у palette выше и у ThemeManager.
+    @ObservedObject private var themeManager = ThemeManager.shared
 
     private let levelRange: ClosedRange<Double> = 1...10
     /// Один и тот же генератор на весь sheet — .prepare() держит "прогретым",
     /// чтобы вибрация срабатывала сразу без задержки на каждом шаге слайдера.
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
+    private var background: Color { palette?.background ?? Theme.background }
+    private var foreground: Color { palette?.foreground ?? Theme.textPrimary }
+    private var secondary: Color { palette?.secondary ?? Theme.textSecondary }
+    private var surface: Color { palette?.surface ?? Theme.surfaceElevated }
+    private var separator: Color { palette?.separator ?? Theme.separator }
+
     var body: some View {
         NavigationStack {
             ZStack {
-                palette.background.ignoresSafeArea()
+                background.ignoresSafeArea()
 
                 VStack(alignment: .leading, spacing: 24) {
                     // Две опции работают сообща из обоих мест (читалка и карточка).
                     VStack(alignment: .leading, spacing: 14) {
                         Toggle(isOn: $disabledInReader) {
                             Text("Отключить комментарии в читалке")
-                                .foregroundStyle(palette.foreground)
+                                .foregroundStyle(foreground)
                         }
                         .tint(Theme.accent)
 
-                        Divider().overlay(palette.separator)
+                        Divider().overlay(separator)
 
                         Toggle(isOn: $disabledOnCard) {
                             Text("Отключить комментарии на карточке тайтла")
-                                .foregroundStyle(palette.foreground)
+                                .foregroundStyle(foreground)
                         }
                         .tint(Theme.accent)
                     }
                     .padding(14)
-                    .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Сворачивать вложенные комментарии с уровня")
-                            .foregroundStyle(palette.foreground)
+                            .foregroundStyle(foreground)
 
                         // Живая подпись над слайдером — меняется сразу по
                         // ходу перетаскивания (не только по отпусканию),
@@ -73,13 +89,13 @@ struct CommentSettingsSheet: View {
                             .onAppear { haptic.prepare() }
 
                         HStack {
-                            Text("1").font(.caption2).foregroundStyle(palette.secondary)
+                            Text("1").font(.caption2).foregroundStyle(secondary)
                             Spacer()
-                            Text("10 (максимум)").font(.caption2).foregroundStyle(palette.secondary)
+                            Text("10 (максимум)").font(.caption2).foregroundStyle(secondary)
                         }
                     }
                     .padding(14)
-                    .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
 
                     Spacer(minLength: 0)
                 }
@@ -100,8 +116,11 @@ struct CommentSettingsSheet: View {
             }
         }
         .tint(Theme.accent)
-        // Навбар/заголовок/тумблеры тоже светлеют вместе с темой читалки.
-        .preferredColorScheme(palette.isLight ? .light : .dark)
+        // Из читалки — навбар/заголовок/тумблеры светлеют вместе с темой
+        // читалки (palette). С карточки тайтла (palette == nil) — тема
+        // приложения (themeManager.isDarkTheme), тот же приём, что и у
+        // остальных .sheet в приложении (см. AddToFolderSheet/BookmarksView).
+        .preferredColorScheme(palette.map { $0.isLight ? .light : .dark } ?? (themeManager.isDarkTheme ? .dark : .light))
     }
 }
 
