@@ -44,13 +44,25 @@ struct MangaDetailView: View {
     /// Sheet «Скачать тайтл» — см. DownloadTitleSheet.
     @State private var showDownloadSheet = false
     /// Полноэкранная листалка доп. обложек (тап по обложке в шапке) — см.
-    /// CoverGalleryView/coverGalleryBadge.
-    @State private var showCoverGallery = false
-    /// Снимок текущего экрана (карточки тайтла) для блюр-фона листалки — см.
-    /// UIView.renderedSnapshot (CoverGalleryView.swift): "размываться должна
-    /// не картинка, а именно приложение за ней". Берётся ОДИН раз прямо
-    /// перед открытием (см. onTapGesture ниже), не хранится постоянно.
-    @State private var coverGalleryBackgroundSnapshot: UIImage?
+    /// CoverGalleryView/coverGalleryBadge. ОДИН Identifiable-item вместо
+    /// прежней пары раздельных @State (showCoverGallery: Bool +
+    /// coverGalleryBackgroundSnapshot: UIImage?, выставлявшихся ДВУМЯ
+    /// отдельными присваиваниями подряд) — та пара гонялась с
+    /// .fullScreenCover(isPresented:): при первом открытии контент листалки
+    /// иногда успевал отрендериться ПЕРВЫМ кадром до того, как снимок
+    /// экрана долетал до @State (см. баг-репорт "в начале блюра нет, фон
+    /// чёрный") — снимок тогда ещё nil → чёрный фон вместо блюра. Заодно
+    /// свежий UUID на каждое открытие (тот же приём, что и у ReaderOpen
+    /// выше) гарантирует НОВЫЙ инстанс CoverGalleryView при каждом тапе —
+    /// без него identity листалки могла сохраняться между закрытием и
+    /// повторным открытием, из-за чего кнопка закрытия "улетала выше
+    /// нужного" (застревала на геометрии/анимации предыдущего показа).
+    private struct CoverGalleryPresentation: Identifiable {
+        let id = UUID()
+        let images: [URL]
+        let backgroundSnapshot: UIImage?
+    }
+    @State private var coverGalleryPresentation: CoverGalleryPresentation?
     /// Namespace для .matchedTransitionSource/.navigationTransition(.zoom) —
     /// листалка "вырастает" из этой самой обложки при открытии, а не выезжает
     /// отдельным чёрным экраном (по прямой просьбе).
@@ -297,10 +309,10 @@ struct MangaDetailView: View {
         .fullScreenCover(item: $readerOpen) { open in
             readerView(for: open.chapter, branchId: open.branchId)
         }
-        .fullScreenCover(isPresented: $showCoverGallery) {
+        .fullScreenCover(item: $coverGalleryPresentation) { presentation in
             CoverGalleryView(
-                images: coverGalleryImageURLs,
-                backgroundSnapshot: coverGalleryBackgroundSnapshot,
+                images: presentation.images,
+                backgroundSnapshot: presentation.backgroundSnapshot,
                 transitionSourceID: "titleCover",
                 transitionNamespace: coverGalleryNamespace
             )
@@ -452,12 +464,18 @@ struct MangaDetailView: View {
                 // coverGalleryImageURLs — если доп. обложек нет, там всё
                 // равно будет один URL основной обложки, просто без
                 // пролистывания). Снимок экрана — прямо перед открытием, для
-                // блюр-фона листалки (см. coverGalleryBackgroundSnapshot).
+                // блюр-фона листалки (см. CoverGalleryPresentation выше).
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    guard !coverGalleryImageURLs.isEmpty else { return }
-                    coverGalleryBackgroundSnapshot = UIApplication.shared.activeKeyWindow?.renderedSnapshot()
-                    showCoverGallery = true
+                    let urls = coverGalleryImageURLs
+                    guard !urls.isEmpty else { return }
+                    // ОДНО присваивание — снимок экрана и флаг показа больше
+                    // не два раздельных @State, гонки быть не может (см.
+                    // комментарий у CoverGalleryPresentation выше).
+                    coverGalleryPresentation = CoverGalleryPresentation(
+                        images: urls,
+                        backgroundSnapshot: UIApplication.shared.activeKeyWindow?.renderedSnapshot()
+                    )
                 }
 
                 titleBlockOverlay
