@@ -27,7 +27,7 @@ struct FavoritesListView: View {
         .navigationTitle("Избранное")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $vm.query, prompt: "Поиск по названию")
-        .safeAreaInset(edge: .bottom) { categoryBar }
+        .safeAreaInset(edge: .bottom, spacing: 0) { categoryBar }
         .tint(Theme.accent)
         .task { vm.loadInitialIfNeeded(userId: userId) }
     }
@@ -61,19 +61,21 @@ struct FavoritesListView: View {
 
     // MARK: Категории — 5 капсул внизу экрана
 
+    /// 1-в-1 нижние кнопки-табы FriendsView.tabBar/tabButton (по прямой
+    /// просьбе выровнять): стеклянные капсулы, авто-ширина + горизонтальный
+    /// скролл.
     private var categoryBar: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 ForEach(FavoritesCategory.allCases) { category in
                     categoryCapsule(category)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
+            .padding(.top, 4)
+            .padding(.bottom, 20)
         }
         .scrollIndicators(.hidden)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-        .background(.thinMaterial)
     }
 
     private func categoryCapsule(_ category: FavoritesCategory) -> some View {
@@ -82,12 +84,12 @@ struct FavoritesListView: View {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { vm.category = category }
         } label: {
             Text(category.title)
-                .font(.subheadline.weight(active ? .semibold : .regular))
+                .font(.footnote.weight(active ? .semibold : .medium))
                 .foregroundStyle(active ? Theme.background : Theme.textPrimary)
                 .lineLimit(1)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 14)
                 .frame(minHeight: Theme.pillControlHeight)
-                .background(active ? Theme.accent : Theme.surface, in: Capsule())
+                .glassEffect(active ? .regular.tint(Theme.accent).interactive() : .regular.interactive(), in: Capsule())
         }
         .buttonStyle(.plain)
     }

@@ -52,7 +52,7 @@ struct TopViewsListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { periodMenu }
         }
-        .safeAreaInset(edge: .bottom) { tabsBar }
+        .safeAreaInset(edge: .bottom, spacing: 0) { tabsBar }
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
     }
@@ -72,19 +72,21 @@ struct TopViewsListView: View {
 
     // MARK: Вкладки (Новинки / Набирающие популярность / Популярное) — внизу
 
-    /// 3 капсулы внизу экрана (не под шапкой, как в первой версии) — по
-    /// прямой просьбе. .safeAreaInset(edge: .bottom) в body — контент
-    /// ScrollView сам поджимается, не заезжает под бар и не перекрывается им.
+    /// 1-в-1 нижние кнопки-табы FriendsView.tabBar/tabButton (по прямой
+    /// просьбе выровнять): стеклянные капсулы, авто-ширина + горизонтальный
+    /// скролл (не растянутые на всю ширину сплошной заливкой, как было).
     private var tabsBar: some View {
-        HStack(spacing: 8) {
-            ForEach(TopViewsSort.allCases) { sort in
-                tabCapsule(sort)
+        ScrollView(.horizontal) {
+            HStack(spacing: 10) {
+                ForEach(TopViewsSort.allCases) { sort in
+                    tabCapsule(sort)
+                }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 4)
+            .padding(.bottom, 20)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-        .background(.thinMaterial)
+        .scrollIndicators(.hidden)
     }
 
     private func tabCapsule(_ sort: TopViewsSort) -> some View {
@@ -93,12 +95,12 @@ struct TopViewsListView: View {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { vm.sort = sort }
         } label: {
             Text(sort.title)
-                .font(.subheadline.weight(active ? .semibold : .regular))
+                .font(.footnote.weight(active ? .semibold : .medium))
                 .foregroundStyle(active ? Theme.background : Theme.textPrimary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .frame(maxWidth: .infinity, minHeight: Theme.pillControlHeight)
-                .background(active ? Theme.accent : Theme.surface, in: Capsule())
+                .padding(.horizontal, 14)
+                .frame(minHeight: Theme.pillControlHeight)
+                .glassEffect(active ? .regular.tint(Theme.accent).interactive() : .regular.interactive(), in: Capsule())
         }
         .buttonStyle(.plain)
     }
