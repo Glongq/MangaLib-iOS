@@ -35,6 +35,12 @@ struct TopViewsListView: View {
         let base = UIFont.preferredFont(forTextStyle: .caption2)
         return UIFont.systemFont(ofSize: base.pointSize * textScale, weight: .regular)
     }
+    private static var titleTypeSpacing: CGFloat { titleUIFont.leading }
+    private static func textBlockHeight(twoLineTitle: Bool) -> CGFloat {
+        let titleHeight = titleUIFont.lineHeight * (twoLineTitle ? 2 : 1)
+        let typeHeight = typeUIFont.lineHeight
+        return (titleHeight + titleTypeSpacing + typeHeight).rounded(.up)
+    }
 
     var body: some View {
         ZStack {
@@ -53,28 +59,14 @@ struct TopViewsListView: View {
 
     @ViewBuilder
     private var content: some View {
-        GeometryReader { proxy in
-            let cardWidth = MangaCardView.gridCardWidth(
-                totalWidth: proxy.size.width,
-                columns: gridColumnsCount,
-                spacing: gridSpacing,
-                containerPadding: gridHorizontalPadding
-            )
-            ScrollView {
-                if let error = vm.errorMessage, vm.items.isEmpty {
-                    errorState(error)
-                } else if vm.items.isEmpty && vm.isLoading {
-                    skeletonGrid(cardWidth: cardWidth)
-                } else if vm.items.isEmpty && vm.didLoadOnce {
-                    emptyState
-                } else {
-                    grid(cardWidth: cardWidth)
-                    if vm.isLoadingMore {
-                        ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 16)
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
+        if let error = vm.errorMessage, vm.items.isEmpty {
+            errorState(error)
+        } else if vm.items.isEmpty && vm.isLoading {
+            skeletonGrid
+        } else if vm.items.isEmpty && vm.didLoadOnce {
+            emptyState
+        } else {
+            grid
         }
     }
 
@@ -137,41 +129,88 @@ struct TopViewsListView: View {
     }
 
     // MARK: Сетка
+    //
+    // 1-в-1 устройство сетки MangaCatalogView.grid (эталон) — НЕ LazyVGrid
+    // (тот вариант визуально "съезжал" — жалоба), а явные HStack-ряды через
+    // stride, посчитанные из ОДНОГО GeometryReader на весь экран. rowNeedsTwoLines
+    // — решение на весь ряд сразу (см. MangaCardView.rowNeedsTwoLines), нужно
+    // видеть все карточки ряда, поэтому ряды явные, не плоский ForEach.
 
-    private func grid(cardWidth: CGFloat) -> some View {
-        let columns = Array(repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing), count: gridColumnsCount)
-        return LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
-            ForEach(vm.items) { item in
-                NavigationLink {
-                    MangaDetailView(slug: item.apiSlug, fallbackTitle: item.displayTitle, coverURL: item.cover?.bestURL, item: item)
-                } label: {
-                    topViewsCard(item, width: cardWidth)
-                }
-                .buttonStyle(.plain)
-                .onAppear { Task { await vm.loadMoreIfNeeded(current: item) } }
+    private var grid: some View {
+        GeometryReader { proxy in
+            let cardWidth = MangaCardView.gridCardWidth(
+                totalWidth: proxy.size.width,
+                columns: gridColumnsCount,
+                spacing: gridSpacing,
+                containerPadding: gridHorizontalPadding
+            )
+            let rows = stride(from: 0, to: vm.items.count, by: gridColumnsCount).map { start in
+                Array(vm.items[start..<min(start + gridColumnsCount, vm.items.count)])
             }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, rowItems in
+                        let rowNeedsTwoLines = rowItems.contains {
+                            MangaCardView.titleLineCount($0.displayTitle, width: cardWidth) > 1
+                        }
+                        HStack(alignment: .top, spacing: gridSpacing) {
+                            ForEach(rowItems) { item in
+                                NavigationLink {
+                                    MangaDetailView(slug: item.apiSlug, fallbackTitle: item.displayTitle, coverURL: item.cover?.bestURL, item: item)
+                                } label: {
+                                    topViewsCard(item, width: cardWidth, rowNeedsTwoLines: rowNeedsTwoLines)
+                                }
+                                .buttonStyle(.plain)
+                                .onAppear { Task { await vm.loadMoreIfNeeded(current: item) } }
+                            }
+                        }
+                    }
+                    if vm.isLoadingMore {
+                        ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 16)
+                    }
+                }
+                .padding(.horizontal, gridHorizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
+            }
+            .scrollIndicators(.hidden)
         }
-        .padding(.horizontal, gridHorizontalPadding)
-        .padding(.top, 12)
-        .padding(.bottom, 24)
     }
 
-    private func skeletonGrid(cardWidth: CGFloat) -> some View {
-        let columns = Array(repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing), count: gridColumnsCount)
-        return LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
-            ForEach(0..<gridColumnsCount * 4, id: \.self) { _ in
-                VStack(alignment: .leading, spacing: 6) {
-                    SkeletonBox()
-                        .frame(width: cardWidth, height: (cardWidth * 3 / 2).rounded())
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    SkeletonBar(width: cardWidth, height: 12)
-                    SkeletonBar(width: cardWidth * 0.6, height: 10)
-                }
+    private var skeletonGrid: some View {
+        GeometryReader { proxy in
+            let cardWidth = MangaCardView.gridCardWidth(
+                totalWidth: proxy.size.width,
+                columns: gridColumnsCount,
+                spacing: gridSpacing,
+                containerPadding: gridHorizontalPadding
+            )
+            let placeholderCount = 12
+            let rows = stride(from: 0, to: placeholderCount, by: gridColumnsCount).map { start in
+                Array(start..<min(start + gridColumnsCount, placeholderCount))
             }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, rowIndices in
+                        HStack(alignment: .top, spacing: gridSpacing) {
+                            ForEach(rowIndices, id: \.self) { _ in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    SkeletonBox()
+                                        .frame(width: cardWidth, height: (cardWidth * 3 / 2).rounded())
+                                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    SkeletonBar(width: cardWidth * 0.85, height: 12)
+                                    SkeletonBar(width: cardWidth * 0.5, height: 10)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, gridHorizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
+            }
+            .scrollIndicators(.hidden)
         }
-        .padding(.horizontal, gridHorizontalPadding)
-        .padding(.top, 12)
-        .padding(.bottom, 24)
     }
 
     private var emptyState: some View {
@@ -204,7 +243,7 @@ struct TopViewsListView: View {
     /// свой чип слева снизу (глаз+число), той же высоты капсулы, что и
     /// RatingChip (тот же fontSize/паддинги), чтобы оба чипа на обложке были
     /// визуально одного калибра.
-    private func topViewsCard(_ item: MangaItem, width: CGFloat) -> some View {
+    private func topViewsCard(_ item: MangaItem, width: CGFloat, rowNeedsTwoLines: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             RemoteImage(url: item.cover?.bestURL) { image in
                 image.resizable().scaledToFill()
@@ -221,20 +260,26 @@ struct TopViewsListView: View {
             }
             .overlay(alignment: .bottomLeading) { topViewsViewsBadge(item.topViewsCount) }
 
-            Text(item.displayTitle)
-                .font(titleFont)
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(width: width, alignment: .topLeading)
+            // Название+тип — та же логика "всегда вплотную, недостающая
+            // высота уходит пустым местом ниже жанра", что и в MangaCardView
+            // (см. её textBlockHeight/rowNeedsTwoLines).
+            VStack(alignment: .leading, spacing: Self.titleTypeSpacing) {
+                Text(item.displayTitle)
+                    .font(titleFont)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(width: width, alignment: .topLeading)
 
-            if let typeLabel = item.type?.label, !typeLabel.isEmpty {
-                Text(typeLabel)
+                Text(item.type?.label ?? " ")
                     .font(typeFont)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                     .frame(width: width, alignment: .leading)
+                    .opacity(item.type?.label == nil ? 0 : 1)
             }
+            .frame(width: width, alignment: .top)
+            .frame(minHeight: Self.textBlockHeight(twoLineTitle: rowNeedsTwoLines), alignment: .top)
         }
         .frame(width: width, alignment: .top)
     }
