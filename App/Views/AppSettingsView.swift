@@ -59,7 +59,11 @@ struct AppSettingsView: View {
             Theme.background.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 20) {
+                // 34 — тот же зазор между подложками, что и в Меню (см.
+                // SideMenuView.body: "VStack(spacing: 34)") — по прямой
+                // просьбе выровнять отступы между разделами настроек с
+                // отступами между карточками в самом Меню.
+                VStack(spacing: 34) {
                     card {
                         infoRow(title: "Версия", value: AppVersionInfo.display)
                         infoRow(title: "Активный сайт", value: siteSession.activeSite.displayName, showDivider: false)
@@ -127,7 +131,7 @@ struct AppSettingsView: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 20)
+                .padding(.top, 22)
                 .padding(.bottom, 24)
                 // Тап по пустому месту — свернуть клавиатуру, если сейчас
                 // вводим debug-токен (см. debugAuthCard/debugTokenFocused).
