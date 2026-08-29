@@ -44,18 +44,24 @@ struct MyCommentsView: View {
     private var content: some View {
         if vm.isLoading && vm.comments.isEmpty {
             skeletonList
+        } else if vm.needsLogin {
+            ScrollView {
+                StateView(icon: "person.crop.circle.badge.exclamationmark", title: "Нужно войти в аккаунт", fillScreen: true)
+                    .containerRelativeFrame(.vertical)
+            }
+            .scrollIndicators(.hidden)
         } else if let error = vm.errorMessage, vm.comments.isEmpty {
             // ScrollView (не голый VStack) — иначе .refreshable ниже не от
             // чего было бы тянуть при пустом/ошибочном списке.
             ScrollView {
-                emptyState(icon: "wifi.exclamationmark", text: error) { Task { await vm.reload() } }
+                StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: { Task { await vm.reload() } }, fillScreen: true)
                     .containerRelativeFrame(.vertical)
             }
             .scrollIndicators(.hidden)
             .refreshable { await vm.reload() }
         } else if vm.visible.isEmpty && vm.didLoad {
             ScrollView {
-                emptyState(icon: "text.bubble", text: "Комментариев нет", retry: nil)
+                StateView(icon: "text.bubble", title: "Комментариев пока нет", fillScreen: true)
                     .containerRelativeFrame(.vertical)
             }
             .scrollIndicators(.hidden)
@@ -193,21 +199,6 @@ struct MyCommentsView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private func emptyState(icon: String, text: String, retry: (() -> Void)?) -> some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: icon).font(.largeTitle).foregroundStyle(Theme.textSecondary)
-            Text(text).font(.subheadline).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
-            if let retry {
-                Button("Повторить", action: retry)
-                    .font(.subheadline.weight(.medium)).foregroundStyle(Theme.accent)
-            }
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-        .padding(32)
     }
 
     // MARK: Фильтр / сортировка (инлайн внизу, не sheet)

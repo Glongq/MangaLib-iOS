@@ -12,6 +12,12 @@ struct CollectionCommentsView: View {
     @State private var draft = ""
     @State private var replyingTo: Comment?
     @FocusState private var composerFocused: Bool
+    // Раньше поле ввода было доступно ВСЕГДА, даже не залогиненным — в
+    // отличие от всех остальных мест с комментариями в приложении
+    // (MangaDetailView/ChapterCommentsSheet), где не вошедшему показывается
+    // пилюля "Войдите, чтобы оставить комментарий". Выровнено.
+    @ObservedObject private var auth = AuthSession.shared
+    @State private var showLogin = false
 
     init(collectionId: Int) {
         self.collectionId = collectionId
@@ -50,17 +56,9 @@ struct CollectionCommentsView: View {
         if vm.isLoading && vm.comments.isEmpty {
             ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error = vm.error, vm.comments.isEmpty {
-            VStack(spacing: 10) {
-                Text(error).font(.footnote).foregroundStyle(Theme.textSecondary)
-                Button { Task { await vm.load() } } label: {
-                    Label("Повторить", systemImage: "arrow.clockwise")
-                        .font(.subheadline.weight(.medium)).foregroundStyle(Theme.accent)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: { Task { await vm.load() } }, fillScreen: true)
         } else if vm.comments.isEmpty && vm.hasLoaded {
-            ContentUnavailableView("Комментариев пока нет", systemImage: "text.bubble")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            StateView(icon: "text.bubble", title: "Комментариев пока нет", fillScreen: true)
         } else {
             let grouped = vm.comments.groupedByParent()
             let roots = grouped[0] ?? []
@@ -136,53 +134,67 @@ struct CollectionCommentsView: View {
         .padding(.leading, isReply ? 34 : 0)
     }
 
+    @ViewBuilder
     private var composer: some View {
-        VStack(spacing: 0) {
-            if let replyingTo {
-                HStack(spacing: 6) {
-                    Text("Ответ для \(replyingTo.author?.username ?? "Аноним")")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                    Spacer(minLength: 0)
-                    Button { self.replyingTo = nil } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-            }
-            HStack(spacing: 8) {
-                TextField("", text: $draft, prompt: Text("Комментарий...").foregroundColor(Theme.textSecondary), axis: .vertical)
-                    .foregroundStyle(Theme.textPrimary)
-                    .focused($composerFocused)
-                    .lineLimit(1...4)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Theme.surfaceElevated, in: Capsule())
-
-                Button {
-                    let target = replyingTo
-                    Task {
-                        if await vm.post(text: draft, replyingTo: target) {
-                            draft = ""
-                            replyingTo = nil
+        if auth.isLoggedIn {
+            VStack(spacing: 0) {
+                if let replyingTo {
+                    HStack(spacing: 6) {
+                        Text("Ответ для \(replyingTo.author?.username ?? "Аноним")")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer(minLength: 0)
+                        Button { self.replyingTo = nil } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary)
                         }
                     }
-                } label: {
-                    if vm.isPosting {
-                        ProgressView().tint(Theme.background).frame(width: 36, height: 36)
-                    } else {
-                        Image(systemName: "arrow.up")
-                            .foregroundStyle(Theme.background)
-                            .frame(width: 36, height: 36)
-                            .background(Theme.accent, in: Circle())
-                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
                 }
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isPosting)
+                HStack(spacing: 8) {
+                    TextField("", text: $draft, prompt: Text("Комментарий...").foregroundColor(Theme.textSecondary), axis: .vertical)
+                        .foregroundStyle(Theme.textPrimary)
+                        .focused($composerFocused)
+                        .lineLimit(1...4)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Theme.surfaceElevated, in: Capsule())
+
+                    Button {
+                        let target = replyingTo
+                        Task {
+                            if await vm.post(text: draft, replyingTo: target) {
+                                draft = ""
+                                replyingTo = nil
+                            }
+                        }
+                    } label: {
+                        if vm.isPosting {
+                            ProgressView().tint(Theme.background).frame(width: 36, height: 36)
+                        } else {
+                            Image(systemName: "arrow.up")
+                                .foregroundStyle(Theme.background)
+                                .frame(width: 36, height: 36)
+                                .background(Theme.accent, in: Circle())
+                        }
+                    }
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isPosting)
+                }
+                .padding(12)
+            }
+            .background(.ultraThinMaterial)
+        } else {
+            Button { showLogin = true } label: {
+                Label("Войдите, чтобы оставить комментарий", systemImage: "person.crop.circle.badge.plus")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, minHeight: Theme.pillControlHeight)
+                    .background(Theme.surfaceElevated, in: Capsule())
             }
             .padding(12)
+            .background(.ultraThinMaterial)
+            .sheet(isPresented: $showLogin) { LoginView() }
         }
-        .background(.ultraThinMaterial)
     }
 }
 

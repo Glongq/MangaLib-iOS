@@ -45,6 +45,10 @@ final class MyCommentsViewModel: ObservableObject {
     @Published private(set) var isLoadingMore = false
     @Published private(set) var didLoad = false
     @Published private(set) var errorMessage: String?
+    /// Раньше "нужно войти" шло тем же errorMessage, что и сетевая
+    /// ошибка — экран показывал их ОДНОЙ веткой с иконкой wifi, хотя это
+    /// разные по смыслу состояния. Отдельный флаг — свой экран/иконка.
+    @Published private(set) var needsLogin = false
 
     private let service = MangaNetworkService.shared
     private var page = 1
@@ -88,7 +92,8 @@ final class MyCommentsViewModel: ObservableObject {
     }
 
     func reload() async {
-        guard let uid = userId else { errorMessage = "Нужно войти в аккаунт."; didLoad = true; return }
+        guard let uid = userId else { needsLogin = true; didLoad = true; return }
+        needsLogin = false
         isLoading = true; errorMessage = nil; page = 1; hasNext = true
         do {
             let r = try await service.fetchUserComments(userId: uid, page: 1, sortType: sort.sortType)

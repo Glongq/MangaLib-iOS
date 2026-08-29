@@ -58,9 +58,9 @@ struct UserBookmarksView: View {
                 skeletonGrid
             }
         } else if let error = vm.errorMessage {
-            emptyState(icon: "wifi.exclamationmark", text: error)
+            StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: { vm.retryFolders() }, fillScreen: true)
         } else {
-            emptyState(icon: "square.stack.3d.up", text: "Списки пусты")
+            StateView(icon: "square.stack.3d.up", title: "Списки пусты", fillScreen: true)
         }
     }
 
@@ -166,8 +166,14 @@ struct UserBookmarksView: View {
     private func grid(cardWidth: CGFloat) -> some View {
         if vm.isLoadingItems && vm.items.isEmpty {
             skeletonGrid
+        } else if let error = vm.errorMessage, vm.items.isEmpty {
+            // Раньше ошибка загрузки тайтлов папки молча тонула в "Пусто" —
+            // errorMessage тут не проверялся вовсе.
+            StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: {
+                if let id = vm.selectedFolderId { Task { await vm.reloadItems(folderId: id) } }
+            }, fillScreen: true)
         } else if vm.items.isEmpty {
-            emptyState(icon: "books.vertical", text: "Пусто")
+            StateView(icon: "books.vertical", title: "Пусто", fillScreen: true)
         } else {
             let columns = Array(repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing), count: gridColumnsCount)
             LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
@@ -192,16 +198,6 @@ struct UserBookmarksView: View {
         }
     }
 
-    private func emptyState(icon: String, text: String) -> some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: icon).font(.largeTitle).foregroundStyle(Theme.textSecondary)
-            Text(text).font(.subheadline).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(32)
-    }
 }
 
 /// Цвет папки закладок приходит с сервера hex-строкой ("#ff9b40") — своего

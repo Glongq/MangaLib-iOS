@@ -84,14 +84,21 @@ struct FriendsView: View {
             // ScrollView (не голый VStack) — иначе .refreshable ниже не от
             // чего было бы тянуть, свайп-обновление работало бы только
             // когда список уже не пуст.
-            // containerRelativeFrame — иначе Spacer() внутри emptyState не
-            // от чего было бы центрироваться (ScrollView сам не задаёт
-            // высоту контенту, только скроллит его).
-            ScrollView { emptyState(icon: "wifi.exclamationmark", text: error).containerRelativeFrame(.vertical) }
+            // containerRelativeFrame — StateView(fillScreen: true) сам
+            // центрируется внутри предложенной высоты, но ScrollView не
+            // задаёт высоту контенту сама по себе (только скроллит его) —
+            // нужен явный источник высоты, от которой StateView оттолкнётся.
+            ScrollView {
+                StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: { Task { await vm.refreshCurrentTab() } }, fillScreen: true)
+                    .containerRelativeFrame(.vertical)
+            }
                 .scrollIndicators(.hidden)
                 .refreshable { await vm.refreshCurrentTab() }
         } else if vm.visible.isEmpty && vm.didLoadCurrent {
-            ScrollView { emptyState(icon: emptyIcon, text: emptyText).containerRelativeFrame(.vertical) }
+            ScrollView {
+                StateView(icon: emptyIcon, title: emptyText, fillScreen: true)
+                    .containerRelativeFrame(.vertical)
+            }
                 .scrollIndicators(.hidden)
                 .refreshable { await vm.refreshCurrentTab() }
         } else {
@@ -288,16 +295,6 @@ struct FriendsView: View {
         }
     }
 
-    private func emptyState(icon: String, text: String) -> some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: icon).font(.largeTitle).foregroundStyle(Theme.textSecondary)
-            Text(text).font(.subheadline).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-        .padding(32)
-    }
 
     // MARK: Нижние кнопки-табы
 

@@ -507,11 +507,7 @@ struct TeamView: View {
         if vm.updates.isEmpty && vm.isLoadingUpdates {
             ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, minHeight: 140)
         } else if vm.updates.isEmpty && vm.didLoadUpdatesOnce {
-            VStack(spacing: 10) {
-                Image(systemName: "clock.arrow.circlepath").font(.largeTitle).foregroundStyle(Theme.textSecondary)
-                Text("Обновлений пока нет").font(.subheadline).foregroundStyle(Theme.textSecondary)
-            }
-            .frame(maxWidth: .infinity, minHeight: 140)
+            StateView(icon: "clock.arrow.circlepath", title: "Обновлений пока нет", minHeight: 140)
         } else {
             LazyVStack(spacing: 10) {
                 ForEach(vm.updates) { group in
@@ -705,16 +701,9 @@ struct TeamView: View {
     @ViewBuilder
     private func grid(cardWidth: CGFloat) -> some View {
         if let error = vm.errorMessage, vm.titles.isEmpty {
-            VStack(spacing: 10) {
-                Text(error).font(.footnote).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity, minHeight: 140)
+            StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: { vm.reloadNow() }, minHeight: 140)
         } else if vm.titles.isEmpty && vm.didLoadOnce && !vm.isLoading {
-            VStack(spacing: 8) {
-                Image(systemName: "books.vertical").font(.largeTitle).foregroundStyle(Theme.textSecondary)
-                Text("Нет тайтлов").font(.subheadline).foregroundStyle(Theme.textSecondary)
-            }
-            .frame(maxWidth: .infinity, minHeight: 140)
+            StateView(icon: "books.vertical", title: "Нет тайтлов", minHeight: 140)
         } else {
             let columns = Array(repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing), count: gridColumnsCount)
             LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {

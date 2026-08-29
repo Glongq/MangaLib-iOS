@@ -194,13 +194,7 @@ struct ProfileView: View {
     /// состоянии), без явного растяжения этот блок прижимался к левому
     /// верхнему углу вместо центра экрана.
     private var closedState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "lock.fill").font(.largeTitle).foregroundStyle(Theme.textSecondary)
-            Text("Профиль закрыт").font(.headline).foregroundStyle(Theme.textPrimary)
-            Text(profile?.username ?? "").font(.subheadline).foregroundStyle(Theme.textSecondary)
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        StateView(icon: "lock.fill", title: "Профиль закрыт", description: profile?.username, fillScreen: true)
     }
 
     // MARK: Шапка (постоянная topBar поверх + баннер/аватар/статистика под ней)
@@ -879,10 +873,7 @@ private struct StubListView: View {
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            VStack(spacing: 10) {
-                Image(systemName: "hammer").font(.largeTitle).foregroundStyle(Theme.textSecondary)
-                Text("«\(title)» скоро").font(.headline).foregroundStyle(Theme.textPrimary)
-            }
+            StateView(icon: "hammer", title: title, description: "Раздел в разработке.", fillScreen: true)
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

@@ -151,7 +151,8 @@ final class FranchiseViewModel: ObservableObject {
         }
     }
 
-    private func reloadNow() { scheduleReload(debounced: false) }
+    // Не private — нужен вызов извне для кнопки "Повторить" на сетке тайтлов (см. View).
+    func reloadNow() { scheduleReload(debounced: false) }
 
     private func reload() async {
         isLoading = true

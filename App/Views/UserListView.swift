@@ -58,14 +58,7 @@ struct UserListView: View {
     }
 
     private func errorState(_ message: String) -> some View {
-        VStack(spacing: 10) {
-            Text(message).font(.footnote).foregroundStyle(Theme.textSecondary)
-            Button { vm.retry() } label: {
-                Label("Повторить", systemImage: "arrow.clockwise")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-            }
-        }
+        StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: message, retry: { vm.retry() }, fillScreen: true)
     }
 
     private func row(_ user: DirectoryUserEntry) -> some View {

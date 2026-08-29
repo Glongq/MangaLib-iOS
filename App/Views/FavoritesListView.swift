@@ -48,15 +48,7 @@ struct FavoritesListView: View {
     }
 
     private func errorState(_ message: String) -> some View {
-        VStack(spacing: 10) {
-            Text(message).font(.footnote).foregroundStyle(Theme.textSecondary)
-            Button { vm.retry(userId: userId) } label: {
-                Label("Повторить", systemImage: "arrow.clockwise")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: message, retry: { vm.retry(userId: userId) }, fillScreen: true)
     }
 
     // MARK: Категории — 5 капсул внизу экрана

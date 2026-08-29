@@ -316,26 +316,16 @@ struct NotificationsView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView(
-            viewModel.readFilter == .unread ? "Нет новых уведомлений" : "Уведомлений нет",
-            systemImage: "bell",
-            description: Text("Здесь появятся новые главы, ответы и другие события.")
+        StateView(
+            icon: "bell",
+            title: viewModel.readFilter == .unread ? "Нет новых уведомлений" : "Уведомлений нет",
+            description: "Здесь появятся новые главы, ответы и другие события.",
+            fillScreen: true
         )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func errorState(_ message: String) -> some View {
-        VStack(spacing: 10) {
-            Text(message).font(.footnote).foregroundStyle(Theme.textSecondary)
-            Button {
-                Task { await viewModel.refresh() }
-            } label: {
-                Label("Повторить", systemImage: "arrow.clockwise")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: message, retry: { Task { await viewModel.refresh() } }, fillScreen: true)
     }
 
     // MARK: Строка уведомления

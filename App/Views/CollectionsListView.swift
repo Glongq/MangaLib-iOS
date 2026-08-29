@@ -31,11 +31,17 @@ struct CollectionsListView: View {
         if vm.isLoading && vm.collections.isEmpty {
             skeletonList
         } else if let error = vm.errorMessage, vm.collections.isEmpty {
-            ScrollView { emptyState(icon: "wifi.exclamationmark", text: error).containerRelativeFrame(.vertical) }
+            ScrollView {
+                StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: { Task { await vm.reload() } }, fillScreen: true)
+                    .containerRelativeFrame(.vertical)
+            }
                 .scrollIndicators(.hidden)
                 .refreshable { await vm.reload() }
         } else if vm.collections.isEmpty && vm.didLoad {
-            ScrollView { emptyState(icon: "square.stack", text: "Коллекций пока нет").containerRelativeFrame(.vertical) }
+            ScrollView {
+                StateView(icon: "square.stack", title: "Коллекций пока нет", fillScreen: true)
+                    .containerRelativeFrame(.vertical)
+            }
                 .scrollIndicators(.hidden)
                 .refreshable { await vm.reload() }
         } else {
@@ -171,17 +177,6 @@ struct CollectionsListView: View {
         }
         .frame(height: 116)
         .frame(maxWidth: .infinity, alignment: .center)
-    }
-
-    private func emptyState(icon: String, text: String) -> some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: icon).font(.largeTitle).foregroundStyle(Theme.textSecondary)
-            Text(text).font(.subheadline).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-        .padding(32)
     }
 
     // MARK: Нижняя панель — "Создать" + "Фильтры"

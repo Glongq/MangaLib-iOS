@@ -25,10 +25,35 @@ enum NetworkError: LocalizedError {
         case .notFound:              return "Ресурс не найден (404)."
         case .rateLimited:           return "Слишком много запросов (429). Попробуйте позже."
         case .server(let status):    return "Ошибка сервера (\(status))."
-        case .decoding(let error):   return "Ошибка разбора ответа: \(error.localizedDescription)"
-        case .transport(let error):  return "Сетевая ошибка: \(error.localizedDescription)"
+        // Раньше сюда подставлялся error.localizedDescription — у
+        // DecodingError он НЕ локализован (всегда на английском, вне
+        // зависимости от языка системы), поэтому пользователь видел
+        // смешанный русско-английский текст. Технические подробности парсинга
+        // всё равно не несут для юзера смысла — просто нейтральное сообщение.
+        case .decoding:               return "Ошибка разбора ответа сервера."
+        // URLError.localizedDescription следует языку системы — на
+        // английской локали устройства утекал английский текст ("нет сети"
+        // и т.п. приходили как есть от системы). Разбираем самые частые коды
+        // сами (по-русски, всегда), реже встречающиеся — нейтральный фолбэк.
+        case .transport(let error):  return Self.transportDescription(error)
         case .cancelled:             return "Запрос отменён."
         case .apiMessage(let message): return message
+        }
+    }
+
+    private static func transportDescription(_ error: Error) -> String {
+        guard let urlError = error as? URLError else { return "Сетевая ошибка." }
+        switch urlError.code {
+        case .notConnectedToInternet, .networkConnectionLost:
+            return "Нет соединения с интернетом."
+        case .timedOut:
+            return "Превышено время ожидания ответа."
+        case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+            return "Не удалось подключиться к серверу."
+        case .secureConnectionFailed, .serverCertificateUntrusted:
+            return "Ошибка безопасного соединения."
+        default:
+            return "Сетевая ошибка."
         }
     }
 }

@@ -213,11 +213,10 @@ struct RewatchHistorySheet: View {
         ZStack {
             Theme.background.ignoresSafeArea()
             if history.isEmpty {
-                ContentUnavailableView(
-                    "Пока не отмечено",
-                    systemImage: "arrow.clockwise",
-                    description: Text("«\(title)» ещё не перечитывался.")
-                )
+                // Была "arrow.clockwise" (иконка "повторить"/retry) — для
+                // пустой ИСТОРИИ перечитываний не по смыслу, заменена на ту
+                // же иконку, что и у "История" в приложении.
+                StateView(icon: "clock.arrow.circlepath", title: "Пока не отмечено", description: "«\(title)» ещё не перечитывался.", fillScreen: true)
             } else {
                 List {
                     ForEach(Array(history.enumerated()), id: \.offset) { index, period in

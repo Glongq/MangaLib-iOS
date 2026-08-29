@@ -1576,25 +1576,20 @@ struct MangaDetailView: View {
             reviewsEntryRow
 
             if viewModel.detail == nil && !viewModel.isLoading {
-                VStack(alignment: .leading, spacing: 10) {
-                    // ВРЕМЕННО: показываем РЕАЛЬНЫЙ текст ошибки вместо
-                    // захардкоженного "Не удалось загрузить описание." —
-                    // используем detailErrorMessage (а не errorMessage,
-                    // который пуст, если главы всё же загрузились) — чтобы
-                    // наконец увидеть, что именно отвечает сервер (404 / 401 /
-                    // таймаут / ошибка разбора JSON), а не гадать вслепую в
-                    // очередной раз. Уберём после того, как найдём и починим
-                    // настоящую причину.
-                    Text(viewModel.detailErrorMessage ?? "Не удалось загрузить описание (причина неизвестна).")
-                        .font(.footnote).foregroundStyle(Theme.textSecondary)
-                    Button {
-                        Task { await viewModel.load(force: true) }
-                    } label: {
-                        Label("Обновить", systemImage: "arrow.clockwise")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Theme.accent)
-                    }
-                }
+                // ВРЕМЕННО: показываем РЕАЛЬНЫЙ текст ошибки вместо
+                // захардкоженного "Не удалось загрузить описание." —
+                // используем detailErrorMessage (а не errorMessage, который
+                // пуст, если главы всё же загрузились) — чтобы наконец
+                // увидеть, что именно отвечает сервер (404 / 401 / таймаут /
+                // ошибка разбора JSON), а не гадать вслепую в очередной раз.
+                // Уберём после того, как найдём и починим настоящую причину.
+                StateView(
+                    icon: "wifi.exclamationmark",
+                    title: "Не удалось загрузить",
+                    description: viewModel.detailErrorMessage ?? "Причина неизвестна.",
+                    retry: { Task { await viewModel.load(force: true) } },
+                    minHeight: 140
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2108,11 +2103,7 @@ struct MangaDetailView: View {
                 } else if let error = viewModel.commentsError, viewModel.comments.isEmpty {
                     commentsErrorState(error)
                 } else if viewModel.comments.isEmpty && viewModel.hasLoadedComments {
-                    VStack(spacing: 8) {
-                        Image(systemName: "text.bubble").font(.largeTitle).foregroundStyle(Theme.textSecondary)
-                        Text("Пока нет комментариев").font(.subheadline).foregroundStyle(Theme.textSecondary)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 120)
+                    StateView(icon: "text.bubble", title: "Комментариев пока нет", minHeight: 120)
                 } else {
                     commentsList
                 }
@@ -2330,7 +2321,7 @@ struct MangaDetailView: View {
                 Label("Войдите, чтобы оставить комментарий", systemImage: "person.crop.circle.badge.plus")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, minHeight: 34)
+                    .frame(maxWidth: .infinity, minHeight: Theme.pillControlHeight)
                     .background(Theme.surfaceElevated, in: Capsule())
             }
         }
@@ -2606,17 +2597,7 @@ struct MangaDetailView: View {
     }
 
     private func commentsErrorState(_ message: String) -> some View {
-        VStack(spacing: 10) {
-            Text(message).font(.footnote).foregroundStyle(Theme.textSecondary)
-            Button {
-                Task { await viewModel.loadComments() }
-            } label: {
-                Label("Повторить", systemImage: "arrow.clockwise")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 100)
+        StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: message, retry: { Task { await viewModel.loadComments() } }, minHeight: 100)
     }
 
     // MARK: Helpers

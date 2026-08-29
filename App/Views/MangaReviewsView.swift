@@ -42,9 +42,9 @@ struct MangaReviewsView: View {
         if vm.isLoading && vm.reviews.isEmpty {
             Spacer(); ProgressView().tint(Theme.accent); Spacer()
         } else if let error = vm.errorMessage, vm.reviews.isEmpty {
-            emptyState(icon: "wifi.exclamationmark", text: error)
+            StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: { Task { await vm.reload() } }, fillScreen: true)
         } else if vm.reviews.isEmpty && vm.didLoad {
-            emptyState(icon: "text.bubble", text: "Отзывов пока нет")
+            StateView(icon: "text.bubble", title: "Отзывов пока нет", fillScreen: true)
         } else {
             ScrollView {
                 LazyVStack(spacing: 10) {
@@ -127,16 +127,6 @@ struct MangaReviewsView: View {
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
-    private func emptyState(icon: String, text: String) -> some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: icon).font(.largeTitle).foregroundStyle(Theme.textSecondary)
-            Text(text).font(.subheadline).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-        .padding(32)
-    }
 }
 
 #Preview {

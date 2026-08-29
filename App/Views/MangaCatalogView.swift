@@ -357,15 +357,7 @@ struct MangaCatalogView: View {
     }
 
     private func errorState(_ message: String) -> some View {
-        ContentUnavailableView {
-            Label("Не удалось загрузить", systemImage: "wifi.exclamationmark")
-        } description: {
-            Text(message).foregroundStyle(Theme.textSecondary)
-        } actions: {
-            Button("Повторить") { viewModel.retry() }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-        }
+        StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: message, retry: { viewModel.retry() }, fillScreen: true)
     }
 }
 

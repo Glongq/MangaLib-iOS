@@ -39,9 +39,9 @@ struct UserCollectionsView: View {
         if vm.isLoading && vm.collections.isEmpty {
             skeletonList
         } else if let error = vm.errorMessage, vm.collections.isEmpty {
-            emptyState(icon: "wifi.exclamationmark", text: error)
+            StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: { Task { await vm.reload() } }, fillScreen: true)
         } else if vm.collections.isEmpty && vm.didLoad {
-            emptyState(icon: "square.stack", text: "Коллекций пока нет")
+            StateView(icon: "square.stack", title: "Коллекций пока нет", fillScreen: true)
         } else {
             ScrollView {
                 LazyVStack(spacing: 10) {
@@ -179,16 +179,6 @@ struct UserCollectionsView: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
-    private func emptyState(icon: String, text: String) -> some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: icon).font(.largeTitle).foregroundStyle(Theme.textSecondary)
-            Text(text).font(.subheadline).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-        .padding(32)
-    }
 }
 
 #Preview {

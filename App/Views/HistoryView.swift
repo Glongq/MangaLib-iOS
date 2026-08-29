@@ -117,17 +117,18 @@ struct HistoryView: View {
     private var list: some View {
         if store.isSyncingHistory && results.isEmpty {
             ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if query.isEmpty && !AuthSession.shared.isLoggedIn {
+            // Раньше — та же ветка/иконка, что и у обычного "пока пусто" —
+            // не сигналило, что дело именно в отсутствии входа, а не в том,
+            // что истории правда ещё нет.
+            StateView(icon: "person.crop.circle.badge.exclamationmark", title: "Войдите в аккаунт", description: "Чтобы видеть историю чтения.", fillScreen: true)
         } else if results.isEmpty {
-            ContentUnavailableView(
-                query.isEmpty ? "Пока пусто" : "Ничего не найдено",
-                systemImage: "clock.arrow.circlepath",
-                description: Text(query.isEmpty
-                    ? (AuthSession.shared.isLoggedIn
-                       ? "Здесь появятся тайтлы, которые вы уже начали читать."
-                       : "Войдите в аккаунт, чтобы видеть историю чтения.")
-                    : "Попробуйте другой запрос.")
+            StateView(
+                icon: "clock.arrow.circlepath",
+                title: query.isEmpty ? "Пока пусто" : "Ничего не найдено",
+                description: query.isEmpty ? "Здесь появятся тайтлы, которые вы уже начали читать." : "Попробуйте другой запрос.",
+                fillScreen: true
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 LazyVStack(spacing: 10) {

@@ -31,11 +31,7 @@ struct DownloadsView: View {
             Theme.background.ignoresSafeArea()
 
             if downloads.titles.isEmpty {
-                ContentUnavailableView(
-                    "Нет загрузок",
-                    systemImage: "arrow.down.circle",
-                    description: Text("Скачанные тайтлы появятся здесь. Открой карточку тайтла → «...» → «Скачать тайтл».")
-                )
+                StateView(icon: "arrow.down.circle", title: "Нет загрузок", description: "Скачанные тайтлы появятся здесь. Открой карточку тайтла → «...» → «Скачать тайтл».", fillScreen: true)
             } else {
                 List {
                     ForEach(downloads.titles) { title in

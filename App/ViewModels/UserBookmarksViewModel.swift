@@ -23,6 +23,15 @@ final class UserBookmarksViewModel: ObservableObject {
     private var page = 1
     private var hasNext = true
 
+    /// Раньше ошибка загрузки папок была тупиком — loadFoldersIfNeeded()
+    /// ставит didLoadFolders=true даже при ошибке, поэтому повторный вызов
+    /// себя самого ничего не делал (guard блокирует), а pull-to-refresh на
+    /// этом экране нет. Кнопка "Повторить" сбрасывает флаг и пробует снова.
+    func retryFolders() {
+        didLoadFolders = false
+        Task { await loadFoldersIfNeeded() }
+    }
+
     func loadFoldersIfNeeded() async {
         guard !didLoadFolders, !isLoadingFolders else { return }
         isLoadingFolders = true; errorMessage = nil

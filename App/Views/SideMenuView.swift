@@ -7,11 +7,7 @@ struct StubView: View {
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            ContentUnavailableView(
-                title,
-                systemImage: "hammer",
-                description: Text("Раздел в разработке.")
-            )
+            StateView(icon: "hammer", title: title, description: "Раздел в разработке.", fillScreen: true)
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

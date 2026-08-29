@@ -216,24 +216,11 @@ struct TopViewsListView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "flame").font(.largeTitle).foregroundStyle(Theme.textSecondary)
-            Text("Пока пусто").font(.subheadline).foregroundStyle(Theme.textSecondary)
-        }
-        .frame(maxWidth: .infinity, minHeight: 160)
+        StateView(icon: "flame", title: "Пока пусто", fillScreen: true)
     }
 
     private func errorState(_ message: String) -> some View {
-        VStack(spacing: 10) {
-            Text(message).font(.footnote).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
-            Button { vm.retry() } label: {
-                Label("Повторить", systemImage: "arrow.clockwise")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 160)
-        .padding(.horizontal, gridHorizontalPadding)
+        StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: message, retry: { vm.retry() }, fillScreen: true)
     }
 
     // MARK: Карточка «Сейчас читают»

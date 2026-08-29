@@ -624,12 +624,7 @@ struct BookmarksView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
-                ContentUnavailableView(
-                    "Пусто",
-                    systemImage: "bookmark",
-                    description: Text("Добавляйте тайтлы через кнопку «Добавить в» на странице тайтла.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                StateView(icon: "bookmark", title: "Пусто", description: "Добавляйте тайтлы через кнопку «Добавить в» на странице тайтла.", fillScreen: true)
             }
         } else {
             // Список/плитка — см. ViewSortSheet (иконка шестерёнки).

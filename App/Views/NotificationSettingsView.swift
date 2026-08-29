@@ -38,16 +38,7 @@ struct NotificationSettingsView: View {
             if isLoading {
                 ProgressView().tint(Theme.accent)
             } else if let loadError {
-                VStack(spacing: 16) {
-                    ContentUnavailableView(
-                        "Не удалось загрузить",
-                        systemImage: "wifi.slash",
-                        description: Text(loadError)
-                    )
-                    Button("Повторить") { Task { await load() } }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.accent)
-                }
+                StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: loadError, retry: { Task { await load() } }, fillScreen: true)
             } else {
                 ScrollView {
                     VStack(spacing: 20) {
