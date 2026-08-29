@@ -1,18 +1,16 @@
 import SwiftUI
 
 /// Экран «Сейчас читают» (Меню → Каталог → Сейчас читают) — раньше вела на
-/// StubView (заглушку), теперь реальный полноэкранный постраничный список,
-/// 1-в-1 референс с реального сайта (по прямой просьбе, со скриншотом):
-/// вкладки Новинки/Набирающие популярность/Популярное под заголовком, справа
-/// сверху — выбор периода (За день/неделю/месяц), сетка карточек с рейтингом
-/// слева сверху обложки и числом просмотров слева снизу. НЕ переиспользует
-/// MangaCardView — та бэйджит рейтинг СПРАВА сверху и завязана на статус
-/// закладки (тут не нужен), у этого экрана своя, отдельная раскладка чипов
-/// на обложке (см. topViewsCard ниже), как на реальном сайте.
+/// StubView (заглушку), теперь реальный полноэкранный постраничный список.
+/// По прямой просьбе (правки после первой версии, со скриншотом):
+/// вкладки Новинки/Набирающие популярность/Популярное — 3 капсулы ВНИЗУ
+/// экрана (не под шапкой), справа сверху обложки — рейтинг ТЕМ ЖЕ чипом,
+/// что и в Каталоге/Закладках (RatingChip, размер 9/6/3/6), выбор периода
+/// (За день/неделю/месяц) в toolbar — БЕЗ своего фона (см. periodMenu —
+/// иначе он накладывается на системное стекло toolbar двойным слоем).
 struct TopViewsListView: View {
     @StateObject private var vm = TopViewsListViewModel()
     @ObservedObject private var themeManager = ThemeManager.shared
-    @Namespace private var tabIndicator
 
     // Та же настройка Персонализации (2/3/4/Авто), что и в остальных сетках
     // приложения (см. CardsPerRow) — на скриншоте 3 колонки, это её "Авто".
@@ -31,6 +29,7 @@ struct TopViewsListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { periodMenu }
         }
+        .safeAreaInset(edge: .bottom) { tabsBar }
         .tint(Theme.accent)
         .task { await vm.loadIfNeeded() }
     }
@@ -45,67 +44,63 @@ struct TopViewsListView: View {
                 containerPadding: gridHorizontalPadding
             )
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    tabsRow
-                        .padding(.horizontal, gridHorizontalPadding)
-
-                    if let error = vm.errorMessage, vm.items.isEmpty {
-                        errorState(error)
-                    } else if vm.items.isEmpty && vm.isLoading {
-                        skeletonGrid(cardWidth: cardWidth)
-                    } else if vm.items.isEmpty && vm.didLoadOnce {
-                        emptyState
-                    } else {
-                        grid(cardWidth: cardWidth)
-                        if vm.isLoadingMore {
-                            ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 16)
-                        }
+                if let error = vm.errorMessage, vm.items.isEmpty {
+                    errorState(error)
+                } else if vm.items.isEmpty && vm.isLoading {
+                    skeletonGrid(cardWidth: cardWidth)
+                } else if vm.items.isEmpty && vm.didLoadOnce {
+                    emptyState
+                } else {
+                    grid(cardWidth: cardWidth)
+                    if vm.isLoadingMore {
+                        ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 16)
                     }
                 }
-                .padding(.top, 12)
-                .padding(.bottom, 24)
             }
             .scrollIndicators(.hidden)
         }
     }
 
-    // MARK: Вкладки (Новинки / Набирающие популярность / Популярное)
+    // MARK: Вкладки (Новинки / Набирающие популярность / Популярное) — внизу
 
-    private var tabsRow: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 20) {
-                ForEach(TopViewsSort.allCases) { sort in
-                    tabButton(sort)
-                }
+    /// 3 капсулы внизу экрана (не под шапкой, как в первой версии) — по
+    /// прямой просьбе. .safeAreaInset(edge: .bottom) в body — контент
+    /// ScrollView сам поджимается, не заезжает под бар и не перекрывается им.
+    private var tabsBar: some View {
+        HStack(spacing: 8) {
+            ForEach(TopViewsSort.allCases) { sort in
+                tabCapsule(sort)
             }
         }
-        .scrollIndicators(.hidden)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(.thinMaterial)
     }
 
-    private func tabButton(_ sort: TopViewsSort) -> some View {
+    private func tabCapsule(_ sort: TopViewsSort) -> some View {
         let active = vm.sort == sort
         return Button {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { vm.sort = sort }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { vm.sort = sort }
         } label: {
             Text(sort.title)
                 .font(.subheadline.weight(active ? .semibold : .regular))
-                .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
+                .foregroundStyle(active ? Theme.background : Theme.textPrimary)
                 .lineLimit(1)
-                .padding(.bottom, 10)
-                .overlay(alignment: .bottom) {
-                    if active {
-                        Rectangle()
-                            .fill(Theme.accent)
-                            .frame(height: 2)
-                            .matchedGeometryEffect(id: "topViewsTabIndicator", in: tabIndicator)
-                    }
-                }
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, minHeight: Theme.pillControlHeight)
+                .background(active ? Theme.accent : Theme.surface, in: Capsule())
         }
         .buttonStyle(.plain)
     }
 
     // MARK: Период (За день / За неделю / За месяц)
 
+    /// БЕЗ .background() — ToolbarItem в iOS 26 сам оборачивает содержимое в
+    /// системное стеклянное закругление; свой непрозрачный фон поверх него
+    /// давал двойное наложение ("накладывается что-то" — жалоба). Тут только
+    /// содержимое, стекло — от системы, как и у остальных toolbar-кнопок в
+    /// приложении (см. actionMenu в MangaDetailView — тоже без своего фона).
     private var periodMenu: some View {
         Menu {
             Picker("Период", selection: $vm.period) {
@@ -121,9 +116,6 @@ struct TopViewsListView: View {
             }
             .font(.subheadline.weight(.medium))
             .foregroundStyle(Theme.textPrimary)
-            .padding(.horizontal, 12)
-            .frame(height: 36)
-            .background(Theme.surfaceElevated, in: Capsule())
         }
     }
 
@@ -143,6 +135,8 @@ struct TopViewsListView: View {
             }
         }
         .padding(.horizontal, gridHorizontalPadding)
+        .padding(.top, 12)
+        .padding(.bottom, 24)
     }
 
     private func skeletonGrid(cardWidth: CGFloat) -> some View {
@@ -159,6 +153,8 @@ struct TopViewsListView: View {
             }
         }
         .padding(.horizontal, gridHorizontalPadding)
+        .padding(.top, 12)
+        .padding(.bottom, 24)
     }
 
     private var emptyState: some View {
@@ -184,11 +180,13 @@ struct TopViewsListView: View {
 
     // MARK: Карточка «Сейчас читают»
 
-    /// Своя карточка (не MangaCardView) — 1-в-1 референс скриншота: рейтинг
-    /// скруглённым квадратом слева сверху обложки (не капсулой справа, как
-    /// у MangaCardView.ratingBadge — на этом конкретном экране реального
-    /// сайта рейтинг именно так), число просмотров тёмной капсулой с иконкой
-    /// глаза слева снизу, название (до 2 строк) и тип тайтла под обложкой.
+    /// Своя карточка (не MangaCardView) — обложка+название+тип в том же
+    /// стиле, что и везде, но рейтинг — ТОТ ЖЕ чип, что в Каталоге/Закладках
+    /// (RatingChip, справа сверху, 9/6/3/6 — по прямой просьбе "по размерам
+    /// одинаковая с чипами в вкладках закладки каталог"); число просмотров —
+    /// свой чип слева снизу (глаз+число), той же высоты капсулы, что и
+    /// RatingChip (тот же fontSize/паддинги), чтобы оба чипа на обложке были
+    /// визуально одного калибра.
     private func topViewsCard(_ item: MangaItem, width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             RemoteImage(url: item.cover?.bestURL) { image in
@@ -201,7 +199,9 @@ struct TopViewsListView: View {
             .frame(width: width, height: (width * 3 / 2).rounded())
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .clipped()
-            .overlay(alignment: .topLeading) { topViewsRatingBadge(item.rating?.value) }
+            .overlay(alignment: .topTrailing) {
+                RatingChip(rating: item.rating?.value, fontSize: 9, horizontalPadding: 6, verticalPadding: 3, outerPadding: 6)
+            }
             .overlay(alignment: .bottomLeading) { topViewsViewsBadge(item.topViewsCount) }
 
             Text(item.displayTitle)
@@ -222,38 +222,12 @@ struct TopViewsListView: View {
         .frame(width: width, alignment: .top)
     }
 
-    /// Тот же цвет по значению, что и у RatingChip (см. её color(for:)) —
-    /// своя копия здесь: форма бэйджа на этом экране другая (скруглённый
-    /// прямоугольник, не капсула), переиспользовать саму RatingChip как есть
-    /// нельзя, а красится оценка везде одинаково.
-    private func topViewsRatingColor(_ value: Double) -> Color {
-        switch value {
-        case 7.0...:      return .green
-        case 5.0..<7.0:   return .yellow
-        case 0.001..<5.0: return .red
-        default:          return .gray
-        }
-    }
-
-    @ViewBuilder
-    private func topViewsRatingBadge(_ rating: Double?) -> some View {
-        if let rating {
-            Text(String(format: "%.1f", rating))
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(topViewsRatingColor(rating), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .padding(6)
-        }
-    }
-
     @ViewBuilder
     private func topViewsViewsBadge(_ views: Int?) -> some View {
         if let views {
             HStack(spacing: 3) {
-                Image(systemName: "eye.fill").font(.system(size: 9))
-                Text("\(views)").font(.system(size: 11, weight: .semibold))
+                Image(systemName: "eye.fill").font(.system(size: 8))
+                Text("\(views)").font(.system(size: 9, weight: .bold))
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
