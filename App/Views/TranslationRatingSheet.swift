@@ -46,7 +46,11 @@ struct TranslationRatingSheet: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .presentationDetents([.height(440)])
+        // Было 440 — с явным запасом под содержимое (реальная сумма
+        // высот/паддингов заголовка + 3 строк со звёздами + кнопок
+        // ≈310-330) — по прямой просьбе ужато, тот же приём, что и у
+        // RatingSheet.ratingSheetHeight.
+        .presentationDetents([.height(380)])
         .presentationDragIndicator(.visible)
         .presentationBackground(Theme.background)
         .interactiveDismissDisabled(isSubmitting)
