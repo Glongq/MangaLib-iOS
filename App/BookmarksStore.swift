@@ -186,6 +186,21 @@ struct BookmarkedTitle: Codable, Identifiable, Hashable {
     /// добавленный тайтл не удаляется как "не найден на сервере", пока не
     /// прошло recentChangeGracePeriod.
     var recentlyAddedAt: Date? = nil
+    /// Номер ПОСЛЕДНЕЙ вышедшей главы тайтла (metadata.last_item с сервера,
+    /// см. MangaItem.latestChapter) — НЕ прогресс чтения (тот в ReadingProgress,
+    /// отдельно). По прямой просьбе + сверке со скриншотом реального сайта:
+    /// бэйдж "Глава N" в углу обложки плитки закладок должен показывать ЭТО
+    /// число ВСЕГДА (даже если тайтл не открывали ни разу), а не то, на чём
+    /// пользователь остановился — см. BookmarksView.chapterChip.
+    var latestChapterNumber: String? = nil
+    /// Общее число глав тайтла (metadata.chap_count, см. MangaItem.chapCount)
+    /// — для "Начать 0/N" под названием в плитке, когда прогресса ещё нет.
+    var chapterCount: Int? = nil
+    /// Статус ПУБЛИКАЦИИ тайтла (label, напр. "Онгоинг"/"Завершён") — по
+    /// прямой просьбе бэйдж "Глава N" не показывается для завершённых
+    /// тайтлов (см. chapterChip: у завершённого номер последней главы и так
+    /// равен общему числу глав, бэйдж не несёт новой информации).
+    var titleStatusLabel: String? = nil
 
     var id: String { slug }
 }
@@ -908,6 +923,9 @@ final class BookmarksStore: ObservableObject {
                 items[idx].comment = entry.meta?.comment
                 items[idx].mediaId = entry.media.id
                 items[idx].originalTitle = entry.media.name
+                items[idx].latestChapterNumber = entry.media.latestChapter?.number
+                items[idx].chapterCount = entry.media.chapCount
+                items[idx].titleStatusLabel = entry.media.status?.label
                 // Подтвердился в ответе сервера — защита от преждевременного
                 // удаления больше не нужна (см. recentlyAddedAt).
                 items[idx].recentlyAddedAt = nil
@@ -920,7 +938,10 @@ final class BookmarksStore: ObservableObject {
                                               rewatchHistory: entry.meta?.rewatchHistory ?? [],
                                               comment: entry.meta?.comment,
                                               mediaId: entry.media.id,
-                                              originalTitle: entry.media.name))
+                                              originalTitle: entry.media.name,
+                                              latestChapterNumber: entry.media.latestChapter?.number,
+                                              chapterCount: entry.media.chapCount,
+                                              titleStatusLabel: entry.media.status?.label))
             }
         }
 

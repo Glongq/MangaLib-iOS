@@ -958,6 +958,15 @@ struct MangaItem: Decodable, Identifiable, Hashable {
     let viewsDay: Int?
     let viewsWeek: Int?
     let viewsMonth: Int?
+    /// Общее число глав тайтла (не путать с latestChapter — та номер
+    /// ПОСЛЕДНЕЙ вышедшей, эта — просто СКОЛЬКО их всего) — как и metadata,
+    /// сервер отдаёт только по явному запросу `fields[]=chap_count` (см.
+    /// MangaNetworkService.fetchBookmarksAccountList), в обычном каталоге
+    /// поле есть только как sort/filter-параметр (chap_count/chap_count_min/
+    /// max в MangaFilter.swift), в самих карточках списка раньше не
+    /// декодировалось вообще. Нужен для "Начать 0/N" в Закладках (плитка) —
+    /// по прямой просьбе, эталон — реальный сайт.
+    let chapCount: Int?
 
     /// Название для отображения: русское, если есть, иначе оригинальное.
     var displayTitle: String { rusName?.isEmpty == false ? rusName! : name }
@@ -989,6 +998,7 @@ struct MangaItem: Decodable, Identifiable, Hashable {
         case viewsDay = "views_day"
         case viewsWeek = "views_week"
         case viewsMonth = "views_month"
+        case chapCount = "chap_count"
     }
 
     static func == (lhs: MangaItem, rhs: MangaItem) -> Bool { lhs.id == rhs.id }

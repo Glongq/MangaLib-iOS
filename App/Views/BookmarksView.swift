@@ -763,13 +763,21 @@ struct BookmarksView: View {
         }
     }
 
-    /// "Продолжить N/M" / "Продолжить: Том X, Глава Y" / "Начать чтение" —
-    /// тот же формат, что и в списке (см. row(_:) ниже), только с явным
-    /// "Начать чтение" вместо "Открыть" для карточек плитки, по прямой просьбе.
+    /// "Продолжить N/M" / "Продолжить: Том X, Глава Y" / "Начать 0/N" —
+    /// тот же формат, что и в списке (см. row(_:) ниже). "Начать 0/N" — по
+    /// прямой просьбе + сверке со скриншотом реального сайта: если прогресса
+    /// ещё нет, но известно общее число глав (bm.chapterCount, см.
+    /// BookmarksStore.syncFromServer), пишем реальный ноль из известных, а не
+    /// голое "Начать чтение" (то остаётся запасным на случай, если сервер не
+    /// прислал chap_count — см. fetchBookmarksAccountList).
     private func progressText(for bm: BookmarkedTitle) -> String {
-        guard let p = store.readingProgress(forSlug: bm.slug) else { return "Начать чтение" }
-        return p.totalChapters > 0
-            ? "Продолжить \(p.lastChapterNumber)/\(p.totalChapters)"
+        guard let p = store.readingProgress(forSlug: bm.slug) else {
+            guard let total = bm.chapterCount, total > 0 else { return "Начать чтение" }
+            return "Начать 0/\(total)"
+        }
+        let total = p.totalChapters > 0 ? p.totalChapters : (bm.chapterCount ?? 0)
+        return total > 0
+            ? "Продолжить \(p.lastChapterNumber)/\(total)"
             : "Продолжить: Том \(p.lastChapterVolume), Глава \(p.lastChapterNumber)"
     }
 
@@ -795,7 +803,7 @@ struct BookmarksView: View {
             .frame(width: width, height: (width * 3 / 2).rounded())
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
-            .overlay(alignment: .topLeading) { chapterChip(progress) }
+            .overlay(alignment: .topLeading) { chapterChip(bm) }
             .overlay(alignment: .topTrailing) { myRatingChip(bm.myRating) }
             .overlay(alignment: .bottomTrailing) { folderMenuChip(bm) }
 
@@ -850,12 +858,20 @@ struct BookmarksView: View {
 
     // MARK: Чипы поверх обложки в плитке
 
-    /// Номер текущей/последней открытой главы — слева сверху, только в
-    /// плитке. Ничего не рисует, если прогресса ещё нет (тайтл не открывали).
+    /// Номер ПОСЛЕДНЕЙ вышедшей главы тайтла — слева сверху, только в
+    /// плитке. По прямой просьбе + сверке со скриншотом реального сайта:
+    /// это НЕ прогресс чтения (тот теперь отдельной строкой под названием,
+    /// см. progressText) — bm.latestChapterNumber всегда известен независимо
+    /// от того, открывали тайтл или нет. Ничего не рисует, если это число
+    /// не пришло с сервера (см. BookmarksStore.syncFromServer/
+    /// fetchBookmarksAccountList) ИЛИ тайтл завершён (для завершённого
+    /// номер последней главы = общему числу глав, бэйдж не несёт новой
+    /// информации — тоже по прямой просьбе).
     @ViewBuilder
-    private func chapterChip(_ progress: ReadingProgress?) -> some View {
-        if let progress {
-            Text("Глава \(progress.lastChapterNumber)")
+    private func chapterChip(_ bm: BookmarkedTitle) -> some View {
+        if let number = bm.latestChapterNumber,
+           bm.titleStatusLabel?.localizedCaseInsensitiveContains("заверш") != true {
+            Text("Глава \(number)")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
