@@ -1,11 +1,17 @@
 import SwiftUI
 
-/// Карточка тайтла внешнего сайта (см. план, ЧАСТЬ B) — обложка без фона
-/// сверху, тип под названием, рейтинг (только e-hentai, у hitomi такого
-/// поля физически нет), метаданные чипами, превью-грид страниц своей
-/// пагинацией + переходом в читалку на нужную страницу, Related Galleries,
-/// вкладки «О тайтле»/«Комментарии». НЕ переиспользует MangaDetailView —
-/// другая форма данных (ExternalGalleryDetail, не MangaItem/MangaDetail).
+/// Карточка тайтла внешнего сайта (см. план, ЧАСТЬ B) — визуально КОПИРУЕТ
+/// стиль текстов/чипов/вкладок обычной карточки тайтла (MangaDetailView) —
+/// по прямой просьбе ("стиль текстов всё как из обычной манги, просто
+/// адаптирован под это"): та же плашка "Тип" под названием (как в
+/// MangaCardView), тот же infoRow-ряд чипов Тип/Язык/... (см.
+/// MangaDetailView.infoRow/infoBlock), те же CollapsibleChips для тегов/
+/// персонажей/серии, тот же подчёркнутый tabBar вместо системного
+/// Picker(.segmented), тот же RatingChip-подобный бэйдж на обложке, тот же
+/// blockTitle/relatedCard стиль для "Похожих тайтлов". НЕ импортирует
+/// MangaDetailView (другая форма данных, ExternalGalleryDetail, не
+/// MangaItem/MangaDetail, см. план про изоляцию от старого сетевого кода)
+/// — стиль скопирован построчно, не переиспользован как код.
 struct ExternalGalleryDetailView: View {
     let site: ExternalSite
     let id: Int
@@ -18,8 +24,9 @@ struct ExternalGalleryDetailView: View {
     @State private var tab: Tab = .about
     @State private var previewPage: Int = 1
     @State private var previewJumpText = ""
+    @Namespace private var tabIndicator
 
-    private enum Tab { case about, comments }
+    private enum Tab: Hashable { case about, comments }
 
     private var provider: any ExternalSiteProvider { ExternalSiteRegistry.provider(for: site) }
     /// ~20 страниц на "экран" пагинации превью-грида — то же число, что
@@ -28,6 +35,14 @@ struct ExternalGalleryDetailView: View {
     /// число не HAR-подтверждено — берём то же самое, не выдумывая новое.
     private static let previewPageSize = 21
     private static let previewColumns = 3
+    /// Высота чипа infoRow — 1-в-1 MangaDetailView.metaChipHeight (аватар/
+    /// заголовок+значение в два ряда), см. infoBlock ниже.
+    private static let metaChipHeight: CGFloat = 44
+    /// Карточка "Похожих тайтлов" — 1-в-1 MangaDetailView.similarCardHeight/
+    /// similarCoverWidth/similarCardWidthFraction.
+    fileprivate static let relatedCardHeight: CGFloat = 132
+    fileprivate static let relatedCoverWidth: CGFloat = relatedCardHeight * 2 / 3
+    private static let relatedCardWidthFraction: CGFloat = 0.72
 
     var body: some View {
         content
@@ -54,25 +69,22 @@ struct ExternalGalleryDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 coverSection(detail)
-                titleSection(detail)
-
+                titleBlock(detail)
                 readButton(detail)
 
                 // См. план ЧАСТЬ B.5 — у hitomi комментариев как концепции
                 // нет вообще (ни одного comment-related запроса ни в одном
-                // HAR), вкладка там не показывается совсем, не просто
-                // "Недоступно" — весь контент всегда "О тайтле".
+                // HAR), вкладка там не показывается совсем, весь контент
+                // всегда "О тайтле" (как и было решено раньше).
                 if site == .ehentai {
-                    tabPicker
+                    tabBar
                 }
 
                 switch tab {
                 case .about:
-                    metadataSection(detail)
-                    if !detail.pages.isEmpty { previewGridSection(detail) }
-                    relatedSection(detail)
+                    aboutTab(detail)
                 case .comments:
-                    commentsSection(detail)
+                    commentsTab(detail)
                 }
             }
             .padding(16)
@@ -81,7 +93,7 @@ struct ExternalGalleryDetailView: View {
         .scrollIndicators(.hidden)
     }
 
-    // MARK: Верх карточки (B.1)
+    // MARK: Верх карточки (B.1) — 1-в-1 MangaDetailView.heroHeader/titleBlock
 
     @ViewBuilder
     private func coverSection(_ detail: ExternalGalleryDetail) -> some View {
@@ -90,123 +102,190 @@ struct ExternalGalleryDetailView: View {
                 .scaledToFit()
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                // Рейтинг — на самой обложке, снизу слева (см.
+                // MangaDetailView.coverRatingBadge) — только у e-hentai, у
+                // hitomi такого поля нет.
+                .overlay(alignment: .bottomLeading) { ratingBadge(detail) }
         }
     }
 
-    private func titleSection(_ detail: ExternalGalleryDetail) -> some View {
+    @ViewBuilder
+    private func ratingBadge(_ detail: ExternalGalleryDetail) -> some View {
+        if let average = detail.ratingAverage {
+            HStack(spacing: 3) {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.yellow)
+                Text(String(format: "%.2f", average))
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                if let count = detail.ratingCount, count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(.black.opacity(0.55), in: Capsule())
+            .padding(6)
+        }
+    }
+
+    /// Название + тип строкой под ним — 1-в-1 стиль карточки в каталоге
+    /// (см. MangaCardView.body: название, сразу под ним типом вторым
+    /// текстом секондари-цветом), по прямой просьбе адаптировать этот же
+    /// стиль сюда.
+    private func titleBlock(_ detail: ExternalGalleryDetail) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(detail.title)
                 .font(.title3.weight(.bold))
                 .foregroundStyle(Theme.textPrimary)
-            Text(detail.type.capitalized)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(Theme.textSecondary)
-            if let average = detail.ratingAverage {
-                ratingWidget(average: average, count: detail.ratingCount)
-            }
-        }
-    }
-
-    /// Только у e-hentai (`detail.ratingAverage != nil`) — у hitomi поля
-    /// рейтинга в galleries/{id}.js нет, честно не показываем (см. план).
-    private func ratingWidget(average: Double, count: Int?) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "star.fill")
-                .font(.footnote)
-                .foregroundStyle(.yellow)
-            Text(String(format: "%.2f", average))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.textPrimary)
-            if let count {
-                Text("(\(count))")
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if !detail.type.isEmpty {
+                Text(detail.type.capitalized)
                     .font(.footnote)
                     .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
             }
         }
     }
 
+    /// «Начать» — 1-в-1 MangaDetailView.readerLink (native
+    /// .borderedProminent + Theme.accent, не самодельная Capsule).
     private func readButton(_ detail: ExternalGalleryDetail) -> some View {
         NavigationLink {
             ExternalReaderView(site: site, detail: detail)
         } label: {
             Text("Читать (\(detail.pages.count) стр.)")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.background)
-                .frame(maxWidth: .infinity)
-                .frame(height: Theme.pillControlHeight)
-                .background(Theme.accent, in: Capsule())
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Theme.accent)
+    }
+
+    // MARK: Вкладки «О тайтле»/«Комментарии» — 1-в-1 MangaDetailView.tabBar/
+    // tabButton (подчёркнутые плоские вкладки, matchedGeometryEffect), без
+    // третьей "Главы" (по прямой просьбе — "такого понятия как Главы тут
+    // не будет").
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            HStack(spacing: 28) {
+                tabButton("О тайтле", .about)
+                tabButton("Комментарии", .comments)
+            }
+            Spacer(minLength: 0)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.separator).frame(height: 1)
+        }
+    }
+
+    private func tabButton(_ title: String, _ value: Tab) -> some View {
+        let active = tab == value
+        return Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { tab = value }
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(active ? .semibold : .regular))
+                .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
+                .lineLimit(1)
+                .padding(.bottom, 13)
+                .overlay(alignment: .bottom) {
+                    if active {
+                        Rectangle()
+                            .fill(Theme.accent)
+                            .frame(height: 2)
+                            .matchedGeometryEffect(id: "tabIndicator", in: tabIndicator)
+                    }
+                }
         }
         .buttonStyle(.plain)
     }
 
-    private var tabPicker: some View {
-        Picker("", selection: $tab) {
-            Text("О тайтле").tag(Tab.about)
-            Text("Комментарии").tag(Tab.comments)
+    // MARK: Tab «О тайтле»
+
+    private func aboutTab(_ detail: ExternalGalleryDetail) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            infoRow(detail)
+            if !detail.groups.isEmpty { chipsBlock("Группа", detail.groups.map { .init(text: $0) }) }
+            if !detail.series.isEmpty { chipsBlock("Серия", detail.series.map { .init(text: $0) }) }
+            if !detail.characters.isEmpty { chipsBlock("Персонажи", detail.characters.map { .init(text: $0) }) }
+            if !detail.tags.isEmpty { chipsBlock("Теги", tagItems(detail)) }
+            if !detail.pages.isEmpty { previewGridSection(detail) }
+            relatedSection(detail)
         }
-        .pickerStyle(.segmented)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: Метаданные чипами (B.2)
+    // MARK: Info row — 1-в-1 MangaDetailView.infoRow/infoBlock (Тип/Статус/
+    // Год/Просмотры/Формат) — здесь Тип/Язык/Опубликовано/Длина + то, что
+    // есть ТОЛЬКО у e-hentai (Родитель/Видимость/Размер/В избранном), у
+    // hitomi этих полей физически нет, просто не добавляются в список.
 
-    private func metadataSection(_ detail: ExternalGalleryDetail) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if !detail.groups.isEmpty { chipRow("Группа", detail.groups) }
-            if let language = detail.language, !language.isEmpty { chipRow("Язык", [language]) }
-            if !detail.series.isEmpty { chipRow("Серия", detail.series) }
-            if !detail.characters.isEmpty { chipRow("Персонажи", detail.characters) }
-            if !detail.tags.isEmpty { tagsChipRow(detail) }
-            chipRow("Инфо", infoFacts(detail))
+    private func infoRow(_ detail: ExternalGalleryDetail) -> some View {
+        let rawItems: [(heading: String, value: String?)] = [
+            (heading: "Тип", value: detail.type.isEmpty ? nil : detail.type.capitalized),
+            (heading: "Язык", value: detail.language),
+            (heading: "Опубликовано", value: detail.posted),
+            (heading: "Длина", value: "\(detail.pages.count) стр."),
+            (heading: "Родитель", value: detail.parentId.map { "#\($0)" }),
+            (heading: "Видимость", value: detail.visible),
+            (heading: "Размер", value: detail.fileSize),
+            (heading: "В избранном", value: detail.favoritedCount)
+        ]
+        let items: [(heading: String, value: String)] = rawItems.compactMap { item in
+            guard let value = item.value, !value.isEmpty else { return nil }
+            return (heading: item.heading, value: value)
         }
-    }
-
-    /// Posted/Length — общие для обоих сайтов; Parent/Visible/File size/
-    /// Favorited — ТОЛЬКО e-hentai (у hitomi таких полей физически нет, см.
-    /// план ЧАСТЬ B.2 — не выдумываем, просто не добавляем в список).
-    private func infoFacts(_ detail: ExternalGalleryDetail) -> [String] {
-        var facts: [String] = []
-        if let posted = detail.posted, !posted.isEmpty { facts.append("Опубликовано: \(posted)") }
-        facts.append("Длина: \(detail.pages.count) стр.")
-        if let parentId = detail.parentId { facts.append("Родитель: #\(parentId)") }
-        if let visible = detail.visible, !visible.isEmpty { facts.append("Видимость: \(visible)") }
-        if let fileSize = detail.fileSize, !fileSize.isEmpty { facts.append("Размер: \(fileSize)") }
-        if let favorited = detail.favoritedCount, !favorited.isEmpty { facts.append("В избранном: \(favorited)") }
-        return facts
-    }
-
-    private func chipRow(_ title: String, _ values: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.textSecondary)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 8)], alignment: .leading, spacing: 8) {
-                ForEach(Array(values.enumerated()), id: \.offset) { _, value in
-                    chip(value)
+        return ScrollView(.horizontal) {
+            HStack(spacing: 10) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    infoBlock(item.heading, value: item.value)
                 }
             }
         }
+        .scrollIndicators(.hidden)
     }
 
-    private func tagsChipRow(_ detail: ExternalGalleryDetail) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Теги")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.textSecondary)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 8)], alignment: .leading, spacing: 8) {
-                ForEach(Array(detail.tags.enumerated()), id: \.offset) { _, tag in
-                    chip(tagLabel(tag))
-                }
-            }
+    private func infoBlock(_ heading: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(heading).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1)
+            Text(value).font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+        }
+        .padding(.horizontal, 18)
+        .frame(height: Self.metaChipHeight)
+        .background(Theme.surfaceElevated, in: Capsule())
+    }
+
+    // MARK: Чипы (Группа/Серия/Персонажи/Теги) — 1-в-1 MangaDetailView
+    // ("Жанры и теги"/"Франшиза"): blockTitle + переиспользованный
+    // CollapsibleChips (тот же общий компонент, что и в MangaDetailView —
+    // чистый UI-виджет без зависимости от старых сетевых моделей, как и
+    // SkeletonBox/StateView, которые уже переиспользуются в этом слое).
+
+    private func blockTitle(_ text: String) -> some View {
+        Text(text).font(.headline).foregroundStyle(Theme.textPrimary)
+    }
+
+    private func chipsBlock(_ title: String, _ items: [CollapsibleChips.Item]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            blockTitle(title)
+            CollapsibleChips(items: items)
         }
     }
 
-    private func chip(_ text: String) -> some View {
-        Text(text)
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(Theme.textPrimary)
-            .padding(.horizontal, 10)
-            .frame(height: 26)
-            .background(Theme.surfaceElevated, in: Capsule())
+    /// female (♀)/male (♂) — цветные чипы (розовый/голубой), как возрастной
+    /// рейтинг 18+/16+ в MangaDetailView (см. ageRatingChip — тот же приём
+    /// tint на CollapsibleChips.Item).
+    private func tagItems(_ detail: ExternalGalleryDetail) -> [CollapsibleChips.Item] {
+        detail.tags.map { tag in
+            let tint: Color? = tag.female ? .pink : (tag.male ? .blue : nil)
+            return CollapsibleChips.Item(text: tagLabel(tag), tint: tint)
+        }
     }
 
     private func tagLabel(_ tag: ExternalGalleryTag) -> String {
@@ -215,7 +294,9 @@ struct ExternalGalleryDetailView: View {
         return tag.name
     }
 
-    // MARK: Превью-грид страниц + пагинация + jump-to-page (B.3)
+    // MARK: Превью-грид страниц + пагинация + jump-to-page (B.3) — своего
+    // аналога в обычной карточке манги нет (там вместо этого список глав),
+    // заголовок/шрифты подогнаны под тот же blockTitle-стиль для консистентности.
 
     private func previewGridSection(_ detail: ExternalGalleryDetail) -> some View {
         let pages = detail.pages
@@ -226,10 +307,8 @@ struct ExternalGalleryDetailView: View {
         let visiblePages = Array(pages[startIndex..<endIndex])
         let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: Self.previewColumns)
 
-        return VStack(alignment: .leading, spacing: 12) {
-            Text("Предпросмотр страниц")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.textPrimary)
+        return VStack(alignment: .leading, spacing: 10) {
+            blockTitle("Предпросмотр страниц")
 
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(visiblePages, id: \.index) { page in
@@ -341,34 +420,42 @@ struct ExternalGalleryDetailView: View {
         return result
     }
 
-    // MARK: Related Galleries (B.4)
+    // MARK: Похожие тайтлы (B.4) — 1-в-1 MangaDetailView.relatedSection/
+    // relatedCard (широкая карточка: обложка слева на всю высоту подложки,
+    // название+тип справа, горизонтальный слайдер).
 
     @ViewBuilder
     private func relatedSection(_ detail: ExternalGalleryDetail) -> some View {
         if !detail.related.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Похожие тайтлы")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
-
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 16) {
-                    ForEach(detail.related, id: \.self) { relatedId in
-                        RelatedGalleryCard(site: site, id: relatedId)
+            VStack(alignment: .leading, spacing: 10) {
+                blockTitle("Похожие тайтлы")
+                GeometryReader { proxy in
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 12) {
+                            ForEach(detail.related, id: \.self) { relatedId in
+                                RelatedGalleryCard(site: site, id: relatedId, width: proxy.size.width * Self.relatedCardWidthFraction)
+                            }
+                        }
                     }
+                    .scrollIndicators(.hidden)
                 }
+                .frame(height: Self.relatedCardHeight)
             }
         }
     }
 
-    // MARK: Комментарии (B.5)
+    // MARK: Комментарии (B.5) — 1-в-1 MangaDetailView.commentRow (аватар +
+    // ник/дата, текст ниже, разделитель между соседними комментариями), без
+    // веток/голосов/спойлеров — у e-hentai комментарии плоские, без ответов.
 
     @ViewBuilder
-    private func commentsSection(_ detail: ExternalGalleryDetail) -> some View {
+    private func commentsTab(_ detail: ExternalGalleryDetail) -> some View {
         if detail.comments.isEmpty {
             StateView(icon: "bubble.left", title: "Пока нет комментариев")
         } else {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(detail.comments) { comment in
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(Array(detail.comments.enumerated()), id: \.offset) { index, comment in
+                    if index > 0 { Divider().overlay(Theme.separator) }
                     commentRow(comment)
                 }
             }
@@ -376,22 +463,27 @@ struct ExternalGalleryDetailView: View {
     }
 
     private func commentRow(_ comment: ExternalComment) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(comment.author)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Text(comment.postedAt)
-                    .font(.caption2)
-                    .foregroundStyle(Theme.textSecondary)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                Circle()
+                    .fill(Theme.surfaceElevated)
+                    .frame(width: 36, height: 36)
+                    .overlay(Image(systemName: "person.fill").font(.footnote).foregroundStyle(Theme.textSecondary))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(comment.author)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(comment.postedAt)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
             }
+
             Text(comment.text)
-                .font(.footnote)
+                .font(.subheadline)
                 .foregroundStyle(Theme.textPrimary)
         }
-        .padding(12)
-        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func load() async {
@@ -404,16 +496,15 @@ struct ExternalGalleryDetailView: View {
     }
 }
 
-/// Одна карточка в Related Galleries (B.4) — визуально копирует стиль
-/// карточки каталога (см. ExternalCatalogGridView.card), но переиспользует
-/// её КАК КОД нельзя (тот метод private конкретного вью) — по тому же
-/// принципу, что и остальные новые вью в этом слое (копипаста стиля, не
-/// общий компонент, см. план). Сама грузит свою карточку лениво по
-/// `.task` — тот же принцип "подгрузка по мере появления", что и в сетке
-/// каталога, но без пагинации (related — обычно короткий список).
+/// Одна карточка в "Похожих тайтлах" (B.4) — 1-в-1 MangaDetailView.relatedCard
+/// (обложка слева во всю высоту подложки, название+тип справа), но данные
+/// свои (ExternalGalleryDetail, не MangaItem) и грузится лениво по `.task`
+/// (related — только ID, полные данные тянутся так же, как в сетке каталога,
+/// см. ExternalCatalogGridView.loadDetail).
 private struct RelatedGalleryCard: View {
     let site: ExternalSite
     let id: Int
+    let width: CGFloat
 
     @State private var detail: ExternalGalleryDetail?
 
@@ -423,7 +514,7 @@ private struct RelatedGalleryCard: View {
         NavigationLink {
             ExternalGalleryDetailView(site: site, id: id, preloaded: detail)
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
                 Group {
                     if let cover = detail?.coverURL {
                         ExternalImage(url: cover) { SkeletonBox() }
@@ -432,18 +523,33 @@ private struct RelatedGalleryCard: View {
                         SkeletonBox()
                     }
                 }
-                .aspectRatio(2.0 / 3.0, contentMode: .fill)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .frame(width: ExternalGalleryDetailView.relatedCoverWidth, height: ExternalGalleryDetailView.relatedCardHeight)
                 .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-                Text(detail?.title ?? "…")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(detail?.title ?? "…")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(2)
+
+                    Spacer(minLength: 0)
+
+                    if let type = detail?.type, !type.isEmpty {
+                        Text(type.capitalized)
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 10)
+                .padding(.trailing, 10)
             }
         }
         .buttonStyle(.plain)
+        .frame(width: width, height: ExternalGalleryDetailView.relatedCardHeight)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .task {
             guard detail == nil else { return }
             detail = try? await provider.fetchGalleryDetail(id: id)
