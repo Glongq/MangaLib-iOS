@@ -122,6 +122,18 @@ protocol ExternalSiteProvider {
     /// Та же опаque-cursor пагинация, что и у fetchIdsByTag.
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
 
+    /// То же самое, но с фильтром по категориям (см.
+    /// ExternalSiteCapabilities.hasCategoryFilter, EHentaiCategory) —
+    /// `excludedCategoryBits` — bitmask ИСКЛЮЧАЕМЫХ категорий (0 — без
+    /// ограничения). Настоящий protocol requirement (не просто метод
+    /// расширения) — иначе переопределение в EHentaiProvider не подхватится
+    /// при вызове через `any ExternalSiteProvider` (диспетчеризация методов
+    /// расширения, не входящих в список требований протокола, статическая,
+    /// не полиморфная). Реализация по умолчанию (см. extension ниже) просто
+    /// игнорирует bitmask и уходит в обычный fetchIdsBySearch — так
+    /// HitomiProvider не обязан ничего знать про категории.
+    func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
+
     /// Полные метаданные тайтла — для карточки и для чтения.
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail
 
@@ -131,6 +143,12 @@ protocol ExternalSiteProvider {
     /// временная, с истекающим keystamp — её нельзя посчитать заранее и
     /// нельзя закэшировать надолго).
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL
+}
+
+extension ExternalSiteProvider {
+    func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
+        try await fetchIdsBySearch(query: query, cursor: cursor, limit: limit)
+    }
 }
 
 /// Простой статический реестр провайдеров — без DI-магии, её в проекте

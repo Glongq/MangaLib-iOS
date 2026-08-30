@@ -7,7 +7,14 @@ import SwiftUI
 /// очередной страницей ID (см. fetchPage).
 enum ExternalCatalogQuery {
     case tag(namespace: ExternalTagNamespace, value: String)
-    case search(query: String)
+    /// `excludedCategoryBits` — см. EHentaiCategory/EHentaiCategoryPicker;
+    /// сайты без capabilities.hasCategoryFilter просто игнорируют его (см.
+    /// ExternalSiteProvider.fetchIdsBySearch(excludedCategoryBits:)
+    /// default-реализация), поэтому здесь один общий случай, не отдельный
+    /// под каждый сайт. 0 — без ограничений (енум-кейсы не поддерживают
+    /// значения параметров по умолчанию, поэтому вызывающая сторона всегда
+    /// передаёт явно).
+    case search(query: String, excludedCategoryBits: Int)
 }
 
 /// Один элемент СОВМЕСТНОЙ выдачи (см. ExternalCombinedCatalogView) — ID
@@ -185,9 +192,9 @@ struct ExternalCatalogGridView: View {
         switch query {
         case let .tag(namespace, value):
             return try await provider.fetchIdsByTag(namespace: namespace, value: value, cursor: cursor, limit: pageSize)
-        case let .search(text):
+        case let .search(text, excludedCategoryBits):
             if provider.capabilities.hasSearch {
-                return try await provider.fetchIdsBySearch(query: text, cursor: cursor, limit: pageSize)
+                return try await provider.fetchIdsBySearch(query: text, excludedCategoryBits: excludedCategoryBits, cursor: cursor, limit: pageSize)
             } else {
                 return try await provider.fetchIdsByTag(namespace: .tag, value: text, cursor: cursor, limit: pageSize)
             }

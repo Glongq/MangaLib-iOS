@@ -42,6 +42,12 @@ struct ExternalSiteCapabilities {
     /// по этому флагу — если нет ни того, ни другого, каталог тоже
     /// «Недоступно», как остальные экраны без аналога.
     var hasSearch: Bool
+    /// Фильтр по категориям (Doujinshi/Manga/Artist CG/... — см.
+    /// EHentaiCategory) поверх hasSearch — есть только у e-hentai (кнопки
+    /// прямо на главной странице сайта). false для сайтов без своей
+    /// категоризации в этом смысле (у hitomi есть похожее понятие "type" в
+    /// тегах, но отдельного UI-фильтра под него в этом клиенте нет).
+    var hasCategoryFilter: Bool
     var hasBookmarks: Bool
     var hasHistory: Bool
     var hasNotifications: Bool

@@ -6,6 +6,50 @@ enum EHentaiError: Error {
     case missingToken
 }
 
+/// Категории e-hentai (кнопки Doujinshi/Manga/Artist CG/... на главной
+/// странице сайта — см. EHentaiCategoryPicker) и их `f_cats` bitmask.
+/// Подтверждено HAR: `f_cats=1019` встречался в реальном запросе, и
+/// 1019 = сумма ВСЕХ битов ниже КРОМЕ .manga (4) — т.е. семантика bitmask
+/// это ИСКЛЮЧЕНИЕ (галочка = категория выключена из выдачи), не включение;
+/// когда ничего не исключено, сайт вообще не шлёт f_cats (см.
+/// EHentaiProvider.fetchIdsBySearch(excludedCategoryBits:) — 0 значит
+/// "без параметра").
+enum EHentaiCategory: CaseIterable, Identifiable {
+    case doujinshi, manga, artistCG, gameCG, western, nonH, imageSet, cosplay, asianPorn, misc
+
+    var id: Self { self }
+
+    var bit: Int {
+        switch self {
+        case .doujinshi: return 2
+        case .manga: return 4
+        case .artistCG: return 8
+        case .gameCG: return 16
+        case .imageSet: return 32
+        case .cosplay: return 64
+        case .asianPorn: return 128
+        case .nonH: return 256
+        case .western: return 512
+        case .misc: return 1
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .doujinshi: return "Doujinshi"
+        case .manga: return "Manga"
+        case .artistCG: return "Artist CG"
+        case .gameCG: return "Game CG"
+        case .western: return "Western"
+        case .nonH: return "Non-H"
+        case .imageSet: return "Image Set"
+        case .cosplay: return "Cosplay"
+        case .asianPorn: return "Asian Porn"
+        case .misc: return "Misc"
+        }
+    }
+}
+
 /// Клиент e-hentai.org — СВОЯ, полностью отдельная реализация, никак не
 /// связанная с MangaNetworkService/LibSite/HitomiProvider. Все URL/форматы
 /// ниже подтверждены реальным HAR (см. план — "e-hentai" блок разбора).
@@ -26,6 +70,7 @@ actor EHentaiProvider: ExternalSiteProvider {
         // hitomi.la) — зато есть обычный полнотекстовый поиск, см. hasSearch.
         hasTagBrowser: false,
         hasSearch: true,
+        hasCategoryFilter: true,
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
@@ -114,8 +159,17 @@ actor EHentaiProvider: ExternalSiteProvider {
     /// команду, хоть вперемешку (см. doc-comment tagPrefix) — здесь это
     /// не различается, просто честно прокидывается как есть.
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
+        try await fetchIdsBySearch(query: query, excludedCategoryBits: 0, cursor: cursor, limit: limit)
+    }
+
+    /// `excludedCategoryBits` — см. EHentaiCategory (bitmask ИСКЛЮЧАЕМЫХ
+    /// категорий, подтверждено HAR). 0 — параметр `f_cats` вообще не
+    /// добавляется в URL, ровно как на самом сайте, когда ни одна кнопка
+    /// категории не выключена.
+    func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let encodedQuery = Self.formEncoded(query)
         var urlString = "https://e-hentai.org/?f_search=\(encodedQuery)"
+        if excludedCategoryBits != 0 { urlString += "&f_cats=\(excludedCategoryBits)" }
         if let cursor { urlString += "&next=\(cursor)" }
         return try await fetchGalleryList(urlString: urlString)
     }

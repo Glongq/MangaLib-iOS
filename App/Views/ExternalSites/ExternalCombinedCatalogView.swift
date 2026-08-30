@@ -6,17 +6,35 @@ import SwiftUI
 /// (ExternalSiteSession.enabledSites), результат мержится в одну сетку
 /// (см. ExternalCatalogGridView, поддержка нескольких `sites`) — карточка
 /// каждого тайтла подписана источником (ExternalCatalogGridView.
-/// showsSourceBadge / ExternalGalleryDetailView "Источник").
+/// showsSourceBadge / ExternalGalleryDetailView "Источник"). Кнопки
+/// категорий (см. EHentaiCategoryPicker) показываются, если ХОТЯ БЫ один
+/// из включённых сайтов их понимает (capabilities.hasCategoryFilter) —
+/// остальные сайты в выдаче просто честно игнорируют bitmask (см.
+/// ExternalSiteProvider.fetchIdsBySearch(excludedCategoryBits:)).
 struct ExternalCombinedCatalogView: View {
     @ObservedObject private var session = ExternalSiteSession.shared
     @State private var query = ""
+    @State private var excludedCategories: Set<EHentaiCategory> = []
     @FocusState private var isFocused: Bool
 
     private var sites: [ExternalSite] { ExternalSite.allCases.filter { session.enabledSites.contains($0) } }
+    private var showsCategoryFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter } }
+    private var excludedCategoryBits: Int { excludedCategories.reduce(0) { $0 | $1.bit } }
+
+    private struct SearchRequest: Hashable {
+        let query: String
+        let excludedCategoryBits: Int
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             searchField
+
+            if showsCategoryFilter {
+                EHentaiCategoryPicker(excluded: $excludedCategories)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            }
 
             if query.trimmingCharacters(in: .whitespaces).isEmpty {
                 StateView(
@@ -26,7 +44,7 @@ struct ExternalCombinedCatalogView: View {
                     fillScreen: true
                 )
             } else {
-                NavigationLink(value: query) {
+                NavigationLink(value: SearchRequest(query: query, excludedCategoryBits: excludedCategoryBits)) {
                     HStack {
                         Image(systemName: "magnifyingglass")
                         Text("Искать «\(query)» везде")
@@ -44,8 +62,8 @@ struct ExternalCombinedCatalogView: View {
         .navigationTitle("Все сайты")
         .navigationBarTitleDisplayMode(.inline)
         .background(Theme.background.ignoresSafeArea())
-        .navigationDestination(for: String.self) { text in
-            ExternalCatalogGridView(sites: sites, query: .search(query: text), title: text)
+        .navigationDestination(for: SearchRequest.self) { request in
+            ExternalCatalogGridView(sites: sites, query: .search(query: request.query, excludedCategoryBits: request.excludedCategoryBits), title: request.query)
         }
     }
 

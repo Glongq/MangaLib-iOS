@@ -3,22 +3,38 @@ import SwiftUI
 /// Каталог-экран для внешних сайтов со свободным текстовым поиском вместо
 /// алфавитного справочника (capabilities.hasSearch && !hasTagBrowser — см.
 /// EHentaiProvider; у hitomi наоборот, см. ExternalTagBrowserView). Просто
-/// поле ввода + переход в ту же ExternalCatalogGridView, но с
-/// `.search(query:)` вместо `.tag(...)`.
+/// поле ввода (+ кнопки категорий у сайтов с capabilities.hasCategoryFilter,
+/// см. EHentaiCategoryPicker) + переход в ту же ExternalCatalogGridView, но
+/// с `.search(query:excludedCategoryBits:)` вместо `.tag(...)`.
 struct ExternalSearchView: View {
     let site: ExternalSite
 
     @State private var query = ""
+    @State private var excludedCategories: Set<EHentaiCategory> = []
     @FocusState private var isFocused: Bool
+
+    private var capabilities: ExternalSiteCapabilities { ExternalSiteRegistry.provider(for: site).capabilities }
+    private var excludedCategoryBits: Int { excludedCategories.reduce(0) { $0 | $1.bit } }
+
+    private struct SearchRequest: Hashable {
+        let query: String
+        let excludedCategoryBits: Int
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             searchField
 
+            if capabilities.hasCategoryFilter {
+                EHentaiCategoryPicker(excluded: $excludedCategories)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            }
+
             if query.trimmingCharacters(in: .whitespaces).isEmpty {
                 StateView(icon: "magnifyingglass", title: "Введите запрос", fillScreen: true)
             } else {
-                NavigationLink(value: query) {
+                NavigationLink(value: SearchRequest(query: query, excludedCategoryBits: excludedCategoryBits)) {
                     HStack {
                         Image(systemName: "magnifyingglass")
                         Text("Искать «\(query)»")
@@ -36,8 +52,8 @@ struct ExternalSearchView: View {
         .navigationTitle("Поиск")
         .navigationBarTitleDisplayMode(.inline)
         .background(Theme.background.ignoresSafeArea())
-        .navigationDestination(for: String.self) { text in
-            ExternalCatalogGridView(site: site, query: .search(query: text), title: text)
+        .navigationDestination(for: SearchRequest.self) { request in
+            ExternalCatalogGridView(site: site, query: .search(query: request.query, excludedCategoryBits: request.excludedCategoryBits), title: request.query)
         }
     }
 

@@ -22,6 +22,7 @@ struct HitomiProvider: ExternalSiteProvider {
         // Свободный текстовый поиск упирается в неразобранный бинарный
         // B-tree индекс (galleriesindex/*) — см. план, "Что заблокировано".
         hasSearch: false,
+        hasCategoryFilter: false,
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
