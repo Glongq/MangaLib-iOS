@@ -63,13 +63,15 @@ struct TranslationRatingSheet: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.accent)
             }
-            HStack(spacing: 4) {
+            // Крупнее (было .footnote) и чуть плотнее (было spacing: 4) — по
+            // прямой просьбе, "не сильно" в обе стороны.
+            HStack(spacing: 3) {
                 ForEach(1...10, id: \.self) { n in
                     Button {
                         score.wrappedValue = n
                     } label: {
                         Image(systemName: n <= score.wrappedValue ? "star.fill" : "star")
-                            .font(.footnote)
+                            .font(.subheadline)
                             .foregroundStyle(n <= score.wrappedValue ? Theme.accent : Theme.textSecondary)
                             .frame(maxWidth: .infinity)
                     }
