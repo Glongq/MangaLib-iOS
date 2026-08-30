@@ -37,7 +37,7 @@ struct ExternalTagSuggestion: Hashable {
 /// решает, во что превратить конкретный случай в СВОЙ URL/параметр (см.
 /// HitomiProvider/EHentaiProvider — маппинг разный, поэтому здесь
 /// намеренно нет .rawValue, привязанного к чьей-то одной схеме URL).
-enum ExternalTagNamespace {
+enum ExternalTagNamespace: Hashable {
     case tag, female, male, character, artist, group, series
 }
 

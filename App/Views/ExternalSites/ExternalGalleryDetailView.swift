@@ -48,7 +48,11 @@ struct ExternalGalleryDetailView: View {
     /// значению НА ТОМ ЖЕ сайте, откуда открыта карточка (по прямой
     /// просьбе 31.08 — "по сайту сразу", т.е. свой namespace/провайдер
     /// именно этого сайта, не общий/угаданный).
-    private struct TagCatalogTarget: Identifiable {
+    // Hashable (не только Identifiable) — .navigationDestination(item:)
+    // требует именно Hashable (в отличие от .sheet(item:)/.fullScreenCover
+    // (item:), которым достаточно Identifiable) — без этого сборка падает
+    // ("requires that 'TagCatalogTarget' conform to 'Hashable'", CI).
+    private struct TagCatalogTarget: Identifiable, Hashable {
         let id = UUID()
         let namespace: ExternalTagNamespace
         let value: String
