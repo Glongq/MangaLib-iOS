@@ -323,7 +323,7 @@ struct FavoritesListView: View {
     // MARK: Навигация — те же экраны, что и у обычных списков
 
     @ViewBuilder
-    private func destination<Label: View>(for entity: DirectoryEntity, @ViewBuilder label: () -> Label) -> some View {
+    private func destination<Label: View>(for entity: DirectoryEntity, @ViewBuilder label: @escaping () -> Label) -> some View {
         switch vm.category.targetModel {
         case "team":
             SearchDismissibleDestinationLink(isSearching: isSearching, dismiss: { dismissSearch() }) {
