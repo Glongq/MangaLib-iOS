@@ -371,16 +371,47 @@ struct HitomiProvider: ExternalSiteProvider {
 
     // MARK: URL картинок
 
-    /// Превью для сетки/карточки — простое шардирование по первым символам
-    /// хэша, БЕЗ gg.js (подтверждено HAR: galleryblock/{id}.html отдаёт
-    /// именно такие URL напрямую). Раньше была отдельным методом протокола
-    /// (thumbnailURL(hash:)) — теперь просто кладётся в
-    /// ExternalGalleryDetail.coverURL при декодировании (см. toDetail()
-    /// ниже), т.к. формула hitomi-специфична, у e-hentai её вообще нет.
+    /// Шард-путь превью — общий для webpbigtn/webpsmalltn (см. coverURL/
+    /// pageThumbnailURL ниже): каталог = ПОСЛЕДНИЙ символ хэша, подкаталог
+    /// = 2 символа ПЕРЕД ним. ИСПРАВЛЕНО (31.08) — раньше шардирование
+    /// было по ПЕРВЫМ символам (`hash.first` + `hash[1...2]`,
+    /// неподтверждённая догадка по общей конвенции, тот же класс ошибки,
+    /// что и был у pageImageURL с "w"/.webp вместо "a"/.avif) — живой curl
+    /// против `galleryblock/{id}.html` показал реальные ссылки вида
+    /// `webpbigtn/3/6c/{hash}.webp` для хэша, заканчивающегося на "...d6c3".
+    /// Из-за старой формулы ВСЕ превью hitomi (обложка карточки в каталоге,
+    /// сама карточка тайтла) 404-ились и вечно висели скелетонами — при
+    /// этом полноразмерные страницы ЧТЕНИЯ грузились нормально, т.к.
+    /// используют другую, уже исправленную ранее формулу (gg.js, см.
+    /// pageImageURL) — отсюда жалоба "превью не грузит бесконечно, а если
+    /// открыть страницу — картинки норм".
+    private static func thumbnailShard(forHash hash: String) -> (dir: String, subdir: String)? {
+        guard hash.count >= 3 else { return nil }
+        return (String(hash.suffix(1)), String(hash.suffix(3).prefix(2)))
+    }
+
+    /// Обложка тайтла (карточка в каталоге/шапка карточки тайтла) —
+    /// `webpbigtn`, живьём подтверждено ТОЛЬКО для первой страницы
+    /// (`files[0]`, та же картинка, что `galleryblock/{id}.html` использует
+    /// как обложку) — не для произвольной страницы, см. pageThumbnailURL.
     fileprivate static func coverURL(forHash hash: String) -> URL? {
-        let c0 = hash.first.map(String.init) ?? "0"
-        let c1_3 = hash.count >= 3 ? String(hash.dropFirst().prefix(2)) : "00"
-        return URL(string: "https://tn.gold-usergeneratedcontent.net/webpbigtn/\(c0)/\(c1_3)/\(hash).webp")
+        guard let shard = thumbnailShard(forHash: hash) else { return nil }
+        return URL(string: "https://tn.gold-usergeneratedcontent.net/webpbigtn/\(shard.dir)/\(shard.subdir)/\(hash).webp")
+    }
+
+    /// Миниатюра ЛЮБОЙ отдельной страницы (превью-грид карточки тайтла,
+    /// см. ExternalGalleryDetailView.previewGridSection) — `webpsmalltn`,
+    /// НЕ `webpbigtn`: живым curl подтверждено, что `webpbigtn` реально
+    /// сгенерирован только для обложки (см. coverURL) — для ОСТАЛЬНЫХ
+    /// страниц галереи он 404-ится, а `webpsmalltn` (то же шардирование,
+    /// просто меньший размер) существует для КАЖДОЙ страницы — проверено
+    /// на нескольких случайных хэшах одной галереи, все 200. Раньше здесь
+    /// использовалась ОДНА и та же функция coverURL для обложки И для
+    /// каждой страницы превью-грида — из-за этого весь превью-грид
+    /// карточки тайтла (кроме первой страницы) висел скелетонами.
+    fileprivate static func pageThumbnailURL(forHash hash: String) -> URL? {
+        guard let shard = thumbnailShard(forHash: hash) else { return nil }
+        return URL(string: "https://tn.gold-usergeneratedcontent.net/webpsmalltn/\(shard.dir)/\(shard.subdir)/\(hash).webp")
     }
 
     /// Полноразмерная страница чтения — формула gg.js: хост = "a" (avif) +
@@ -441,10 +472,15 @@ private struct HitomiGalleryJSON: Decodable {
     let files: [FileEntry]
 
     func toDetail() -> ExternalGalleryDetail {
+        // pages[].thumbnailURL — webpsmalltn (см. HitomiProvider.
+        // pageThumbnailURL, реально существует для КАЖДОЙ страницы), НЕ
+        // coverURL/webpbigtn (та сгенерирована только для обложки —
+        // страница 1 — использовать её тут означало бы, что весь
+        // превью-грид карточки, кроме первой миниатюры, 404-ится).
         let pages = files.enumerated().map { idx, file in
             ExternalGalleryPage(
                 index: idx + 1, key: file.hash, width: file.width, height: file.height,
-                thumbnailURL: HitomiProvider.coverURL(forHash: file.hash),
+                thumbnailURL: HitomiProvider.pageThumbnailURL(forHash: file.hash),
                 thumbnailSpriteOffsetX: nil
             )
         }
@@ -463,7 +499,11 @@ private struct HitomiGalleryJSON: Decodable {
             series: Self.names(from: parodys, key: "parody"),
             related: related ?? [],
             pages: pages,
-            coverURL: pages.first?.thumbnailURL,
+            // Обложка — ОТДЕЛЬНО, webpbigtn по хэшу первой страницы (не
+            // pages.first?.thumbnailURL — то теперь webpsmalltn, меньшего
+            // размера, годится для мелких превью-грид-тайлов, но не для
+            // большой обложки карточки/каталога).
+            coverURL: files.first.flatMap { HitomiProvider.coverURL(forHash: $0.hash) },
             posted: date,
             // hitomi физически не имеет этих полей — см. план ЧАСТЬ B.2,
             // честно nil/[], не выдумываем.
