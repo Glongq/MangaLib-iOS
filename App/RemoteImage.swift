@@ -139,7 +139,14 @@ final class RemoteImageLoader: ObservableObject {
 
     /// Ключ ассоциированного объекта для ProgressDataTaskDelegate ниже — см.
     /// fetchDataWithProgress.
-    private static var progressDelegateAssocKey: UInt8 = 0
+    // nonisolated(unsafe) — эта static var живёт ТОЛЬКО ради своего адреса
+    // как уникального ключа objc_setAssociatedObject (её ЗНАЧЕНИЕ никогда не
+    // читается/пишется), но по умолчанию static var внутри @MainActor класса
+    // считается main-actor-изолированной — а fetchDataWithProgress ниже
+    // nonisolated и берёт от неё `&...` (inout). Без nonisolated(unsafe)
+    // сборка падает: "main actor-isolated static property ... can not be
+    // used 'inout' from a nonisolated context" (см. CI).
+    private nonisolated(unsafe) static var progressDelegateAssocKey: UInt8 = 0
 
     /// То же самое, что fetchData(from:priority:), но с РЕАЛЬНЫМ прогрессом
     /// скачивания (0...1, по факту принятых байт / Content-Length) — для
