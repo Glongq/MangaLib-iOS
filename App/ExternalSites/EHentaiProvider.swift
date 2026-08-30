@@ -460,21 +460,49 @@ actor EHentaiProvider: ExternalSiteProvider {
     /// Заодно вытаскивает `thumbnailURL` — реальный CSS background-image
     /// URL полосы миниатюр (`<div style="...url(https://.../{id}-{n}.webp)...">`,
     /// (без кавычек внутри url(), подтверждено HAR), см. план ЧАСТЬ B.3.
+    /// ВАЖНО: миниатюры e-hentai — НЕ отдельная картинка на страницу. Одна
+    /// полоса (?p=N-довесок, ~20 страниц) отдаёт ОДИН общий "спрайт" +
+    /// CSS `background-position`, вырезающий нужный тайл — подтверждено
+    /// побайтово реальной разметкой:
+    /// `<a href=".../s/{key}/{gid}-{n}"><div title="Page N: ..."
+    /// style="width:200px;height:278px;background:transparent
+    /// url(.../{gid}-{p}.webp) -200px 0 no-repeat"></div></a>` — 20
+    /// СОСЕДНИХ страниц ссылаются на ОДИН И ТОТ ЖЕ url(...), офсет растёт
+    /// на 200 (=ширина тайла) на каждую. Раньше офсет не учитывался вовсе
+    /// — из-за этого превью-грид карточки тайтла показывал один и тот же
+    /// (нецелевой, необрезанный) спрайт на КАЖДОЙ странице партии — то и
+    /// была жалоба "одна картинка много раз + сетка кривая" (нецелевой
+    /// широкий спрайт, натянутый на узкий тайл через scaledToFill,
+    /// выглядит перекошенным). См. ExternalSpriteThumbnail
+    /// (App/Views/ExternalSites/ExternalImage.swift) — там реальный кроп.
+    /// width/height тайла (200×278 и т.п., варьируются по странице) заодно
+    /// используются как width/height страницы — раньше здесь были 0/0
+    /// ("размер неизвестен"), а это разумное приближение реальных пропорций
+    /// (плейсхолдер в читалке/расчёт высоты при "по ширине" теперь чуть точнее).
     private static func parsePages(from html: String) -> [ExternalGalleryPage] {
-        guard let regex = try? NSRegularExpression(pattern: #"href="https://e-hentai\.org/s/([0-9a-f]+)/\d+-(\d+)"><div[^>]*url\(([^)]+)\)"#) else { return [] }
+        guard let regex = try? NSRegularExpression(
+            pattern: #"href="https://e-hentai\.org/s/([0-9a-f]+)/\d+-(\d+)"><div[^>]*style="width:(\d+)px;height:(\d+)px;background:transparent url\(([^)]+)\)\s*(-?\d+)px"#
+        ) else { return [] }
         let range = NSRange(html.startIndex..., in: html)
         var seen = Set<Int>()
         var pages: [ExternalGalleryPage] = []
         regex.enumerateMatches(in: html, range: range) { match, _, _ in
-            guard let match, match.numberOfRanges == 4,
+            guard let match, match.numberOfRanges == 7,
                   let keyRange = Range(match.range(at: 1), in: html),
                   let indexRange = Range(match.range(at: 2), in: html),
                   let index = Int(html[indexRange]), !seen.contains(index),
-                  let thumbRange = Range(match.range(at: 3), in: html) else { return }
+                  let widthRange = Range(match.range(at: 3), in: html),
+                  let heightRange = Range(match.range(at: 4), in: html),
+                  let thumbRange = Range(match.range(at: 5), in: html),
+                  let offsetRange = Range(match.range(at: 6), in: html) else { return }
             seen.insert(index)
+            let tileWidth = Int(html[widthRange]) ?? 0
+            let tileHeight = Int(html[heightRange]) ?? 0
+            let offsetX = abs(Int(html[offsetRange]) ?? 0)
             pages.append(ExternalGalleryPage(
-                index: index, key: String(html[keyRange]), width: 0, height: 0,
-                thumbnailURL: URL(string: String(html[thumbRange]))
+                index: index, key: String(html[keyRange]), width: tileWidth, height: tileHeight,
+                thumbnailURL: URL(string: String(html[thumbRange])),
+                thumbnailSpriteOffsetX: offsetX
             ))
         }
         return pages

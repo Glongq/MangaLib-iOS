@@ -1,31 +1,55 @@
 import SwiftUI
 
-/// Мини-загрузчик картинок для внешних сайтов (hitomi.la и далее) — специально
-/// НЕ RemoteImage (см. App/RemoteImage.swift): та шлёт заголовки
+/// Мини-загрузчик картинок для внешних сайтов (hitomi.la и e-hentai.org) —
+/// специально НЕ RemoteImage (см. App/RemoteImage.swift): та шлёт заголовки
 /// MangaNetworkService.userAgent/referer, рассчитанные на apicdnlibs.org —
-/// у чужого CDN (gold-usergeneratedcontent.net) хотлинк-защита проверяет
-/// Referer именно на hitomi.la, чужой Referer от MangaLib рискует словить
+/// у чужих CDN хотлинк-защита проверяет СВОЙ Referer, чужой рискует словить
 /// 403. По прямой просьбе — минимально пересекаться со старым сетевым кодом,
 /// поэтому здесь свой, отдельный, совсем простой загрузчик (только
-/// оперативный NSCache, без дискового кэша — картинки хитоми и так уже
-/// закэшированы системным URLCache сессии на уровне HTTP).
+/// оперативный NSCache, без дискового кэша — картинки и так уже закэшированы
+/// системным URLCache сессии на уровне HTTP).
 private enum ExternalImageCache {
     static let shared = NSCache<NSURL, UIImage>()
+}
+
+/// Referer — ПО ХОСТУ конкретной картинки, не единый на весь загрузчик:
+/// tn.gold-usergeneratedcontent.net (hitomi) хочет Referer hitomi.la, а
+/// ehgt.org/*.hath.network (e-hentai — обложки/миниатюры и сами H@H-узлы)
+/// хотят Referer e-hentai.org, ровно как у EHentaiProvider.session — раньше
+/// здесь БЫЛ единый хардкод "hitomi.la", из-за чего e-hentai-картинки в этом
+/// загрузчике (обложки в каталоге, превью-грид, Похожие тайтлы) рисковали
+/// молча падать в 403 и никогда не подгружаться.
+private func externalImageReferer(for url: URL) -> String {
+    let host = url.host ?? ""
+    if host.hasSuffix("e-hentai.org") || host.hasSuffix("ehgt.org") || host.hasSuffix("hath.network") {
+        return "https://e-hentai.org/"
+    }
+    return "https://hitomi.la/"
+}
+
+private let externalImageSession: URLSession = {
+    let config = URLSessionConfiguration.default
+    config.httpAdditionalHeaders = [
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1"
+    ]
+    return URLSession(configuration: config)
+}()
+
+/// Один сетевой запрос картинки — общий для ExternalImageLoader/
+/// ExternalSpriteLoader ниже (одинаковый Referer-по-хосту/кэш/сессия).
+private func fetchExternalImage(_ url: URL) async -> UIImage? {
+    if let cached = ExternalImageCache.shared.object(forKey: url as NSURL) { return cached }
+    var request = URLRequest(url: url)
+    request.setValue(externalImageReferer(for: url), forHTTPHeaderField: "Referer")
+    guard let (data, _) = try? await externalImageSession.data(for: request),
+          let decoded = UIImage(data: data) else { return nil }
+    ExternalImageCache.shared.setObject(decoded, forKey: url as NSURL)
+    return decoded
 }
 
 @MainActor
 private final class ExternalImageLoader: ObservableObject {
     @Published var image: UIImage?
-
-    private static let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.httpAdditionalHeaders = [
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1",
-            "Referer": "https://hitomi.la/"
-        ]
-        return URLSession(configuration: config)
-    }()
-
     private var task: Task<Void, Never>?
 
     func load(_ url: URL) {
@@ -36,9 +60,7 @@ private final class ExternalImageLoader: ObservableObject {
         task?.cancel()
         image = nil
         task = Task { [weak self] in
-            guard let (data, _) = try? await Self.session.data(from: url),
-                  let decoded = UIImage(data: data) else { return }
-            ExternalImageCache.shared.setObject(decoded, forKey: url as NSURL)
+            guard let decoded = await fetchExternalImage(url) else { return }
             if !Task.isCancelled { self?.image = decoded }
         }
     }
@@ -62,6 +84,57 @@ struct ExternalImage<Placeholder: View>: View {
         .task(id: url) {
             guard let url else { return }
             loader.load(url)
+        }
+    }
+}
+
+@MainActor
+private final class ExternalSpriteLoader: ObservableObject {
+    @Published var tile: UIImage?
+    private var task: Task<Void, Never>?
+
+    func load(url: URL, offsetX: Int, width: Int, height: Int) {
+        task?.cancel()
+        tile = nil
+        guard width > 0, height > 0 else { return }
+        task = Task { [weak self] in
+            guard let sprite = await fetchExternalImage(url), let cg = sprite.cgImage else { return }
+            let rect = CGRect(x: offsetX, y: 0, width: width, height: height)
+            guard rect.maxX <= CGFloat(cg.width), rect.maxY <= CGFloat(cg.height),
+                  let cropped = cg.cropping(to: rect) else { return }
+            let result = UIImage(cgImage: cropped, scale: sprite.scale, orientation: sprite.imageOrientation)
+            if !Task.isCancelled { self?.tile = result }
+        }
+    }
+}
+
+/// Миниатюра-"тайл", вырезанный из общего спрайта — у e-hentai полоса
+/// миниатюр отдаёт НЕ отдельную картинку на страницу, а один общий спрайт
+/// на партию страниц (~20, размер одного ?p=N-довеска) + CSS
+/// `background-position`-смещение на каждую (подтверждено побайтово реальной
+/// разметкой, см. EHentaiProvider.parsePages/ExternalGalleryPage.
+/// thumbnailSpriteOffsetX). Сам спрайт грузится и кэшируется по `url` через
+/// тот же ExternalImageCache, что и обычные картинки — несколько тайлов
+/// ОДНОГО спрайта скачивают его реально только один раз, дальше просто
+/// каждый вырезает свой кусок из уже закэшированного UIImage.
+struct ExternalSpriteThumbnail<Placeholder: View>: View {
+    let url: URL
+    let offsetX: Int
+    let tileWidth: Int
+    let tileHeight: Int
+    @ViewBuilder let placeholder: () -> Placeholder
+    @StateObject private var loader = ExternalSpriteLoader()
+
+    var body: some View {
+        Group {
+            if let tile = loader.tile {
+                Image(uiImage: tile).resizable()
+            } else {
+                placeholder()
+            }
+        }
+        .task(id: url) {
+            loader.load(url: url, offsetX: offsetX, width: tileWidth, height: tileHeight)
         }
     }
 }

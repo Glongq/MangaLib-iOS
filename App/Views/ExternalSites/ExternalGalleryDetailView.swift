@@ -349,7 +349,19 @@ struct ExternalGalleryDetailView: View {
     private func previewThumb(_ page: ExternalGalleryPage) -> some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
-                if let url = page.thumbnailURL {
+                if let url = page.thumbnailURL, let offsetX = page.thumbnailSpriteOffsetX {
+                    // e-hentai: url — общий спрайт на партию страниц, offsetX
+                    // выбирает нужный тайл (см. ExternalGalleryPage.
+                    // thumbnailSpriteOffsetX/ExternalSpriteThumbnail) — БЕЗ
+                    // этого кропа тут показывался бы один и тот же спрайт
+                    // целиком на КАЖДОЙ странице партии.
+                    ExternalSpriteThumbnail(
+                        url: url, offsetX: offsetX, tileWidth: page.width, tileHeight: page.height
+                    ) { SkeletonBox() }
+                    .scaledToFill()
+                } else if let url = page.thumbnailURL {
+                    // hitomi: url уже указывает на отдельную картинку именно
+                    // этой страницы — кроп не нужен.
                     ExternalImage(url: url) { SkeletonBox() }
                         .scaledToFill()
                 } else {

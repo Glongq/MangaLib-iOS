@@ -98,10 +98,19 @@ struct ExternalReaderView: View {
         .statusBarHidden(!showUI)
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .task { preloadUpcoming(from: currentPage) }
+        .task {
+            // Вертикальный режим — тянем ВСЕ страницы сразу (1-в-1
+            // ReaderViewModel.preloadAll: "в вертикальном режиме тянем всё
+            // заранее, чтобы лента листалась без подгрузок"), не окном
+            // preloadCount вперёд (это для горизонтального пейджера).
+            if pageMode == 1 { preloadAllPages() } else { preloadUpcoming(from: currentPage) }
+        }
         .onChange(of: currentPage) { _, page in
             isCurrentPageZoomed = false
-            preloadUpcoming(from: page)
+            if pageMode != 1 { preloadUpcoming(from: page) }
+        }
+        .onChange(of: pageMode) { _, mode in
+            if mode == 1 { preloadAllPages() } else { preloadUpcoming(from: currentPage) }
         }
         .sheet(isPresented: $showSettings) {
             ExternalReaderSettingsSheet(
@@ -277,12 +286,23 @@ struct ExternalReaderView: View {
         let end = min(start + preloadCount, detail.pages.count)
         guard start < end else { return }
         for index in start..<end {
-            let p = detail.pages[index]
-            let galleryId = detail.id
-            Task {
-                guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: p) else { return }
-                RemoteImageLoader.preload(candidates: [url])
-            }
+            preloadPage(detail.pages[index])
+        }
+    }
+
+    /// Вертикальный режим — 1-в-1 ReaderViewModel.preloadAll ("тянем всё
+    /// заранее"), не окно вперёд.
+    private func preloadAllPages() {
+        for page in detail.pages {
+            preloadPage(page)
+        }
+    }
+
+    private func preloadPage(_ page: ExternalGalleryPage) {
+        let galleryId = detail.id
+        Task {
+            guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
+            RemoteImageLoader.preload(candidates: [url])
         }
     }
 

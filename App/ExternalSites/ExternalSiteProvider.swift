@@ -64,6 +64,19 @@ struct ExternalGalleryPage: Hashable {
     let width: Int
     let height: Int
     let thumbnailURL: URL?
+    /// Смещение (в пикселях, ось X) тайла-миниатюры ЭТОЙ страницы внутри
+    /// `thumbnailURL` — у e-hentai миниатюры отданы НЕ отдельной картинкой
+    /// на страницу, а общим "спрайтом" на партию страниц (~20, размер
+    /// одного ?p=N-довеска) + CSS `background-position` (подтверждено
+    /// побайтово реальной разметкой: `style="width:200px;height:278px;
+    /// background:transparent url(.../{id}-{n}.webp) -200px 0 no-repeat"` —
+    /// одна и та же ссылка на N страниц подряд, различается только этот
+    /// офсет, кратный ширине тайла). Без учёта офсета все страницы одной
+    /// партии показывали бы один и тот же спрайт целиком — см.
+    /// EHentaiProvider.parsePages/ExternalSpriteThumbnail. nil — у hitomi
+    /// (там thumbnailURL уже указывает на отдельную картинку именно этой
+    /// страницы, кроп не нужен).
+    let thumbnailSpriteOffsetX: Int?
 }
 
 /// Один комментарий к тайтлу (см. ExternalGalleryDetail.comments) — сейчас

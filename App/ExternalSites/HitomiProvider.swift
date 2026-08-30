@@ -380,7 +380,8 @@ private struct HitomiGalleryJSON: Decodable {
         let pages = files.enumerated().map { idx, file in
             ExternalGalleryPage(
                 index: idx + 1, key: file.hash, width: file.width, height: file.height,
-                thumbnailURL: HitomiProvider.coverURL(forHash: file.hash)
+                thumbnailURL: HitomiProvider.coverURL(forHash: file.hash),
+                thumbnailSpriteOffsetX: nil
             )
         }
         return ExternalGalleryDetail(

@@ -81,8 +81,14 @@ struct ExternalCatalogGridView: View {
     @State private var errorMessage: String?
     @State private var jumpPageText = ""
 
+    /// Число колонок — та же общая настройка Персонализации (2/3/4/Авто),
+    /// что и у обычного каталога (см. MangaCatalogView/MangaCardView,
+    /// CardsPerRow.swift) — общий тип, тот же @AppStorage-ключ, по прямой
+    /// просьбе "по аналогии с работой фн персонализация".
+    @AppStorage("personalization_cards_per_row") private var cardsPerRow: CardsPerRow = .auto
+    private var gridColumns: Int { cardsPerRow.columns }
+
     private let gridSpacing: CGFloat = 12
-    private let gridColumns = 3
     /// Бейдж с источником имеет смысл показывать ТОЛЬКО когда сайтов
     /// несколько — в обычном одно-сайтовом режиме и так понятно, откуда
     /// тайтл (см. ExternalTagBrowserView/ExternalSearchView, где sites — [x]).
