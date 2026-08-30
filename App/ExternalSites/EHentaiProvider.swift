@@ -150,8 +150,12 @@ actor EHentaiProvider: ExternalSiteProvider {
 
     /// Синтезирует прыжковый курсор (см. paginationQueryItem ниже) — просто
     /// заворачивает номер страницы как есть в будущий `range=`,
-    /// приблизительно (нет точной формулы страница→range).
-    func cursorForPage(_ page: Int, limit: Int) -> String? {
+    /// приблизительно (нет точной формулы страница→range). `nonisolated` —
+    /// протокол объявляет этот метод СИНХРОННЫМ (без async, как site/
+    /// capabilities), а актор по умолчанию изолирует даже такие методы;
+    /// чистое вычисление без обращения к tokenCache/session, изоляция не
+    /// нужна — без этого сборка падает ("crosses into actor-isolated code").
+    nonisolated func cursorForPage(_ page: Int, limit: Int) -> String? {
         guard page > 1 else { return nil }
         return "page:\(page)"
     }
