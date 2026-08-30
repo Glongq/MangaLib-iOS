@@ -743,7 +743,7 @@ struct MangaDetailView: View {
     private var infoRow: some View {
         let rawItems: [(heading: String, value: String?)] = [
             (heading: "Тип", value: (viewModel.detail?.type ?? listItem?.type)?.label),
-            (heading: "Статус", value: statusValue),
+            (heading: "Статус / Перевод", value: statusValue),
             (heading: "Год выпуска", value: viewModel.detail?.yearString),
             // Просмотры — 4-е место (сразу после года), как попросили.
             (heading: "Просмотры", value: viewModel.detail?.viewsString),

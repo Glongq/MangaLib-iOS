@@ -864,13 +864,15 @@ struct BookmarksView: View {
     /// см. progressText) — bm.latestChapterNumber всегда известен независимо
     /// от того, открывали тайтл или нет. Ничего не рисует, если это число
     /// не пришло с сервера (см. BookmarksStore.syncFromServer/
-    /// fetchBookmarksAccountList) ИЛИ тайтл завершён (для завершённого
-    /// номер последней главы = общему числу глав, бэйдж не несёт новой
-    /// информации — тоже по прямой просьбе).
+    /// fetchBookmarksAccountList) ИЛИ тайтл завершён/приостановлен (для
+    /// завершённого номер последней главы = общему числу глав, бэйдж не
+    /// несёт новой информации; для приостановленного — тоже по прямой
+    /// просьбе, отдельно от "завершён").
     @ViewBuilder
     private func chapterChip(_ bm: BookmarkedTitle) -> some View {
-        if let number = bm.latestChapterNumber,
-           bm.titleStatusLabel?.localizedCaseInsensitiveContains("заверш") != true {
+        let isFrozen = bm.titleStatusLabel?.localizedCaseInsensitiveContains("заверш") == true
+            || bm.titleStatusLabel?.localizedCaseInsensitiveContains("приостановлен") == true
+        if let number = bm.latestChapterNumber, !isFrozen {
             Text("Глава \(number)")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
