@@ -962,9 +962,24 @@ struct MangaReaderView: View {
         .padding(.top, 2)
     }
 
-    // Плашка названия — своя отдельная подложка, ширина по контенту
-    // (с потолком, чтобы очень длинные названия не упирались в кнопку),
-    // текст чуть меньше прежнего (subheadline→footnote, caption→caption2).
+    // Плашка названия — своя отдельная подложка, ширина ПО КОНТЕНТУ (капсула
+    // сама сжимается под короткое название, .frame(maxWidth:) тут только
+    // потолок для длинных), текст чуть меньше прежнего (subheadline→footnote,
+    // caption→caption2).
+    //
+    // Потолок ширины — БЫЛ захардкожен 260, из-за чего на узких экранах
+    // (например 375pt, iPhone SE/mini) центрированная капсула на длинном
+    // названии реально заезжала под кнопку закрытия слева (та занимает
+    // 48pt + 16pt отступ = 64pt от края) — по прямой просьбе исправлено:
+    // потолок теперь считается от РЕАЛЬНОЙ ширины экрана минус безопасная
+    // зона под кнопку с обеих сторон (симметрично — капсула центрирована
+    // через ZStack в topBar, а не подтянута к одному краю), а не
+    // фиксированное число "на глаз".
+    private static let titleBadgeSideMargin: CGFloat = 72 // 48 (кнопка) + 16 (её отступ) + 8 (зазор)
+    private var titleBadgeMaxWidth: CGFloat {
+        max(120, UIScreen.main.bounds.width - Self.titleBadgeSideMargin * 2)
+    }
+
     private var titleBadge: some View {
         VStack(alignment: .center, spacing: 2) {
             Text(mangaTitle ?? viewModel.currentChapter?.name ?? "Глава")
@@ -978,7 +993,7 @@ struct MangaReaderView: View {
                 .lineLimit(1)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
-        .frame(maxWidth: 260)
+        .frame(maxWidth: titleBadgeMaxWidth)
         .glassEffect(.regular, in: Capsule())
     }
 
