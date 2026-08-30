@@ -37,6 +37,17 @@ struct ExternalReaderView: View {
     @State private var verticalPage: Int
     @State private var showUI = true
     @State private var showSettings = false
+    /// Быстрый переход к странице (см. ExternalReaderPageJumpSheet) — по
+    /// прямой просьбе (31.08), тем же местом/иконкой, что у "Список глав"
+    /// в оригинальной читалке (line.3.horizontal, см. bottomBar), но
+    /// открывает превью-сетку страниц + пейджер номеров вместо списка глав
+    /// (у hitomi/e-hentai/3hentai глав как понятия нет вообще).
+    @State private var showPageJump = false
+    /// Страница, к которой нужно проскроллить вертикальную читалку (см.
+    /// verticalReader.onChange) — ПОСЛЕ выбора в ExternalReaderPageJumpSheet
+    /// (в горизонтальном режиме проще: там достаточно goToPage, TabView
+    /// сам переключается на нужный tag).
+    @State private var pendingJumpPage: Int?
     @State private var isCurrentPageZoomed = false
     /// Индексы страниц, для которых предзагрузка УЖЕ запущена (см.
     /// preloadPage) — без этого при каждом чуть-чуть прокрученном
@@ -129,7 +140,29 @@ struct ExternalReaderView: View {
                 verticalGap: $verticalGap
             )
         }
+        .sheet(isPresented: $showPageJump) {
+            ExternalReaderPageJumpSheet(pages: detail.pages, currentPage: pageBubbleCurrent) { page in
+                showPageJump = false
+                performPageJump(to: page)
+            }
+        }
         .preferredColorScheme(readerTheme == 2 ? nil : (palette.isLight ? .light : .dark))
+    }
+
+    /// Переход к конкретной странице (см. ExternalReaderPageJumpSheet) —
+    /// горизонтальные режимы просто переиспользуют goToPage (TabView сам
+    /// переключается на нужный tag, без пролистывания промежуточных),
+    /// вертикальный — через pendingJumpPage (см. verticalReader.onChange,
+    /// ScrollViewReader.scrollTo не вызвать отсюда напрямую — proxy
+    /// живёт внутри самого verticalReader).
+    private func performPageJump(to page: Int) {
+        let clamped = min(max(page, 1), detail.pages.count)
+        if pageMode == 1 {
+            verticalPage = clamped
+            pendingJumpPage = clamped
+        } else {
+            goToPage(clamped)
+        }
     }
 
     // MARK: Контент (страницы)
@@ -252,6 +285,15 @@ struct ExternalReaderView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         proxy.scrollTo(currentPage, anchor: .top)
                     }
+                }
+                // Прыжок из ExternalReaderPageJumpSheet (см. performPageJump)
+                // — proxy живёт только здесь, внутри ScrollViewReader,
+                // поэтому реагируем на pendingJumpPage тут, а не в
+                // performPageJump напрямую.
+                .onChange(of: pendingJumpPage) { _, target in
+                    guard let target else { return }
+                    proxy.scrollTo(target, anchor: .top)
+                    pendingJumpPage = nil
                 }
             }
             .scrollIndicators(.hidden)
@@ -395,6 +437,11 @@ struct ExternalReaderView: View {
 
     private var bottomBar: some View {
         HStack {
+            // line.3.horizontal — то же место/иконка, что и у "Список
+            // глав" в оригинальной читалке (см. MangaReaderView.bottomBar
+            // — там слева же), просто открывает не список глав (тут этого
+            // понятия нет вообще), а быстрый переход к странице.
+            readerButton(icon: "line.3.horizontal") { showPageJump = true }
             Spacer()
             readerButton(icon: "gearshape") { showSettings = true }
         }
@@ -671,5 +718,188 @@ private struct ExternalReaderSettingsSheet: View {
         .presentationBackground(.thinMaterial)
         .preferredColorScheme(palette.isLight ? .light : .dark)
         .tint(Theme.accent)
+    }
+}
+
+// MARK: - Быстрый переход к странице (bottomBar.line.3.horizontal, 31.08)
+
+/// Превью-сетка ВСЕХ страниц (3 колонки, тап — сразу переход и закрытие
+/// листа) + фиксированный (не скроллящийся вместе с сеткой) пейджер
+/// номеров страниц внизу ("1 2 3 … 67 69", та же truncated-логика, что и
+/// у ExternalGalleryDetailView.paginationSequence — 1-в-1 приём, тут
+/// просто по РЕАЛЬНЫМ страницам чтения, не по батчам превью-грида
+/// карточки тайтла, т.к. читалка и так уже открыта — дублировать ту
+/// пагинацию незачем). Сетка — внутри `ScrollView`, лист —
+/// `.presentationDetents([.large])`, чтобы не расти бесконечно вниз при
+/// большом числе страниц (по прямой просьбе).
+private struct ExternalReaderPageJumpSheet: View {
+    let pages: [ExternalGalleryPage]
+    let currentPage: Int
+    let onSelect: (Int) -> Void
+
+    @State private var jumpText = ""
+
+    private static let columns = 3
+    private static let spacing: CGFloat = 8
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Страницы")
+                .font(.headline)
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.top, 20)
+                .padding(.bottom, 12)
+
+            ScrollView {
+                grid
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+            }
+            .scrollIndicators(.hidden)
+
+            Divider().overlay(Theme.separator)
+
+            paginationRow
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+        }
+        .background(Theme.background.ignoresSafeArea())
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    // MARK: Сетка миниатюр
+
+    private var grid: some View {
+        let availableWidth = UIScreen.main.bounds.width - 32
+        let totalSpacing = Self.spacing * CGFloat(Self.columns - 1)
+        let cellWidth = ((availableWidth - totalSpacing) / CGFloat(Self.columns)).rounded(.down)
+        let cellHeight = (cellWidth * 4 / 3).rounded()
+        let columns = Array(repeating: GridItem(.fixed(cellWidth), spacing: Self.spacing), count: Self.columns)
+
+        return LazyVGrid(columns: columns, spacing: Self.spacing) {
+            ForEach(pages, id: \.index) { page in
+                Button {
+                    onSelect(page.index)
+                } label: {
+                    thumb(page, width: cellWidth, height: cellHeight)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func thumb(_ page: ExternalGalleryPage, width: CGFloat, height: CGFloat) -> some View {
+        ZStack(alignment: .bottomTrailing) {
+            Group {
+                if let url = page.thumbnailURL, let offsetX = page.thumbnailSpriteOffsetX {
+                    // e-hentai: спрайт на партию страниц, offsetX — нужный
+                    // тайл (см. ExternalGalleryDetailView.previewThumb —
+                    // тот же приём).
+                    ExternalSpriteThumbnail(url: url, offsetX: offsetX, tileWidth: page.width, tileHeight: page.height) { SkeletonBox() }
+                        .scaledToFill()
+                } else if let url = page.thumbnailURL {
+                    ExternalImage(url: url) { SkeletonBox() }
+                        .scaledToFill()
+                } else {
+                    SkeletonBox()
+                }
+            }
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipped()
+            .overlay {
+                if page.index == currentPage {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Theme.accent, lineWidth: 2)
+                }
+            }
+
+            Text("\(page.index)")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 5)
+                .frame(height: 14)
+                .background(.black.opacity(0.55), in: Capsule())
+                .padding(4)
+        }
+    }
+
+    // MARK: Пейджер номеров + поле "перейти на страницу"
+
+    private var paginationRow: some View {
+        HStack(spacing: 8) {
+            ScrollViewReader { pagerProxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 6) {
+                        ForEach(Array(paginationSequence.enumerated()), id: \.offset) { _, item in
+                            if let page = item {
+                                Button {
+                                    onSelect(page)
+                                } label: {
+                                    Text("\(page)")
+                                        .font(.footnote.weight(page == currentPage ? .semibold : .regular))
+                                        .foregroundStyle(page == currentPage ? Theme.background : Theme.textPrimary)
+                                        .frame(width: 28, height: 28)
+                                        .background(page == currentPage ? Theme.accent : Theme.surfaceElevated, in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .id(page)
+                            } else {
+                                Text("…")
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .frame(width: 20, height: 28)
+                            }
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        pagerProxy.scrollTo(currentPage, anchor: .center)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            TextField("№", text: $jumpText)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 6)
+                .frame(width: 44, height: 28)
+                .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Button {
+                if let page = Int(jumpText), page > 0 {
+                    onSelect(min(page, pages.count))
+                    jumpText = ""
+                }
+            } label: {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Int(jumpText) != nil ? Theme.accent : Theme.textSecondary.opacity(0.4))
+            }
+            .disabled(Int(jumpText) == nil)
+        }
+    }
+
+    /// "1 2 3 … 67 69" — 1-в-1 truncated-логика
+    /// ExternalGalleryDetailView.paginationSequence (см. её doc-comment),
+    /// только тут по РЕАЛЬНЫМ страницам чтения.
+    private var paginationSequence: [Int?] {
+        let total = pages.count
+        guard total > 7 else { return (1...max(total, 1)).map { $0 } }
+        var keep: Set<Int> = [1, 2, total - 1, total, currentPage - 1, currentPage, currentPage + 1]
+        keep = keep.filter { $0 >= 1 && $0 <= total }
+        let sorted = keep.sorted()
+        var result: [Int?] = []
+        var previous = 0
+        for page in sorted {
+            if page - previous > 1 { result.append(nil) }
+            result.append(page)
+            previous = page
+        }
+        return result
     }
 }
