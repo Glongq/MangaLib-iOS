@@ -14,6 +14,47 @@ final class RemoteImageCache {
     func removeAll() { cache.removeAllObjects() }
 }
 
+/// URLSessionDataDelegate одной загрузки — накапливает данные по мере
+/// прихода чанков и репортит прогресс (byte count / Content-Length) через
+/// onProgress. См. RemoteImageLoader.fetchDataWithProgress — держится живым
+/// ассоциированным объектом на самом URLSessionTask (task.delegate — weak).
+/// Колбэки Foundation вызывает на своей внутренней (фоновой) очереди —
+/// onProgress сам решает, нужен ли переход на MainActor.
+private final class ProgressDataTaskDelegate: NSObject, URLSessionDataDelegate {
+    private var buffer = Data()
+    private var expectedLength: Int64 = -1
+    private var response: URLResponse?
+    private let onProgress: @Sendable (Double) -> Void
+    private let continuation: CheckedContinuation<(Data, URLResponse), Error>
+
+    init(onProgress: @escaping @Sendable (Double) -> Void, continuation: CheckedContinuation<(Data, URLResponse), Error>) {
+        self.onProgress = onProgress
+        self.continuation = continuation
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse) async -> URLSession.ResponseDisposition {
+        self.response = response
+        expectedLength = response.expectedContentLength
+        return .allow
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        buffer.append(data)
+        guard expectedLength > 0 else { return }
+        onProgress(min(1, Double(buffer.count) / Double(expectedLength)))
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            continuation.resume(throwing: error)
+        } else if let response {
+            continuation.resume(returning: (buffer, response))
+        } else {
+            continuation.resume(throwing: URLError(.badServerResponse))
+        }
+    }
+}
+
 /// Загрузчик изображений через URLSession с обязательными заголовками MangaLib
 /// (User-Agent, Referer) — обычный AsyncImage их не отправляет и получает 403.
 @MainActor
@@ -96,6 +137,39 @@ final class RemoteImageLoader: ObservableObject {
         }
     }
 
+    /// Ключ ассоциированного объекта для ProgressDataTaskDelegate ниже — см.
+    /// fetchDataWithProgress.
+    private static var progressDelegateAssocKey: UInt8 = 0
+
+    /// То же самое, что fetchData(from:priority:), но с РЕАЛЬНЫМ прогрессом
+    /// скачивания (0...1, по факту принятых байт / Content-Length) — для
+    /// видимой страницы читалки, по прямой просьбе: "реальный прогресс
+    /// прогрузки картинки вместо деф спинера". `session.dataTask(with:
+    /// completionHandler:)` прогресса не даёт вообще; `URLSession.bytes(for:)`
+    /// даёт, но итерирует ПОБАЙТНО — заметно медленнее на страницах манги
+    /// (сотни КБ) — поэтому здесь свой `URLSessionDataDelegate`,
+    /// накапливающий данные целыми чанками (`didReceive data:`), как обычный
+    /// загрузчик файлов.
+    ///
+    /// `task.delegate` (доступно с iOS 15 — делегат НА КОНКРЕТНЫЙ таск, а не
+    /// на всю session, той же shared `session` для переиспользования кэша/
+    /// соединений) — WEAK свойство у Foundation, поэтому делегат сам по себе
+    /// немедленно деаллоцировался бы сразу после этой функции — держим его
+    /// живым ассоциированным объектом НА САМОМ таске (тот и так жив, пока
+    /// задача не завершится), без отдельного глобального реестра/лока.
+    nonisolated private static func fetchDataWithProgress(
+        from url: URL, priority: Float?, onProgress: @escaping @Sendable (Double) -> Void
+    ) async throws -> (Data, URLResponse) {
+        try await withCheckedThrowingContinuation { continuation in
+            let task = session.dataTask(with: url)
+            let delegate = ProgressDataTaskDelegate(onProgress: onProgress, continuation: continuation)
+            objc_setAssociatedObject(task, &progressDelegateAssocKey, delegate, .OBJC_ASSOCIATION_RETAIN)
+            task.delegate = delegate
+            if let priority { task.priority = priority }
+            task.resume()
+        }
+    }
+
     /// Пробует список URL по очереди (перебор серверов картинок), пока один не отдаст изображение.
     ///
     /// `priority` — URLSessionTask.priority (0...1). Нужен для обложки/фона
@@ -155,7 +229,14 @@ final class RemoteImageLoader: ObservableObject {
     /// приоритету (preload отличался только Swift Task priority .utility,
     /// который на порядок очереди самой сети не влияет), из-за чего текущая
     /// страница могла ждать наравне с "про запас".
-    static func fetchImage(candidates: [URL], priority: Float? = nil) async -> UIImage? {
+    ///
+    /// `onProgress` — РЕАЛЬНЫЙ прогресс скачивания (0...1) видимой страницы,
+    /// по прямой просьбе (вместо неопределённого спиннера, см.
+    /// MangaReaderView.ZoomableImageScrollView/VerticalPageImage). nil по
+    /// умолчанию — остальные вызовы (превью-загрузка/предзагрузка вперёд/
+    /// аватар в AccountInfoView) прогресс не показывают, им не нужен лишний
+    /// делегат на таск (см. fetchDataWithProgress).
+    static func fetchImage(candidates: [URL], priority: Float? = nil, onProgress: (@Sendable (Double) -> Void)? = nil) async -> UIImage? {
         guard let key = candidates.first else { return nil }
         if let cached = RemoteImageCache.shared.image(for: key) { return cached }
         for url in candidates {
@@ -168,7 +249,12 @@ final class RemoteImageLoader: ObservableObject {
                 continue
             }
             do {
-                let (data, response) = try await fetchData(from: url, priority: priority)
+                let (data, response): (Data, URLResponse)
+                if let onProgress {
+                    (data, response) = try await fetchDataWithProgress(from: url, priority: priority, onProgress: onProgress)
+                } else {
+                    (data, response) = try await fetchData(from: url, priority: priority)
+                }
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { continue }
                 guard let img = await decodeImage(data: data) else { continue }
                 RemoteImageCache.shared.insert(img, for: key)

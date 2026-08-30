@@ -1540,15 +1540,12 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         imageView.isUserInteractionEnabled = true
         scroll.addSubview(imageView)
 
-        let spinner = UIActivityIndicatorView(style: .medium)
-        spinner.color = .white
-        spinner.hidesWhenStopped = true
-        spinner.startAnimating()
-        scroll.addSubview(spinner)
+        let ring = RingProgressView(frame: CGRect(x: 0, y: 0, width: 28, height: 28))
+        scroll.addSubview(ring)
 
         context.coordinator.scrollView = scroll
         context.coordinator.imageView = imageView
-        context.coordinator.spinner = spinner
+        context.coordinator.ringView = ring
 
         let single = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
         single.numberOfTapsRequired = 1
@@ -1580,7 +1577,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
     final class Coordinator: NSObject, UIScrollViewDelegate {
         weak var scrollView: UIScrollView?
         weak var imageView: UIImageView?
-        weak var spinner: UIActivityIndicatorView?
+        weak var ringView: RingProgressView?
         var onTap: (CGFloat) -> Void
         var onZoomChanged: ((Bool) -> Void)?
         var fitWidth: Bool
@@ -1601,15 +1598,23 @@ struct ZoomableImageScrollView: UIViewRepresentable {
             currentKey = candidates.first
             loadTask?.cancel()
             imageView?.image = nil
-            spinner?.startAnimating()
+            ringView?.progress = 0
+            ringView?.isHidden = false
             let key = currentKey
             loadTask = Task { [weak self] in
                 // Видимая страница — высокий сетевой приоритет, чтобы не
                 // ждать наравне с молча качающимися вперёд preload()-страницами.
-                let img = await RemoteImageLoader.fetchImage(candidates: candidates, priority: URLSessionTask.highPriority)
+                // onProgress — реальный прогресс скачивания (0...1) для
+                // кольца вместо неопределённого спиннера, по прямой просьбе.
+                let img = await RemoteImageLoader.fetchImage(candidates: candidates, priority: URLSessionTask.highPriority) { [weak self] p in
+                    Task { @MainActor in
+                        guard let self, self.currentKey == key else { return }
+                        self.ringView?.progress = CGFloat(p)
+                    }
+                }
                 await MainActor.run {
                     guard let self, self.currentKey == key else { return }
-                    self.spinner?.stopAnimating()
+                    self.ringView?.isHidden = true
                     self.imageView?.image = img
                     self.layoutImage(resetZoom: true)
                 }
@@ -1656,8 +1661,8 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         /// Вписывает картинку (по высоте или по ширине) и центрирует.
         func layoutImage(resetZoom: Bool) {
             guard let scroll = scrollView, let imageView, let image = imageView.image else {
-                // Нет картинки — центрируем спиннер.
-                centerSpinner()
+                // Нет картинки — центрируем кольцо прогресса.
+                centerRing()
                 return
             }
             let bounds = scroll.bounds.size
@@ -1676,7 +1681,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
             imageView.frame = CGRect(origin: .zero, size: size)
             scroll.contentSize = size
             centerImage()
-            centerSpinner()
+            centerRing()
         }
 
         private func centerImage() {
@@ -1688,9 +1693,9 @@ struct ZoomableImageScrollView: UIViewRepresentable {
             scroll.contentInset = UIEdgeInsets(top: insetY, left: insetX, bottom: insetY, right: insetX)
         }
 
-        private func centerSpinner() {
-            guard let scroll = scrollView, let spinner else { return }
-            spinner.center = CGPoint(x: scroll.bounds.midX, y: scroll.bounds.midY)
+        private func centerRing() {
+            guard let scroll = scrollView, let ringView else { return }
+            ringView.center = CGPoint(x: scroll.bounds.midX, y: scroll.bounds.midY)
         }
     }
 }
@@ -1702,6 +1707,57 @@ final class LayoutCallbackScrollView: UIScrollView {
     override func layoutSubviews() {
         super.layoutSubviews()
         onLayout?()
+    }
+}
+
+/// Кольцевой индикатор РЕАЛЬНОГО прогресса скачивания страницы (0...1) —
+/// вместо неопределённого UIActivityIndicatorView, по прямой просьбе. Тот же
+/// стиль отрисовки, что и у SwiftUI-кольца в VerticalPageImage.pageProgressRing/
+/// MangaDetailView.chapterDownloadControl (трек + дуга прогресса), просто
+/// нативным UIKit-слоем — читалка страниц целиком нативная (см.
+/// ZoomableImageScrollView).
+final class RingProgressView: UIView {
+    private let trackLayer = CAShapeLayer()
+    private let progressLayer = CAShapeLayer()
+
+    /// Минимум 0.02 — тонкий видимый штрих сразу, даже пока прогресс ещё
+    /// не начал реально расти (тот же приём, что и в SwiftUI-версии).
+    var progress: CGFloat = 0 {
+        didSet { progressLayer.strokeEnd = max(0.02, min(1, progress)) }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+
+        trackLayer.fillColor = UIColor.clear.cgColor
+        trackLayer.strokeColor = UIColor.white.withAlphaComponent(0.25).cgColor
+        trackLayer.lineWidth = 3
+        layer.addSublayer(trackLayer)
+
+        progressLayer.fillColor = UIColor.clear.cgColor
+        progressLayer.strokeColor = UIColor.white.cgColor
+        progressLayer.lineWidth = 3
+        progressLayer.lineCap = .round
+        progressLayer.strokeEnd = 0.02
+        layer.addSublayer(progressLayer)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let radius = min(bounds.width, bounds.height) / 2 - trackLayer.lineWidth / 2
+        let path = UIBezierPath(
+            arcCenter: CGPoint(x: bounds.midX, y: bounds.midY),
+            radius: max(0, radius),
+            startAngle: -.pi / 2,
+            endAngle: .pi * 1.5,
+            clockwise: true
+        )
+        trackLayer.path = path.cgPath
+        progressLayer.path = path.cgPath
     }
 }
 
@@ -1722,6 +1778,10 @@ struct VerticalPageImage: View {
     let width: Int?
     let height: Int?
     @State private var image: UIImage?
+    /// Реальный прогресс скачивания (0...1) — по прямой просьбе, кольцо
+    /// вместо неопределённого спиннера (см. RemoteImageLoader.fetchImage
+    /// onProgress). Сбрасывается на 0 в начале каждой новой загрузки.
+    @State private var progress: Double = 0
 
     /// Высота placeholder'а под реальную ширину экрана — та же логика
     /// "по факту загрузки" (scaledToFit + maxWidth: .infinity) даёт финальную
@@ -1746,14 +1806,31 @@ struct VerticalPageImage: View {
                     .fill(Color.clear)
                     .frame(height: placeholderHeight)
                     .frame(maxWidth: .infinity)
-                    .overlay { ProgressView().tint(.white) }
+                    .overlay { pageProgressRing }
             }
         }
         .task(id: candidates.first) {
+            progress = 0
             // Видимая страница — высокий сетевой приоритет (см. комментарий
             // у fetchImage в RemoteImage.swift).
-            image = await RemoteImageLoader.fetchImage(candidates: candidates, priority: URLSessionTask.highPriority)
+            image = await RemoteImageLoader.fetchImage(candidates: candidates, priority: URLSessionTask.highPriority) { p in
+                Task { @MainActor in progress = p }
+            }
         }
+    }
+
+    /// Кольцо реального прогресса скачивания — тот же стиль отрисовки, что и
+    /// у MangaDetailView.chapterDownloadControl (трек + дуга), просто белым
+    /// (страница ещё не загрузилась, фон тёмный вне зависимости от темы).
+    private var pageProgressRing: some View {
+        ZStack {
+            Circle().stroke(Color.white.opacity(0.25), lineWidth: 3)
+            Circle().trim(from: 0, to: max(0.02, progress))
+                .stroke(Color.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 28, height: 28)
+        .animation(.linear(duration: 0.15), value: progress)
     }
 }
 
