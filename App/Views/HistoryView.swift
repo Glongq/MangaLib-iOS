@@ -5,10 +5,8 @@ import SwiftUI
 /// Дедуп по тайтлу — самая свежая запись сверху, сервер и так отдаёт от
 /// новых к старым.
 ///
-/// Шапка — НЕ общий бар: заголовок "История" отдельно плавает по центру в
-/// своём стекле, кнопка закрытия — отдельный кружок слева, каждый в своём
-/// материале (тот же принцип, что и в остальных экранах приложения). Поиск —
-/// отдельное плавающее поле снизу, над главной панелью.
+/// Поиск — родной .searchable() сверху, как в Каталоге/Закладках (эталон —
+/// MangaCatalogView/BookmarksView), а не отдельное плавающее поле снизу.
 struct HistoryView: View {
     /// true — открыт PUSH-переходом внутри вкладки «Меню» (без своего
     /// NavigationStack; у экрана своя плавающая шапка с кнопкой «назад»).
@@ -19,7 +17,6 @@ struct HistoryView: View {
     @ObservedObject private var siteSession = SiteSession.shared
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var query = ""
-    @FocusState private var searchFocused: Bool
 
     /// Дедуп по media.id — сервер отдаёт КАЖДЫЙ просмотр главы отдельной
     /// записью, а не одну запись на тайтл (см. пример ответа в чате: два
@@ -64,11 +61,6 @@ struct HistoryView: View {
             Theme.background.ignoresSafeArea()
             list
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            searchField
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
-        }
         // Родной системный заголовок + системный back chevron, никакого
         // своего кода (эталон — Настройки/Загрузки). embedded — push из
         // Меню (системная кнопка "назад" сама появляется); не embedded —
@@ -76,6 +68,7 @@ struct HistoryView: View {
         // AppSettingsView/DownloadsView в их !embedded-режиме).
         .navigationTitle("История")
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, prompt: "Поиск по названию")
         .toolbar {
             if !embedded {
                 ToolbarItem(placement: .cancellationAction) {
@@ -88,27 +81,6 @@ struct HistoryView: View {
                              coverURL: entry.media.cover?.bestURL, item: entry.media)
         }
         .background { if embedded { InteractivePopGesture() } }
-    }
-
-    // MARK: Поиск (снизу, над главной панелью)
-
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
-            TextField("", text: $query,
-                      prompt: Text("Поиск по названию").foregroundColor(Theme.textSecondary))
-                .foregroundStyle(Theme.textPrimary)
-                .focused($searchFocused)
-                .submitLabel(.search)
-            if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     // MARK: Список
@@ -138,7 +110,6 @@ struct HistoryView: View {
                     }
                 }
                 .padding(12)
-                .padding(.bottom, 90)
             }
             .scrollIndicators(.hidden)
             .refreshable { await store.syncHistoryFromServer() }
