@@ -4,8 +4,14 @@ import Foundation
 /// characters) — используется ExternalTagBrowserView. Не у каждого сайта
 /// вообще есть такой справочник — см. ExternalSiteCapabilities.hasTagBrowser
 /// (у e-hentai, например, его нет, см. EHentaiProvider).
+/// `.groups` — добавлено вместе с 3hentai.net (у него `/groups` — полноценный
+/// пункт nav-бара, `alle-groups-{буква}.html`-аналог, см.
+/// ThreeHentaiProvider.fetchTagIndex); у hitomi такого справочника нет
+/// (только 4 кита: tags/series/characters/artists, см.
+/// HitomiProvider.fetchTagIndex — честно возвращает [] на .groups), у
+/// e-hentai справочника нет вообще ни на что (hasTagBrowser == false).
 enum ExternalTagKind {
-    case tags, series, characters, artists
+    case tags, series, characters, artists, groups
 }
 
 /// Один пункт алфавитного списка (ExternalTagBrowserView) — имя + число
@@ -250,7 +256,8 @@ extension ExternalSiteProvider {
 enum ExternalSiteRegistry {
     static let providers: [ExternalSite: any ExternalSiteProvider] = [
         .hitomi: HitomiProvider(),
-        .ehentai: EHentaiProvider()
+        .ehentai: EHentaiProvider(),
+        .threeHentai: ThreeHentaiProvider()
     ]
 
     static func provider(for site: ExternalSite) -> any ExternalSiteProvider {

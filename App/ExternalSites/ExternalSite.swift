@@ -9,6 +9,7 @@ import Foundation
 enum ExternalSite: String, CaseIterable, Identifiable {
     case hitomi
     case ehentai
+    case threeHentai
     // Следующие сайты добавляются сюда по мере разбора их HAR (см. план).
 
     var id: String { rawValue }
@@ -17,6 +18,7 @@ enum ExternalSite: String, CaseIterable, Identifiable {
         switch self {
         case .hitomi: return "Hitomi.la"
         case .ehentai: return "E-Hentai"
+        case .threeHentai: return "3Hentai"
         }
     }
 }

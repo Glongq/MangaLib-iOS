@@ -59,6 +59,10 @@ struct HitomiProvider: ExternalSiteProvider {
         case .series: kindSlug = "series"
         case .characters: kindSlug = "characters"
         case .artists: kindSlug = "artists"
+        // У hitomi нет справочника групп (только 4 кита в nav — tags/series/
+        // characters/artists) — добавлено вместе с 3hentai.net, у которого
+        // такой справочник реально есть (см. ThreeHentaiProvider).
+        case .groups: return []
         }
         // "123" — отдельный бакет для значений, начинающихся с цифры (см.
         // nav hitomi.la: /alltags-123.html), а не буква как таковая.

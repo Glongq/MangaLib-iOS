@@ -18,11 +18,18 @@ private enum ExternalImageCache {
 /// хотят Referer e-hentai.org, ровно как у EHentaiProvider.session — раньше
 /// здесь БЫЛ единый хардкод "hitomi.la", из-за чего e-hentai-картинки в этом
 /// загрузчике (обложки в каталоге, превью-грид, Похожие тайтлы) рисковали
-/// молча падать в 403 и никогда не подгружаться.
+/// молча падать в 403 и никогда не подгружаться. `s*.3hentai.net`/`.xyz`
+/// (3hentai) хотлинк-защиты вообще НЕ имеет (подтверждено живым curl —
+/// 200 без Referer, 200 с ЛЮБЫМ чужим Referer тоже) — Referer тут ставится
+/// не потому что без него сломается, а для единообразия с остальными двумя
+/// сайтами (тот же принцип "честный per-хостовый Referer", не угадывание).
 private func externalImageReferer(for url: URL) -> String {
     let host = url.host ?? ""
     if host.hasSuffix("e-hentai.org") || host.hasSuffix("ehgt.org") || host.hasSuffix("hath.network") {
         return "https://e-hentai.org/"
+    }
+    if host.hasSuffix("3hentai.net") || host.hasSuffix("3hentai.xyz") {
+        return "https://ru.3hentai.net/"
     }
     return "https://hitomi.la/"
 }
