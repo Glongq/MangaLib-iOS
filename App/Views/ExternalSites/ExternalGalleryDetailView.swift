@@ -40,6 +40,27 @@ struct ExternalGalleryDetailView: View {
         let initialPage: Int?
     }
 
+    /// Переход по чипу (Группа/Серия/Персонажи/Автор/Женское/Мужское/
+    /// Смешанное/Другое, см. aboutTab) — push (не .fullScreenCover, как у
+    /// читалки: это обычный каталог, тот же остаётся таб-бар/навигация,
+    /// что и при переходе из ExternalTagBrowserView) в
+    /// ExternalCatalogGridView, отфильтрованный по ЭТОМУ конкретному
+    /// значению НА ТОМ ЖЕ сайте, откуда открыта карточка (по прямой
+    /// просьбе 31.08 — "по сайту сразу", т.е. свой namespace/провайдер
+    /// именно этого сайта, не общий/угаданный).
+    private struct TagCatalogTarget: Identifiable {
+        let id = UUID()
+        let namespace: ExternalTagNamespace
+        let value: String
+        let title: String
+    }
+
+    @State private var tagCatalogTarget: TagCatalogTarget?
+
+    private func openTagCatalog(namespace: ExternalTagNamespace, value: String, title: String) {
+        tagCatalogTarget = TagCatalogTarget(namespace: namespace, value: value, title: title)
+    }
+
     private enum Tab: Hashable { case about, comments }
 
     private var provider: any ExternalSiteProvider { ExternalSiteRegistry.provider(for: site) }
@@ -111,6 +132,9 @@ struct ExternalGalleryDetailView: View {
         .scrollIndicators(.hidden)
         .fullScreenCover(item: $readerOpen) { open in
             ExternalReaderView(site: site, detail: detail, initialPage: open.initialPage)
+        }
+        .navigationDestination(item: $tagCatalogTarget) { target in
+            ExternalCatalogGridView(site: site, query: .tag(namespace: target.namespace, value: target.value), title: target.title)
         }
     }
 
@@ -234,21 +258,71 @@ struct ExternalGalleryDetailView: View {
         let categories = tagsByCategory(detail)
         return VStack(alignment: .leading, spacing: 18) {
             infoRow(detail)
-            if !detail.groups.isEmpty { chipsBlock("Группа", detail.groups.map { .init(text: $0) }) }
+            // Тап по чипу — сразу каталог ЭТОГО сайта, отфильтрованный по
+            // конкретному значению (см. TagCatalogTarget/openTagCatalog,
+            // прямая просьба 31.08 "по нажатию на чип сразу открывается
+            // этот тег/жанр, по сайту сразу"). Namespace — свой на каждую
+            // категорию (см. ExternalTagNamespace); значение — чистое
+            // отображаемое имя, КАЖДЫЙ провайдер сам приводит его к
+            // своему реальному query (у hitomi это уже готовый формат, у
+            // 3hentai — слагификация + приписывание пола, см.
+            // ThreeHentaiProvider.slugify/withGenderSuffix).
+            if !detail.groups.isEmpty {
+                chipsBlock("Группа", detail.groups.map { name in
+                    .init(text: name, onTap: { openTagCatalog(namespace: .group, value: name, title: name) })
+                })
+            }
             // Порядок и разбивка ниже — по прямой просьбе (30.08): теги
             // делятся ПОЛНОСТЬЮ на отдельные подкатегории со своим
             // заголовком каждая (не одним общим блоком "Теги"), в этом же
             // порядке — Серия(parody)/Персонажи(character)/Язык(language)/
             // Автор(artist)/Женское(female)/Мужское(male)/Смешанное(mixed)/
             // Другое(other), каждый тег в своей отдельной чипе.
-            if !detail.series.isEmpty { chipsBlock("Серия", detail.series.map { .init(text: $0) }) }
-            if !detail.characters.isEmpty { chipsBlock("Персонажи", detail.characters.map { .init(text: $0) }) }
+            if !detail.series.isEmpty {
+                chipsBlock("Серия", detail.series.map { name in
+                    .init(text: name, onTap: { openTagCatalog(namespace: .series, value: name, title: name) })
+                })
+            }
+            if !detail.characters.isEmpty {
+                chipsBlock("Персонажи", detail.characters.map { name in
+                    .init(text: name, onTap: { openTagCatalog(namespace: .character, value: name, title: name) })
+                })
+            }
+            // Язык — БЕЗ перехода: ни у одного провайдера нет
+            // подтверждённого namespace под язык как отдельный кит
+            // (ExternalTagNamespace такого не знает вовсе) — честно
+            // некликабельно, а не угаданный (наверняка неверный) переход.
             if let language = detail.language, !language.isEmpty { chipsBlock("Язык", [.init(text: language)]) }
-            if !detail.artists.isEmpty { chipsBlock("Автор", detail.artists.map { .init(text: $0) }) }
-            if !categories.female.isEmpty { chipsBlock("Женское", categories.female.map { .init(text: $0.name) }) }
-            if !categories.male.isEmpty { chipsBlock("Мужское", categories.male.map { .init(text: $0.name) }) }
-            if !categories.mixed.isEmpty { chipsBlock("Смешанное", categories.mixed.map { .init(text: $0.name) }) }
-            if !categories.other.isEmpty { chipsBlock("Другое", categories.other.map { .init(text: $0.name) }) }
+            if !detail.artists.isEmpty {
+                chipsBlock("Автор", detail.artists.map { name in
+                    .init(text: name, onTap: { openTagCatalog(namespace: .artist, value: name, title: name) })
+                })
+            }
+            if !categories.female.isEmpty {
+                chipsBlock("Женское", categories.female.map { tag in
+                    .init(text: tag.name, onTap: { openTagCatalog(namespace: .female, value: tag.name, title: tag.name) })
+                })
+            }
+            if !categories.male.isEmpty {
+                chipsBlock("Мужское", categories.male.map { tag in
+                    .init(text: tag.name, onTap: { openTagCatalog(namespace: .male, value: tag.name, title: tag.name) })
+                })
+            }
+            // "Смешанный" тег (female И male оба true) — неоднозначно, к
+            // какому из двух реальных namespace он относится (сайт не
+            // даёт отдельного "смешанного" кита) — берём .female как
+            // разумное приближение (первый из двух реально существующих
+            // вариантов), не выдумывая несуществующий третий.
+            if !categories.mixed.isEmpty {
+                chipsBlock("Смешанное", categories.mixed.map { tag in
+                    .init(text: tag.name, onTap: { openTagCatalog(namespace: .female, value: tag.name, title: tag.name) })
+                })
+            }
+            if !categories.other.isEmpty {
+                chipsBlock("Другое", categories.other.map { tag in
+                    .init(text: tag.name, onTap: { openTagCatalog(namespace: .tag, value: tag.name, title: tag.name) })
+                })
+            }
             if !detail.pages.isEmpty { previewGridSection(detail) }
             relatedSection(detail)
         }

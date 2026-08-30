@@ -244,9 +244,54 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         try await fetchIdsByTag(namespace: namespace, value: value, sortKey: nil, cursor: cursor, limit: limit)
     }
 
+    /// Нормализует ЛЮБОЙ входной текст в реальный URL-slug сайта —
+    /// lowercase, любая ПОСЛЕДОВАТЕЛЬНОСТЬ не-буквенно-цифровых символов
+    /// схлопывается в ОДИН дефис (не посимвольно), края обрезаются.
+    /// Подтверждено HAR на реальных парах имя→slug: "big breasts" →
+    /// "big-breasts", "focalors | lady furina" → "focalors-lady-furina"
+    /// (пробелы вокруг "|" вместе с самим "|" — ОДНА последовательность →
+    /// ОДИН дефис, не три), "y. ginjho the 3rd" → "y-ginjho-the-3rd".
+    /// ИДЕМПОТЕНТНО на уже готовом slug (те, что приходят из
+    /// ExternalTagBrowserView/entry.slug, уже в этом виде — повторная
+    /// нормализация ничего не меняет, сами дефисы — не-alphanumeric
+    /// символы, остаются одиночными) — а вот значение из ЧИПА карточки
+    /// тайтла (см. ExternalGalleryDetailView, переход по тегу/жанру,
+    /// 31.08) несёт только ЧИСТОЕ отображаемое имя, без этой нормализации
+    /// такие запросы 404-ились бы.
+    private static func slugify(_ text: String) -> String {
+        var slug = ""
+        var lastWasSeparator = true // true — чтобы не начать с дефиса
+        for scalar in text.lowercased().unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                slug.unicodeScalars.append(scalar)
+                lastWasSeparator = false
+            } else if !lastWasSeparator {
+                slug.append("-")
+                lastWasSeparator = true
+            }
+        }
+        while slug.hasSuffix("-") { slug.removeLast() }
+        return slug
+    }
+
+    /// Пол — суффикс `-female`/`-male` В САМ slug (см. tagBasePath doc-
+    /// comment) — добавляется, только если его там ЕЩЁ нет (значение из
+    /// ExternalTagBrowserView/entry.slug для тегов из категории "Tags" уже
+    /// несёт его само по себе, повторное добавление задвоило бы суффикс;
+    /// значение из ЧИПА карточки тайтла — только чистое имя тега, без
+    /// суффикса, см. ExternalGalleryDetailView).
+    private static func withGenderSuffix(_ slug: String, namespace: ExternalTagNamespace) -> String {
+        switch namespace {
+        case .female where !slug.hasSuffix("-female"): return slug + "-female"
+        case .male where !slug.hasSuffix("-male"): return slug + "-male"
+        default: return slug
+        }
+    }
+
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let basePath = Self.tagBasePath(for: namespace)
-        let encodedValue = value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+        let slug = Self.withGenderSuffix(Self.slugify(value), namespace: namespace)
+        let encodedValue = slug.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? slug
         var urlString = "\(Self.baseURL)/\(basePath)/\(encodedValue)"
         let page = Int(cursor ?? "1") ?? 1
         if page > 1 { urlString += "/\(page)" }
