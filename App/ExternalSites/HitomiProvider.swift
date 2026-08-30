@@ -306,11 +306,11 @@ struct HitomiProvider: ExternalSiteProvider {
     /// принцип, что и главная страница hitomi.la), непустой — распознаёт
     /// префикс `namespace:значение` (`female:`/`male:`/`series:`/`artist:`/
     /// `group:`/`character:`/`tag:`, по образцу того, как реально ищут на
-    /// самом сайте) и уходит в fetchIdsByTag; без префикса — трактует весь
-    /// текст как обычный тег (namespace `.tag`). `index-all.nozomi`
-    /// проверен живым curl против apiDomain (30.08, повторная проверка) —
-    /// `206`, `Content-Range .../4804324` (~1.2M тайтлов, правдоподобно для
-    /// "весь индекс").
+    /// самом сайте) и уходит в fetchIdsByTag; БЕЗ префикса (обычный ввод
+    /// "просто название тега") — АВТОПОДБОР неймспейса (см. ниже, ИСПРАВЛЕНО
+    /// 31.08). `index-all.nozomi` проверен живым curl против apiDomain
+    /// (30.08, повторная проверка) — `206`, `Content-Range .../4804324`
+    /// (~1.2M тайтлов, правдоподобно для "весь индекс").
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: 0, cursor: cursor, limit: limit)
     }
@@ -319,6 +319,21 @@ struct HitomiProvider: ExternalSiteProvider {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: excludedCategoryBits, sortKey: nil, cursor: cursor, limit: limit)
     }
 
+    /// ИСПРАВЛЕНО (31.08) — раньше без явного `namespace:`-префикса запрос
+    /// ВСЕГДА трактовался как namespace `.tag` (бинарный поиск ровно по
+    /// `/tag/{значение}-all.nozomi`) — но на hitomi БОЛЬШИНСТВО тегов
+    /// категоризированы по полу и как "голый" тег вообще не существуют:
+    /// `/tag/anal-all.nozomi` → 404 живьём, тогда как `/tag/female%3Aanal-
+    /// all.nozomi` → 206 (проверено curl 31.08). Из-за этого обычный ввод
+    /// "anal"/"yaoi"/любого гендерного тега БЕЗ префикса всегда находил 0
+    /// тайтлов — хотя пользователь ожидает "нормальный поиск: просто
+    /// написал тег, оно должно находить" (жалоба 31.08). Теперь без явной
+    /// команды перебираются В ПОРЯДКЕ: как есть (`.tag`) → `female:` →
+    /// `male:` — первый непустой результат побеждает, тот же (kit,
+    /// значение) переиспользуется на всех следующих страницах через
+    /// `cursor` (см. ContinuationKit/encodeSearchCursor — без этого
+    /// переход на страницу 2 заново перебирал бы неймспейсы с нуля и
+    /// слетал бы обратно на бесплодный `.tag`).
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         let period = sortKey.flatMap(SortOption.init(rawValue:))?.popularPeriod
@@ -330,8 +345,36 @@ struct HitomiProvider: ExternalSiteProvider {
             }
             return try await fetchNozomiList(urlString: "https://\(Self.apiDomain)/index-all.nozomi", cursor: cursor, limit: limit)
         }
-        let (namespace, value) = Self.parseSearchCommand(trimmed)
-        return try await fetchIdsByTag(namespace: namespace, value: value, sortKey: sortKey, cursor: cursor, limit: limit)
+
+        // Продолжение уже разрешённого (на первой странице) автоподбора —
+        // тот же (kit, значение) переиспользуется как есть, БЕЗ повторного
+        // перебора неймспейсов.
+        if let cursor, let decoded = Self.decodeSearchCursor(cursor) {
+            let result = try await fetchIdsByTag(namespace: decoded.kit.namespace, value: decoded.resolvedValue, sortKey: sortKey, cursor: decoded.offset, limit: limit)
+            return (result.ids, result.nextCursor.map { Self.encodeSearchCursor(kit: decoded.kit, resolvedValue: decoded.resolvedValue, offset: $0) })
+        }
+
+        let (namespace, value, explicit) = Self.parseSearchCommand(trimmed)
+        // Явная команда (female:/male:/series:/artist:/group:/character:/
+        // tag:) — уважаем ровно то, что попросили, без автоподбора;
+        // legacy-курсор (например от "перейти на страницу N" — тот просто
+        // число, не наш "kit\u{1}значение\u{1}offset" формат) —
+        // используется КАК СТАРТОВЫЙ offset для этой попытки.
+        if explicit {
+            let kit = Self.continuationKit(for: namespace)
+            let resolvedValue = Self.prefixedValue(for: namespace, value: value)
+            let result = try await fetchIdsByTag(namespace: kit.namespace, value: resolvedValue, sortKey: sortKey, cursor: cursor, limit: limit)
+            return (result.ids, result.nextCursor.map { Self.encodeSearchCursor(kit: kit, resolvedValue: resolvedValue, offset: $0) })
+        }
+
+        for candidate: ExternalTagNamespace in [.tag, .female, .male] {
+            let kit = Self.continuationKit(for: candidate)
+            let resolvedValue = Self.prefixedValue(for: candidate, value: value)
+            let result = try await fetchIdsByTag(namespace: kit.namespace, value: resolvedValue, sortKey: sortKey, cursor: cursor, limit: limit)
+            guard !result.ids.isEmpty else { continue }
+            return (result.ids, result.nextCursor.map { Self.encodeSearchCursor(kit: kit, resolvedValue: resolvedValue, offset: $0) })
+        }
+        return ([], nil)
     }
 
     private static let searchPrefixes: [(String, ExternalTagNamespace)] = [
@@ -339,12 +382,55 @@ struct HitomiProvider: ExternalSiteProvider {
         ("artist:", .artist), ("group:", .group), ("character:", .character), ("tag:", .tag)
     ]
 
-    private static func parseSearchCommand(_ text: String) -> (ExternalTagNamespace, String) {
+    private static func parseSearchCommand(_ text: String) -> (namespace: ExternalTagNamespace, value: String, explicit: Bool) {
         let lower = text.lowercased()
         for (prefix, ns) in searchPrefixes where lower.hasPrefix(prefix) {
-            return (ns, lower.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces))
+            return (ns, lower.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces), true)
         }
-        return (.tag, lower)
+        return (.tag, lower, false)
+    }
+
+    /// РЕАЛЬНЫЙ REST-кит (nozomiPath) для продолжения пагинации —
+    /// `.tag`/`.female`/`.male`/`.group` все живут ПОД китом `tag`
+    /// (значение само несёт префикс, см. prefixedValue), поэтому для НИХ
+    /// продолжение обязано идти через `.tag` (у него prefixedValue —
+    /// no-op, повторный вызов не задвоит уже вписанный "female:"/"male:"/
+    /// "group:" префикс) — `.character`/`.artist`/`.series` живут на
+    /// СВОИХ китах, там prefixedValue и так no-op, продолжение идёт через
+    /// исходный неймспейс без изменений.
+    private enum ContinuationKit: String {
+        case tag, character, artist, series
+        var namespace: ExternalTagNamespace {
+            switch self {
+            case .tag: return .tag
+            case .character: return .character
+            case .artist: return .artist
+            case .series: return .series
+            }
+        }
+    }
+
+    private static func continuationKit(for namespace: ExternalTagNamespace) -> ContinuationKit {
+        switch namespace {
+        case .tag, .female, .male, .group: return .tag
+        case .character: return .character
+        case .artist: return .artist
+        case .series: return .series
+        }
+    }
+
+    /// "\u{1}" — технический разделитель между kit/значением/offset:
+    /// значение может содержать буквы/цифры/дефисы/пробелы/двоеточие (все
+    /// реально встречаются, см. prefixedValue) — control-символ
+    /// гарантированно не встретится ни в нём, ни в rawValue ContinuationKit.
+    private static func encodeSearchCursor(kit: ContinuationKit, resolvedValue: String, offset: String) -> String {
+        "\(kit.rawValue)\u{1}\(resolvedValue)\u{1}\(offset)"
+    }
+
+    private static func decodeSearchCursor(_ cursor: String) -> (kit: ContinuationKit, resolvedValue: String, offset: String)? {
+        let parts = cursor.split(separator: "\u{1}", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count == 3, let kit = ContinuationKit(rawValue: String(parts[0])) else { return nil }
+        return (kit, String(parts[1]), String(parts[2]))
     }
 
     // MARK: Карточка тайтла (galleries/{id}.js, Часть 6)
