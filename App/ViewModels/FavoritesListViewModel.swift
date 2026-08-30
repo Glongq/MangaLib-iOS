@@ -75,8 +75,22 @@ final class FavoritesListViewModel: ObservableObject {
         reloadNow(userId: userId)
     }
 
+    /// items/errorMessage чистятся ЗДЕСЬ, синхронно (тот же ран-луп, что и
+    /// тап по капсуле категории), а не только внутри reload(userId:) после
+    /// await — иначе между тапом и приходом ответа сервера content
+    /// (FavoritesListView) успевал отрисовать СТАРЫЕ items уже под НОВУЮ
+    /// category (category.isGrid уже сменилось синхронно, items — ещё нет):
+    /// на секунду показывался чужой список, а при переключении список↔сетка
+    /// — ещё и в чужом формате карточек, пока не подгрузится реальный
+    /// список — по прямой просьбе исправлено. Поиск (query) через этот путь
+    /// НЕ идёт (см. scheduleReload(debounced:) ниже, отдельный путь БЕЗ
+    /// этой очистки) — иначе список мигал бы пустотой на каждую введённую
+    /// букву ещё до срабатывания debounce.
     private func reloadNow(userId: Int) {
         cachedUserId = userId
+        items = []
+        errorMessage = nil
+        isLoading = true
         scheduleReload(userId: userId, debounced: false)
     }
 
