@@ -71,6 +71,9 @@ actor EHentaiProvider: ExternalSiteProvider {
         hasTagBrowser: false,
         hasSearch: true,
         hasCategoryFilter: true,
+        // Приблизительный (не точный offset, см. cursorForPage) — но
+        // реальный, подтверждён HAR (`range=`), см. paginationQueryItem.
+        hasPageJump: true,
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
@@ -145,11 +148,39 @@ actor EHentaiProvider: ExternalSiteProvider {
         return withPlus.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? withPlus
     }
 
+    /// Синтезирует прыжковый курсор (см. paginationQueryItem ниже) — просто
+    /// заворачивает номер страницы как есть в будущий `range=`,
+    /// приблизительно (нет точной формулы страница→range).
+    func cursorForPage(_ page: Int, limit: Int) -> String? {
+        guard page > 1 else { return nil }
+        return "page:\(page)"
+    }
+
+    /// Курсор — либо ОБЫЧНЫЙ, тот, что вернул прошлый вызов (id последнего
+    /// тайтла текущей страницы, идёт в `&next=` — стандартная пагинация
+    /// сайта), либо СПЕЦИАЛЬНЫЙ, синтезированный самим клиентом для прыжка
+    /// на произвольную страницу (см. cursorForPage выше) — с префиксом
+    /// `page:`, идёт в `&range=`. `range=N` подтверждён HAR (второй HAR
+    /// про сортировку/переход): реально меняет позицию в выдаче (запрос с
+    /// `range=68` вернул совсем другой диапазон id тайтлов, чем без него) —
+    /// это и есть механизм кнопки "Jump/Seek" на самом сайте, просто
+    /// подставляет введённое число прямо в этот параметр. ТОЧНАЯ формула
+    /// перевода "номер страницы" → конкретное значение range не подтверждена
+    /// (сайт явно не считает это как offset/limit) — трактуем как
+    /// приблизительный переход, не гарантируем показ РОВНО той же страницы,
+    /// что была бы при обычной постраничной пагинации с начала.
+    private static func paginationQueryItem(for cursor: String) -> String {
+        if cursor.hasPrefix("page:"), let page = Int(cursor.dropFirst(5)) {
+            return "range=\(page)"
+        }
+        return "next=\(cursor)"
+    }
+
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let prefix = Self.tagPrefix(for: namespace)
         let encodedValue = Self.formEncoded(value.lowercased())
         var urlString = "https://e-hentai.org/tag/\(prefix):\(encodedValue)"
-        if let cursor { urlString += "?next=\(cursor)" }
+        if let cursor { urlString += "?" + Self.paginationQueryItem(for: cursor) }
         return try await fetchGalleryList(urlString: urlString)
     }
 
@@ -170,7 +201,7 @@ actor EHentaiProvider: ExternalSiteProvider {
         let encodedQuery = Self.formEncoded(query)
         var urlString = "https://e-hentai.org/?f_search=\(encodedQuery)"
         if excludedCategoryBits != 0 { urlString += "&f_cats=\(excludedCategoryBits)" }
-        if let cursor { urlString += "&next=\(cursor)" }
+        if let cursor { urlString += "&" + Self.paginationQueryItem(for: cursor) }
         return try await fetchGalleryList(urlString: urlString)
     }
 

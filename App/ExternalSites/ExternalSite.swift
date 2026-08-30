@@ -48,6 +48,11 @@ struct ExternalSiteCapabilities {
     /// категоризации в этом смысле (у hitomi есть похожее понятие "type" в
     /// тегах, но отдельного UI-фильтра под него в этом клиенте нет).
     var hasCategoryFilter: Bool
+    /// "Перейти на страницу N" (см. ExternalSiteProvider.cursorForPage,
+    /// ExternalCatalogGridView) — у hitomi точный (offset — обычное число),
+    /// у e-hentai приблизительный (см. EHentaiProvider — `range=`,
+    /// подтверждено HAR как реальный переход, но без точной формулы).
+    var hasPageJump: Bool
     var hasBookmarks: Bool
     var hasHistory: Bool
     var hasNotifications: Bool

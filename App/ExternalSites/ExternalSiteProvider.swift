@@ -134,6 +134,21 @@ protocol ExternalSiteProvider {
     /// HitomiProvider не обязан ничего знать про категории.
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
 
+    /// Курсор, соответствующий началу СТРАНИЦЫ `page` (1-based, по `limit`
+    /// элементов на страницу) — для кнопки "Перейти на страницу" (см.
+    /// ExternalSiteCapabilities.hasPageJump, ExternalCatalogGridView). У
+    /// hitomi это ТОЧНЫЙ переход (offset — обычное число элементов, есть
+    /// всегда), у e-hentai — ПРИБЛИЗИТЕЛЬНЫЙ (см. EHentaiProvider —
+    /// `range=`, подтверждено HAR, но точная формула номер-страницы→range
+    /// сайтом не документирована). `page <= 1` — nil (первая страница и
+    /// так открывается без курсора). Синхронный — чистое вычисление, без
+    /// сети, у обоих текущих провайдеров. Реализация по умолчанию (см.
+    /// extension ниже) — nil всегда, для сайта без capabilities.
+    /// hasPageJump; НАСТОЯЩИЙ protocol requirement по той же причине, что
+    /// и fetchIdsBySearch(excludedCategoryBits:) выше — иначе переопределение
+    /// не подхватится через `any ExternalSiteProvider`.
+    func cursorForPage(_ page: Int, limit: Int) -> String?
+
     /// Полные метаданные тайтла — для карточки и для чтения.
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail
 
@@ -149,6 +164,8 @@ extension ExternalSiteProvider {
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         try await fetchIdsBySearch(query: query, cursor: cursor, limit: limit)
     }
+
+    func cursorForPage(_ page: Int, limit: Int) -> String? { nil }
 }
 
 /// Простой статический реестр провайдеров — без DI-магии, её в проекте

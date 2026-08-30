@@ -23,6 +23,9 @@ struct HitomiProvider: ExternalSiteProvider {
         // B-tree индекс (galleriesindex/*) — см. план, "Что заблокировано".
         hasSearch: false,
         hasCategoryFilter: false,
+        // Курсор — обычный byte-offset (см. fetchIdsByTag ниже), поэтому
+        // "страница N" считается точно, без сети (см. cursorForPage ниже).
+        hasPageJump: true,
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
@@ -179,6 +182,14 @@ struct HitomiProvider: ExternalSiteProvider {
         let nextOffset = offset + ids.count
         let nextCursor = nextOffset < total ? String(nextOffset) : nil
         return (ids, nextCursor)
+    }
+
+    /// Курсор здесь — простой offset-в-элементах (см. fetchIdsByTag выше:
+    /// `Int(cursor ?? "0") ?? 0`, дальше `* 4` в байты Range-заголовка) —
+    /// значит "страница N" считается ТОЧНО, обычной арифметикой, без сети.
+    func cursorForPage(_ page: Int, limit: Int) -> String? {
+        guard page > 1 else { return nil }
+        return String((page - 1) * limit)
     }
 
     /// Тело .nozomi — просто массив big-endian Int32 (4 байта на ID), без

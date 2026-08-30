@@ -71,6 +71,8 @@ struct ExternalCatalogGridView: View {
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var errorMessage: String?
+    @State private var showJumpPrompt = false
+    @State private var jumpPageText = ""
 
     private let gridSpacing: CGFloat = 12
     private let gridColumns = 3
@@ -78,6 +80,11 @@ struct ExternalCatalogGridView: View {
     /// несколько — в обычном одно-сайтовом режиме и так понятно, откуда
     /// тайтл (см. ExternalTagBrowserView/ExternalSearchView, где sites — [x]).
     private var showsSourceBadge: Bool { sites.count > 1 }
+    /// «Перейти на страницу» (см. ExternalSiteCapabilities.hasPageJump) —
+    /// хотя бы один из sites должен это уметь, иначе кнопка ни на что не
+    /// повлияет (см. jump(toPage:) — сайты без поддержки там просто
+    /// пропускаются, начинают заново с первой страницы).
+    private var showsPageJump: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasPageJump } }
 
     var body: some View {
         content
@@ -85,6 +92,28 @@ struct ExternalCatalogGridView: View {
             .navigationBarTitleDisplayMode(.inline)
             .background(Theme.background.ignoresSafeArea())
             .task { await loadFirstPage() }
+            .toolbar {
+                if showsPageJump {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            jumpPageText = ""
+                            showJumpPrompt = true
+                        } label: {
+                            Image(systemName: "arrow.forward.to.line")
+                        }
+                    }
+                }
+            }
+            .alert("Перейти на страницу", isPresented: $showJumpPrompt) {
+                TextField("Номер страницы", text: $jumpPageText)
+                    .keyboardType(.numberPad)
+                Button("Перейти") {
+                    if let page = Int(jumpPageText), page > 0 { jump(toPage: page) }
+                }
+                Button("Отмена", role: .cancel) {}
+            } message: {
+                Text("У некоторых сайтов переход приблизительный — точный номер страницы не гарантирован.")
+            }
     }
 
     @ViewBuilder
@@ -203,10 +232,30 @@ struct ExternalCatalogGridView: View {
 
     private func loadFirstPage() async {
         guard items.isEmpty else { return }
+        cursors = [:]
+        await performInitialLoad()
+    }
+
+    /// Сбрасывает выдачу и запускает её заново, начиная с курсора, который
+    /// каждый провайдер (см. cursorForPage) сам синтезирует под "страницу
+    /// N" — у сайтов без capabilities.hasPageJump курсор просто не
+    /// задаётся, они честно начинают заново с первой страницы (не ошибка,
+    /// см. showsPageJump — кнопка видна, если ХОТЯ БЫ один сайт умеет).
+    private func jump(toPage page: Int) {
+        items = []
+        details = [:]
+        cursors = sites.reduce(into: [ExternalSite: String]()) { result, site in
+            if let cursor = ExternalSiteRegistry.provider(for: site).cursorForPage(page, limit: Self.pageSize) {
+                result[site] = cursor
+            }
+        }
+        Task { await performInitialLoad() }
+    }
+
+    private func performInitialLoad() async {
         isLoading = true
         errorMessage = nil
         pending = Set(sites)
-        cursors = [:]
         await loadNextBatch()
         if items.isEmpty && pending.isEmpty {
             errorMessage = "Проверьте соединение и попробуйте ещё раз."
