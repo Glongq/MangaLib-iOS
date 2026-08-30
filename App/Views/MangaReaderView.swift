@@ -998,7 +998,7 @@ struct MangaReaderView: View {
     private static func textWidth(_ text: String, font: UIFont) -> CGFloat {
         guard !text.isEmpty else { return 0 }
         let box = (text as NSString).boundingRect(
-            with: CGSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude),
+            with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: font],
             context: nil
