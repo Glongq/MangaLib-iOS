@@ -985,7 +985,15 @@ struct MangaReaderView: View {
     // отрапортовать свой размер. Потолок (titleBadgeMaxWidth) — от реальной
     // ширины экрана минус безопасная зона под кнопку закрытия с обеих
     // сторон (симметрично — капсула центрирована через ZStack в topBar).
-    private static let titleBadgeSideMargin: CGFloat = 72 // 48 (кнопка) + 16 (её отступ) + 8 (зазор)
+    // Зазор — БЫЛ 8 (72 всего), из-за чего на максимальной ширине название
+    // всё ещё визуально сливалось с крестиком в одну фигуру ("капля" на
+    // фото): 8 МЕНЬШЕ порога слияния GlassEffectContainer(spacing: 16) в
+    // overlayUI — расстояние между двумя стеклянными фигурами меньше этого
+    // порога, и Liquid Glass их морфит вместе, порог сам по себе не
+    // учитывает наши намерения. Зазор увеличен до 20 (> 16), чтобы гарантированно
+    // быть НАД порогом слияния — по прямой просьбе "чуть больше отступ,
+    // чуть-чуть".
+    private static let titleBadgeSideMargin: CGFloat = 84 // 48 (кнопка) + 16 (её отступ) + 20 (зазор, > порога слияния GlassEffectContainer)
     private var titleBadgeMaxWidth: CGFloat {
         max(120, UIScreen.main.bounds.width - Self.titleBadgeSideMargin * 2)
     }
