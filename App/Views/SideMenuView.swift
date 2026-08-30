@@ -52,12 +52,6 @@ struct SideMenuView: View {
     private enum MenuRoute: Hashable {
         case history, settings, downloads, comments, franchises, friends, collections, myCollections
         case teams, characters, people, publishers, users, nowReading, favorites
-        /// Список тегов/серий внешнего сайта (см. App/ExternalSites/) —
-        /// сама вьюха берёт активный сайт из ExternalSiteSession напрямую
-        /// (см. navigationDestination ниже), а не из этого case — он
-        /// всегда один и тот же вне зависимости от того, какой внешний
-        /// сайт сейчас активен.
-        case externalTags
     }
     // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
     // NavigationLink(value:) ВНУТРИ этих экранов (например, History →
@@ -95,6 +89,7 @@ struct SideMenuView: View {
                         catalogSection
                         otherSection
                         searchSitesBlock
+                        externalSitesBlock
                     }
                     .padding(.horizontal, 16)
                     // Компенсация за отсутствующую строку поиска (была здесь
@@ -135,8 +130,6 @@ struct SideMenuView: View {
                 case .users:      UserListView()
                 case .nowReading: TopViewsListView()
                 case .favorites:  if let uid = auth.userId { FavoritesListView(userId: uid) }
-                case .externalTags:
-                    if let site = externalSiteSession.activeExternalSite { ExternalTagBrowserView(site: site) }
                 }
             }
         }
@@ -329,23 +322,12 @@ struct SideMenuView: View {
     private var catalogRootRows: some View {
         // Внешний сайт активен (см. ExternalSiteSession) — обычные пункты
         // каталога MangaLib здесь не при чём (Команды/Персонажи/Франшизы и
-        // т.д. — это сущности ИМЕННО экосистемы Lib), показываем только то,
-        // что реально есть у внешнего сайта (сейчас — только список тегов).
-        if externalSiteSession.combinedModeActive {
-            // Совместный каталог («Все сайты») живёт во вкладке «Каталог»
-            // (см. ExternalCombinedCatalogView) — единого списка тегов тут
-            // нет (у каждого сайта свой), отдельный пункт меню не нужен.
+        // т.д. — это сущности ИМЕННО экосистемы Lib). Список тегов/поиск
+        // теперь живут СВОЕЙ менюшкой прямо во вкладке «Каталог» (см.
+        // ExternalCatalogMenuView/ExternalCombinedCatalogView) — здесь
+        // просто указатель, без дублирующего пункта.
+        if externalSiteSession.isExternalModeActive {
             row("Каталог — во вкладке «Каталог»", icon: "square.grid.2x2", showDivider: false, showChevron: false)
-        } else if let ext = externalSiteSession.activeExternalSite {
-            let capabilities = ExternalSiteRegistry.provider(for: ext).capabilities
-            if capabilities.hasTagBrowser {
-                row("Список тегов", icon: "tag", showDivider: false, action: { path.append(MenuRoute.externalTags) })
-            } else if !capabilities.hasSearch {
-                row("Каталог недоступен на \(ext.displayName)", icon: "tag", showDivider: false, showChevron: false)
-            }
-            // hasSearch && !hasTagBrowser (например e-hentai) — каталог
-            // реально есть, просто через поиск во вкладке «Каталог»
-            // (ExternalSearchView), отдельного пункта меню под него не надо.
         } else {
             VStack(spacing: 0) {
                 row("Тайтлы", icon: "book", action: {
@@ -531,6 +513,65 @@ struct SideMenuView: View {
             }
             .buttonStyle(.plain)
             .disabled(isActive)
+
+            if showDivider {
+                Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14).padding(.trailing, 16)
+            }
+        }
+    }
+
+    // Блок «Отдельные сайты» — самый низ меню, по прямой просьбе. Чекбоксы —
+    // ТО ЖЕ САМОЕ состояние, что и в Настройки → «Другие сайты» (см.
+    // ExternalSitesSettingsView, ExternalSiteSession.enabledSites) — просто
+    // ещё один способ его редактировать, без похода в Настройки. Тот же
+    // визуальный приём (чекбокс-квадратик), что и у searchSitesBlock выше,
+    // но это ДВА разных, не связанных друг с другом понятия: там — LibSite
+    // (mangalib/slashlib/...), здесь — ExternalSite (hitomi/e-hentai/...).
+    private var externalSitesBlock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Отдельные сайты")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 4)
+
+            card {
+                ForEach(Array(ExternalSite.allCases.enumerated()), id: \.element) { index, site in
+                    externalSiteCheckboxRow(site, showDivider: index != ExternalSite.allCases.count - 1)
+                }
+            }
+        }
+    }
+
+    private func externalSiteCheckboxRow(_ site: ExternalSite, showDivider: Bool) -> some View {
+        let isChecked = externalSiteSession.enabledSites.contains(site)
+
+        return VStack(spacing: 0) {
+            Button {
+                if isChecked {
+                    externalSiteSession.enabledSites.remove(site)
+                    // Выключили сайт, который был активным/участвовал в
+                    // совместном режиме — тот же принцип отката, что и в
+                    // ExternalSitesSettingsView.siteRow.
+                    if externalSiteSession.activeExternalSite == site { externalSiteSession.activeExternalSite = nil }
+                    if externalSiteSession.enabledSites.isEmpty { externalSiteSession.combinedModeActive = false }
+                } else {
+                    externalSiteSession.enabledSites.insert(site)
+                }
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: isChecked ? "checkmark.square.fill" : "square")
+                        .font(.title3)
+                        .foregroundStyle(isChecked ? Theme.accent : Theme.textSecondary)
+                        .frame(width: 24)
+                    Text(site.displayName)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 52)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
             if showDivider {
                 Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14).padding(.trailing, 16)

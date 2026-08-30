@@ -51,15 +51,10 @@ struct MangaCatalogView: View {
         // отдельный, более простой экран вместо всей этой шапки/фильтров/
         // поиска. Ветка else — буквально то, что уже было, без изменений.
         if let ext = externalSiteSession.activeExternalSite {
-            let capabilities = ExternalSiteRegistry.provider(for: ext).capabilities
+            // По прямой просьбе — вкладка не прыгает сразу в список тегов/
+            // поиск, а показывает отдельную менюшку (см. ExternalCatalogMenuView).
             NavigationStack {
-                if capabilities.hasTagBrowser {
-                    ExternalTagBrowserView(site: ext)
-                } else if capabilities.hasSearch {
-                    ExternalSearchView(site: ext)
-                } else {
-                    ExternalScreenContent(site: ext, featureTitle: "Каталог")
-                }
+                ExternalCatalogMenuView(site: ext)
             }
             .tint(Theme.accent)
         } else if externalSiteSession.combinedModeActive {
