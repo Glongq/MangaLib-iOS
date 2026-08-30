@@ -61,12 +61,22 @@ actor EHentaiProvider: ExternalSiteProvider {
         []
     }
 
-    // MARK: Список тайтлов по тегу
+    // MARK: Список тайтлов по тегу/поиску
 
-    /// Общий ExternalTagNamespace → префикс тега e-hentai. У e-hentai нет
-    /// namespace'ов female/male в понятии "весь список по этому неймспейсу"
-    /// (как у hitomi/.nozomi) — они здесь такие же namespaced-теги
-    /// (`female:...`/`male:...`), просто на общей странице `/tag/`.
+    /// У e-hentai НЕТ отдельной "фичи поиска по тегам" — есть ОДНА строка
+    /// поиска (f_search), а `namespace:value` — просто КОМАНДА внутри неё
+    /// (подтверждено HAR: `f_search=anal+anime+series%3Agenshin` — обычный
+    /// текст и тег-команда в одном и том же запросе одновременно). У
+    /// `/tag/{ns}:{value}` — это просто то, что открывается по клику на
+    /// готовую тег-ссылку в разметке (тоже подтверждено HAR, отдельно от
+    /// f_search), удобный короткий путь для ОДНОГО тега без лишнего текста
+    /// — оставлен отдельным методом протокола, а не свёрнут в
+    /// fetchIdsBySearch, ТОЛЬКО потому что многословные значения тега
+    /// (`nudity only`, `textless narrative`) подтверждены именно в этой
+    /// форме (`+` вместо пробела прямо в пути); синтаксис кавычек для
+    /// многословного тега ВНУТРИ f_search (`parody:"kimi no na wa$"` и
+    /// т.п. — так делают публичные гайды по сайту) HAR не подтверждает,
+    /// поэтому не рискуем угадывать его здесь.
     private static func tagPrefix(for namespace: ExternalTagNamespace) -> String {
         switch namespace {
         case .tag: return "other"
@@ -79,10 +89,20 @@ actor EHentaiProvider: ExternalSiteProvider {
         }
     }
 
+    /// e-hentai кодирует пробел как `+` (форма `application/x-www-form-
+    /// urlencoded`), НЕ `%20` — подтверждено HAR и в query (`f_search=anal
+    /// +anime`), и прямо в пути (`/tag/other:nudity+only`). `.urlPathAllowed`/
+    /// `.urlQueryAllowed` сами по себе дают `%20`, поэтому пробел заменяется
+    /// на `+` вручную ДО percent-encoding остального (encoding сохраняет уже
+    /// вставленный `+` как есть — он входит в `.urlQueryAllowed`).
+    private static func formEncoded(_ text: String) -> String {
+        let withPlus = text.replacingOccurrences(of: " ", with: "+")
+        return withPlus.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? withPlus
+    }
+
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let prefix = Self.tagPrefix(for: namespace)
-        let encodedValue = value.lowercased()
-            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value.lowercased()
+        let encodedValue = Self.formEncoded(value.lowercased())
         var urlString = "https://e-hentai.org/tag/\(prefix):\(encodedValue)"
         if let cursor { urlString += "?next=\(cursor)" }
         return try await fetchGalleryList(urlString: urlString)
@@ -90,8 +110,11 @@ actor EHentaiProvider: ExternalSiteProvider {
 
     /// Обычный полнотекстовый поиск по всему сайту (`?f_search=`) — то,
     /// чего у hitomi нет (см. HitomiProvider.fetchIdsBySearch — заглушка).
+    /// Пользователь может ввести сюда И свободный текст, И `ns:value`-
+    /// команду, хоть вперемешку (см. doc-comment tagPrefix) — здесь это
+    /// не различается, просто честно прокидывается как есть.
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
-        let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        let encodedQuery = Self.formEncoded(query)
         var urlString = "https://e-hentai.org/?f_search=\(encodedQuery)"
         if let cursor { urlString += "&next=\(cursor)" }
         return try await fetchGalleryList(urlString: urlString)
@@ -141,22 +164,85 @@ actor EHentaiProvider: ExternalSiteProvider {
 
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail {
         guard let token = tokenCache[id] else { throw EHentaiError.missingToken }
-        guard let url = URL(string: "https://e-hentai.org/g/\(id)/\(token)/") else {
-            throw EHentaiError.badResponse
+        let html = try await fetchHTML(urlString: "https://e-hentai.org/g/\(id)/\(token)/")
+        let metadata = Self.parseMetadata(html: html)
+        var pages = Self.parsePages(from: html)
+
+        // Полоса миниатюр страниц отдаётся кусками ~20 штук за раз (см.
+        // ?p=N внизу карточки) — базовый /g/{id}/{token}/ БЕЗ ?p= отдаёт
+        // только первые ~20, подтверждено HAR (галерея на 67 страниц:
+        // "Length: 67 pages" в метаданных, но только 20 ссылок /s/... в
+        // самом ответе; ?p=1/?p=2/?p=3 добавляют следующие ~20 каждая).
+        // Без этой дотяжки чтение молча обрывалось бы на 20-й странице у
+        // любой достаточно длинной галереи.
+        var pageIndex = 1
+        while pages.count < metadata.totalPages, pageIndex < 64 {
+            guard let moreHTML = try? await fetchHTML(urlString: "https://e-hentai.org/g/\(id)/\(token)/?p=\(pageIndex)") else { break }
+            let morePages = Self.parsePages(from: moreHTML)
+            guard !morePages.isEmpty else { break }
+            let existingIndices = Set(pages.map(\.index))
+            let newPages = morePages.filter { !existingIndices.contains($0.index) }
+            guard !newPages.isEmpty else { break }
+            pages.append(contentsOf: newPages)
+            pageIndex += 1
         }
+        pages.sort { $0.index < $1.index }
+
+        return ExternalGalleryDetail(
+            id: id,
+            site: .ehentai,
+            title: metadata.title,
+            type: metadata.type,
+            language: metadata.language,
+            tags: metadata.tags,
+            artists: metadata.artists,
+            groups: metadata.groups,
+            characters: metadata.characters,
+            series: metadata.series,
+            // Похожие тайтлы на странице e-hentai — не отдельный список ID
+            // (как related у hitomi), а карточки с собственными gid/token —
+            // не подтверждено разбором, честно пусто (см. план "чего не хватает").
+            related: [],
+            pages: pages,
+            coverURL: metadata.coverURL
+        )
+    }
+
+    private func fetchHTML(urlString: String) async throws -> String {
+        guard let url = URL(string: urlString) else { throw EHentaiError.badResponse }
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200,
               let html = String(data: data, encoding: .utf8) else {
             throw EHentaiError.badResponse
         }
-        return Self.parseGalleryDetail(id: id, html: html)
+        return html
     }
 
-    private static func parseGalleryDetail(id: Int, html: String) -> ExternalGalleryDetail {
+    /// Всё, что не относится к списку страниц — то, ради чего нет смысла
+    /// заново парсить тег/автора/обложку на КАЖДОМ ?p=N-довеске (см.
+    /// fetchGalleryDetail): достаточно вызвать один раз на базовой странице.
+    private struct GalleryMetadata {
+        let title: String
+        let type: String
+        let language: String?
+        let coverURL: URL?
+        let tags: [ExternalGalleryTag]
+        let artists: [String]
+        let groups: [String]
+        let characters: [String]
+        let series: [String]
+        /// Из `<td class="gdt1">Length:</td><td class="gdt2">67 pages</td>`
+        /// — сколько СТРАНИЦ ТАЙТЛА всего (не то же самое, что число ?p=N
+        /// довесок полосы миниатюр — она просто их источник).
+        let totalPages: Int
+    }
+
+    private static func parseMetadata(html: String) -> GalleryMetadata {
         let title = firstMatch(in: html, pattern: #"<h1 id="gn">([^<]*)</h1>"#).map(decodeHTMLEntities) ?? "Untitled"
         let type = firstMatch(in: html, pattern: #"<div id="gdc"><div class="cs [^"]+"[^>]*>([^<]+)</div>"#) ?? "Misc"
         let language = firstMatch(in: html, pattern: #"<td[^>]*>Language:</td><td[^>]*>([^<]+?)(?:\s*<span[^>]*>[^<]*</span>)?</td>"#).map(decodeHTMLEntities)
         let coverURL = firstMatch(in: html, pattern: #"(https://ehgt\.org/[^"'\s]+\.(?:jpg|jpeg|png|webp))"#).flatMap(URL.init(string:))
+        let totalPages = firstMatch(in: html, pattern: #"<td class="gdt2">(\d+) pages</td>"#).flatMap(Int.init) ?? 0
 
         var tags: [ExternalGalleryTag] = []
         var artists: [String] = []
@@ -188,39 +274,29 @@ actor EHentaiProvider: ExternalSiteProvider {
             }
         }
 
-        var pages: [ExternalGalleryPage] = []
-        if let regex = try? NSRegularExpression(pattern: #"href="https://e-hentai\.org/s/([0-9a-f]+)/\d+-(\d+)""#) {
-            let range = NSRange(html.startIndex..., in: html)
-            var seen = Set<Int>()
-            regex.enumerateMatches(in: html, range: range) { match, _, _ in
-                guard let match, match.numberOfRanges == 3,
-                      let keyRange = Range(match.range(at: 1), in: html),
-                      let indexRange = Range(match.range(at: 2), in: html),
-                      let index = Int(html[indexRange]), !seen.contains(index) else { return }
-                seen.insert(index)
-                pages.append(ExternalGalleryPage(index: index, key: String(html[keyRange]), width: 0, height: 0))
-            }
-        }
-        pages.sort { $0.index < $1.index }
-
-        return ExternalGalleryDetail(
-            id: id,
-            site: .ehentai,
-            title: title,
-            type: type,
-            language: language,
-            tags: tags,
-            artists: artists,
-            groups: groups,
-            characters: characters,
-            series: series,
-            // Похожие тайтлы на странице e-hentai — не отдельный список ID
-            // (как related у hitomi), а карточки с собственными gid/token —
-            // не подтверждено разбором, честно пусто (см. план "чего не хватает").
-            related: [],
-            pages: pages,
-            coverURL: coverURL
+        return GalleryMetadata(
+            title: title, type: type, language: language, coverURL: coverURL,
+            tags: tags, artists: artists, groups: groups, characters: characters, series: series,
+            totalPages: totalPages
         )
+    }
+
+    /// Миниатюры страниц из ОДНОГО ответа (базового /g/{id}/{token}/ ИЛИ
+    /// любого его ?p=N-довеска — разметка одинаковая, см. fetchGalleryDetail).
+    private static func parsePages(from html: String) -> [ExternalGalleryPage] {
+        guard let regex = try? NSRegularExpression(pattern: #"href="https://e-hentai\.org/s/([0-9a-f]+)/\d+-(\d+)""#) else { return [] }
+        let range = NSRange(html.startIndex..., in: html)
+        var seen = Set<Int>()
+        var pages: [ExternalGalleryPage] = []
+        regex.enumerateMatches(in: html, range: range) { match, _, _ in
+            guard let match, match.numberOfRanges == 3,
+                  let keyRange = Range(match.range(at: 1), in: html),
+                  let indexRange = Range(match.range(at: 2), in: html),
+                  let index = Int(html[indexRange]), !seen.contains(index) else { return }
+            seen.insert(index)
+            pages.append(ExternalGalleryPage(index: index, key: String(html[keyRange]), width: 0, height: 0))
+        }
+        return pages
     }
 
     /// `<td class="tc">ns:</td><td><a href=...>Name</a> <a ...>Name 2</a></td>`
