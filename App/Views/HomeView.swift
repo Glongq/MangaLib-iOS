@@ -826,8 +826,16 @@ struct HomeView: View {
     private var newestSection: some View {
         if !viewModel.newest.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                sectionHeader("Новинки")
-                    .padding(.horizontal, 16)
+                // Быстрый переход на вкладку "Новинки" полноэкранного "Сейчас
+                // читают" по тапу на заголовок — тот же приём, что и у
+                // "Сейчас читают" выше (currentlyReadingSection).
+                NavigationLink {
+                    TopViewsListView(initialSort: .newest)
+                } label: {
+                    sectionHeader("Новинки")
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 12) {
                         ForEach(viewModel.newest) { item in

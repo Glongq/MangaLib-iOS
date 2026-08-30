@@ -9,8 +9,16 @@ import SwiftUI
 /// (За день/неделю/месяц) в toolbar — БЕЗ своего фона (см. periodMenu —
 /// иначе он накладывается на системное стекло toolbar двойным слоем).
 struct TopViewsListView: View {
-    @StateObject private var vm = TopViewsListViewModel()
+    @StateObject private var vm: TopViewsListViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
+
+    /// initialSort — по прямой просьбе: быстрый переход с главной сразу на
+    /// нужную вкладку (см. HomeView.newestSection — "Новинки" на главной и
+    /// вкладка "Новинки" здесь физически РАЗНЫЕ данные, catalog sort=added
+    /// vs top-views popularity=1, но по названию это один и тот же переход).
+    init(initialSort: TopViewsSort = .newest) {
+        _vm = StateObject(wrappedValue: TopViewsListViewModel(initialSort: initialSort))
+    }
 
     // Та же настройка Персонализации (2/3/4/Авто), что и в остальных сетках
     // приложения (см. CardsPerRow) — на скриншоте 3 колонки, это её "Авто".

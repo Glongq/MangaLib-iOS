@@ -9,7 +9,7 @@ import Foundation
 @MainActor
 final class TopViewsListViewModel: ObservableObject {
 
-    @Published var sort: TopViewsSort = .newest {
+    @Published var sort: TopViewsSort {
         didSet { if oldValue != sort { Task { await reload() } } }
     }
     @Published var period: TopViewsPeriod = .day {
@@ -25,6 +25,19 @@ final class TopViewsListViewModel: ObservableObject {
     private let service = MangaNetworkService.shared
     private var page = 1
     private var hasNext = true
+
+    /// Стартовая вкладка — по прямой просьбе, для быстрого перехода с
+    /// главной сразу на нужную вкладку (см. HomeView.newestSection/
+    /// currentlyReadingSection). `sort` — БЕЗ инлайн-дефолта в объявлении
+    /// (был `= .newest`) специально: присвоение в СОБСТВЕННОМ init для
+    /// свойства, у которого ещё не было значения, didSet не вызывает (как и
+    /// раньше для дефолтного случая) — но объявленный инлайн-дефолт плюс
+    /// повторное присваивание здесь же в init было бы уже вторым
+    /// присваиванием и МОГЛО бы завести лишний параллельный reload() ещё до
+    /// loadIfNeeded() в .task.
+    init(initialSort: TopViewsSort = .newest) {
+        sort = initialSort
+    }
 
     func loadIfNeeded() async {
         guard !didLoadOnce, !isLoading else { return }
