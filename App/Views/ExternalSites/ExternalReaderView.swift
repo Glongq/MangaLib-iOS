@@ -38,6 +38,11 @@ struct ExternalReaderView: View {
     @State private var showUI = true
     @State private var showSettings = false
     @State private var isCurrentPageZoomed = false
+    /// Индексы страниц, для которых предзагрузка УЖЕ запущена (см.
+    /// preloadPage) — без этого при каждом чуть-чуть прокрученном
+    /// verticalPage окно (см. preloadVerticalWindow) пересчитывалось бы и
+    /// заново дёргало те же самые уже запрошенные страницы.
+    @State private var preloadedIndices: Set<Int> = []
     @State private var vScale: CGFloat = 1
     @State private var vScaleBase: CGFloat = 1
     @State private var didScrollToInitial = false
@@ -99,18 +104,17 @@ struct ExternalReaderView: View {
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .task {
-            // Вертикальный режим — тянем ВСЕ страницы сразу (1-в-1
-            // ReaderViewModel.preloadAll: "в вертикальном режиме тянем всё
-            // заранее, чтобы лента листалась без подгрузок"), не окном
-            // preloadCount вперёд (это для горизонтального пейджера).
-            if pageMode == 1 { preloadAllPages() } else { preloadUpcoming(from: currentPage) }
+            if pageMode == 1 { preloadVerticalWindow(from: verticalPage) } else { preloadUpcoming(from: currentPage) }
         }
         .onChange(of: currentPage) { _, page in
             isCurrentPageZoomed = false
             if pageMode != 1 { preloadUpcoming(from: page) }
         }
+        .onChange(of: verticalPage) { _, page in
+            if pageMode == 1 { preloadVerticalWindow(from: page) }
+        }
         .onChange(of: pageMode) { _, mode in
-            if mode == 1 { preloadAllPages() } else { preloadUpcoming(from: currentPage) }
+            if mode == 1 { preloadVerticalWindow(from: verticalPage) } else { preloadUpcoming(from: currentPage) }
         }
         .sheet(isPresented: $showSettings) {
             ExternalReaderSettingsSheet(
@@ -290,15 +294,23 @@ struct ExternalReaderView: View {
         }
     }
 
-    /// Вертикальный режим — 1-в-1 ReaderViewModel.preloadAll ("тянем всё
-    /// заранее"), не окно вперёд.
-    private func preloadAllPages() {
-        for page in detail.pages {
-            preloadPage(page)
+    /// Вертикальный режим — окно вперёд от текущей страницы (по прямой
+    /// просьбе — не ВСЁ сразу, а следующие 50), пересчитывается по мере
+    /// прокрутки (см. .onChange(of: verticalPage)).
+    private static let verticalPreloadWindow = 50
+
+    private func preloadVerticalWindow(from page: Int) {
+        let start = page + 1
+        let end = min(start + Self.verticalPreloadWindow, detail.pages.count)
+        guard start < end else { return }
+        for index in start..<end {
+            preloadPage(detail.pages[index])
         }
     }
 
     private func preloadPage(_ page: ExternalGalleryPage) {
+        guard !preloadedIndices.contains(page.index) else { return }
+        preloadedIndices.insert(page.index)
         let galleryId = detail.id
         Task {
             guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
