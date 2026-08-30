@@ -461,8 +461,19 @@ struct ExternalCatalogGridView: View {
         isLoading = true
         errorMessage = nil
         pending = Set(sites)
-        await loadNextBatch()
-        if items.isEmpty && pending.isEmpty {
+        // `anySucceeded` — отличает РЕАЛЬНЫЙ сбой сети (ни один сайт не
+        // ответил успешно) от честного "0 совпадений" (запрос прошёл,
+        // просто пусто — например по hitomi ищут точное имя тега, которого
+        // нет). Раньше здесь смотрели только на `items.isEmpty &&
+        // pending.isEmpty` — это условие ОДИНАКОВО истинно в обоих
+        // случаях (успешный пустой ответ тоже убирает сайт из `pending`,
+        // см. loadNextBatch), из-за чего любой пустой поиск на hitomi тут
+        // же показывал "Проверьте соединение и попробуйте ещё раз" —
+        // выглядит как сетевая ошибка с намёком нажать "Обновить", хотя
+        // сеть отработала нормально, просто совпадений нет (жалоба
+        // "фаллбек слишком быстро предлагает нажать обновить").
+        let anySucceeded = await loadNextBatch()
+        if items.isEmpty && pending.isEmpty && !anySucceeded {
             errorMessage = "Проверьте соединение и попробуйте ещё раз."
         }
         isLoading = false
@@ -479,10 +490,15 @@ struct ExternalCatalogGridView: View {
     /// просто "все сайты из `sites`" на старте), мержит результат ЧЕРЕДУЯ по
     /// сайтам (не "сначала все с одного, потом все с другого" — иначе
     /// совместная сетка выглядела бы как склейка двух отдельных, а не
-    /// единая выдача).
-    private func loadNextBatch() async {
+    /// единая выдача). Возвращает, ответил ли хоть один сайт УСПЕШНО (даже
+    /// пустым списком) — см. performInitialLoad, где это отличает реальный
+    /// сбой сети от честного "0 совпадений". `@discardableResult` —
+    /// loadMoreIfNeeded этот флаг не нужен (там об ошибке уже сообщать
+    /// нечего, экран и так что-то показывает).
+    @discardableResult
+    private func loadNextBatch() async -> Bool {
         let sitesToQuery = Array(pending)
-        guard !sitesToQuery.isEmpty else { return }
+        guard !sitesToQuery.isEmpty else { return true }
         let currentQuery = query
         let currentSortKey = sortKey
         let cursorsSnapshot = cursors
@@ -505,7 +521,9 @@ struct ExternalCatalogGridView: View {
         }
 
         var idsBySite: [ExternalSite: [Int]] = [:]
+        var anySucceeded = false
         for (site, ids, nextCursor, succeeded) in results {
+            if succeeded { anySucceeded = true }
             if succeeded, let nextCursor {
                 cursors[site] = nextCursor
             } else {
@@ -529,6 +547,7 @@ struct ExternalCatalogGridView: View {
 
         let existing = Set(items.map(\.id))
         items.append(contentsOf: merged.filter { !existing.contains($0.id) })
+        return anySucceeded
     }
 }
 
