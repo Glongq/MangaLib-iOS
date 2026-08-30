@@ -621,38 +621,42 @@ struct MangaDetailView: View {
         let votes = ratingObj?.votes
         let myScore = viewModel.detail?.rating?.myScore
         let hasRating = (rating ?? 0) > 0
-        HStack(spacing: 6) {
+        // Чуть уже (ширина/отступы/звёздочка/цифры) — по прямой просьбе:
+        // при двузначной личной оценке (10) вместе со средней + длинным
+        // коротким форматом голосов (197.85k) чипы почти впритык не влезали
+        // в ширину обложки.
+        HStack(spacing: 5) {
             if let myScore {
                 // Заливка под цвет оценки (не чёрная полупрозрачная, как у
                 // средней ниже) — тот же стиль чипа, что и у ratingStatsBlock.
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 9))
+                        .font(.system(size: 8))
                         .foregroundStyle(.white)
                     Text("\(myScore)")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.white)
                 }
-                .padding(.horizontal, 7)
+                .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(personalRatingColor(myScore), in: Capsule())
             }
             if hasRating, let rating {
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 9))
+                        .font(.system(size: 8))
                         .foregroundStyle(.yellow)
                     Text(String(format: "%.1f", rating))
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.white)
                     // Сколько людей поставило оценку — в коротком формате (762k).
                     if let votes, votes > 0 {
                         Text(Self.shortCount(votes).lowercased())
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.85))
                     }
                 }
-                .padding(.horizontal, 7)
+                .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(.black.opacity(0.55), in: Capsule())
             }
