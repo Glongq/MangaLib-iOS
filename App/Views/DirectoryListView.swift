@@ -11,6 +11,12 @@ struct DirectoryListView: View {
 
     @StateObject private var vm: DirectoryListViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
+    /// Для сворачивания клавиатуры первым тапом ГДЕ УГОДНО по списку, даже
+    /// по строке — см. KeyboardDismissOnTap.dismissKeyboardOnFirstTap. У
+    /// .searchable() нет своего @FocusState (тем управляет система), поэтому
+    /// вместо него — стандартные isSearching/dismissSearch из окружения.
+    @Environment(\.isSearching) private var isSearching
+    @Environment(\.dismissSearch) private var dismissSearch
 
     init(kind: DirectoryKind) {
         _vm = StateObject(wrappedValue: DirectoryListViewModel(kind: kind))
@@ -41,6 +47,7 @@ struct DirectoryListView: View {
             ContentUnavailableView.search(text: vm.query)
         } else {
             list
+                .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
         }
     }
 

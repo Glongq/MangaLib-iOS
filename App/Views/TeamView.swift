@@ -106,6 +106,7 @@ struct TeamView: View {
                         if selectedTab == .titles {
                             titlesControls
                             grid(cardWidth: cardWidth)
+                                .dismissKeyboardOnFirstTap(active: searchFocused) { searchFocused = false }
                         } else {
                             updatesSection
                         }

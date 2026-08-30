@@ -77,6 +77,7 @@ struct CharacterView: View {
 
                         titlesControls
                         grid(cardWidth: cardWidth)
+                            .dismissKeyboardOnFirstTap(active: searchFocused) { searchFocused = false }
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 18)

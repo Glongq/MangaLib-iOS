@@ -7,6 +7,11 @@ struct FranchiseListView: View {
 
     @StateObject private var vm = FranchiseListViewModel()
     @ObservedObject private var themeManager = ThemeManager.shared
+    /// См. DirectoryListView — тот же приём сворачивания клавиатуры первым
+    /// тапом по списку через isSearching/dismissSearch (.searchable() без
+    /// своего @FocusState).
+    @Environment(\.isSearching) private var isSearching
+    @Environment(\.dismissSearch) private var dismissSearch
 
     var body: some View {
         ZStack {
@@ -33,6 +38,7 @@ struct FranchiseListView: View {
             ContentUnavailableView.search(text: vm.query)
         } else {
             list
+                .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
         }
     }
 
