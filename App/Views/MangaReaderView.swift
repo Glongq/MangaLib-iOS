@@ -962,29 +962,61 @@ struct MangaReaderView: View {
         .padding(.top, 2)
     }
 
-    // Плашка названия — своя отдельная подложка, ширина ПО КОНТЕНТУ (капсула
-    // сама сжимается под короткое название), текст чуть меньше прежнего
-    // (subheadline→footnote, caption→caption2).
+    // Плашка названия — ширина ПО КОНТЕНТУ, но СЧИТАННАЯ ЯВНО через
+    // NSString.boundingRect (тот же приём, что и у MangaCardView.
+    // titleLineCount — точное измерение реального рендера шрифта, а не
+    // догадка), а НЕ доверена SwiftUI-автосайзингу.
     //
-    // Потолок ширины считается от РЕАЛЬНОЙ ширины экрана минус безопасная
-    // зона под кнопку закрытия с обеих сторон (симметрично — капсула
-    // центрирована через ZStack в topBar, а не подтянута к одному краю), а
-    // не фиксированное число "на глаз" (было 260 — на узких экранах, 375pt,
-    // iPhone SE/mini, длинное название реально заезжало под кнопку, та
-    // занимает 48pt + 16pt отступ = 64pt от края).
+    // Было два подхода подряд, и оба не сработали на деле (видно по фото
+    // бага): сначала .frame(maxWidth: 260) — плашка стабильно рендерилась
+    // близко к потолку НЕЗАВИСИМО от длины текста, даже у короткого
+    // "FMTY"; затем добавленный следом .fixedSize(horizontal: true) тоже не
+    // помог — Text с .lineLimit(1) под fixedSize не отдаёт наверх честный
+    // "по контенту" размер, это известная нестыковка этих двух модификаторов
+    // в SwiftUI. Из-за того, что плашка была широкой всегда, она вплотную
+    // подходила к кнопке закрытия — а обе они внутри одного
+    // GlassEffectContainer (см. overlayUI), и когда стеклянные фигуры
+    // оказываются близко друг к другу, iOS 26 Liquid Glass АВТОМАТИЧЕСКИ
+    // сливает их в одну фигуру ("капля" на скриншоте) — это и есть
+    // системная причина видимого бага, а не просто "выглядит криво".
     //
-    // .fixedSize(horizontal: true, vertical: false) — КЛЮЧЕВОЕ и ПРОПУЩЕННОЕ
-    // в прошлый раз: без него VStack внутри ZStack (соседний HStack с
-    // кнопкой и Spacer() требует себе всю ширину экрана) получал в
-    // ПРЕДЛОЖЕНИИ широкий размер и капсула визуально растягивалась почти на
-    // весь потолок ВСЕГДА, а не сжималась под короткое название, как должна
-    // (по прямой просьбе именно это и исправлено — "должна быть по названию
-    // ширина"). fixedSize заставляет VStack всегда сообщать СВОЙ настоящий
-    // (по контенту) размер вверх по иерархии, .frame(maxWidth:) после него —
-    // просто потолок на случай, если этот настоящий размер слишком большой.
+    // Теперь размер задаётся явным .frame(width:) (не maxWidth — ТОЧНОЕ
+    // число) — гарантированно по тексту, без веры в то, как Text сам решит
+    // отрапортовать свой размер. Потолок (titleBadgeMaxWidth) — от реальной
+    // ширины экрана минус безопасная зона под кнопку закрытия с обеих
+    // сторон (симметрично — капсула центрирована через ZStack в topBar).
     private static let titleBadgeSideMargin: CGFloat = 72 // 48 (кнопка) + 16 (её отступ) + 8 (зазор)
     private var titleBadgeMaxWidth: CGFloat {
         max(120, UIScreen.main.bounds.width - Self.titleBadgeSideMargin * 2)
+    }
+
+    private static var titleBadgeTitleFont: UIFont {
+        UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .semibold)
+    }
+    private static var titleBadgeSubtitleFont: UIFont { UIFont.preferredFont(forTextStyle: .caption2) }
+
+    private static func textWidth(_ text: String, font: UIFont) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let box = (text as NSString).boundingRect(
+            with: CGSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        )
+        return box.width.rounded(.up)
+    }
+
+    /// Реальная ширина капсулы: макс. из двух строк + горизонтальный паддинг
+    /// (16×2), с потолком titleBadgeMaxWidth. Пересчитывается на каждый
+    /// рендер (текст меняется при смене главы, см. .task(id:) у страниц) —
+    /// дёшево, boundingRect на две короткие строки, не список из сотен строк.
+    private var titleBadgeWidth: CGFloat {
+        let title = mangaTitle ?? viewModel.currentChapter?.name ?? "Глава"
+        let subtitle = viewModel.currentChapter?.shortTitle ?? ""
+        let titleWidth = Self.textWidth(title, font: Self.titleBadgeTitleFont)
+        let subtitleWidth = Self.textWidth(subtitle, font: Self.titleBadgeSubtitleFont)
+        let contentWidth = max(titleWidth, subtitleWidth) + 32 // + .padding(.horizontal, 16) с двух сторон
+        return min(contentWidth, titleBadgeMaxWidth)
     }
 
     private var titleBadge: some View {
@@ -999,17 +1031,8 @@ struct MangaReaderView: View {
                 .foregroundStyle(fg.opacity(0.7))
                 .lineLimit(1)
         }
-        .fixedSize(horizontal: true, vertical: false)
         .padding(.horizontal, 16).padding(.vertical, 10)
-        .frame(maxWidth: titleBadgeMaxWidth)
-        // .clipped() — подстраховка на редкий крайний случай: fixedSize
-        // заставляет Text всегда сообщать СВОЙ полный (нетронутый) размер
-        // вверх по иерархии, поэтому lineLimit(1)-обрезание с "..." само по
-        // себе для АБСОЛЮТНО экстремально длинного названия может не
-        // успеть сработать до того, как .frame(maxWidth:) обрежет уже
-        // готовый (полноразмерный) контент по границе — без .clipped() он
-        // в этом редком случае вылезал бы за пределы капсулы визуально.
-        .clipped()
+        .frame(width: titleBadgeWidth)
         .glassEffect(.regular, in: Capsule())
     }
 
