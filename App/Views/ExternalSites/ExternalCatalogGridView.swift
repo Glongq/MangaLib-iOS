@@ -150,13 +150,44 @@ struct ExternalCatalogGridView: View {
     @ViewBuilder
     private var content: some View {
         if isLoading && items.isEmpty {
-            ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Скелетон-сетка вместо голого спиннера — 1-в-1
+            // MangaCatalogView.skeletonGrid (по прямой просьбе "скелетоны в
+            // разделе каталог"), та же ширина карточки, что и у настоящей
+            // сетки (см. grid ниже).
+            skeletonGrid
         } else if let errorMessage, items.isEmpty {
             StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: errorMessage, retry: { Task { await loadFirstPage() } }, fillScreen: true)
         } else if items.isEmpty {
             StateView(icon: "square.grid.2x2", title: "Тайтлов не найдено", fillScreen: true)
         } else {
             grid
+        }
+    }
+
+    /// Число ячеек-заглушек не привязано к реальным данным (их ещё нет) —
+    /// просто с запасом на экран при любом gridColumns (2/3/4).
+    private var skeletonGrid: some View {
+        GeometryReader { proxy in
+            let spacing = gridSpacing
+            let totalSpacing = spacing * CGFloat(gridColumns - 1) + 24
+            let cardWidth = ((proxy.size.width - totalSpacing) / CGFloat(gridColumns)).rounded(.down)
+            let columns = Array(repeating: GridItem(.fixed(cardWidth), spacing: spacing), count: gridColumns)
+
+            ScrollView {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                    ForEach(0..<12, id: \.self) { _ in
+                        VStack(alignment: .leading, spacing: 6) {
+                            SkeletonBox()
+                                .frame(width: cardWidth, height: (cardWidth * 3 / 2).rounded())
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            SkeletonBar(width: cardWidth * 0.85, height: 12)
+                            SkeletonBar(width: cardWidth * 0.5, height: 10)
+                        }
+                    }
+                }
+                .padding(12)
+            }
+            .scrollIndicators(.hidden)
         }
     }
 

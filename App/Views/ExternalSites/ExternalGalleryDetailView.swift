@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Карточка тайтла внешнего сайта (см. план, ЧАСТЬ B) — визуально КОПИРУЕТ
 /// стиль текстов/чипов/вкладок обычной карточки тайтла (MangaDetailView) —
@@ -25,6 +26,19 @@ struct ExternalGalleryDetailView: View {
     @State private var previewPage: Int = 1
     @State private var previewJumpText = ""
     @Namespace private var tabIndicator
+
+    /// Читалка — ТОЛЬКО `.fullScreenCover`, не push через NavigationLink
+    /// (1-в-1 MangaDetailView.readerOpen/.fullScreenCover) — раньше была
+    /// NavigationLink, из-за чего читалка оставалась ВНУТРИ текущего таба
+    /// NavigationStack и таб-бар приложения (Закладки/Каталог/...) не
+    /// прятался, торчал поверх интерфейса читалки (по жалобе со скриншотом,
+    /// 30.08).
+    @State private var readerOpen: ReaderOpen?
+
+    private struct ReaderOpen: Identifiable {
+        let id = UUID()
+        let initialPage: Int?
+    }
 
     private enum Tab: Hashable { case about, comments }
 
@@ -91,6 +105,9 @@ struct ExternalGalleryDetailView: View {
             .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
+        .fullScreenCover(item: $readerOpen) { open in
+            ExternalReaderView(site: site, detail: detail, initialPage: open.initialPage)
+        }
     }
 
     // MARK: Верх карточки (B.1) — 1-в-1 MangaDetailView.heroHeader/titleBlock
@@ -153,10 +170,11 @@ struct ExternalGalleryDetailView: View {
     }
 
     /// «Начать» — 1-в-1 MangaDetailView.readerLink (native
-    /// .borderedProminent + Theme.accent, не самодельная Capsule).
+    /// .borderedProminent + Theme.accent, не самодельная Capsule). Кнопка,
+    /// не NavigationLink — открывает `.fullScreenCover` (см. readerOpen).
     private func readButton(_ detail: ExternalGalleryDetail) -> some View {
-        NavigationLink {
-            ExternalReaderView(site: site, detail: detail)
+        Button {
+            readerOpen = ReaderOpen(initialPage: nil)
         } label: {
             Text("Читать (\(detail.pages.count) стр.)")
                 .frame(maxWidth: .infinity, minHeight: 44)
@@ -317,6 +335,18 @@ struct ExternalGalleryDetailView: View {
     // аналога в обычной карточке манги нет (там вместо этого список глав),
     // заголовок/шрифты подогнаны под тот же blockTitle-стиль для консистентности.
 
+    /// Ширина/зазор — ФИКСИРОВАННЫЕ числа (не GeometryReader/.flexible()+
+    /// aspectRatio, как было раньше): вся секция сидит внутри одного и того
+    /// же `.padding(16)` на весь контент карточки (см. detailBody), поэтому
+    /// доступная ширина СЧИТАЕТСЯ заранее, без лишнего слоя геометрии —
+    /// тот же приём, что и у MangaReaderView.titleBadgeMaxWidth. Раньше
+    /// колонки были `.flexible()` + кропу задавался только aspectRatio БЕЗ
+    /// явного .frame() — LazyVGrid в паре мест не мог стабильно посчитать
+    /// высоту строки (гонка с асинхронной подгрузкой картинок), из-за чего
+    /// сетка "лагала"/тайлы наслаивались друг на друга (жалоба 30.08). Явный
+    /// .frame(width:height:) на каждой ячейке убирает саму возможность гонки.
+    private static let previewSpacing: CGFloat = 8
+
     private func previewGridSection(_ detail: ExternalGalleryDetail) -> some View {
         let pages = detail.pages
         let totalPaginationPages = max(1, Int((Double(pages.count) / Double(Self.previewPageSize)).rounded(.up)))
@@ -324,17 +354,22 @@ struct ExternalGalleryDetailView: View {
         let startIndex = (clampedPage - 1) * Self.previewPageSize
         let endIndex = min(startIndex + Self.previewPageSize, pages.count)
         let visiblePages = Array(pages[startIndex..<endIndex])
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: Self.previewColumns)
+
+        let availableWidth = UIScreen.main.bounds.width - 32
+        let totalSpacing = Self.previewSpacing * CGFloat(Self.previewColumns - 1)
+        let cellWidth = ((availableWidth - totalSpacing) / CGFloat(Self.previewColumns)).rounded(.down)
+        let cellHeight = (cellWidth * 4 / 3).rounded()
+        let columns = Array(repeating: GridItem(.fixed(cellWidth), spacing: Self.previewSpacing), count: Self.previewColumns)
 
         return VStack(alignment: .leading, spacing: 10) {
             blockTitle("Предпросмотр страниц")
 
-            LazyVGrid(columns: columns, spacing: 8) {
+            LazyVGrid(columns: columns, spacing: Self.previewSpacing) {
                 ForEach(visiblePages, id: \.index) { page in
-                    NavigationLink {
-                        ExternalReaderView(site: site, detail: detail, initialPage: page.index)
+                    Button {
+                        readerOpen = ReaderOpen(initialPage: page.index)
                     } label: {
-                        previewThumb(page)
+                        previewThumb(page, width: cellWidth, height: cellHeight)
                     }
                     .buttonStyle(.plain)
                 }
@@ -346,7 +381,7 @@ struct ExternalGalleryDetailView: View {
         }
     }
 
-    private func previewThumb(_ page: ExternalGalleryPage) -> some View {
+    private func previewThumb(_ page: ExternalGalleryPage, width: CGFloat, height: CGFloat) -> some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
                 if let url = page.thumbnailURL, let offsetX = page.thumbnailSpriteOffsetX {
@@ -368,7 +403,7 @@ struct ExternalGalleryDetailView: View {
                     SkeletonBox()
                 }
             }
-            .aspectRatio(3.0 / 4.0, contentMode: .fill)
+            .frame(width: width, height: height)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .clipped()
 
