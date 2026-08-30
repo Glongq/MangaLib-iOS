@@ -22,6 +22,14 @@ struct MangaCatalogView: View {
     // назад, из-за чего заголовок дёргался. См. тот же фикс в BookmarksView.
     @State private var isHeaderAnimating = false
 
+    /// Для сворачивания клавиатуры первым тапом ГДЕ УГОДНО по сетке, даже
+    /// по карточке тайтла — см. KeyboardDismissOnTap.dismissKeyboardOnFirstTap
+    /// (тот же приём, что и в DirectoryListView/FranchiseListView — родной
+    /// .searchable() без своего @FocusState, isSearching/dismissSearch из
+    /// окружения).
+    @Environment(\.isSearching) private var isSearching
+    @Environment(\.dismissSearch) private var dismissSearch
+
     // Сетка: N колонок одинаковой ширины — строгое выравнивание карточек.
     // Ширину меряем один раз через GeometryReader (см. grid) и кормим ЕЮ ЖЕ
     // и GridItem(.fixed), и саму MangaCardView — см. комментарий у
@@ -211,6 +219,7 @@ struct MangaCatalogView: View {
             skeletonGrid
         } else {
             grid
+                .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
         }
     }
 

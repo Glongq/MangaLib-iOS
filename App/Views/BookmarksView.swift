@@ -19,6 +19,12 @@ struct BookmarksView: View {
     @State private var showNewFolder = false
     @State private var newFolderName = ""
     @State private var query = ""
+    /// Для сворачивания клавиатуры первым тапом ГДЕ УГОДНО по списку/сетке —
+    /// см. KeyboardDismissOnTap.dismissKeyboardOnFirstTap (родной
+    /// .searchable() без своего @FocusState, isSearching/dismissSearch из
+    /// окружения — тот же приём, что и в DirectoryListView/FranchiseListView).
+    @Environment(\.isSearching) private var isSearching
+    @Environment(\.dismissSearch) private var dismissSearch
 
     /// Тайтл, который сейчас редактируется через долгое нажатие на строку
     /// (см. row() ниже, .contextMenu) — открывает тот же AddToFolderSheet,
@@ -642,10 +648,17 @@ struct BookmarksView: View {
             }
         } else {
             // Список/плитка — см. ViewSortSheet (иконка шестерёнки).
-            switch viewMode {
-            case .list: listContent
-            case .grid: gridContent
+            Group {
+                switch viewMode {
+                case .list: listContent
+                case .grid: gridContent
+                }
             }
+            // Первый тап где угодно по списку/сетке, пока открыта клавиатура
+            // поиска, съедается и просто закрывает её — тот же приём, что и
+            // в DirectoryListView/FranchiseListView/MangaCatalogView (см.
+            // KeyboardDismissOnTap.dismissKeyboardOnFirstTap).
+            .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
         }
     }
 
