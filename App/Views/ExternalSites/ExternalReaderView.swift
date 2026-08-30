@@ -8,6 +8,11 @@ import SwiftUI
 struct ExternalReaderView: View {
     let site: ExternalSite
     let detail: ExternalGalleryDetail
+    /// Открыть сразу на этой странице (1-based, `ExternalGalleryPage.index`)
+    /// — тап по миниатюре в превью-гриде карточки тайтла (см.
+    /// ExternalGalleryDetailView.previewGridSection, план ЧАСТЬ B.3). `nil`
+    /// (по умолчанию, обычное открытие через «Читать») — начинает с начала.
+    var initialPage: Int?
 
     @Environment(\.dismiss) private var dismiss
     @State private var showUI = true
@@ -18,15 +23,27 @@ struct ExternalReaderView: View {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
 
-            ScrollView {
-                LazyVStack(spacing: 4) {
-                    ForEach(Array(detail.pages.enumerated()), id: \.offset) { _, page in
-                        ExternalReaderPage(provider: provider, galleryId: detail.id, page: page)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(Array(detail.pages.enumerated()), id: \.offset) { _, page in
+                            ExternalReaderPage(provider: provider, galleryId: detail.id, page: page)
+                                .id(page.index)
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+                .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
+                .onAppear {
+                    guard let initialPage else { return }
+                    // Без анимации и с небольшой задержкой — ScrollViewReader
+                    // не может проскроллить к `.id()`, который ещё не успел
+                    // разложиться в LazyVStack на первом кадре появления.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        proxy.scrollTo(initialPage, anchor: .top)
                     }
                 }
             }
-            .scrollIndicators(.hidden)
-            .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
 
             if showUI {
                 topBar

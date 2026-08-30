@@ -350,6 +350,11 @@ private struct HitomiGalleryJSON: Decodable {
     let title: String
     let type: String
     let language: String?
+    /// Дата публикации — подтверждена живьём (`"2025-03-08 15:00:00-06"`),
+    /// см. план ЧАСТЬ A/B.2. `date`, не `datepublished` — оба поля есть в
+    /// ответе, но `date` — то, что реально показывается на самой странице
+    /// тайтла (`<span class="date">`).
+    let date: String?
     let tags: [TagEntry]?
     let artists: [[String: JSONAnyValue]]?
     let groups: [[String: JSONAnyValue]]?
@@ -359,7 +364,13 @@ private struct HitomiGalleryJSON: Decodable {
     let files: [FileEntry]
 
     func toDetail() -> ExternalGalleryDetail {
-        ExternalGalleryDetail(
+        let pages = files.enumerated().map { idx, file in
+            ExternalGalleryPage(
+                index: idx + 1, key: file.hash, width: file.width, height: file.height,
+                thumbnailURL: HitomiProvider.coverURL(forHash: file.hash)
+            )
+        }
+        return ExternalGalleryDetail(
             id: Int(id) ?? 0,
             site: .hitomi,
             title: title,
@@ -373,10 +384,13 @@ private struct HitomiGalleryJSON: Decodable {
             characters: Self.names(from: characters, key: "character"),
             series: Self.names(from: parodys, key: "parody"),
             related: related ?? [],
-            pages: files.enumerated().map { idx, file in
-                ExternalGalleryPage(index: idx + 1, key: file.hash, width: file.width, height: file.height)
-            },
-            coverURL: files.first.flatMap { HitomiProvider.coverURL(forHash: $0.hash) }
+            pages: pages,
+            coverURL: pages.first?.thumbnailURL,
+            posted: date,
+            // hitomi физически не имеет этих полей — см. план ЧАСТЬ B.2,
+            // честно nil/[], не выдумываем.
+            parentId: nil, visible: nil, fileSize: nil, favoritedCount: nil,
+            ratingAverage: nil, ratingCount: nil, comments: []
         )
     }
 

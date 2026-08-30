@@ -299,7 +299,15 @@ actor EHentaiProvider: ExternalSiteProvider {
             // не подтверждено разбором, честно пусто (см. план "чего не хватает").
             related: [],
             pages: pages,
-            coverURL: metadata.coverURL
+            coverURL: metadata.coverURL,
+            posted: metadata.posted,
+            parentId: metadata.parentId,
+            visible: metadata.visible,
+            fileSize: metadata.fileSize,
+            favoritedCount: metadata.favoritedCount,
+            ratingAverage: metadata.ratingAverage,
+            ratingCount: metadata.ratingCount,
+            comments: metadata.comments
         )
     }
 
@@ -330,6 +338,19 @@ actor EHentaiProvider: ExternalSiteProvider {
         /// — сколько СТРАНИЦ ТАЙТЛА всего (не то же самое, что число ?p=N
         /// довесок полосы миниатюр — она просто их источник).
         let totalPages: Int
+        /// Ниже — поля из тех же `gdt1`/`gdt2` строк метатаблицы + виджета
+        /// рейтинга (`#gdr`) + блока комментариев (`#cdiv`), подтверждены
+        /// реальной разметкой (`eh_detail.html` из HAR этой сессии), см.
+        /// план ЧАСТЬ B.2/B.5. У hitomi таких полей нет вообще — это чисто
+        /// e-hentai-специфичный набор.
+        let posted: String?
+        let parentId: Int?
+        let visible: String?
+        let fileSize: String?
+        let favoritedCount: String?
+        let ratingAverage: Double?
+        let ratingCount: Int?
+        let comments: [ExternalComment]
     }
 
     private static func parseMetadata(html: String) -> GalleryMetadata {
@@ -369,27 +390,76 @@ actor EHentaiProvider: ExternalSiteProvider {
             }
         }
 
+        let posted = firstMatch(in: html, pattern: #"<td class="gdt1">Posted:</td><td class="gdt2">([^<]+)</td>"#).map { $0.trimmingCharacters(in: .whitespaces) }
+        let parentId = firstMatch(in: html, pattern: #"<td class="gdt1">Parent:</td><td class="gdt2"><a href="https://e-hentai\.org/g/(\d+)/"#).flatMap(Int.init)
+        let visible = firstMatch(in: html, pattern: #"<td class="gdt1">Visible:</td><td class="gdt2">([^<]+)</td>"#).map { $0.trimmingCharacters(in: .whitespaces) }
+        let fileSize = firstMatch(in: html, pattern: #"<td class="gdt1">File Size:</td><td class="gdt2">([^<]+)</td>"#).map { $0.trimmingCharacters(in: .whitespaces) }
+        let favoritedCount = firstMatch(in: html, pattern: #"<td class="gdt2" id="favcount">([^<]+)</td>"#).map { $0.trimmingCharacters(in: .whitespaces) }
+        let ratingAverage = firstMatch(in: html, pattern: #"id="rating_label"[^>]*>Average: ([\d.]+)"#).flatMap(Double.init)
+        let ratingCount = firstMatch(in: html, pattern: #"id="rating_count">(\d+)"#).flatMap(Int.init)
+
         return GalleryMetadata(
             title: title, type: type, language: language, coverURL: coverURL,
             tags: tags, artists: artists, groups: groups, characters: characters, series: series,
-            totalPages: totalPages
+            totalPages: totalPages,
+            posted: posted, parentId: parentId, visible: visible, fileSize: fileSize,
+            favoritedCount: favoritedCount, ratingAverage: ratingAverage, ratingCount: ratingCount,
+            comments: parseComments(from: html)
         )
+    }
+
+    /// `<a name="c{id}"></a>...<div class="c3">Posted on {дата} by: ...
+    /// <a href=".../uploader/...">{автор}</a>...</div>...<div class="c6"
+    /// id="comment_{id}">{текст}</div>` — подтверждено реальной разметкой
+    /// (`eh_detail.html`, HAR этой сессии), см. план ЧАСТЬ B.5. `.*?`
+    /// ленивые — останавливаются на ПЕРВОМ совпадении внутри блока именно
+    /// этого комментария (по одному "by:"/`c6` на комментарий).
+    private static func parseComments(from html: String) -> [ExternalComment] {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<a name="c(\d+)"></a>.*?<div class="c3">Posted on (.*?) by:.*?<a href="https://e-hentai\.org/uploader/[^"]*">([^<]+)</a>.*?<div class="c6"[^>]*>(.*?)</div>"#,
+            options: [.dotMatchesLineSeparators]
+        ) else { return [] }
+        let range = NSRange(html.startIndex..., in: html)
+        var result: [ExternalComment] = []
+        regex.enumerateMatches(in: html, range: range) { match, _, _ in
+            guard let match, match.numberOfRanges == 5,
+                  let idRange = Range(match.range(at: 1), in: html),
+                  let id = Int(html[idRange]),
+                  let dateRange = Range(match.range(at: 2), in: html),
+                  let authorRange = Range(match.range(at: 3), in: html),
+                  let textRange = Range(match.range(at: 4), in: html) else { return }
+            let rawText = String(html[textRange]).replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+            result.append(ExternalComment(
+                id: id,
+                author: decodeHTMLEntities(String(html[authorRange])),
+                postedAt: String(html[dateRange]),
+                text: decodeHTMLEntities(rawText).trimmingCharacters(in: .whitespacesAndNewlines)
+            ))
+        }
+        return result
     }
 
     /// Миниатюры страниц из ОДНОГО ответа (базового /g/{id}/{token}/ ИЛИ
     /// любого его ?p=N-довеска — разметка одинаковая, см. fetchGalleryDetail).
+    /// Заодно вытаскивает `thumbnailURL` — реальный CSS background-image
+    /// URL полосы миниатюр (`<div style="...url(https://.../{id}-{n}.webp)...">`,
+    /// (без кавычек внутри url(), подтверждено HAR), см. план ЧАСТЬ B.3.
     private static func parsePages(from html: String) -> [ExternalGalleryPage] {
-        guard let regex = try? NSRegularExpression(pattern: #"href="https://e-hentai\.org/s/([0-9a-f]+)/\d+-(\d+)""#) else { return [] }
+        guard let regex = try? NSRegularExpression(pattern: #"href="https://e-hentai\.org/s/([0-9a-f]+)/\d+-(\d+)"><div[^>]*url\(([^)]+)\)"#) else { return [] }
         let range = NSRange(html.startIndex..., in: html)
         var seen = Set<Int>()
         var pages: [ExternalGalleryPage] = []
         regex.enumerateMatches(in: html, range: range) { match, _, _ in
-            guard let match, match.numberOfRanges == 3,
+            guard let match, match.numberOfRanges == 4,
                   let keyRange = Range(match.range(at: 1), in: html),
                   let indexRange = Range(match.range(at: 2), in: html),
-                  let index = Int(html[indexRange]), !seen.contains(index) else { return }
+                  let index = Int(html[indexRange]), !seen.contains(index),
+                  let thumbRange = Range(match.range(at: 3), in: html) else { return }
             seen.insert(index)
-            pages.append(ExternalGalleryPage(index: index, key: String(html[keyRange]), width: 0, height: 0))
+            pages.append(ExternalGalleryPage(
+                index: index, key: String(html[keyRange]), width: 0, height: 0,
+                thumbnailURL: URL(string: String(html[thumbRange]))
+            ))
         }
         return pages
     }

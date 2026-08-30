@@ -51,11 +51,30 @@ struct ExternalGalleryTag: Hashable {
 /// только живым запросом). `width`/`height` — 0, если реальный размер
 /// заранее не известен (у e-hentai он выясняется только при открытии
 /// конкретной страницы — до тех пор просто нет данных).
+/// `thumbnailURL` — статическая ссылка на МИНИАТЮРУ именно этой страницы
+/// (не полноразмерная картинка) — у hitomi та же формула шардирования
+/// хэша, что и у обложки (HitomiProvider.coverURL, применима к любой
+/// странице, не только первой), у e-hentai — реальный CSS background-image
+/// URL полосы миниатюр, подтверждён HAR прямо в разметке `/g/{id}/{token}/`
+/// (`<div style="...url(https://.../{id}-{n}.webp)...">`). Используется в
+/// превью-гриде карточки тайтла (см. ExternalGalleryDetailView, план ЧАСТЬ B.3).
 struct ExternalGalleryPage: Hashable {
     let index: Int
     let key: String
     let width: Int
     let height: Int
+    let thumbnailURL: URL?
+}
+
+/// Один комментарий к тайтлу (см. ExternalGalleryDetail.comments) — сейчас
+/// подтверждён HAR только у e-hentai (`<div id="cdiv">`, см. план ЧАСТЬ
+/// B.5); у hitomi комментариев как концепции нет вообще (ни одного
+/// comment-related запроса ни в одном HAR), там `comments` всегда `[]`.
+struct ExternalComment: Identifiable, Hashable {
+    let id: Int
+    let author: String
+    let postedAt: String
+    let text: String
 }
 
 /// Полные метаданные тайтла (см. HitomiProvider/EHentaiProvider.
@@ -86,6 +105,20 @@ struct ExternalGalleryDetail: Identifiable {
     let related: [Int]
     let pages: [ExternalGalleryPage]
     let coverURL: URL?
+    /// Posted/Опубликовано — у hitomi `date` из galleries/{id}.js, у
+    /// e-hentai строка из `gdt1"Posted:"`/`gdt2` — оба сайта её честно
+    /// имеют, см. план ЧАСТЬ B.2.
+    let posted: String?
+    /// Ниже — метаданные, которых у hitomi физически НЕТ (не выдумываем,
+    /// см. план ЧАСТЬ B.2) — заполняются только EHentaiProvider, у
+    /// HitomiProvider всегда nil/[].
+    let parentId: Int?
+    let visible: String?
+    let fileSize: String?
+    let favoritedCount: String?
+    let ratingAverage: Double?
+    let ratingCount: Int?
+    let comments: [ExternalComment]
 }
 
 /// Общий протокол одного внешнего сайта — реализуется отдельным типом на
