@@ -612,7 +612,8 @@ struct MangaReaderView: View {
                         fitWidth: fitWidth,
                         doubleTapZoom: doubleTapZoom,
                         onTap: { xFraction in handleReaderTap(xFraction) },
-                        onZoomChanged: { zoomed in isCurrentPageZoomed = zoomed }
+                        onZoomChanged: { zoomed in isCurrentPageZoomed = zoomed },
+                        ringColor: UIColor(fg)
                     )
                     .frame(width: geo.size.width, height: geo.size.height)
 
@@ -1592,6 +1593,9 @@ struct ZoomableImageScrollView: UIViewRepresentable {
     /// см. MangaReaderView.horizontalPage), пока идёт панорама зума, и они не
     /// конкурировали за один и тот же вертикальный драг.
     var onZoomChanged: ((Bool) -> Void)? = nil
+    /// Цвет кольца загрузки (см. RingProgressView.ringColor) — под текущую
+    /// ReaderPalette.foreground, чтобы не терялось на светлой теме читалки.
+    var ringColor: UIColor = .white
 
     func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap, fitWidth: fitWidth, doubleTapZoom: doubleTapZoom, onZoomChanged: onZoomChanged) }
 
@@ -1614,6 +1618,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         scroll.addSubview(imageView)
 
         let ring = RingProgressView(frame: CGRect(x: 0, y: 0, width: 28, height: 28))
+        ring.ringColor = ringColor
         scroll.addSubview(ring)
 
         context.coordinator.scrollView = scroll
@@ -1638,6 +1643,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         context.coordinator.onTap = onTap
         context.coordinator.onZoomChanged = onZoomChanged
         context.coordinator.doubleTapZoom = doubleTapZoom
+        context.coordinator.ringView?.ringColor = ringColor
         if context.coordinator.fitWidth != fitWidth {
             context.coordinator.fitWidth = fitWidth
             context.coordinator.layoutImage(resetZoom: true)
@@ -1799,6 +1805,17 @@ final class RingProgressView: UIView {
         didSet { progressLayer.strokeEnd = max(0.02, min(1, progress)) }
     }
 
+    /// Цвет кольца — раньше был жёстко белым ("фон читалки тёмный вне
+    /// зависимости от темы" — на самом деле при светлой теме читалки фон
+    /// светлый, и белое кольцо на нём не видно); теперь задаётся снаружи
+    /// (см. ZoomableImageScrollView.ringColor) под текущую ReaderPalette.
+    var ringColor: UIColor = .white {
+        didSet {
+            trackLayer.strokeColor = ringColor.withAlphaComponent(0.25).cgColor
+            progressLayer.strokeColor = ringColor.cgColor
+        }
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
@@ -1856,6 +1873,14 @@ struct VerticalPageImage: View {
     /// onProgress). Сбрасывается на 0 в начале каждой новой загрузки.
     @State private var progress: Double = 0
 
+    // Тема читалки — кольцо прогресса раньше было жёстко белым ("страница
+    // ещё не загрузилась, фон тёмный вне зависимости от темы" — было не так:
+    // при светлой теме читалки фон светлый, и белое кольцо на нём не видно).
+    // Берём цвет из той же ReaderPalette, что и весь остальной текст читалки.
+    @AppStorage("reader_theme") private var readerTheme = 0
+    @Environment(\.colorScheme) private var systemColorScheme
+    private var palette: ReaderPalette { .make(theme: readerTheme, system: systemColorScheme) }
+
     /// Высота placeholder'а под реальную ширину экрана — та же логика
     /// "по факту загрузки" (scaledToFit + maxWidth: .infinity) даёт финальную
     /// картинку, просто заранее просчитанная. Не учитывает vScale (зум) —
@@ -1893,13 +1918,15 @@ struct VerticalPageImage: View {
     }
 
     /// Кольцо реального прогресса скачивания — тот же стиль отрисовки, что и
-    /// у MangaDetailView.chapterDownloadControl (трек + дуга), просто белым
-    /// (страница ещё не загрузилась, фон тёмный вне зависимости от темы).
+    /// у MangaDetailView.chapterDownloadControl (трек + дуга), цвет — из
+    /// ReaderPalette.foreground (белый на тёмной теме читалки, тёмный на
+    /// светлой), а не жёстко белый.
     private var pageProgressRing: some View {
-        ZStack {
-            Circle().stroke(Color.white.opacity(0.25), lineWidth: 3)
+        let fg = palette.foreground
+        return ZStack {
+            Circle().stroke(fg.opacity(0.25), lineWidth: 3)
             Circle().trim(from: 0, to: max(0.02, progress))
-                .stroke(Color.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .stroke(fg, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }
         .frame(width: 28, height: 28)
