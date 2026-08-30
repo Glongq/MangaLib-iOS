@@ -70,20 +70,23 @@ struct CoverGalleryView: View {
     }
 
     var body: some View {
-        // Крестик закрытия — ОТДЕЛЬНЫЙ слой поверх (alignment: .bottomTrailing
-        // у ВНЕШНЕГО ZStack), а не .overlay поверх уже .ignoresSafeArea()'нутого
-        // контента: раньше кнопка была overlay'ем НА содержимом с
-        // .ignoresSafeArea(), из-за чего её позиция считалась от буквального
-        // верха экрана, а не от реальной safe area. Вынесена сюда — считается
-        // от НАСТОЯЩЕЙ safe area, фон/листалка при этом по-прежнему
-        // полноэкранные (их .ignoresSafeArea() ниже не тронут).
+        // Крестик закрытия и бабл номера страницы — ТЕПЕРЬ одна общая нижняя
+        // "полоса" (HStack), а не два независимых оверлея с одинаковым
+        // .padding(.bottom, 24), которые формально стояли на одной высоте, но
+        // визуально не были ничем связаны — бабл по центру, крестик отдельно
+        // в углу сам по себе, "как будто забыт там" (по прямой просьбе
+        // исправлено — "крестик теперь вообще в углу"). Бабл — по центру ВСЕЙ
+        // строки (Spacer с обеих сторон, тот же эффект, что и раньше давал
+        // .overlay(alignment: .bottom) на всю ширину), крестик — оверлеем
+        // поверх этой ЖЕ строки у trailing-края, то есть буквально на одной
+        // высоте и в одном визуальном "блоке", а не отдельно.
         //
-        // Позиция — СНИЗУ, рядом с бабблом номера страницы (было сверху
-        // справа, как кнопка "..." на карточке тайтла) — по прямой повторной
-        // просьбе: "перенеси уже ниже, она всё ещё вверху". Тот же нижний
-        // отступ, что и у бабла (24), чтобы обе плашки стояли на одной
-        // высоте.
-        ZStack(alignment: .bottomTrailing) {
+        // ОТДЕЛЬНЫЙ слой ПОВЕРХ содержимого (а не overlay уже
+        // .ignoresSafeArea()'нутого TabView/фона) — чтобы позиция считалась
+        // от НАСТОЯЩЕЙ safe area, а не от буквального края экрана; фон/
+        // листалка при этом по-прежнему полноэкранные (их .ignoresSafeArea()
+        // ниже не тронут).
+        ZStack(alignment: .bottom) {
             ZStack {
                 background
 
@@ -96,7 +99,9 @@ struct CoverGalleryView: View {
                 .tabViewStyle(.page(indexDisplayMode: .never))
             }
             .ignoresSafeArea()
-            .overlay(alignment: .bottom) {
+
+            HStack {
+                Spacer(minLength: 0)
                 // Тот же стеклянный бабл, что у номера страницы в читалке манги
                 // (см. MangaReaderView.pageBubble) — тот же шрифт/паддинг/капсула,
                 // просто белый текст (в читалке fg зависит от темы страницы, тут
@@ -108,18 +113,19 @@ struct CoverGalleryView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .glassEffect(.regular, in: Capsule())
-                        .padding(.bottom, 24)
+                }
+                Spacer(minLength: 0)
+            }
+            .overlay(alignment: .trailing) {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 48, height: 48)
+                        .glassEffect(.regular, in: Circle())
                 }
             }
-
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 48, height: 48)
-                    .glassEffect(.regular, in: Circle())
-            }
-            .padding(.trailing, 16)
+            .padding(.horizontal, 16)
             .padding(.bottom, 24)
         }
         .persistentSystemOverlays(.hidden)
