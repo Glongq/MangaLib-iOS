@@ -101,7 +101,12 @@ protocol ExternalSiteProvider {
     /// у сайта такого справочника нет (capabilities.hasTagBrowser == false)
     /// — просто возвращает [] и никогда не вызывается настоящим UI (тот
     /// сам проверяет capabilities раньше, чем показать экран).
-    func fetchTagIndex(kind: ExternalTagKind, letter: Character) async throws -> [ExternalTagEntry]
+    /// `Swift.Character`, не голое `Character` — этот модуль объявляет
+    /// СВОЙ тип `Character` (см. MangaModels.swift — модель персонажа
+    /// тайтла), который иначе затеняет стандартный однобуквенный тип и
+    /// ломает компиляцию (не отлавливается локальным баланс-скобок-чеком,
+    /// только реальным билдом — см. .github/workflows/ios.yml).
+    func fetchTagIndex(kind: ExternalTagKind, letter: Swift.Character) async throws -> [ExternalTagEntry]
 
     /// Автокомплит при наборе текста в поиске. Как и fetchTagIndex — можно
     /// честно вернуть [], если у сайта такого эндпоинта нет/не подтверждён.

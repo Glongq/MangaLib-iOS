@@ -99,7 +99,7 @@ actor EHentaiProvider: ExternalSiteProvider {
 
     // MARK: Алфавитный справочник — не подтверждён у e-hentai, честно пусто.
 
-    func fetchTagIndex(kind: ExternalTagKind, letter: Character) async throws -> [ExternalTagEntry] {
+    func fetchTagIndex(kind: ExternalTagKind, letter: Swift.Character) async throws -> [ExternalTagEntry] {
         []
     }
 

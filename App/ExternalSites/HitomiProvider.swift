@@ -45,7 +45,7 @@ struct HitomiProvider: ExternalSiteProvider {
 
     // MARK: Алфавитный список (Часть 4)
 
-    func fetchTagIndex(kind: ExternalTagKind, letter: Character) async throws -> [ExternalTagEntry] {
+    func fetchTagIndex(kind: ExternalTagKind, letter: Swift.Character) async throws -> [ExternalTagEntry] {
         let kindSlug: String
         switch kind {
         case .tags: kindSlug = "tags"

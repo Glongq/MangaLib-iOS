@@ -8,13 +8,16 @@ struct ExternalTagBrowserView: View {
     let site: ExternalSite
 
     @State private var kind: ExternalTagKind = .tags
-    @State private var letter: Character = "a"
+    /// `Swift.Character`, не голое `Character` — см. ExternalSiteProvider.
+    /// fetchTagIndex doc-comment (свой тип `Character` в MangaModels.swift
+    /// затеняет стандартный однобуквенный тип во всём модуле).
+    @State private var letter: Swift.Character = "a"
     @State private var entries: [ExternalTagEntry] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
 
     private var provider: any ExternalSiteProvider { ExternalSiteRegistry.provider(for: site) }
-    private static let letters: [Character] = ["#"] + Array("abcdefghijklmnopqrstuvwxyz")
+    private static let letters: [Swift.Character] = ["#"] + Array("abcdefghijklmnopqrstuvwxyz")
 
     var body: some View {
         VStack(spacing: 0) {
