@@ -19,9 +19,12 @@ struct HitomiProvider: ExternalSiteProvider {
     let capabilities = ExternalSiteCapabilities(
         hasCatalog: true,
         hasTagBrowser: true,
-        // Свободный текстовый поиск упирается в неразобранный бинарный
-        // B-tree индекс (galleriesindex/*) — см. план, "Что заблокировано".
-        hasSearch: false,
+        // Не полнотекстовый поиск в привычном смысле (тот всё ещё упирается
+        // в неразобранный бинарный B-tree индекс galleriesindex/*, см. план,
+        // "Что заблокировано") — но реальную пользу даёт: пустой запрос —
+        // «Recently», непустой — намеренная команда namespace:значение (см.
+        // fetchIdsBySearch), тот же принцип, что и у поиска на самом сайте.
+        hasSearch: true,
         hasCategoryFilter: false,
         // Курсор — обычный byte-offset (см. fetchIdsByTag ниже), поэтому
         // "страница N" считается точно, без сети (см. cursorForPage ниже).
@@ -139,29 +142,41 @@ struct HitomiProvider: ExternalSiteProvider {
 
     // MARK: Список тайтлов по тегу (.nozomi, Часть 6)
 
-    /// hitomi.la — свой неймспейс на каждый URL-путь (см. план: "female"/
-    /// "male"/"tag" для конкретных тегов, "n/series"/"character"/"artist"/
-    /// "group" для остального). Явный switch, а не ExternalTagNamespace.
-    /// rawValue — тот теперь ничей, общий enum (см. ExternalSiteProvider.swift).
+    /// hitomi.la — свой неймспейс на каждый URL-путь, ВСЕ с префиксом `n/`
+    /// (единая схема, используемая всеми известными сторонними hitomi-
+    /// клиентами) — раньше здесь ошибочно был префикс только у `.series`
+    /// (единственный случай, напрямую пойманный в HAR), а `tag`/`female`/
+    /// `male`/`character`/`artist`/`group` были без `n/` "по аналогии" —
+    /// это и было причиной "0 тайтлов по любому тегу, будто нет сети": путь
+    /// без `n/` уводит на несуществующий URL, .nozomi отвечает 404/ошибкой
+    /// на КАЖДЫЙ тег, кроме серий (единственного пути, который был верным).
     private static func nozomiPath(for namespace: ExternalTagNamespace) -> String {
         switch namespace {
-        case .tag: return "tag"
-        case .female: return "female"
-        case .male: return "male"
-        case .character: return "character"
-        case .artist: return "artist"
-        case .group: return "group"
+        case .tag: return "n/tag"
+        case .female: return "n/female"
+        case .male: return "n/male"
+        case .character: return "n/character"
+        case .artist: return "n/artist"
+        case .group: return "n/group"
         case .series: return "n/series"
         }
     }
 
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
-        let offset = Int(cursor ?? "0") ?? 0
         let encodedValue = value.lowercased()
             .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value.lowercased()
-        guard let url = URL(string: "https://ltn.hitomi.la/\(Self.nozomiPath(for: namespace))/\(encodedValue)-all.nozomi") else {
-            throw HitomiError.badResponse
-        }
+        return try await fetchNozomiList(
+            urlString: "https://ltn.hitomi.la/\(Self.nozomiPath(for: namespace))/\(encodedValue)-all.nozomi",
+            cursor: cursor, limit: limit
+        )
+    }
+
+    /// Общий байтовый Range-запрос к .nozomi-файлу — и по тегу
+    /// (fetchIdsByTag), и по общему индексу "Recently" (fetchIdsBySearch,
+    /// пустой запрос) — один и тот же формат ответа, отличается только URL.
+    private func fetchNozomiList(urlString: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
+        let offset = Int(cursor ?? "0") ?? 0
+        guard let url = URL(string: urlString) else { throw HitomiError.badResponse }
         var request = URLRequest(url: url)
         let byteOffset = offset * 4
         let byteEnd = byteOffset + limit * 4 - 1
@@ -211,11 +226,40 @@ struct HitomiProvider: ExternalSiteProvider {
         return result
     }
 
-    /// Честная пустая заглушка — см. capabilities.hasSearch == false. UI
-    /// не должен вообще вызывать это для hitomi (см. ExternalSiteCapabilities
-    /// doc-comment), но протокол требует реализацию у всех провайдеров.
+    /// Пустой запрос — «Recently» (см. индекс `index-all.nozomi`, тот же
+    /// принцип, что и главная страница hitomi.la), непустой — распознаёт
+    /// префикс `namespace:значение` (`female:`/`male:`/`series:`/`artist:`/
+    /// `group:`/`character:`/`tag:`, по образцу того, как реально ищут на
+    /// самом сайте) и уходит в fetchIdsByTag; без префикса — трактует весь
+    /// текст как обычный тег (namespace `.tag`). НЕ HAR-подтверждено (в
+    /// отличие от остального в этом файле) — путь `index-all.nozomi`
+    /// известен по документации сторонних hitomi-клиентов, не пойман в
+    /// живом трафике этой сессии; если "Recently" не грузится, это первое,
+    /// что стоит перепроверить.
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
-        ([], nil)
+        try await fetchIdsBySearch(query: query, excludedCategoryBits: 0, cursor: cursor, limit: limit)
+    }
+
+    func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            return try await fetchNozomiList(urlString: "https://ltn.hitomi.la/index-all.nozomi", cursor: cursor, limit: limit)
+        }
+        let (namespace, value) = Self.parseSearchCommand(trimmed)
+        return try await fetchIdsByTag(namespace: namespace, value: value, cursor: cursor, limit: limit)
+    }
+
+    private static let searchPrefixes: [(String, ExternalTagNamespace)] = [
+        ("female:", .female), ("male:", .male), ("series:", .series),
+        ("artist:", .artist), ("group:", .group), ("character:", .character), ("tag:", .tag)
+    ]
+
+    private static func parseSearchCommand(_ text: String) -> (ExternalTagNamespace, String) {
+        let lower = text.lowercased()
+        for (prefix, ns) in searchPrefixes where lower.hasPrefix(prefix) {
+            return (ns, lower.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces))
+        }
+        return (.tag, lower)
     }
 
     // MARK: Карточка тайтла (galleries/{id}.js, Часть 6)

@@ -197,15 +197,21 @@ actor EHentaiProvider: ExternalSiteProvider {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: 0, cursor: cursor, limit: limit)
     }
 
+    /// Пустой запрос — просто главная страница (см. HAR: `GET https://
+    /// e-hentai.org/` без единого параметра — та же самая "последние
+    /// загруженные" лента, что видна в браузере) — по тому же принципу
+    /// «Recently», что и у hitomi (см. HitomiProvider.fetchIdsBySearch).
     /// `excludedCategoryBits` — см. EHentaiCategory (bitmask ИСКЛЮЧАЕМЫХ
     /// категорий, подтверждено HAR). 0 — параметр `f_cats` вообще не
     /// добавляется в URL, ровно как на самом сайте, когда ни одна кнопка
     /// категории не выключена.
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
-        let encodedQuery = Self.formEncoded(query)
-        var urlString = "https://e-hentai.org/?f_search=\(encodedQuery)"
-        if excludedCategoryBits != 0 { urlString += "&f_cats=\(excludedCategoryBits)" }
-        if let cursor { urlString += "&" + Self.paginationQueryItem(for: cursor) }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        var params: [String] = []
+        if !trimmed.isEmpty { params.append("f_search=\(Self.formEncoded(trimmed))") }
+        if excludedCategoryBits != 0 { params.append("f_cats=\(excludedCategoryBits)") }
+        if let cursor { params.append(Self.paginationQueryItem(for: cursor)) }
+        let urlString = params.isEmpty ? "https://e-hentai.org/" : "https://e-hentai.org/?" + params.joined(separator: "&")
         return try await fetchGalleryList(urlString: urlString)
     }
 

@@ -34,17 +34,11 @@ struct ExternalCombinedCatalogView: View {
                     .padding(.bottom, 12)
             }
 
-            if committedQuery.isEmpty {
-                StateView(
-                    icon: "square.grid.2x2",
-                    title: "Введите запрос",
-                    description: "Ищет сразу по всем включённым сайтам: \(sites.map(\.displayName).joined(separator: ", ")).",
-                    fillScreen: true
-                )
-            } else {
-                ExternalCatalogGridView(sites: sites, query: .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits), title: committedQuery, embedded: true)
-                    .id("\(committedQuery)#\(excludedCategoryBits)")
-            }
+            // Пустой запрос — лента "Recently" сразу по всем включённым
+            // сайтам (см. ExternalSearchView — тот же принцип), не
+            // требует сначала что-то ввести.
+            ExternalCatalogGridView(sites: sites, query: .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits), title: committedQuery.isEmpty ? "Recently" : committedQuery, embedded: true)
+                .id("\(committedQuery)#\(excludedCategoryBits)")
         }
         .navigationTitle("Все сайты")
         .navigationBarTitleDisplayMode(.inline)

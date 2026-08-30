@@ -32,17 +32,16 @@ struct ExternalSearchView: View {
                     .padding(.bottom, 12)
             }
 
-            if committedQuery.isEmpty {
-                StateView(icon: "magnifyingglass", title: "Введите запрос", fillScreen: true)
-            } else {
-                // .id — принудительно НОВЫЙ экземпляр вью на каждое
-                // изменение запроса/категорий, чтобы @State сетки (items/
-                // cursors/...) сбрасывался и .task заново запускал загрузку
-                // — простая смена параметра `query:` этого не делает, SwiftUI
-                // считает это ТЕМ ЖЕ вью на том же месте дерева.
-                ExternalCatalogGridView(site: site, query: .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits), title: committedQuery, embedded: true)
-                    .id("\(committedQuery)#\(excludedCategoryBits)")
-            }
+            // Пустой запрос — не "Введите запрос", а лента "Recently" (см.
+            // HitomiProvider/EHentaiProvider.fetchIdsBySearch с пустым query)
+            // — тайтлы видны сразу, без необходимости сначала что-то ввести.
+            // .id — принудительно НОВЫЙ экземпляр вью на каждое изменение
+            // запроса/категорий, чтобы @State сетки (items/cursors/...)
+            // сбрасывался и .task заново запускал загрузку — простая смена
+            // параметра `query:` этого не делает, SwiftUI считает это ТЕМ ЖЕ
+            // вью на том же месте дерева.
+            ExternalCatalogGridView(site: site, query: .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits), title: committedQuery.isEmpty ? "Recently" : committedQuery, embedded: true)
+                .id("\(committedQuery)#\(excludedCategoryBits)")
         }
         .navigationTitle("Поиск")
         .navigationBarTitleDisplayMode(.inline)
