@@ -53,6 +53,12 @@ struct ExternalSiteCapabilities {
     /// у e-hentai приблизительный (см. EHentaiProvider — `range=`,
     /// подтверждено HAR как реальный переход, но без точной формулы).
     var hasPageJump: Bool
+    /// Сортировка выдачи (см. ExternalSiteProvider.fetchIdsByTag(sortKey:)/
+    /// fetchIdsBySearch(sortKey:), ExternalCatalogGridView) — подтверждено
+    /// живым HAR ТОЛЬКО у hitomi (`popular/{период}[-{...}]-all.nozomi`,
+    /// см. HitomiProvider.SortOption) — у e-hentai подтверждения нет,
+    /// честно false, кнопка сортировки там не показывается.
+    var hasSortOptions: Bool
     var hasBookmarks: Bool
     var hasHistory: Bool
     var hasNotifications: Bool

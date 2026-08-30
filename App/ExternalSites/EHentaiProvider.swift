@@ -74,6 +74,11 @@ actor EHentaiProvider: ExternalSiteProvider {
         // Приблизительный (не точный offset, см. cursorForPage) — но
         // реальный, подтверждён HAR (`range=`), см. paginationQueryItem.
         hasPageJump: true,
+        // Ни в HAR, ни на самой странице поиска e-hentai нет видимого
+        // пользовательского контрола сортировки выдачи (в отличие от
+        // hitomi — см. HitomiProvider.SortOption) — честно false, не
+        // выдумываем.
+        hasSortOptions: false,
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,

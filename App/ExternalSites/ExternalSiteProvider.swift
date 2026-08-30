@@ -167,6 +167,19 @@ protocol ExternalSiteProvider {
     /// — тайтлов больше нет.
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
 
+    /// То же самое, но с сортировкой (см. ExternalSiteCapabilities.
+    /// hasSortOptions) — `sortKey` НЕПРОЗРАЧНЫЙ, специфичный для сайта
+    /// (см. HitomiProvider.SortOption.rawValue) — тот же принцип, что и
+    /// excludedCategoryBits у fetchIdsBySearch ниже (Int/String, а не общий
+    /// enum, чтобы протокол не был завязан на тип одного сайта). nil/"" —
+    /// сортировка по умолчанию. НАСТОЯЩИЙ protocol requirement по той же
+    /// причине, что и остальные необязательные параметры ниже — иначе
+    /// переопределение в HitomiProvider не подхватится через `any
+    /// ExternalSiteProvider`. Реализация по умолчанию (см. extension ниже)
+    /// просто игнорирует sortKey — так EHentaiProvider не обязан ничего
+    /// знать про сортировку (у него capabilities.hasSortOptions == false).
+    func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
+
     /// Свободный текстовый поиск (см. ExternalSiteCapabilities.hasSearch) —
     /// у hitomi формально нет (см. HitomiProvider — честная пустая
     /// заглушка), у e-hentai — обычный `?f_search=` по всему сайту.
@@ -184,6 +197,11 @@ protocol ExternalSiteProvider {
     /// игнорирует bitmask и уходит в обычный fetchIdsBySearch — так
     /// HitomiProvider не обязан ничего знать про категории.
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
+
+    /// То же самое, но и с категориями, и с сортировкой сразу (см. sortKey
+    /// у fetchIdsByTag выше) — НАСТОЯЩИЙ protocol requirement по той же
+    /// причине.
+    func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
 
     /// Курсор, соответствующий началу СТРАНИЦЫ `page` (1-based, по `limit`
     /// элементов на страницу) — для кнопки "Перейти на страницу" (см.
@@ -212,8 +230,16 @@ protocol ExternalSiteProvider {
 }
 
 extension ExternalSiteProvider {
+    func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
+        try await fetchIdsByTag(namespace: namespace, value: value, cursor: cursor, limit: limit)
+    }
+
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         try await fetchIdsBySearch(query: query, cursor: cursor, limit: limit)
+    }
+
+    func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
+        try await fetchIdsBySearch(query: query, excludedCategoryBits: excludedCategoryBits, cursor: cursor, limit: limit)
     }
 
     func cursorForPage(_ page: Int, limit: Int) -> String? { nil }

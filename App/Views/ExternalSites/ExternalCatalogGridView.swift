@@ -80,6 +80,11 @@ struct ExternalCatalogGridView: View {
     @State private var isLoadingMore = false
     @State private var errorMessage: String?
     @State private var jumpPageText = ""
+    /// НЕПРОЗРАЧНЫЙ ключ сортировки (см. ExternalSiteProvider.
+    /// fetchIdsByTag(sortKey:), HitomiProvider.SortOption.rawValue) — nil =
+    /// сортировка по умолчанию (по дате добавления). Только у сайтов с
+    /// capabilities.hasSortOptions (сейчас только hitomi, см. showsSortMenu).
+    @State private var sortKey: String?
 
     /// Число колонок — та же общая настройка Персонализации (2/3/4/Авто),
     /// что и у обычного каталога (см. MangaCatalogView/MangaCardView,
@@ -99,30 +104,61 @@ struct ExternalCatalogGridView: View {
     /// пропускаются, начинают заново с первой страницы). По прямой просьбе
     /// — всегда СВЕРХУ, видимой строкой, не спрятана за кнопкой/алертом.
     private var showsPageJump: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasPageJump } }
+    /// Сортировка (см. ExternalSiteCapabilities.hasSortOptions) — сейчас
+    /// подтверждена живым HAR только у hitomi (см. HitomiProvider.
+    /// SortOption), кнопка видна, если ХОТЯ БЫ один из sites её понимает —
+    /// у e-hentai в совместной выдаче sortKey просто честно игнорируется
+    /// (см. ExternalSiteProvider extension-дефолт).
+    private var showsSortMenu: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasSortOptions } }
 
     var body: some View {
         if embedded {
             innerContent
                 .task { await loadFirstPage() }
+                .onChange(of: sortKey) { _, _ in resetAndReload() }
         } else {
             innerContent
                 .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
                 .background(Theme.background.ignoresSafeArea())
                 .task { await loadFirstPage() }
+                .onChange(of: sortKey) { _, _ in resetAndReload() }
         }
+    }
+
+    /// Смена сортировки — начинаем выдачу заново с первой страницы (тот же
+    /// сброс, что и у jump(toPage:), просто без синтеза курсора страницы).
+    private func resetAndReload() {
+        items = []
+        details = [:]
+        cursors = [:]
+        Task { await performInitialLoad() }
     }
 
     private var innerContent: some View {
         VStack(spacing: 0) {
-            if showsPageJump {
-                pageJumpRow
+            if showsPageJump || showsSortMenu {
+                controlsRow
             }
             content
         }
     }
 
-    private var pageJumpRow: some View {
+    private var controlsRow: some View {
+        HStack(spacing: 8) {
+            if showsPageJump {
+                pageJumpControls
+            }
+            Spacer(minLength: 8)
+            if showsSortMenu {
+                sortMenuButton
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private var pageJumpControls: some View {
         HStack(spacing: 8) {
             Text("Стр.")
                 .font(.footnote)
@@ -141,10 +177,40 @@ struct ExternalCatalogGridView: View {
                     .foregroundStyle(Int(jumpPageText) != nil ? Theme.accent : Theme.textSecondary.opacity(0.4))
             }
             .disabled(Int(jumpPageText) == nil)
-            Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+    }
+
+    /// Ключ сортировки — `String?` (nil = по умолчанию), а не сам enum,
+    /// т.к. это ОБЩЕЕ поле для любого сайта (см. sortKey doc-comment выше);
+    /// Picker внутри работает с HitomiProvider.SortOption через
+    /// Binding(get:set:) — единственная сегодня реализация, см. showsSortMenu.
+    private var sortSelection: Binding<HitomiProvider.SortOption> {
+        Binding(
+            get: { sortKey.flatMap(HitomiProvider.SortOption.init(rawValue:)) ?? .dateAdded },
+            set: { newValue in sortKey = newValue == .dateAdded ? nil : newValue.rawValue }
+        )
+    }
+
+    private var sortMenuButton: some View {
+        Menu {
+            Picker("Сортировка", selection: sortSelection) {
+                ForEach(HitomiProvider.SortOption.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.footnote)
+                Text(sortSelection.wrappedValue.label)
+                    .font(.footnote)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
     }
 
     @ViewBuilder
@@ -292,16 +358,16 @@ struct ExternalCatalogGridView: View {
     /// см. HitomiProvider.fetchIdsByTag). `static`, без захвата `self` —
     /// вызывается из параллельных задач в loadNextBatch (см. ниже), лишний
     /// захват целого View-структа в @Sendable-замыкании ни к чему.
-    private static func fetchPage(site: ExternalSite, cursor: String?, query: ExternalCatalogQuery) async throws -> (ids: [Int], nextCursor: String?) {
+    private static func fetchPage(site: ExternalSite, cursor: String?, query: ExternalCatalogQuery, sortKey: String?) async throws -> (ids: [Int], nextCursor: String?) {
         let provider = ExternalSiteRegistry.provider(for: site)
         switch query {
         case let .tag(namespace, value):
-            return try await provider.fetchIdsByTag(namespace: namespace, value: value, cursor: cursor, limit: pageSize)
+            return try await provider.fetchIdsByTag(namespace: namespace, value: value, sortKey: sortKey, cursor: cursor, limit: pageSize)
         case let .search(text, excludedCategoryBits):
             if provider.capabilities.hasSearch {
-                return try await provider.fetchIdsBySearch(query: text, excludedCategoryBits: excludedCategoryBits, cursor: cursor, limit: pageSize)
+                return try await provider.fetchIdsBySearch(query: text, excludedCategoryBits: excludedCategoryBits, sortKey: sortKey, cursor: cursor, limit: pageSize)
             } else {
-                return try await provider.fetchIdsByTag(namespace: .tag, value: text, cursor: cursor, limit: pageSize)
+                return try await provider.fetchIdsByTag(namespace: .tag, value: text, sortKey: sortKey, cursor: cursor, limit: pageSize)
             }
         }
     }
@@ -355,6 +421,7 @@ struct ExternalCatalogGridView: View {
         let sitesToQuery = Array(pending)
         guard !sitesToQuery.isEmpty else { return }
         let currentQuery = query
+        let currentSortKey = sortKey
         let cursorsSnapshot = cursors
 
         let results = await withTaskGroup(of: (ExternalSite, [Int], String?, Bool).self) { group in
@@ -362,7 +429,7 @@ struct ExternalCatalogGridView: View {
                 let cursor = cursorsSnapshot[site]
                 group.addTask {
                     do {
-                        let page = try await Self.fetchPage(site: site, cursor: cursor, query: currentQuery)
+                        let page = try await Self.fetchPage(site: site, cursor: cursor, query: currentQuery, sortKey: currentSortKey)
                         return (site, page.ids, page.nextCursor, true)
                     } catch {
                         return (site, [], nil, false)

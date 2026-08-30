@@ -29,6 +29,10 @@ struct HitomiProvider: ExternalSiteProvider {
         // Курсор — обычный byte-offset (см. fetchIdsByTag ниже), поэтому
         // "страница N" считается точно, без сети (см. cursorForPage ниже).
         hasPageJump: true,
+        // Популярное: Сегодня/Неделя/Месяц/Год — подтверждено живым curl
+        // (30.08, третий заход) против `popular/{период}-all.nozomi` и
+        // `{кит}/popular/{период}/{значение}-all.nozomi`, см. SortOption.
+        hasSortOptions: true,
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
@@ -177,14 +181,52 @@ struct HitomiProvider: ExternalSiteProvider {
         }
     }
 
+    /// Сортировка (см. ExternalSiteCapabilities.hasSortOptions/SortOption) —
+    /// подтверждена живым curl (30.08, третий заход): `popular/{период}-
+    /// all.nozomi` (без тега) и `{кит}/popular/{период}/{значение}-
+    /// all.nozomi` (с тегом) — ОБА отдают `206` с реальным Content-Range,
+    /// без языкового суффикса (пример из живого `search.js`-комментария
+    /// содержал `-czech.nozomi`, но это оказалось НЕобязательным — путь без
+    /// языка тоже работает, см. план).
+    enum SortOption: String, CaseIterable, Identifiable {
+        case dateAdded, popularToday, popularWeek, popularMonth, popularYear
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .dateAdded: return "По дате добавления"
+            case .popularToday: return "Популярное: сегодня"
+            case .popularWeek: return "Популярное: неделя"
+            case .popularMonth: return "Популярное: месяц"
+            case .popularYear: return "Популярное: год"
+            }
+        }
+        fileprivate var popularPeriod: String? {
+            switch self {
+            case .dateAdded: return nil
+            case .popularToday: return "today"
+            case .popularWeek: return "week"
+            case .popularMonth: return "month"
+            case .popularYear: return "year"
+            }
+        }
+    }
+
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
+        try await fetchIdsByTag(namespace: namespace, value: value, sortKey: nil, cursor: cursor, limit: limit)
+    }
+
+    func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let prefixed = Self.prefixedValue(for: namespace, value: value)
         let encodedValue = prefixed.lowercased()
             .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? prefixed.lowercased()
-        return try await fetchNozomiList(
-            urlString: "https://\(Self.apiDomain)/\(Self.nozomiPath(for: namespace))/\(encodedValue)-all.nozomi",
-            cursor: cursor, limit: limit
-        )
+        let period = sortKey.flatMap(SortOption.init(rawValue:))?.popularPeriod
+        let path: String
+        if let period {
+            path = "\(Self.nozomiPath(for: namespace))/popular/\(period)/\(encodedValue)-all.nozomi"
+        } else {
+            path = "\(Self.nozomiPath(for: namespace))/\(encodedValue)-all.nozomi"
+        }
+        return try await fetchNozomiList(urlString: "https://\(Self.apiDomain)/\(path)", cursor: cursor, limit: limit)
     }
 
     /// РЕАЛЬНЫЙ хост для .nozomi/galleries/{id}.js — подтверждено ЖИВЫМ
@@ -270,12 +312,22 @@ struct HitomiProvider: ExternalSiteProvider {
     }
 
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
+        try await fetchIdsBySearch(query: query, excludedCategoryBits: excludedCategoryBits, sortKey: nil, cursor: cursor, limit: limit)
+    }
+
+    func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
+        let period = sortKey.flatMap(SortOption.init(rawValue:))?.popularPeriod
         guard !trimmed.isEmpty else {
+            // Пустой запрос + сортировка "Популярное" — глобальный
+            // popular-фид (без тега), проверено живым curl (см. SortOption).
+            if let period {
+                return try await fetchNozomiList(urlString: "https://\(Self.apiDomain)/popular/\(period)-all.nozomi", cursor: cursor, limit: limit)
+            }
             return try await fetchNozomiList(urlString: "https://\(Self.apiDomain)/index-all.nozomi", cursor: cursor, limit: limit)
         }
         let (namespace, value) = Self.parseSearchCommand(trimmed)
-        return try await fetchIdsByTag(namespace: namespace, value: value, cursor: cursor, limit: limit)
+        return try await fetchIdsByTag(namespace: namespace, value: value, sortKey: sortKey, cursor: cursor, limit: limit)
     }
 
     private static let searchPrefixes: [(String, ExternalTagNamespace)] = [
@@ -327,18 +379,26 @@ struct HitomiProvider: ExternalSiteProvider {
         return URL(string: "https://tn.gold-usergeneratedcontent.net/webpbigtn/\(c0)/\(c1_3)/\(hash).webp")
     }
 
-    /// Полноразмерная страница чтения — формула gg.js, ПОДТВЕРЖДЕНА двумя
-    /// живыми примерами из HAR (см. HitomiGG doc-comment и план):
-    /// хост = "w" (webp) + (gg.m(Int(gg.s(hash))) + 1), путь = gg.b +
-    /// gg.s(hash) + "/" + hash + ".webp". Сети не требует — async только
-    /// ради общего протокола (см. EHentaiProvider, там реально нужна сеть).
+    /// Полноразмерная страница чтения — формула gg.js: хост = "a" (avif) +
+    /// (gg.m(Int(gg.s(hash))) + 1), путь = gg.b + gg.s(hash) + "/" + hash +
+    /// ".avif". `b`/набор case-значений `m()` — ЖИВЬЁМ через HitomiGGCache
+    /// (см. её doc-comment — оба реально меняются со временем). Хост-префикс
+    /// "a"/расширение ".avif" — ИСПРАВЛЕНО (30.08, третий заход): раньше
+    /// здесь было "w"/".webp" — предположение по общей конвенции публичных
+    /// hitomi-клиентов, НЕ подтверждённое живым трафиком; свежий HAR поймал
+    /// РЕАЛЬНЫЕ URL читалки (`a1.../*.avif`, `a2.../*.avif`, статус 200) —
+    /// формула бакета/выбора хоста (gg.s/gg.m) была верна, ошибались именно
+    /// в букве хоста и расширении. Проверено живым curl на нескольких
+    /// хэшах из свежего HAR + ещё одном тайтле отдельно — везде 200
+    /// image/avif (обязательно с Referer: hitomi.la — уже стоит в session).
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL {
         let hash = page.key
+        let (b, caseSet) = try await HitomiGGCache.shared.current(session: session)
         let bucket = HitomiGG.s(hash)
         let g = Int(bucket) ?? 0
-        let hostNumber = HitomiGG.m(g) + 1
-        let host = "w\(hostNumber).gold-usergeneratedcontent.net"
-        guard let url = URL(string: "https://\(host)/\(HitomiGG.b)\(bucket)/\(hash).webp") else {
+        let hostNumber = HitomiGG.m(g, caseSet: caseSet) + 1
+        let host = "a\(hostNumber).gold-usergeneratedcontent.net"
+        guard let url = URL(string: "https://\(host)/\(b)\(bucket)/\(hash).avif") else {
             throw HitomiError.badResponse
         }
         return url
