@@ -215,6 +215,20 @@ struct ExternalCatalogGridView: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
                 .frame(width: width, alignment: .topLeading)
+
+            // Тип тайтла — третьей строкой под названием, тем же приёмом,
+            // что и в обычном каталоге (MangaCardView: название, сразу под
+            // ним тип секондари-цветом), по прямой просьбе (30.08). НА
+            // АНГЛИЙСКОМ, как есть на самом сайте (hitomi отдаёт "manga"/
+            // "doujinshi"/"misc"/... строчными, e-hentai — "Manga"/... с
+            // большой) — не переводим и не меняем регистр.
+            if let type = details[item.id]?.type, !type.isEmpty {
+                Text(type)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .frame(width: width, alignment: .leading)
+            }
         }
         .frame(width: width, alignment: .top)
     }
