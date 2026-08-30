@@ -143,9 +143,9 @@ struct HitomiProvider: ExternalSiteProvider {
     // MARK: Список тайтлов по тегу (.nozomi, Часть 6)
 
     /// РЕАЛЬНАЯ схема (перепроверено живьём против `ltn.gold-
-    /// usergeneratedcontent.net` — подтверждённый alias `ltn.hitomi.la`,
-    /// плюс живой исходник `galleryblock.js`/`galleries/{id}.js` этого же
-    /// сайта — см. план, ЧАСТЬ A): у hitomi ровно 4 "прямых" URL-кита —
+    /// usergeneratedcontent.net`, плюс живой исходник `galleryblock.js`/
+    /// `galleries/{id}.js` этого же сайта — см. план, ЧАСТЬ A): у hitomi
+    /// ровно 4 "прямых" URL-кита —
     /// `tag`/`series`/`character`/`artist` (те же 4, что в nav-баре
     /// alltags/allseries/allcharacters/allartists), БЕЗ префикса `n/`
     /// (мой предыдущий фикс с `n/` не был причиной бага — сервер принимает
@@ -182,10 +182,24 @@ struct HitomiProvider: ExternalSiteProvider {
         let encodedValue = prefixed.lowercased()
             .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? prefixed.lowercased()
         return try await fetchNozomiList(
-            urlString: "https://ltn.hitomi.la/\(Self.nozomiPath(for: namespace))/\(encodedValue)-all.nozomi",
+            urlString: "https://\(Self.apiDomain)/\(Self.nozomiPath(for: namespace))/\(encodedValue)-all.nozomi",
             cursor: cursor, limit: limit
         )
     }
+
+    /// РЕАЛЬНЫЙ хост для .nozomi/galleries/{id}.js — подтверждено ЖИВЫМ
+    /// `common.js` самого сайта (скачан 30.08 через доступный из песочницы
+    /// alias): `const domain2 = 'gold-usergeneratedcontent.net'; var domain
+    /// = 'ltn.' + domain2;` — сайт САМ ходит на `ltn.gold-
+    /// usergeneratedcontent.net`, НЕ на `ltn.hitomi.la` (тот, похоже,
+    /// заблокирован у части провайдеров/РКН — ровно то, ради чего у сайта
+    /// вообще есть domain-fronting на второй домен). Раньше здесь БЫЛ
+    /// буквально `ltn.hitomi.la` — сама .nozomi-схема была верной (что и
+    /// подтверждали живые curl-тесты В ЭТОЙ СЕССИИ, они шли через .net-alias
+    /// как обход блокировки самой песочницы), но в реальном коде домен
+    /// остался старым — вот и был "0 тайтлов" уже ПОСЛЕ фикса схемы:
+    /// тестировался один домен, а в коде остался другой.
+    private static let apiDomain = "ltn.gold-usergeneratedcontent.net"
 
     /// Общий байтовый Range-запрос к .nozomi-файлу — и по тегу
     /// (fetchIdsByTag), и по общему индексу "Recently" (fetchIdsBySearch,
@@ -247,11 +261,10 @@ struct HitomiProvider: ExternalSiteProvider {
     /// префикс `namespace:значение` (`female:`/`male:`/`series:`/`artist:`/
     /// `group:`/`character:`/`tag:`, по образцу того, как реально ищут на
     /// самом сайте) и уходит в fetchIdsByTag; без префикса — трактует весь
-    /// текст как обычный тег (namespace `.tag`). НЕ HAR-подтверждено (в
-    /// отличие от остального в этом файле) — путь `index-all.nozomi`
-    /// известен по документации сторонних hitomi-клиентов, не пойман в
-    /// живом трафике этой сессии; если "Recently" не грузится, это первое,
-    /// что стоит перепроверить.
+    /// текст как обычный тег (namespace `.tag`). `index-all.nozomi`
+    /// проверен живым curl против apiDomain (30.08, повторная проверка) —
+    /// `206`, `Content-Range .../4804324` (~1.2M тайтлов, правдоподобно для
+    /// "весь индекс").
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: 0, cursor: cursor, limit: limit)
     }
@@ -259,7 +272,7 @@ struct HitomiProvider: ExternalSiteProvider {
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
-            return try await fetchNozomiList(urlString: "https://ltn.hitomi.la/index-all.nozomi", cursor: cursor, limit: limit)
+            return try await fetchNozomiList(urlString: "https://\(Self.apiDomain)/index-all.nozomi", cursor: cursor, limit: limit)
         }
         let (namespace, value) = Self.parseSearchCommand(trimmed)
         return try await fetchIdsByTag(namespace: namespace, value: value, cursor: cursor, limit: limit)
@@ -281,7 +294,7 @@ struct HitomiProvider: ExternalSiteProvider {
     // MARK: Карточка тайтла (galleries/{id}.js, Часть 6)
 
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail {
-        guard let url = URL(string: "https://ltn.hitomi.la/galleries/\(id).js") else {
+        guard let url = URL(string: "https://\(Self.apiDomain)/galleries/\(id).js") else {
             throw HitomiError.badResponse
         }
         let (data, response) = try await session.data(from: url)
