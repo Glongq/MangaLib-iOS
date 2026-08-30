@@ -142,29 +142,45 @@ struct HitomiProvider: ExternalSiteProvider {
 
     // MARK: Список тайтлов по тегу (.nozomi, Часть 6)
 
-    /// hitomi.la — свой неймспейс на каждый URL-путь, ВСЕ с префиксом `n/`
-    /// (единая схема, используемая всеми известными сторонними hitomi-
-    /// клиентами) — раньше здесь ошибочно был префикс только у `.series`
-    /// (единственный случай, напрямую пойманный в HAR), а `tag`/`female`/
-    /// `male`/`character`/`artist`/`group` были без `n/` "по аналогии" —
-    /// это и было причиной "0 тайтлов по любому тегу, будто нет сети": путь
-    /// без `n/` уводит на несуществующий URL, .nozomi отвечает 404/ошибкой
-    /// на КАЖДЫЙ тег, кроме серий (единственного пути, который был верным).
+    /// РЕАЛЬНАЯ схема (перепроверено живьём против `ltn.gold-
+    /// usergeneratedcontent.net` — подтверждённый alias `ltn.hitomi.la`,
+    /// плюс живой исходник `galleryblock.js`/`galleries/{id}.js` этого же
+    /// сайта — см. план, ЧАСТЬ A): у hitomi ровно 4 "прямых" URL-кита —
+    /// `tag`/`series`/`character`/`artist` (те же 4, что в nav-баре
+    /// alltags/allseries/allcharacters/allartists), БЕЗ префикса `n/`
+    /// (мой предыдущий фикс с `n/` не был причиной бага — сервер принимает
+    /// оба варианта одинаково, но канонический — без него, как строит сам
+    /// сайт). `female`/`male`/`group` — это НЕ отдельные киты: это `tag`,
+    /// где ЗНАЧЕНИЕ само содержит префикс (см. `prefixedValue` ниже) —
+    /// подтверждено `galleries/{id}.js`: `tags[].url =
+    /// "/tag/female%3Aanal-all.html"`, НЕ `"/female/anal-all.html"`.
     private static func nozomiPath(for namespace: ExternalTagNamespace) -> String {
         switch namespace {
-        case .tag: return "n/tag"
-        case .female: return "n/female"
-        case .male: return "n/male"
-        case .character: return "n/character"
-        case .artist: return "n/artist"
-        case .group: return "n/group"
-        case .series: return "n/series"
+        case .tag, .female, .male, .group: return "tag"
+        case .character: return "character"
+        case .artist: return "artist"
+        case .series: return "series"
+        }
+    }
+
+    /// `female`/`male`/`group` живут ПОД китом `tag` (см. nozomiPath выше)
+    /// — сюда добавляется намеспейс-префикс в САМО значение, ровно как
+    /// делает сам сайт (`female:anal`, не отдельный путь). `.group` — по
+    /// аналогии с female/male, живым запросом НЕ подтверждено (нет ни
+    /// одного `/group/`-примера в собранных HAR), помечено ниже.
+    private static func prefixedValue(for namespace: ExternalTagNamespace, value: String) -> String {
+        switch namespace {
+        case .female: return "female:\(value)"
+        case .male: return "male:\(value)"
+        case .group: return "group:\(value)" // best-effort, не HAR-подтверждено
+        case .tag, .character, .artist, .series: return value
         }
     }
 
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
-        let encodedValue = value.lowercased()
-            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value.lowercased()
+        let prefixed = Self.prefixedValue(for: namespace, value: value)
+        let encodedValue = prefixed.lowercased()
+            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? prefixed.lowercased()
         return try await fetchNozomiList(
             urlString: "https://ltn.hitomi.la/\(Self.nozomiPath(for: namespace))/\(encodedValue)-all.nozomi",
             cursor: cursor, limit: limit

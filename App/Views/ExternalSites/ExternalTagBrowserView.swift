@@ -80,7 +80,15 @@ struct ExternalTagBrowserView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(entries) { entry in
                         NavigationLink {
-                            ExternalCatalogGridView(site: site, query: .tag(namespace: namespace(for: kind), value: entry.name), title: entry.name)
+                            // entry.slug, НЕ entry.name — slug это то, что
+                            // реально идёт в URL/nozomi (у гендерных тегов
+                            // содержит префикс "female:"/"male:"), который
+                            // сайт снимает только для отображения (см.
+                            // entry.name/HitomiProvider.parseTagList и план,
+                            // ЧАСТЬ A.2) — раньше здесь было entry.name, из-за
+                            // чего каждый гендерный тег бил в несуществующий
+                            // "голый" путь и 404-ился.
+                            ExternalCatalogGridView(site: site, query: .tag(namespace: namespace(for: kind), value: entry.slug.removingPercentEncoding ?? entry.slug), title: entry.name)
                         } label: {
                             row(entry)
                         }
