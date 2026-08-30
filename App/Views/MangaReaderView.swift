@@ -603,6 +603,32 @@ struct MangaReaderView: View {
     /// см. её .task(id: postPage)) только когда докрутили ДО него — метка-
     /// маркер ниже картинки ловит .onAppear лишь при реальной прокрутке вниз,
     /// а не сразу при показе страницы.
+    ///
+    /// ВАЖНО (баг "нужно несколько раз докручивать до низа" + "после загрузки
+    /// длинной манхвы блок комментариев не в самом низу"): контейнер
+    /// ZoomableImageScrollView раньше был жёстко .frame(height: geo.size.
+    /// height) — ровно один экран, вне зависимости от реальной высоты
+    /// картинки. Для длинных манхва-страниц (fitWidth == true, картинка выше
+    /// экрана) это создавало ДВА независимых вертикальных скролла сразу:
+    /// внешний SwiftUI ScrollView (этот, раскрывающий комментарии) и
+    /// внутренний нативный UIScrollView (панорама самой картинки без зума,
+    /// см. ZoomableImageScrollView) — они конкурировали за один и тот же
+    /// жест, и на реальной высоте контейнер не совпадал с фактической
+    /// высотой контента, из-за чего позиция скролла после дозагрузки
+    /// картинки переставала соответствовать видимому. Теперь высота
+    /// контейнера СРАЗУ считается из page.width/height (те же метаданные,
+    /// что и у VerticalPageImage.placeholderHeight в вертикальном режиме —
+    /// приходят в ответе главы ДО самой картинки), поэтому внутреннему
+    /// UIScrollView при зуме 1× скроллить нечего — вся прокрутка (картинка +
+    /// комментарии) идёт ОДНИМ непрерывным внешним скроллом, без гонки.
+    /// Зум по-прежнему полностью работает — во время него внешний скролл
+    /// уже отключается через isCurrentPageZoomed (см. .scrollDisabled ниже).
+    private func horizontalPageHeight(geo: GeometryProxy, page: PageItem) -> CGFloat {
+        guard fitWidth, let w = page.width, let h = page.height, w > 0, h > 0 else { return geo.size.height }
+        let scaled = geo.size.width * CGFloat(h) / CGFloat(w)
+        return max(scaled, geo.size.height)
+    }
+
     private func horizontalPage(index: Int, page: PageItem) -> some View {
         GeometryReader { geo in
             ScrollView(.vertical, showsIndicators: false) {
@@ -613,9 +639,10 @@ struct MangaReaderView: View {
                         doubleTapZoom: doubleTapZoom,
                         onTap: { xFraction in handleReaderTap(xFraction) },
                         onZoomChanged: { zoomed in isCurrentPageZoomed = zoomed },
-                        ringColor: UIColor(fg)
+                        ringColor: UIColor(fg),
+                        viewportHeight: geo.size.height
                     )
-                    .frame(width: geo.size.width, height: geo.size.height)
+                    .frame(width: geo.size.width, height: horizontalPageHeight(geo: geo, page: page))
 
                     if let ch = viewModel.currentChapter {
                         Color.clear.frame(height: 1)
@@ -1575,8 +1602,12 @@ struct ReaderSettingsSheet: View {
 /// жесты давали резину; здесь весь зум делает UIKit.
 ///
 /// - `fitWidth == false`: страница вписана целиком по высоте (обычная манга).
-/// - `fitWidth == true`: страница по ширине, длинные страницы скроллятся вниз
-///   даже без зума (вебтун/манхва).
+/// - `fitWidth == true`: страница по ширине; для длинных страниц (вебтун/
+///   манхва) высоту САМОГО контейнера снаружи заранее считают из метаданных
+///   (см. MangaReaderView.horizontalPageHeight) — при зуме 1× этой вьюхе
+///   внутри скроллить нечего, вся прокрутка длинной страницы идёт внешним
+///   SwiftUI ScrollView вокруг (а не этим UIScrollView). Собственная
+///   прокрутка этой вьюхи включается только когда реально зашли в зум.
 /// Одиночный тап — `onSingleTap` (показать/скрыть интерфейс). Двойной тап —
 /// зум к точке / сброс. Горизонтальный свайп на масштабе 1 не перехватывается
 /// (контент вписан → не скроллится вбок), поэтому листание страниц TabView
@@ -1596,6 +1627,13 @@ struct ZoomableImageScrollView: UIViewRepresentable {
     /// Цвет кольца загрузки (см. RingProgressView.ringColor) — под текущую
     /// ReaderPalette.foreground, чтобы не терялось на светлой теме читалки.
     var ringColor: UIColor = .white
+    /// Высота ОДНОГО экрана (geo.size.height у вызывающей стороны) — контейнер
+    /// этой вьюхи теперь бывает ВЫШЕ экрана (см. MangaReaderView.
+    /// horizontalPageHeight, длинные манхва-страницы), а кольцо загрузки,
+    /// пока картинка не пришла, должно оставаться в пределах ВИДИМОЙ (первой
+    /// экранной) части контейнера, а не по центру всей длинной страницы (см.
+    /// Coordinator.centerRing).
+    var viewportHeight: CGFloat = 0
 
     func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap, fitWidth: fitWidth, doubleTapZoom: doubleTapZoom, onZoomChanged: onZoomChanged) }
 
@@ -1624,6 +1662,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         context.coordinator.scrollView = scroll
         context.coordinator.imageView = imageView
         context.coordinator.ringView = ring
+        context.coordinator.viewportHeight = viewportHeight
 
         let single = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
         single.numberOfTapsRequired = 1
@@ -1644,6 +1683,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         context.coordinator.onZoomChanged = onZoomChanged
         context.coordinator.doubleTapZoom = doubleTapZoom
         context.coordinator.ringView?.ringColor = ringColor
+        context.coordinator.viewportHeight = viewportHeight
         if context.coordinator.fitWidth != fitWidth {
             context.coordinator.fitWidth = fitWidth
             context.coordinator.layoutImage(resetZoom: true)
@@ -1657,6 +1697,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         weak var scrollView: UIScrollView?
         weak var imageView: UIImageView?
         weak var ringView: RingProgressView?
+        var viewportHeight: CGFloat = 0
         var onTap: (CGFloat) -> Void
         var onZoomChanged: ((Bool) -> Void)?
         var fitWidth: Bool
@@ -1772,9 +1813,17 @@ struct ZoomableImageScrollView: UIViewRepresentable {
             scroll.contentInset = UIEdgeInsets(top: insetY, left: insetX, bottom: insetY, right: insetX)
         }
 
+        /// Кольцо центрируется в пределах ВИДИМОЙ (первой экранной) части
+        /// контейнера, не всей его высоты — контейнер теперь бывает выше
+        /// экрана (длинные манхва-страницы, см. MangaReaderView.
+        /// horizontalPageHeight), а координаты этой UIScrollView — локальные
+        /// для ВСЕГО контейнера целиком (внешний SwiftUI-скролл двигает его
+        /// как единое целое, bounds.origin этой вьюхи от этого не меняется),
+        /// поэтому центр по всей высоте оказался бы вне экрана до прокрутки.
         private func centerRing() {
             guard let scroll = scrollView, let ringView else { return }
-            ringView.center = CGPoint(x: scroll.bounds.midX, y: scroll.bounds.midY)
+            let refHeight = viewportHeight > 0 ? min(scroll.bounds.height, viewportHeight) : scroll.bounds.height
+            ringView.center = CGPoint(x: scroll.bounds.midX, y: refHeight / 2)
         }
     }
 }
