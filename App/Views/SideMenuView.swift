@@ -51,7 +51,7 @@ struct SideMenuView: View {
     // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
     private enum MenuRoute: Hashable {
         case history, settings, downloads, comments, franchises, friends, collections, myCollections
-        case teams, characters, people, publishers, users, nowReading, favorites
+        case teams, characters, people, publishers, users, nowReading, favorites, combinedCatalog
     }
     // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
     // NavigationLink(value:) ВНУТРИ этих экранов (например, History →
@@ -90,6 +90,7 @@ struct SideMenuView: View {
                         otherSection
                         searchSitesBlock
                         externalSitesBlock
+                        combinedCatalogBlock
                     }
                     .padding(.horizontal, 16)
                     // Компенсация за отсутствующую строку поиска (была здесь
@@ -130,6 +131,15 @@ struct SideMenuView: View {
                 case .users:      UserListView()
                 case .nowReading: TopViewsListView()
                 case .favorites:  if let uid = auth.userId { FavoritesListView(userId: uid) }
+                // Совместный поиск/каталог СРАЗУ по всем включённым внешним
+                // сайтам (см. ExternalCombinedCatalogView — уже умеет это
+                // делать, использовалась раньше только через "Все сайты" в
+                // развёрнутом siteRow, см. combinedCatalogBlock ниже) — по
+                // прямой просьбе (31.08) отдельным, всегда видимым пунктом
+                // в самом низу меню, не переключая при этом активный
+                // сайт/режим приложения (это просто отдельный экран поиска,
+                // не смена глобального состояния, как у siteRow).
+                case .combinedCatalog: ExternalCombinedCatalogView()
                 }
             }
         }
@@ -576,6 +586,22 @@ struct SideMenuView: View {
             if showDivider {
                 Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14).padding(.trailing, 16)
             }
+        }
+    }
+
+    // Совместный каталог/поиск СРАЗУ по всем включённым внешним сайтам
+    // (см. ExternalCombinedCatalogView) — по прямой просьбе (31.08),
+    // отдельный ВСЕГДА видимый пункт в самом низу меню (не только внутри
+    // развёрнутого siteRow под "Все сайты", и не гейтится числом включённых
+    // сайтов — тот вариант это переключатель ГЛОБАЛЬНОГО активного режима
+    // приложения, этот — просто отдельный экран поиска, открывается
+    // ПОВЕРХ текущего режима, ничего не переключая). С 0 включёнными
+    // сайтами экран честно покажет "Тайтлов не найдено" — тот же принцип,
+    // что и у searchSitesBlock/externalSitesBlock выше (без искусственного
+    // скрытия строки).
+    private var combinedCatalogBlock: some View {
+        card {
+            row("Совместный каталог", icon: "square.grid.3x3", showDivider: false, action: { path.append(MenuRoute.combinedCatalog) })
         }
     }
 
