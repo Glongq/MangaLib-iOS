@@ -556,6 +556,13 @@ struct BookmarksView: View {
                 base
             }
             .buttonStyle(.plain)
+        } else if isSearching {
+            // См. KeyboardDismissOnTap.SearchDismissibleNavigationLink — тот
+            // же приём "подмени NavigationLink на Button, пока активен
+            // поиск", просто здесь ветвление и так уже было (isSelecting), а
+            // не через отдельный компонент.
+            Button { dismissSearch() } label: { base }
+                .buttonStyle(.plain)
         } else {
             NavigationLink(value: bm) { base }
                 .buttonStyle(.plain)

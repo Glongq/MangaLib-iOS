@@ -103,17 +103,17 @@ struct DirectoryListView: View {
     private func row(_ entity: DirectoryEntity) -> some View {
         switch vm.kind.targetModel {
         case "team":
-            NavigationLink {
+            SearchDismissibleDestinationLink(isSearching: isSearching, dismiss: { dismissSearch() }) {
                 TeamView(slugURL: entity.slugURL, fallbackName: entity.displayName, coverURL: entity.coverURL)
             } label: { rowContent(entity) }
             .buttonStyle(.plain)
         case "character":
-            NavigationLink {
+            SearchDismissibleDestinationLink(isSearching: isSearching, dismiss: { dismissSearch() }) {
                 CharacterView(slugURL: entity.slugURL, fallbackName: entity.displayName, coverURL: entity.coverURL)
             } label: { rowContent(entity) }
             .buttonStyle(.plain)
         default:
-            NavigationLink {
+            SearchDismissibleDestinationLink(isSearching: isSearching, dismiss: { dismissSearch() }) {
                 DirectoryDetailView(kind: vm.kind, slugURL: entity.slugURL, fallbackName: entity.displayName, coverURL: entity.coverURL)
             } label: { rowContent(entity) }
             .buttonStyle(.plain)

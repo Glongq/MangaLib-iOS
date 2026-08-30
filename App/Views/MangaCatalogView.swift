@@ -300,7 +300,7 @@ struct MangaCatalogView: View {
 
                         HStack(alignment: .top, spacing: gridSpacing) {
                             ForEach(rowItems) { item in
-                                NavigationLink(value: item) {
+                                SearchDismissibleNavigationLink(value: item, isSearching: isSearching, dismiss: { dismissSearch() }) {
                                     MangaCardView(item: item, width: cardWidth, rowNeedsTwoLines: rowNeedsTwoLines)
                                 }
                                 .buttonStyle(.plain)

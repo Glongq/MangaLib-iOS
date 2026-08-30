@@ -19,6 +19,13 @@ struct FavoritesListView: View {
     private let gridSpacing: CGFloat = 12
     private let gridHorizontalPadding: CGFloat = 16
 
+    /// Для сворачивания клавиатуры первым тапом (см.
+    /// KeyboardDismissOnTap.dismissKeyboardOnFirstTap/
+    /// SearchDismissibleDestinationLink) — родной .searchable() без своего
+    /// @FocusState, isSearching/dismissSearch из окружения.
+    @Environment(\.isSearching) private var isSearching
+    @Environment(\.dismissSearch) private var dismissSearch
+
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
@@ -105,6 +112,7 @@ struct FavoritesListView: View {
             }
         }
         .scrollIndicators(.hidden)
+        .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
     }
 
     @ViewBuilder
@@ -261,6 +269,7 @@ struct FavoritesListView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
         }
     }
 
@@ -317,22 +326,22 @@ struct FavoritesListView: View {
     private func destination<Label: View>(for entity: DirectoryEntity, @ViewBuilder label: () -> Label) -> some View {
         switch vm.category.targetModel {
         case "team":
-            NavigationLink {
+            SearchDismissibleDestinationLink(isSearching: isSearching, dismiss: { dismissSearch() }) {
                 TeamView(slugURL: entity.slugURL, fallbackName: entity.displayName, coverURL: entity.coverURL)
             } label: { label() }
             .buttonStyle(.plain)
         case "character":
-            NavigationLink {
+            SearchDismissibleDestinationLink(isSearching: isSearching, dismiss: { dismissSearch() }) {
                 CharacterView(slugURL: entity.slugURL, fallbackName: entity.displayName, coverURL: entity.coverURL)
             } label: { label() }
             .buttonStyle(.plain)
         case "franchise":
-            NavigationLink {
+            SearchDismissibleDestinationLink(isSearching: isSearching, dismiss: { dismissSearch() }) {
                 FranchiseView(slugURL: entity.slugURL, fallbackName: entity.displayName)
             } label: { label() }
             .buttonStyle(.plain)
         default:
-            NavigationLink {
+            SearchDismissibleDestinationLink(isSearching: isSearching, dismiss: { dismissSearch() }) {
                 DirectoryDetailView(kind: vm.category == .people ? .people : .publisher, slugURL: entity.slugURL, fallbackName: entity.displayName, coverURL: entity.coverURL)
             } label: { label() }
             .buttonStyle(.plain)

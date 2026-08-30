@@ -709,7 +709,7 @@ struct TeamView: View {
             let columns = Array(repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing), count: gridColumnsCount)
             LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
                 ForEach(vm.titles) { item in
-                    NavigationLink {
+                    SearchDismissibleDestinationLink(isSearching: searchFocused, dismiss: { searchFocused = false }) {
                         MangaDetailView(
                             slug: item.apiSlug,
                             fallbackTitle: item.displayTitle,

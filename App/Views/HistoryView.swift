@@ -38,6 +38,13 @@ struct HistoryView: View {
     @State private var isLoadingHistory = false
     @State private var isLoadingMoreHistory = false
 
+    /// Для сворачивания клавиатуры первым тапом по списку (см.
+    /// KeyboardDismissOnTap.dismissKeyboardOnFirstTap/
+    /// SearchDismissibleNavigationLink) — родной .searchable() без своего
+    /// @FocusState, isSearching/dismissSearch из окружения.
+    @Environment(\.isSearching) private var isSearching
+    @Environment(\.dismissSearch) private var dismissSearch
+
     /// Дедуп по media.id — сервер отдаёт КАЖДЫЙ просмотр главы отдельной
     /// записью, а не одну запись на тайтл (см. пример ответа в чате: два
     /// подряд идущих view_at для одного и того же тайтла, разные главы).
@@ -175,7 +182,7 @@ struct HistoryView: View {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     ForEach(results) { entry in
-                        NavigationLink(value: entry) { row(entry) }
+                        SearchDismissibleNavigationLink(value: entry, isSearching: isSearching, dismiss: { dismissSearch() }) { row(entry) }
                             .buttonStyle(.plain)
                             .onAppear { Task { await loadMoreIfNeeded(current: entry) } }
                     }
@@ -188,6 +195,7 @@ struct HistoryView: View {
             }
             .scrollIndicators(.hidden)
             .refreshable { await resetAndLoad() }
+            .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
         }
     }
 

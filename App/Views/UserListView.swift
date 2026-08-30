@@ -12,6 +12,12 @@ struct UserListView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var profileUser: ProfileUserId?
 
+    /// Для сворачивания клавиатуры первым тапом по списку (см.
+    /// KeyboardDismissOnTap.dismissKeyboardOnFirstTap) — родной .searchable()
+    /// без своего @FocusState, isSearching/dismissSearch из окружения.
+    @Environment(\.isSearching) private var isSearching
+    @Environment(\.dismissSearch) private var dismissSearch
+
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
@@ -55,6 +61,7 @@ struct UserListView: View {
             }
         }
         .scrollIndicators(.hidden)
+        .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
     }
 
     private func errorState(_ message: String) -> some View {

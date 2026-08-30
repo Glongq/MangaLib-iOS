@@ -88,7 +88,7 @@ struct FranchiseListView: View {
 
     private func row(_ franchise: Franchise) -> some View {
         HStack(spacing: 12) {
-            NavigationLink {
+            SearchDismissibleDestinationLink(isSearching: isSearching, dismiss: { dismissSearch() }) {
                 FranchiseView(slugURL: franchise.slugURL, fallbackName: franchise.name)
             } label: {
                 VStack(alignment: .leading, spacing: 4) {

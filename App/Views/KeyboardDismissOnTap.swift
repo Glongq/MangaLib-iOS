@@ -26,3 +26,47 @@ extension View {
         }
     }
 }
+
+/// Замена NavigationLink(value:) для строк/карточек внутри списка с активным
+/// поиском — по прямой жалобе: ".highPriorityGesture (см. dismissKeyboardOnFirstTap
+/// выше) не всегда реально побеждает NavigationLink — тап по карточке в
+/// Каталоге одновременно и закрывал поиск, И открывал тайтл (гонка, а не
+/// гарантия). Здесь гарантия другого рода: пока `isSearching == true`,
+/// НАСТОЯЩЕГО NavigationLink в дереве вообще нет — вместо него обычная
+/// Button, которая просто снимает фокус с поля поиска. Как только поиск
+/// закрыт, view пересобирается с обычным NavigationLink — навигация тапом
+/// работает как всегда. Никакой гонки жестов, потому что нечему
+/// конкурировать.
+struct SearchDismissibleNavigationLink<Value: Hashable, Label: View>: View {
+    let value: Value
+    let isSearching: Bool
+    let dismiss: () -> Void
+    @ViewBuilder let label: () -> Label
+
+    var body: some View {
+        if isSearching {
+            Button(action: dismiss) { label() }
+        } else {
+            NavigationLink(value: value) { label() }
+        }
+    }
+}
+
+/// Тот же приём, что и SearchDismissibleNavigationLink, но для
+/// NavigationLink(destination:) — экраны, где пункт списка не Hashable-
+/// значение с .navigationDestination(for:), а сразу готовый destination-view
+/// (см. DirectoryDetailView.grid).
+struct SearchDismissibleDestinationLink<Destination: View, Label: View>: View {
+    let isSearching: Bool
+    let dismiss: () -> Void
+    @ViewBuilder let destination: () -> Destination
+    @ViewBuilder let label: () -> Label
+
+    var body: some View {
+        if isSearching {
+            Button(action: dismiss) { label() }
+        } else {
+            NavigationLink(destination: destination) { label() }
+        }
+    }
+}

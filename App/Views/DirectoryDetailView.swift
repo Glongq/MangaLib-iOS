@@ -344,7 +344,7 @@ struct DirectoryDetailView: View {
             let columns = Array(repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing), count: gridColumnsCount)
             LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
                 ForEach(vm.titles) { item in
-                    NavigationLink {
+                    SearchDismissibleDestinationLink(isSearching: searchFocused, dismiss: { searchFocused = false }) {
                         MangaDetailView(
                             slug: item.apiSlug,
                             fallbackTitle: item.displayTitle,
@@ -358,6 +358,7 @@ struct DirectoryDetailView: View {
                     .onAppear { vm.loadMoreIfNeeded(item) }
                 }
             }
+            .dismissKeyboardOnFirstTap(active: searchFocused) { searchFocused = false }
 
             if vm.isLoading && vm.titles.isEmpty {
                 ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 24)
