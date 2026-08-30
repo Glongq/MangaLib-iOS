@@ -48,8 +48,14 @@ extension UIApplication {
 ///   .frame(maxWidth: .infinity, maxHeight: .infinity) — тянутся под
 ///   реальный размер контейнера НЕПРЕРЫВНО, в каждом кадре анимации, без
 ///   отдельного измерения.
-/// - Крестик закрытия — тот же стеклянный кружок, что и у кнопки "..." на
-///   карточке тайтла, поднят на высоту своей же кнопки (48pt).
+/// - Крестик закрытия — НАВЕРХУ, обычный системный ToolbarItem(.topBarTrailing),
+///   точно как кнопка "..." на карточке тайтла (см. MangaDetailView.body) —
+///   после трёх неудачных попыток расположить его понизу (то "в углу", то
+///   "по центру внизу экрана") пользователь прямо попросил именно этот
+///   вариант. Раз это настоящий toolbar — нужен свой NavigationStack (у
+///   .fullScreenCover, которым открывается эта вьюха, снаружи его нет).
+///   Никакой ручной .glassEffect(Circle()) — системный toolbar сам рисует
+///   стеклянную подложку.
 /// - Плейсхолдер картинки, пока грузится — скелетон (SkeletonBox), не
 ///   спиннер — тот же приём, что и везде в приложении.
 struct CoverGalleryView: View {
@@ -70,48 +76,27 @@ struct CoverGalleryView: View {
     }
 
     var body: some View {
-        // Крестик закрытия и бабл номера страницы — ОДНА группа, ВМЕСТЕ по
-        // центру внизу, а не порознь (бабл по центру, крестик у trailing-
-        // края отдельно): при ОДНОЙ картинке в галерее бабл вообще не
-        // рисуется (images.count > 1 ниже) — крестик оставался в одиночестве
-        // у правого края, без бабла рядом выглядел ровно как "случайно
-        // забыт в углу" (по фото бага — реальная жалоба, не только "формально
-        // не в углу"). Сгруппированы в один HStack, центрированный как единое
-        // целое (.frame(maxWidth: .infinity, alignment: .center)) — крестик
-        // всегда рядом с бабблом (когда он есть) или один по центру (когда
-        // картинка одна), никогда не "болтается" отдельно у края.
-        //
-        // ОТДЕЛЬНЫЙ слой ПОВЕРХ содержимого (а не overlay уже
-        // .ignoresSafeArea()'нутого TabView/фона) — чтобы позиция считалась
-        // от НАСТОЯЩЕЙ safe area, а не от буквального края экрана; фон/
-        // листалка при этом по-прежнему полноэкранные (их .ignoresSafeArea()
-        // ниже не тронут).
-        ZStack(alignment: .bottom) {
-            ZStack {
-                background
+        // Баббл номера страницы — ОТДЕЛЬНЫЙ слой ПОВЕРХ уже
+        // .ignoresSafeArea()'нутого TabView/фона (а не внутри него), чтобы его
+        // позиция считалась от НАСТОЯЩЕЙ safe area, а не от буквального края
+        // экрана; фон/листалка при этом по-прежнему полноэкранные. Крестик
+        // закрытия сюда больше не входит — он теперь в toolbar сверху (см.
+        // .toolbar ниже), баббл остаётся внизу один, группировать не с кем.
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                ZStack {
+                    background
 
-                TabView(selection: $currentIndex) {
-                    ForEach(images.indices, id: \.self) { index in
-                        page(images[index], index: index)
-                            .tag(index)
+                    TabView(selection: $currentIndex) {
+                        ForEach(images.indices, id: \.self) { index in
+                            page(images[index], index: index)
+                                .tag(index)
+                        }
                     }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-            }
-            .ignoresSafeArea()
+                .ignoresSafeArea()
 
-            HStack(spacing: 12) {
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 48, height: 48)
-                        .glassEffect(.regular, in: Circle())
-                }
-                // Тот же стеклянный бабл, что у номера страницы в читалке манги
-                // (см. MangaReaderView.pageBubble) — тот же шрифт/паддинг/капсула,
-                // просто белый текст (в читалке fg зависит от темы страницы, тут
-                // всегда поверх фото/блюра).
                 if images.count > 1 {
                     Text("\(currentIndex + 1)/\(images.count)")
                         .font(.footnote.weight(.semibold))
@@ -119,10 +104,18 @@ struct CoverGalleryView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .glassEffect(.regular, in: Capsule())
+                        .padding(.bottom, 24)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.bottom, 24)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                    }
+                }
+            }
         }
         .persistentSystemOverlays(.hidden)
         .navigationTransition(.zoom(sourceID: transitionSourceID, in: transitionNamespace))
