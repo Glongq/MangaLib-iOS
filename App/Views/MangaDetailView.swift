@@ -747,7 +747,7 @@ struct MangaDetailView: View {
     private var infoRow: some View {
         let rawItems: [(heading: String, value: String?)] = [
             (heading: "Тип", value: (viewModel.detail?.type ?? listItem?.type)?.label),
-            (heading: "Статус / Перевод", value: statusValue),
+            (heading: "Статус / Перевод", value: (viewModel.detail?.status ?? listItem?.status)?.label),
             (heading: "Год выпуска", value: viewModel.detail?.yearString),
             // Просмотры — 4-е место (сразу после года), как попросили.
             (heading: "Просмотры", value: viewModel.detail?.viewsString),
@@ -771,25 +771,6 @@ struct MangaDetailView: View {
     private var formatValue: String? {
         let labels = viewModel.detail?.formatLabels ?? []
         return labels.isEmpty ? nil : labels.joined(separator: ", ")
-    }
-
-    /// "Статус" + фактический номер ПОСЛЕДНЕЙ вышедшей главы для онгоингов —
-    /// по прямой просьбе. Общий счётчик числа глав (chapters.count/
-    /// totalChapters) для этого не годится: туда попадают и служебные
-    /// "глава 0", и половинки типа "4.5", раздувая число сверх реального
-    /// номера последней главы — берём РЕАЛЬНЫЙ number у последнего элемента
-    /// уже отсортированного списка (chapters сортируются по volume+number
-    /// ПО ВОЗРАСТАНИЮ, см. MangaDetailViewModel.sortChapters — .last всегда
-    /// самая свежая глава, ЧТО БЫ она из себя ни представляла, хоть "4.5").
-    /// Только для "Онгоинг" — сверка по подстроке метки (id статусов НЕ
-    /// подтверждён перехватом, только текстовые ярлыки из /constants), тот
-    /// же приём, что и у isBlockedByLicenseOrModeration ниже. Для
-    /// завершённых/анонсов и т.п. — просто статус как был.
-    private var statusValue: String? {
-        guard let base = (viewModel.detail?.status ?? listItem?.status)?.label, !base.isEmpty else { return nil }
-        guard base.localizedCaseInsensitiveContains("онгоинг"),
-              let lastNumber = displayChapters.last?.number, !lastNumber.isEmpty else { return base }
-        return "\(base) · Глава \(lastNumber)"
     }
 
     // Высота чипа teamChip (см. ниже, раздел "Главы") — аватар 28pt +
