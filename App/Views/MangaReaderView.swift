@@ -1305,6 +1305,15 @@ struct ReaderSettingsSheet: View {
 
     private var palette: ReaderPalette { .make(theme: readerTheme, system: systemColorScheme) }
 
+    /// Высота под-листа «Переключение страниц» — РОВНО по содержимому
+    /// (заголовок + 2 тумблера с подписями), не системный .medium (был на
+    /// полэкрана с пустым хвостом снизу) — тот же приём, что и в
+    /// RatingSheet.ratingSheetHeight: фиксированное число, а не
+    /// GeometryReader+PreferenceKey (пересчёт детента постфактум — известная
+    /// хрупкая штука в SwiftUI, см. комментарий там). Реальная сумма
+    /// высот/паддингов ≈290-300, тут с запасом под крупный Dynamic Type.
+    private static let pagingSheetHeight: CGFloat = 340
+
     var body: some View {
         ZStack {
             palette.background.ignoresSafeArea()
@@ -1477,7 +1486,7 @@ struct ReaderSettingsSheet: View {
             // настроек читалки/PersonalizationSettingsView (было 20).
             .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 20)
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.height(Self.pagingSheetHeight)])
         .presentationDragIndicator(.visible)
         .presentationBackground(.thinMaterial)
         .preferredColorScheme(palette.isLight ? .light : .dark)
