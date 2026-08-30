@@ -77,7 +77,7 @@ struct ExternalTagBrowserView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(entries) { entry in
                         NavigationLink {
-                            ExternalCatalogGridView(site: site, namespace: namespace(for: kind), value: entry.name, title: entry.name)
+                            ExternalCatalogGridView(site: site, query: .tag(namespace: namespace(for: kind), value: entry.name), title: entry.name)
                         } label: {
                             row(entry)
                         }

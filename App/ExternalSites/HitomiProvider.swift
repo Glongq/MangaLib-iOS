@@ -19,6 +19,9 @@ struct HitomiProvider: ExternalSiteProvider {
     let capabilities = ExternalSiteCapabilities(
         hasCatalog: true,
         hasTagBrowser: true,
+        // Свободный текстовый поиск упирается в неразобранный бинарный
+        // B-tree индекс (galleriesindex/*) — см. план, "Что заблокировано".
+        hasSearch: false,
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
@@ -132,10 +135,27 @@ struct HitomiProvider: ExternalSiteProvider {
 
     // MARK: Список тайтлов по тегу (.nozomi, Часть 6)
 
-    func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, offset: Int, limit: Int) async throws -> (ids: [Int], total: Int) {
+    /// hitomi.la — свой неймспейс на каждый URL-путь (см. план: "female"/
+    /// "male"/"tag" для конкретных тегов, "n/series"/"character"/"artist"/
+    /// "group" для остального). Явный switch, а не ExternalTagNamespace.
+    /// rawValue — тот теперь ничей, общий enum (см. ExternalSiteProvider.swift).
+    private static func nozomiPath(for namespace: ExternalTagNamespace) -> String {
+        switch namespace {
+        case .tag: return "tag"
+        case .female: return "female"
+        case .male: return "male"
+        case .character: return "character"
+        case .artist: return "artist"
+        case .group: return "group"
+        case .series: return "n/series"
+        }
+    }
+
+    func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
+        let offset = Int(cursor ?? "0") ?? 0
         let encodedValue = value.lowercased()
             .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value.lowercased()
-        guard let url = URL(string: "https://ltn.hitomi.la/\(namespace.rawValue)/\(encodedValue)-all.nozomi") else {
+        guard let url = URL(string: "https://ltn.hitomi.la/\(Self.nozomiPath(for: namespace))/\(encodedValue)-all.nozomi") else {
             throw HitomiError.badResponse
         }
         var request = URLRequest(url: url)
@@ -144,18 +164,20 @@ struct HitomiProvider: ExternalSiteProvider {
         request.setValue("bytes=\(byteOffset)-\(byteEnd)", forHTTPHeaderField: "Range")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw HitomiError.badResponse }
-        if http.statusCode == 404 { return ([], 0) }
+        if http.statusCode == 404 { return ([], nil) }
         guard http.statusCode == 200 || http.statusCode == 206 else { throw HitomiError.badResponse }
 
         let ids = Self.parseNozomi(data)
-        var total = ids.count
+        var total = offset + ids.count
         // Content-Range: bytes X-Y/ИТОГО — ИТОГО уже в байтах, /4 → число тайтлов.
         if let contentRange = http.value(forHTTPHeaderField: "Content-Range"),
            let slashIndex = contentRange.lastIndex(of: "/"),
            let totalBytes = Int(contentRange[contentRange.index(after: slashIndex)...]) {
             total = totalBytes / 4
         }
-        return (ids, total)
+        let nextOffset = offset + ids.count
+        let nextCursor = nextOffset < total ? String(nextOffset) : nil
+        return (ids, nextCursor)
     }
 
     /// Тело .nozomi — просто массив big-endian Int32 (4 байта на ID), без
@@ -175,6 +197,13 @@ struct HitomiProvider: ExternalSiteProvider {
             }
         }
         return result
+    }
+
+    /// Честная пустая заглушка — см. capabilities.hasSearch == false. UI
+    /// не должен вообще вызывать это для hitomi (см. ExternalSiteCapabilities
+    /// doc-comment), но протокол требует реализацию у всех провайдеров.
+    func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
+        ([], nil)
     }
 
     // MARK: Карточка тайтла (galleries/{id}.js, Часть 6)
@@ -201,25 +230,33 @@ struct HitomiProvider: ExternalSiteProvider {
 
     // MARK: URL картинок
 
-    /// Превью для сетки каталога — простое шардирование по первым символам
+    /// Превью для сетки/карточки — простое шардирование по первым символам
     /// хэша, БЕЗ gg.js (подтверждено HAR: galleryblock/{id}.html отдаёт
-    /// именно такие URL напрямую).
-    func thumbnailURL(hash: String) -> URL {
+    /// именно такие URL напрямую). Раньше была отдельным методом протокола
+    /// (thumbnailURL(hash:)) — теперь просто кладётся в
+    /// ExternalGalleryDetail.coverURL при декодировании (см. toDetail()
+    /// ниже), т.к. формула hitomi-специфична, у e-hentai её вообще нет.
+    fileprivate static func coverURL(forHash hash: String) -> URL? {
         let c0 = hash.first.map(String.init) ?? "0"
         let c1_3 = hash.count >= 3 ? String(hash.dropFirst().prefix(2)) : "00"
-        return URL(string: "https://tn.gold-usergeneratedcontent.net/webpbigtn/\(c0)/\(c1_3)/\(hash).webp")!
+        return URL(string: "https://tn.gold-usergeneratedcontent.net/webpbigtn/\(c0)/\(c1_3)/\(hash).webp")
     }
 
     /// Полноразмерная страница чтения — формула gg.js, ПОДТВЕРЖДЕНА двумя
     /// живыми примерами из HAR (см. HitomiGG doc-comment и план):
     /// хост = "w" (webp) + (gg.m(Int(gg.s(hash))) + 1), путь = gg.b +
-    /// gg.s(hash) + "/" + hash + ".webp".
-    func pageImageURL(hash: String) -> URL {
+    /// gg.s(hash) + "/" + hash + ".webp". Сети не требует — async только
+    /// ради общего протокола (см. EHentaiProvider, там реально нужна сеть).
+    func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL {
+        let hash = page.key
         let bucket = HitomiGG.s(hash)
         let g = Int(bucket) ?? 0
         let hostNumber = HitomiGG.m(g) + 1
         let host = "w\(hostNumber).gold-usergeneratedcontent.net"
-        return URL(string: "https://\(host)/\(HitomiGG.b)\(bucket)/\(hash).webp")!
+        guard let url = URL(string: "https://\(host)/\(HitomiGG.b)\(bucket)/\(hash).webp") else {
+            throw HitomiError.badResponse
+        }
+        return url
     }
 }
 
@@ -263,7 +300,10 @@ private struct HitomiGalleryJSON: Decodable {
             characters: Self.names(from: characters, key: "character"),
             series: Self.names(from: parodys, key: "parody"),
             related: related ?? [],
-            pages: files.map { ExternalGalleryPage(hash: $0.hash, width: $0.width, height: $0.height) }
+            pages: files.enumerated().map { idx, file in
+                ExternalGalleryPage(index: idx + 1, key: file.hash, width: file.width, height: file.height)
+            },
+            coverURL: files.first.flatMap { HitomiProvider.coverURL(forHash: $0.hash) }
         )
     }
 

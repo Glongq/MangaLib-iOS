@@ -51,8 +51,15 @@ struct MangaCatalogView: View {
         // отдельный, более простой экран вместо всей этой шапки/фильтров/
         // поиска. Ветка else — буквально то, что уже было, без изменений.
         if let ext = externalSiteSession.activeExternalSite {
+            let capabilities = ExternalSiteRegistry.provider(for: ext).capabilities
             NavigationStack {
-                ExternalTagBrowserView(site: ext)
+                if capabilities.hasTagBrowser {
+                    ExternalTagBrowserView(site: ext)
+                } else if capabilities.hasSearch {
+                    ExternalSearchView(site: ext)
+                } else {
+                    ExternalScreenContent(site: ext, featureTitle: "Каталог")
+                }
             }
             .tint(Theme.accent)
         } else {

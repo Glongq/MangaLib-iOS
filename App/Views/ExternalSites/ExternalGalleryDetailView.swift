@@ -40,8 +40,8 @@ struct ExternalGalleryDetailView: View {
     private func detailBody(_ detail: ExternalGalleryDetail) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if let firstHash = detail.pages.first?.hash {
-                    ExternalImage(url: provider.thumbnailURL(hash: firstHash)) { SkeletonBox() }
+                if let cover = detail.coverURL {
+                    ExternalImage(url: cover) { SkeletonBox() }
                         .scaledToFit()
                         .frame(maxWidth: .infinity)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))

@@ -21,13 +21,7 @@ struct ExternalReaderView: View {
             ScrollView {
                 LazyVStack(spacing: 4) {
                     ForEach(Array(detail.pages.enumerated()), id: \.offset) { _, page in
-                        ExternalImage(url: provider.pageImageURL(hash: page.hash)) {
-                            Rectangle()
-                                .fill(Color.white.opacity(0.06))
-                                .aspectRatio(CGFloat(page.width) / CGFloat(max(page.height, 1)), contentMode: .fit)
-                        }
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
+                        ExternalReaderPage(provider: provider, galleryId: detail.id, page: page)
                     }
                 }
             }
@@ -67,5 +61,39 @@ struct ExternalReaderView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
+    }
+}
+
+/// Одна страница чтения — pageImageURL теперь async throws (у hitomi это
+/// чистая формула без сети, у e-hentai — РЕАЛЬНЫЙ запрос за временной
+/// H@H-ссылкой каждый раз, см. EHentaiProvider.pageImageURL), поэтому
+/// ссылку сначала нужно разрешить в `.task`, а уже потом отдать в
+/// ExternalImage (которая качает саму картинку по готовому URL).
+private struct ExternalReaderPage: View {
+    let provider: any ExternalSiteProvider
+    let galleryId: Int
+    let page: ExternalGalleryPage
+
+    @State private var resolvedURL: URL?
+
+    /// У e-hentai width/height всегда 0 (см. ExternalGalleryPage doc-comment
+    /// — реальный размер известен только после открытия страницы) — плейсхолдер
+    /// в этом случае берёт обычное книжное соотношение вместо 0/1 (которое
+    /// SwiftUI отрисует нулевой высотой).
+    private var placeholderAspectRatio: CGFloat {
+        page.width > 0 && page.height > 0 ? CGFloat(page.width) / CGFloat(page.height) : 0.7
+    }
+
+    var body: some View {
+        ExternalImage(url: resolvedURL) {
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .aspectRatio(placeholderAspectRatio, contentMode: .fit)
+        }
+        .scaledToFit()
+        .frame(maxWidth: .infinity)
+        .task {
+            resolvedURL = try? await provider.pageImageURL(galleryId: galleryId, page: page)
+        }
     }
 }

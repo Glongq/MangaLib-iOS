@@ -3,7 +3,7 @@ import Foundation
 /// Порт gg.js hitomi.la (https://ltn.hitomi.la/gg.js) — используется для
 /// сборки URL полноразмерных страниц чтения (см. HitomiProvider.
 /// pageImageURL). НЕ используется для превью в сетке каталога — там просто
-/// шардирование по первым символам хэша (см. HitomiProvider.thumbnailURL),
+/// шардирование по первым символам хэша (см. HitomiProvider.coverURL),
 /// без этого файла.
 ///
 /// Снят живым HAR (30.08.2026, ProxyPin) — исходник:

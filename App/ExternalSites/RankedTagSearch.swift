@@ -44,7 +44,7 @@ enum RankedTagSearch {
         var idSets: [Choice: Set<Int>] = [:]
         for choice in items {
             guard let (ids, _) = try? await provider.fetchIdsByTag(
-                namespace: choice.namespace, value: choice.value, offset: 0, limit: perTagLimit
+                namespace: choice.namespace, value: choice.value, cursor: nil, limit: perTagLimit
             ) else { continue }
             idSets[choice] = Set(ids)
         }

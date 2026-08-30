@@ -1,5 +1,14 @@
 import SwiftUI
 
+/// Запрос выдачи — тег/серия/... (см. ExternalTagBrowserView) ИЛИ свободный
+/// текстовый поиск (см. ExternalSearchView, capabilities.hasSearch) — один
+/// и тот же экран сетки обслуживает оба случая, отличается только то, какой
+/// метод протокола дёргается за очередной страницей ID (см. fetchPage).
+enum ExternalCatalogQuery {
+    case tag(namespace: ExternalTagNamespace, value: String)
+    case search(query: String)
+}
+
 /// Сетка тайтлов внешнего сайта по одному тегу/серии/персонажу/группе/
 /// автору (см. план, Часть 6) — открывается тапом по строке в
 /// ExternalTagBrowserView. Список ID — постранично через .nozomi (см.
@@ -10,14 +19,13 @@ import SwiftUI
 /// старым кодом).
 struct ExternalCatalogGridView: View {
     let site: ExternalSite
-    let namespace: ExternalTagNamespace
-    let value: String
+    let query: ExternalCatalogQuery
     let title: String
 
     private static let pageSize = 25
 
     @State private var ids: [Int] = []
-    @State private var total = 0
+    @State private var nextCursor: String?
     @State private var details: [Int: ExternalGalleryDetail] = [:]
     @State private var isLoading = false
     @State private var isLoadingMore = false
@@ -80,8 +88,8 @@ struct ExternalCatalogGridView: View {
     private func card(id: Int, width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Group {
-                if let detail = details[id], let hash = detail.pages.first?.hash {
-                    ExternalImage(url: provider.thumbnailURL(hash: hash)) { SkeletonBox() }
+                if let detail = details[id], let cover = detail.coverURL {
+                    ExternalImage(url: cover) { SkeletonBox() }
                         .scaledToFill()
                 } else {
                     SkeletonBox()
@@ -114,14 +122,25 @@ struct ExternalCatalogGridView: View {
         details[id] = detail
     }
 
+    /// Один и тот же метод для первой и последующих страниц — отличаются
+    /// только cursor (nil = первая страница).
+    private func fetchPage(cursor: String?) async throws -> (ids: [Int], nextCursor: String?) {
+        switch query {
+        case let .tag(namespace, value):
+            return try await provider.fetchIdsByTag(namespace: namespace, value: value, cursor: cursor, limit: Self.pageSize)
+        case let .search(text):
+            return try await provider.fetchIdsBySearch(query: text, cursor: cursor, limit: Self.pageSize)
+        }
+    }
+
     private func loadFirstPage() async {
         guard ids.isEmpty else { return }
         isLoading = true
         errorMessage = nil
         do {
-            let result = try await provider.fetchIdsByTag(namespace: namespace, value: value, offset: 0, limit: Self.pageSize)
+            let result = try await fetchPage(cursor: nil)
             ids = result.ids
-            total = result.total
+            nextCursor = result.nextCursor
         } catch {
             errorMessage = "Проверьте соединение и попробуйте ещё раз."
         }
@@ -129,19 +148,20 @@ struct ExternalCatalogGridView: View {
     }
 
     private func loadMoreIfNeeded() async {
-        guard !isLoadingMore, ids.count < total else { return }
+        guard !isLoadingMore, let cursor = nextCursor else { return }
         isLoadingMore = true
         defer { isLoadingMore = false }
-        guard let result = try? await provider.fetchIdsByTag(namespace: namespace, value: value, offset: ids.count, limit: Self.pageSize) else { return }
+        guard let result = try? await fetchPage(cursor: cursor) else { return }
         // Защита от дублей — на случай гонки/повторного onAppear.
         let existing = Set(ids)
         ids.append(contentsOf: result.ids.filter { !existing.contains($0) })
+        nextCursor = result.nextCursor
     }
 }
 
 #Preview {
     NavigationStack {
-        ExternalCatalogGridView(site: .hitomi, namespace: .tag, value: "full color", title: "full color")
+        ExternalCatalogGridView(site: .hitomi, query: .tag(namespace: .tag, value: "full color"), title: "full color")
     }
     .preferredColorScheme(.dark)
 }
