@@ -17,16 +17,21 @@ import SwiftUI
 /// принципе, не "пока не реализовано" — текст это прямо объясняет, а не
 /// притворяется обычной пустой заглушкой.
 struct ExternalScreenContent: View {
-    let site: ExternalSite
+    /// nil — совместный режим («Все сайты», см. ExternalSiteSession.
+    /// combinedModeActive): формулировка не привязывается к одному
+    /// конкретному сайту, потому что их сразу несколько.
+    let site: ExternalSite?
     let featureTitle: String
+
+    private var siteLabel: String { site?.displayName ?? "подключённых сайтов" }
 
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
             StateView(
                 icon: "xmark.circle",
-                title: "Недоступно на \(site.displayName)",
-                description: "«\(featureTitle)» — часть аккаунта MangaLib, а у \(site.displayName) нет аккаунтов.",
+                title: site.map { "Недоступно на \($0.displayName)" } ?? "Недоступно на подключённых сайтах",
+                description: "«\(featureTitle)» — часть аккаунта MangaLib, а у \(siteLabel) нет аккаунтов.",
                 fillScreen: true
             )
         }

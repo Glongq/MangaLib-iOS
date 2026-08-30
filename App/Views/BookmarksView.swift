@@ -84,9 +84,9 @@ struct BookmarksView: View {
         // подобных нет аккаунтов, значит нет и закладок. Ветка else —
         // буквально то, что уже было, без изменений (просто отступ вырос
         // на один уровень).
-        if let ext = externalSiteSession.activeExternalSite {
+        if externalSiteSession.isExternalModeActive {
             NavigationStack {
-                ExternalScreenContent(site: ext, featureTitle: "Закладки")
+                ExternalScreenContent(site: externalSiteSession.activeExternalSite, featureTitle: "Закладки")
                     .navigationTitle("Закладки")
                     .navigationBarTitleDisplayMode(.large)
             }

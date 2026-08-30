@@ -180,7 +180,7 @@ struct SideMenuView: View {
                     Text("Сайт")
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
-                    Text(externalSiteSession.activeExternalSite?.displayName ?? siteSession.activeSite.displayName)
+                    Text(externalSiteSession.combinedModeActive ? "Все сайты" : (externalSiteSession.activeExternalSite?.displayName ?? siteSession.activeSite.displayName))
                         .foregroundStyle(Theme.textSecondary)
                     Image(systemName: siteExpanded ? "chevron.up" : "chevron.down")
                         .font(.subheadline.weight(.semibold))
@@ -194,12 +194,13 @@ struct SideMenuView: View {
 
             if siteExpanded {
                 ForEach(LibSite.allCases) { site in
-                    let isActive = externalSiteSession.activeExternalSite == nil && site == siteSession.activeSite
+                    let isActive = externalSiteSession.activeExternalSite == nil && !externalSiteSession.combinedModeActive && site == siteSession.activeSite
                     Divider().overlay(Theme.separator)
                         .padding(.leading, 16 + 52 + 14).padding(.trailing, 16)
                     Button {
                         siteSession.activeSite = site
                         externalSiteSession.activeExternalSite = nil
+                        externalSiteSession.combinedModeActive = false
                         withAnimation(.easeInOut(duration: 0.2)) { siteExpanded = false }
                     } label: {
                         siteOptionRow(title: site.displayName, isActive: isActive)
@@ -219,9 +220,29 @@ struct SideMenuView: View {
                         .padding(.leading, 16 + 52 + 14).padding(.trailing, 16)
                     Button {
                         externalSiteSession.activeExternalSite = site
+                        externalSiteSession.combinedModeActive = false
                         withAnimation(.easeInOut(duration: 0.2)) { siteExpanded = false }
                     } label: {
                         siteOptionRow(title: site.displayName, isActive: isActive)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                // «Все сайты» — совместный каталог/выдача сразу по всем
+                // включённым внешним сайтам (см. ExternalSiteSession.
+                // combinedModeActive, ExternalCombinedCatalogView). Имеет
+                // смысл только когда включено 2+ — с одним это просто то же
+                // самое, что и выбор этого одного сайта выше.
+                if externalSiteSession.enabledSites.count >= 2 {
+                    let isActive = externalSiteSession.combinedModeActive
+                    Divider().overlay(Theme.separator)
+                        .padding(.leading, 16 + 52 + 14).padding(.trailing, 16)
+                    Button {
+                        externalSiteSession.activeExternalSite = nil
+                        externalSiteSession.combinedModeActive = true
+                        withAnimation(.easeInOut(duration: 0.2)) { siteExpanded = false }
+                    } label: {
+                        siteOptionRow(title: "Все сайты", isActive: isActive)
                     }
                     .buttonStyle(.plain)
                 }
@@ -310,13 +331,21 @@ struct SideMenuView: View {
         // каталога MangaLib здесь не при чём (Команды/Персонажи/Франшизы и
         // т.д. — это сущности ИМЕННО экосистемы Lib), показываем только то,
         // что реально есть у внешнего сайта (сейчас — только список тегов).
-        if let ext = externalSiteSession.activeExternalSite {
-            let hasTagBrowser = ExternalSiteRegistry.provider(for: ext).capabilities.hasTagBrowser
-            if hasTagBrowser {
+        if externalSiteSession.combinedModeActive {
+            // Совместный каталог («Все сайты») живёт во вкладке «Каталог»
+            // (см. ExternalCombinedCatalogView) — единого списка тегов тут
+            // нет (у каждого сайта свой), отдельный пункт меню не нужен.
+            row("Каталог — во вкладке «Каталог»", icon: "square.grid.2x2", showDivider: false, showChevron: false)
+        } else if let ext = externalSiteSession.activeExternalSite {
+            let capabilities = ExternalSiteRegistry.provider(for: ext).capabilities
+            if capabilities.hasTagBrowser {
                 row("Список тегов", icon: "tag", showDivider: false, action: { path.append(MenuRoute.externalTags) })
-            } else {
+            } else if !capabilities.hasSearch {
                 row("Каталог недоступен на \(ext.displayName)", icon: "tag", showDivider: false, showChevron: false)
             }
+            // hasSearch && !hasTagBrowser (например e-hentai) — каталог
+            // реально есть, просто через поиск во вкладке «Каталог»
+            // (ExternalSearchView), отдельного пункта меню под него не надо.
         } else {
             VStack(spacing: 0) {
                 row("Тайтлы", icon: "book", action: {

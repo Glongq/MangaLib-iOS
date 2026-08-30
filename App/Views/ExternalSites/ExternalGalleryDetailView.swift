@@ -91,6 +91,11 @@ struct ExternalGalleryDetailView: View {
                 metaLine("Язык", language)
             }
             metaLine("Тип", detail.type)
+            // См. план — совместный каталог опрашивает НЕСКОЛЬКО сайтов
+            // сразу (ExternalCombinedCatalogView), поэтому карточка тайтла
+            // всегда честно подписывает, какой конкретно сервис его выдал,
+            // а не только тот, что сейчас "активный".
+            metaLine("Источник", detail.site.displayName)
         }
     }
 

@@ -62,6 +62,14 @@ struct MangaCatalogView: View {
                 }
             }
             .tint(Theme.accent)
+        } else if externalSiteSession.combinedModeActive {
+            // «Все сайты» (см. ExternalSiteSession.combinedModeActive) —
+            // совместный каталог/выдача сразу по всем включённым внешним
+            // сайтам, см. ExternalCombinedCatalogView.
+            NavigationStack {
+                ExternalCombinedCatalogView()
+            }
+            .tint(Theme.accent)
         } else {
         NavigationStack(path: $navPath) {
             // ЭКСПЕРИМЕНТ против раздутого отступа под .large: раньше фон

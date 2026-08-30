@@ -264,8 +264,8 @@ struct NotificationsView: View {
     private var content: some View {
         // Добавочная ветка (см. план внешних сайтов) — у hitomi.la и
         // подобных нет аккаунтов, значит нет и уведомлений.
-        if let ext = externalSiteSession.activeExternalSite {
-            ExternalScreenContent(site: ext, featureTitle: "Новое")
+        if externalSiteSession.isExternalModeActive {
+            ExternalScreenContent(site: externalSiteSession.activeExternalSite, featureTitle: "Новое")
         } else if let error = viewModel.errorMessage, viewModel.items.isEmpty {
             errorState(error)
         } else if viewModel.items.isEmpty && viewModel.isLoading {

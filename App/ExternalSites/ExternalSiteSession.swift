@@ -29,10 +29,23 @@ final class ExternalSiteSession: ObservableObject {
         didSet { persistActive() }
     }
 
+    /// «Все сайты» — совместный режим (см. ExternalCombinedCatalogView):
+    /// вместо ОДНОГО активного внешнего сайта каталог/выдача опрашивают ВСЕ
+    /// включённые сразу и мержат результат (см. ExternalCatalogGridView,
+    /// поддержка нескольких sites). Взаимоисключающе с activeExternalSite —
+    /// выбор одного всегда сбрасывает другой (см. SideMenuView.siteRow).
+    /// Экраны без каталога-аналога (Закладки/Читают/Новое) в этом режиме
+    /// по-прежнему показывают «Недоступно» — общей формулировкой без
+    /// привязки к одному сайту (см. ExternalScreenContent, site: nil).
+    @Published var combinedModeActive: Bool {
+        didSet { persistCombined() }
+    }
+
     private let defaults = UserDefaults.standard
     private enum Keys {
         static let enabled = "external_site_enabled_set"
         static let active = "external_site_active"
+        static let combined = "external_site_combined_active"
     }
 
     private init() {
@@ -46,11 +59,17 @@ final class ExternalSiteSession: ObservableObject {
         } else {
             activeExternalSite = nil
         }
+        combinedModeActive = defaults.bool(forKey: Keys.combined)
     }
 
     var activeProvider: (any ExternalSiteProvider)? {
         activeExternalSite.map(ExternalSiteRegistry.provider(for:))
     }
+
+    /// Внешний режим (одиночный ИЛИ совместный) вообще активен — тем
+    /// экранам, где это единственное, что важно (LibSite-ветка else и т.п.),
+    /// не нужно проверять оба флага по отдельности.
+    var isExternalModeActive: Bool { activeExternalSite != nil || combinedModeActive }
 
     private func persistEnabled() {
         defaults.set(enabledSites.map(\.rawValue), forKey: Keys.enabled)
@@ -62,5 +81,9 @@ final class ExternalSiteSession: ObservableObject {
         } else {
             defaults.removeObject(forKey: Keys.active)
         }
+    }
+
+    private func persistCombined() {
+        defaults.set(combinedModeActive, forKey: Keys.combined)
     }
 }

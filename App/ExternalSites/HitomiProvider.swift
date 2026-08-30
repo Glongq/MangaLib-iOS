@@ -289,6 +289,7 @@ private struct HitomiGalleryJSON: Decodable {
     func toDetail() -> ExternalGalleryDetail {
         ExternalGalleryDetail(
             id: Int(id) ?? 0,
+            site: .hitomi,
             title: title,
             type: type,
             language: language,

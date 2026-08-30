@@ -69,6 +69,12 @@ struct ExternalGalleryPage: Hashable {
 /// готовый URL сюда.
 struct ExternalGalleryDetail: Identifiable {
     let id: Int
+    /// Какой конкретно сайт выдал этот тайтл — нужно для совместного
+    /// каталога/выдачи (см. ExternalCombinedCatalogView, ExternalCatalogItem)
+    /// и для подписи в карточке (ExternalGalleryDetailView), где тайтл мог
+    /// прийти как с активного одиночного сайта, так и (в совместном режиме)
+    /// с любого из нескольких включённых сразу.
+    let site: ExternalSite
     let title: String
     let type: String
     let language: String?

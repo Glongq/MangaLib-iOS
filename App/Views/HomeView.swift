@@ -156,8 +156,8 @@ struct HomeView: View {
         // "Сейчас читают"/"Мои обновления" (всё завязано на аккаунт/
         // историю MangaLib). Остальное (else) — буквально то, что уже
         // было, без изменений.
-        if let ext = externalSiteSession.activeExternalSite {
-            ExternalScreenContent(site: ext, featureTitle: "Читают")
+        if externalSiteSession.isExternalModeActive {
+            ExternalScreenContent(site: externalSiteSession.activeExternalSite, featureTitle: "Читают")
         } else {
         // ScrollViewReader — нужен ТОЛЬКО чтобы при переключении "Все"/"Мои"
         // в "Последних обновлениях" не подбрасывало наверх (см. комментарий

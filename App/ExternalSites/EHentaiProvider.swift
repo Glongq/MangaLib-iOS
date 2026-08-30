@@ -205,6 +205,7 @@ actor EHentaiProvider: ExternalSiteProvider {
 
         return ExternalGalleryDetail(
             id: id,
+            site: .ehentai,
             title: title,
             type: type,
             language: language,
