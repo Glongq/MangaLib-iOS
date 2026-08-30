@@ -624,7 +624,21 @@ struct BookmarksView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
-                StateView(icon: "bookmark", title: "Пусто", description: "Добавляйте тайтлы через кнопку «Добавить в» на странице тайтла.", fillScreen: true)
+                // ScrollView (не голый StateView) — иначе .navigationTitle
+                // ("Закладки") пропадал целиком, оставался только системный
+                // поисковый бар: .searchable() + .navigationBarTitleDisplayMode
+                // (.large) координируют схлопывание крупного заголовка через
+                // реальный скролл-контент, без него заголовок иногда вообще
+                // не рисуется — по прямой просьбе исправлено (тот же приём,
+                // что и в FriendsView/CollectionsListView/MyCommentsView).
+                // containerRelativeFrame — ScrollView сам не даёт контенту
+                // высоту (только скроллит его), StateView(fillScreen: true)
+                // центрируется относительно ЭТОЙ явной высоты.
+                ScrollView {
+                    StateView(icon: "bookmark", title: "Пусто", description: "Добавляйте тайтлы через кнопку «Добавить в» на странице тайтла.", fillScreen: true)
+                        .containerRelativeFrame(.vertical)
+                }
+                .scrollIndicators(.hidden)
             }
         } else {
             // Список/плитка — см. ViewSortSheet (иконка шестерёнки).
