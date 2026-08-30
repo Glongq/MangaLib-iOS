@@ -196,7 +196,6 @@ struct NotificationSettingsView: View {
     private var foldersCard: some View {
         card {
             Text("Уведомления из списков")
-                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
@@ -241,13 +240,14 @@ struct NotificationSettingsView: View {
                 }
 
                 Text(folder.name)
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
 
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
-            .frame(minHeight: 48)
+            .frame(minHeight: 52)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -267,7 +267,7 @@ struct NotificationSettingsView: View {
                 Spacer(minLength: 0)
             }
             .foregroundStyle(Theme.background)
-            .frame(height: 44)
+            .frame(height: Theme.pillControlHeight)
             .background(Theme.accent, in: Capsule())
         }
         .buttonStyle(.plain)
