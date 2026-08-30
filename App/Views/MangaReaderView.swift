@@ -8,17 +8,28 @@ struct ReaderPalette {
     let isLight: Bool
     /// Фон под страницами: тёмный — чёрный, светлый — чуть серый (не чисто белый).
     var pageBackground: Color { isLight ? Color(white: 0.93) : .black }
-    /// Фон меню (главы/настройки): светлый — белый.
+    /// Фон меню (главы/настройки/комментарии).
     ///
     /// Тёмная ветка берёт цвета из Theme.Dark (ФИКСИРОВАННАЯ тёмная палитра),
     /// а не из Theme.xxx напрямую — тема читалки независима от белой/чёрной
     /// темы всего приложения (см. Theme.swift/ThemeManager), поэтому не
     /// должна меняться, если пользователь переключит тему приложения на белую.
-    var background: Color { isLight ? .white : Theme.Dark.background }
-    var foreground: Color { isLight ? Color(white: 0.12) : .white }
-    var secondary: Color { isLight ? Color(white: 0.45) : Theme.Dark.textSecondary }
-    var surface: Color { isLight ? Color(white: 0.94) : Theme.Dark.surfaceElevated }
-    var separator: Color { isLight ? Color.black.opacity(0.10) : Theme.Dark.separator }
+    ///
+    /// Светлая ветка — теперь буквально Theme.Light (было — отдельные
+    /// приблизительные серые: .white/Color(white: 0.12/0.45/0.94)/
+    /// black.opacity(0.10), на глаз чуть-чуть, "на пару тонов" отличались от
+    /// белой темы приложения) — по прямой просьбе: кнопки/поле ввода/
+    /// подложки комментариев в читалке должны выглядеть ТОЧНО как в карточке
+    /// тайтла. Независимость самого ПЕРЕКЛЮЧАТЕЛЯ темы читалки (см. doc-
+    /// comment выше про Theme.Dark) этим не нарушается — она про то, ЧТО
+    /// выбрано (свет/тьма/системная, отдельно от темы приложения), а не про
+    /// то, какие именно RGB у "светлого". pageBackground (сам холст страницы)
+    /// НЕ тронут — так и остаётся своим чуть серым, не белым, тоном.
+    var background: Color { isLight ? Theme.Light.background : Theme.Dark.background }
+    var foreground: Color { isLight ? Theme.Light.textPrimary : .white }
+    var secondary: Color { isLight ? Theme.Light.textSecondary : Theme.Dark.textSecondary }
+    var surface: Color { isLight ? Theme.Light.surfaceElevated : Theme.Dark.surfaceElevated }
+    var separator: Color { isLight ? Theme.Light.separator : Theme.Dark.separator }
 
     static func make(theme: Int, system: ColorScheme) -> ReaderPalette {
         switch theme {
