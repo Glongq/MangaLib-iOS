@@ -445,7 +445,21 @@ private struct ExternalHorizontalPageImage: View {
             )
         }
         .task {
-            resolvedURL = try? await provider.pageImageURL(galleryId: galleryId, page: page)
+            guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
+            // Прогреваем RemoteImageCache ПРАВИЛЬНОЙ (по хосту) Referer-
+            // сессией ДО того, как отдать url в ZoomableImageScrollView —
+            // без этого у ТЕКУЩЕЙ (видимой прямо сейчас) страницы, в
+            // отличие от предзагружаемых вперёд (см. preloadPage), не было
+            // ни единого шанса оказаться в кэше заранее: страница 1 вообще
+            // никогда не предзагружается (окно предзагрузки стартует со
+            // следующей), поэтому ZoomableImageScrollView/RemoteImageLoader
+            // внутри неё ВСЕГДА пытались бы взять её сами — чужой сессией
+            // с неверным Referer (см. preloadExternalImage doc-comment) —
+            // 404, картинка не декодируется, и первая (иногда и вторая,
+            // если TabView успевает отрисовать её раньше предзагрузки)
+            // страница читалки оставались просто чёрным фоном (жалоба 31.08).
+            await preloadExternalImage(url)
+            resolvedURL = url
         }
     }
 }
@@ -466,7 +480,13 @@ private struct ExternalVerticalPageImage: View {
             height: page.height > 0 ? page.height : nil
         )
         .task {
-            resolvedURL = try? await provider.pageImageURL(galleryId: galleryId, page: page)
+            guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
+            // См. ExternalHorizontalPageImage.task — та же гонка с
+            // неверным Referer у ТЕКУЩЕ видимой (не предзагруженной
+            // заранее) страницы, тот же фикс: прогреть кэш ПРАВИЛЬНОЙ
+            // сессией до того, как отдать url в VerticalPageImage.
+            await preloadExternalImage(url)
+            resolvedURL = url
         }
     }
 }
