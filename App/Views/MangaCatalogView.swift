@@ -5,6 +5,8 @@ struct MangaCatalogView: View {
 
     @StateObject private var viewModel = CatalogViewModel()
     @ObservedObject private var themeManager = ThemeManager.shared
+    /// «Другие сайты» (hitomi.la и далее) — см. App/ExternalSites/.
+    @ObservedObject private var externalSiteSession = ExternalSiteSession.shared
     @State private var showFilters = false
     /// Путь навигации — нужен, чтобы при тапе по жанру/тегу в уже открытой
     /// карточке вернуться к корню каталога (см. onReceive switchRequest).
@@ -42,6 +44,18 @@ struct MangaCatalogView: View {
     private let gridHorizontalPadding: CGFloat = 12
 
     var body: some View {
+        // Добавочная ветка (см. план внешних сайтов) — в отличие от
+        // Закладок/Читают/Новое, у внешнего сайта каталог РЕАЛЬНО есть
+        // (список тегов/серий → выдача, см. ExternalTagBrowserView/
+        // ExternalCatalogGridView), просто устроен иначе, чем у MangaLib —
+        // отдельный, более простой экран вместо всей этой шапки/фильтров/
+        // поиска. Ветка else — буквально то, что уже было, без изменений.
+        if let ext = externalSiteSession.activeExternalSite {
+            NavigationStack {
+                ExternalTagBrowserView(site: ext)
+            }
+            .tint(Theme.accent)
+        } else {
         NavigationStack(path: $navPath) {
             // ЭКСПЕРИМЕНТ против раздутого отступа под .large: раньше фон
             // и контент были двумя РАВНОПРАВНЫМИ слоями в общем ZStack —
@@ -126,6 +140,7 @@ struct MangaCatalogView: View {
         // возвращаемся к корню каталога с применённым фильтром.
         .onReceive(CatalogNavigator.shared.$switchRequest) { _ in
             _ = applyPendingFilter(popToRoot: true)
+        }
         }
     }
 

@@ -15,6 +15,8 @@ struct BookmarksView: View {
     @ObservedObject private var store = BookmarksStore.shared
     @ObservedObject private var catalogNav = CatalogNavigator.shared
     @ObservedObject private var themeManager = ThemeManager.shared
+    /// «Другие сайты» (hitomi.la и далее) — см. App/ExternalSites/.
+    @ObservedObject private var externalSiteSession = ExternalSiteSession.shared
     @State private var selectedFolderId: String? = nil   // nil = «Все»
     @State private var showNewFolder = false
     @State private var newFolderName = ""
@@ -78,6 +80,18 @@ struct BookmarksView: View {
     }
 
     var body: some View {
+        // Добавочная ветка (см. план внешних сайтов) — у hitomi.la и
+        // подобных нет аккаунтов, значит нет и закладок. Ветка else —
+        // буквально то, что уже было, без изменений (просто отступ вырос
+        // на один уровень).
+        if let ext = externalSiteSession.activeExternalSite {
+            NavigationStack {
+                ExternalScreenContent(site: ext, featureTitle: "Закладки")
+                    .navigationTitle("Закладки")
+                    .navigationBarTitleDisplayMode(.large)
+            }
+            .tint(Theme.accent)
+        } else {
         NavigationStack {
             ZStack {
                 Theme.background.ignoresSafeArea()
@@ -270,6 +284,7 @@ struct BookmarksView: View {
         // открытии вкладки, если есть сессия — см. BookmarksStore.syncFromServer.
         // Без сессии ничего не делает (просто локальный список, как раньше).
         .task { await store.syncFromServer() }
+        }
     }
 
     private var currentTitles: [BookmarkedTitle] {

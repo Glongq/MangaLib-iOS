@@ -45,6 +45,8 @@ struct HomeView: View {
     /// PersonalizationSettingsView.homeSectionsCard), реально применяется
     /// здесь (см. content/section(for:)).
     @ObservedObject private var sectionsStore = HomeSectionsStore.shared
+    /// «Другие сайты» (hitomi.la и далее) — см. App/ExternalSites/.
+    @ObservedObject private var externalSiteSession = ExternalSiteSession.shared
     /// Экран входа для "Мои обновления" без аккаунта — см. updatesTabBinding.
     @State private var showLoginForUpdates = false
     /// Текст в .searchable() — реально никуда не отправляется, поле служит
@@ -147,7 +149,16 @@ struct HomeView: View {
     /// раньше именно эта связка на одном и том же ScrollView скроллила
     /// шапку вместе с контентом; теперь шапка — родной navigationTitle, не
     /// часть ScrollView вообще, но порядок оставлен как есть, менять незачем.
+    @ViewBuilder
     private var content: some View {
+        // Добавочная ветка (см. план внешних сайтов) — у hitomi.la и
+        // подобных нет аккаунтов, значит нет ни "Продолжить читать", ни
+        // "Сейчас читают"/"Мои обновления" (всё завязано на аккаунт/
+        // историю MangaLib). Остальное (else) — буквально то, что уже
+        // было, без изменений.
+        if let ext = externalSiteSession.activeExternalSite {
+            ExternalScreenContent(site: ext, featureTitle: "Читают")
+        } else {
         // ScrollViewReader — нужен ТОЛЬКО чтобы при переключении "Все"/"Мои"
         // в "Последних обновлениях" не подбрасывало наверх (см. комментарий
         // у .onChange ниже): весь экран — один ScrollView, и когда
@@ -173,6 +184,7 @@ struct HomeView: View {
                     proxy.scrollTo(HomeSectionKind.updates.id, anchor: .top)
                 }
             }
+        }
         }
     }
 

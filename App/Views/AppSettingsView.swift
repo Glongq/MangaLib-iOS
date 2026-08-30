@@ -101,7 +101,8 @@ struct AppSettingsView: View {
                         storageSettingsRow
                         personalizationRow
                         specialFilterRow
-                        settingsRow(icon: "arrow.triangle.2.circlepath", title: "Проверить обновления", showDivider: false)
+                        settingsRow(icon: "arrow.triangle.2.circlepath", title: "Проверить обновления")
+                        externalSitesRow
                     }
 
                     settingsSection("Помощь") {
@@ -344,6 +345,18 @@ struct AppSettingsView: View {
 
             Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14)
         }
+    }
+
+    /// «Другие сайты» — сайты вне экосистемы MangaLib (hitomi.la и далее,
+    /// см. App/ExternalSites/), с совсем другим API. По прямой просьбе —
+    /// последняя строка раздела «Приложение» (без Divider после неё).
+    private var externalSitesRow: some View {
+        NavigationLink {
+            ExternalSitesSettingsView()
+        } label: {
+            settingsRowLabel(icon: "network", title: "Другие сайты")
+        }
+        .buttonStyle(.plain)
     }
 
     /// Содержимое строки пункта настроек — вынесено отдельно, чтобы обычные

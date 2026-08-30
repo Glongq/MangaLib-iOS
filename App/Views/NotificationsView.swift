@@ -12,6 +12,8 @@ import SwiftUI
 struct NotificationsView: View {
     @StateObject private var viewModel = NotificationsViewModel()
     @ObservedObject private var themeManager = ThemeManager.shared
+    /// «Другие сайты» (hitomi.la и далее) — см. App/ExternalSites/.
+    @ObservedObject private var externalSiteSession = ExternalSiteSession.shared
     @Environment(\.scenePhase) private var scenePhase
 
     // Схлопывание строки категорий при скролле вниз (вверх — хоть чуть-чуть
@@ -260,7 +262,11 @@ struct NotificationsView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let error = viewModel.errorMessage, viewModel.items.isEmpty {
+        // Добавочная ветка (см. план внешних сайтов) — у hitomi.la и
+        // подобных нет аккаунтов, значит нет и уведомлений.
+        if let ext = externalSiteSession.activeExternalSite {
+            ExternalScreenContent(site: ext, featureTitle: "Новое")
+        } else if let error = viewModel.errorMessage, viewModel.items.isEmpty {
             errorState(error)
         } else if viewModel.items.isEmpty && viewModel.isLoading {
             ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, maxHeight: .infinity)

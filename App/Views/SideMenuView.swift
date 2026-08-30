@@ -39,6 +39,9 @@ struct SideMenuView: View {
     // — см. LibSite.swift/SiteSession. @ObservedObject, чтобы строка сайта и
     // блок чекбоксов сразу перерисовывались при переключении.
     @ObservedObject private var siteSession = SiteSession.shared
+    /// «Другие сайты» (hitomi.la и далее, см. App/ExternalSites/) — не
+    /// LibSite, отдельный независимый переключатель, см. siteRow.
+    @ObservedObject private var externalSiteSession = ExternalSiteSession.shared
 
     @ObservedObject private var themeManager = ThemeManager.shared
 
@@ -49,6 +52,12 @@ struct SideMenuView: View {
     private enum MenuRoute: Hashable {
         case history, settings, downloads, comments, franchises, friends, collections, myCollections
         case teams, characters, people, publishers, users, nowReading, favorites
+        /// Список тегов/серий внешнего сайта (см. App/ExternalSites/) —
+        /// сама вьюха берёт активный сайт из ExternalSiteSession напрямую
+        /// (см. navigationDestination ниже), а не из этого case — он
+        /// всегда один и тот же вне зависимости от того, какой внешний
+        /// сайт сейчас активен.
+        case externalTags
     }
     // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
     // NavigationLink(value:) ВНУТРИ этих экранов (например, History →
@@ -126,6 +135,8 @@ struct SideMenuView: View {
                 case .users:      UserListView()
                 case .nowReading: TopViewsListView()
                 case .favorites:  if let uid = auth.userId { FavoritesListView(userId: uid) }
+                case .externalTags:
+                    if let site = externalSiteSession.activeExternalSite { ExternalTagBrowserView(site: site) }
                 }
             }
         }
@@ -169,7 +180,7 @@ struct SideMenuView: View {
                     Text("Сайт")
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
-                    Text(siteSession.activeSite.displayName)
+                    Text(externalSiteSession.activeExternalSite?.displayName ?? siteSession.activeSite.displayName)
                         .foregroundStyle(Theme.textSecondary)
                     Image(systemName: siteExpanded ? "chevron.up" : "chevron.down")
                         .font(.subheadline.weight(.semibold))
@@ -183,33 +194,60 @@ struct SideMenuView: View {
 
             if siteExpanded {
                 ForEach(LibSite.allCases) { site in
+                    let isActive = externalSiteSession.activeExternalSite == nil && site == siteSession.activeSite
                     Divider().overlay(Theme.separator)
                         .padding(.leading, 16 + 52 + 14).padding(.trailing, 16)
                     Button {
                         siteSession.activeSite = site
+                        externalSiteSession.activeExternalSite = nil
                         withAnimation(.easeInOut(duration: 0.2)) { siteExpanded = false }
                     } label: {
-                        HStack(spacing: 14) {
-                            // Пустая колонка шириной иконки — чтобы название
-                            // выровнялось под «Сайт» выше.
-                            Color.clear.frame(width: 52)
-                            Text(site.displayName)
-                                .foregroundStyle(site == siteSession.activeSite ? Theme.accent : Theme.textPrimary)
-                            Spacer()
-                            if site == siteSession.activeSite {
-                                Image(systemName: "checkmark")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(Theme.accent)
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .frame(minHeight: 48)
-                        .contentShape(Rectangle())
+                        siteOptionRow(title: site.displayName, isActive: isActive)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                // «Другие сайты» — включённые в Настройках (см.
+                // ExternalSitesSettingsView) внешние сайты (сейчас hitomi.la,
+                // дальше по мере разбора HAR), той же строкой в конце того
+                // же списка — SiteSession/LibSite при этом не трогаются,
+                // просто рядом появляется независимый переключатель (см.
+                // ExternalSiteSession).
+                ForEach(ExternalSite.allCases.filter { externalSiteSession.enabledSites.contains($0) }) { site in
+                    let isActive = externalSiteSession.activeExternalSite == site
+                    Divider().overlay(Theme.separator)
+                        .padding(.leading, 16 + 52 + 14).padding(.trailing, 16)
+                    Button {
+                        externalSiteSession.activeExternalSite = site
+                        withAnimation(.easeInOut(duration: 0.2)) { siteExpanded = false }
+                    } label: {
+                        siteOptionRow(title: site.displayName, isActive: isActive)
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
+    }
+
+    /// Одна строка в развёрнутом списке выбора сайта — общая для LibSite и
+    /// ExternalSite (см. siteRow выше).
+    private func siteOptionRow(title: String, isActive: Bool) -> some View {
+        HStack(spacing: 14) {
+            // Пустая колонка шириной иконки — чтобы название выровнялось
+            // под «Сайт» выше.
+            Color.clear.frame(width: 52)
+            Text(title)
+                .foregroundStyle(isActive ? Theme.accent : Theme.textPrimary)
+            Spacer()
+            if isActive {
+                Image(systemName: "checkmark")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 48)
+        .contentShape(Rectangle())
     }
 
     // Быстрый блок БЕЗ заголовка подложки: Настройки, История, Загрузки — все
@@ -266,19 +304,33 @@ struct SideMenuView: View {
         }
     }
 
+    @ViewBuilder
     private var catalogRootRows: some View {
-        VStack(spacing: 0) {
-            row("Тайтлы", icon: "book", action: {
-                withAnimation(.easeInOut(duration: 0.2)) { catalogShowingTypes = true }
-            })
-            row("Сейчас читают", icon: "flame", action: { path.append(MenuRoute.nowReading) })
-            row("Коллекции", icon: "square.stack", action: { path.append(MenuRoute.collections) })
-            row("Команды", icon: "person.3", action: { path.append(MenuRoute.teams) })
-            row("Люди", icon: "person.crop.rectangle", action: { path.append(MenuRoute.people) })
-            row("Персонажи", icon: "face.smiling", action: { path.append(MenuRoute.characters) })
-            row("Франшизы", icon: "sparkles", action: { path.append(MenuRoute.franchises) })
-            row("Издательства", icon: "building.2", action: { path.append(MenuRoute.publishers) })
-            row("Пользователи", icon: "person.crop.circle", showDivider: false, action: { path.append(MenuRoute.users) })
+        // Внешний сайт активен (см. ExternalSiteSession) — обычные пункты
+        // каталога MangaLib здесь не при чём (Команды/Персонажи/Франшизы и
+        // т.д. — это сущности ИМЕННО экосистемы Lib), показываем только то,
+        // что реально есть у внешнего сайта (сейчас — только список тегов).
+        if let ext = externalSiteSession.activeExternalSite {
+            let hasTagBrowser = ExternalSiteRegistry.provider(for: ext).capabilities.hasTagBrowser
+            if hasTagBrowser {
+                row("Список тегов", icon: "tag", showDivider: false, action: { path.append(MenuRoute.externalTags) })
+            } else {
+                row("Каталог недоступен на \(ext.displayName)", icon: "tag", showDivider: false, showChevron: false)
+            }
+        } else {
+            VStack(spacing: 0) {
+                row("Тайтлы", icon: "book", action: {
+                    withAnimation(.easeInOut(duration: 0.2)) { catalogShowingTypes = true }
+                })
+                row("Сейчас читают", icon: "flame", action: { path.append(MenuRoute.nowReading) })
+                row("Коллекции", icon: "square.stack", action: { path.append(MenuRoute.collections) })
+                row("Команды", icon: "person.3", action: { path.append(MenuRoute.teams) })
+                row("Люди", icon: "person.crop.rectangle", action: { path.append(MenuRoute.people) })
+                row("Персонажи", icon: "face.smiling", action: { path.append(MenuRoute.characters) })
+                row("Франшизы", icon: "sparkles", action: { path.append(MenuRoute.franchises) })
+                row("Издательства", icon: "building.2", action: { path.append(MenuRoute.publishers) })
+                row("Пользователи", icon: "person.crop.circle", showDivider: false, action: { path.append(MenuRoute.users) })
+            }
         }
     }
 
