@@ -193,8 +193,9 @@ struct BookmarkedTitle: Codable, Identifiable, Hashable {
     /// число ВСЕГДА (даже если тайтл не открывали ни разу), а не то, на чём
     /// пользователь остановился — см. BookmarksView.chapterChip.
     var latestChapterNumber: String? = nil
-    /// Общее число глав тайтла (metadata.chap_count, см. MangaItem.chapCount)
-    /// — для "Начать 0/N" под названием в плитке, когда прогресса ещё нет.
+    /// Общее число глав тайтла (items_count.uploaded, см.
+    /// MangaItem.uploadedChaptersCount) — для "Начать 0/N" под названием в
+    /// плитке, когда прогресса ещё нет.
     var chapterCount: Int? = nil
     /// Статус ПУБЛИКАЦИИ тайтла (label, напр. "Онгоинг"/"Завершён") — по
     /// прямой просьбе бэйдж "Глава N" не показывается для завершённых
@@ -924,7 +925,7 @@ final class BookmarksStore: ObservableObject {
                 items[idx].mediaId = entry.media.id
                 items[idx].originalTitle = entry.media.name
                 items[idx].latestChapterNumber = entry.media.latestChapter?.number
-                items[idx].chapterCount = entry.media.chapCount
+                items[idx].chapterCount = entry.media.uploadedChaptersCount
                 items[idx].titleStatusLabel = entry.media.status?.label
                 // Подтвердился в ответе сервера — защита от преждевременного
                 // удаления больше не нужна (см. recentlyAddedAt).
@@ -940,7 +941,7 @@ final class BookmarksStore: ObservableObject {
                                               mediaId: entry.media.id,
                                               originalTitle: entry.media.name,
                                               latestChapterNumber: entry.media.latestChapter?.number,
-                                              chapterCount: entry.media.chapCount,
+                                              chapterCount: entry.media.uploadedChaptersCount,
                                               titleStatusLabel: entry.media.status?.label))
             }
         }

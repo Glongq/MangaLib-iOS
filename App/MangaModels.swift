@@ -959,14 +959,16 @@ struct MangaItem: Decodable, Identifiable, Hashable {
     let viewsWeek: Int?
     let viewsMonth: Int?
     /// Общее число глав тайтла (не путать с latestChapter — та номер
-    /// ПОСЛЕДНЕЙ вышедшей, эта — просто СКОЛЬКО их всего) — как и metadata,
-    /// сервер отдаёт только по явному запросу `fields[]=chap_count` (см.
-    /// MangaNetworkService.fetchBookmarksAccountList), в обычном каталоге
-    /// поле есть только как sort/filter-параметр (chap_count/chap_count_min/
-    /// max в MangaFilter.swift), в самих карточках списка раньше не
-    /// декодировалось вообще. Нужен для "Начать 0/N" в Закладках (плитка) —
-    /// по прямой просьбе, эталон — реальный сайт.
-    let chapCount: Int?
+    /// ПОСЛЕДНЕЙ вышедшей, эта — просто СКОЛЬКО их всего) — ПОДТВЕРЖДЕНО
+    /// реальным перехватом `GET /bookmarks` (БЕЗ каких-либо явных fields[]!):
+    /// `"items_count":{"uploaded":127,"total":0}` у тайтла с последней главой
+    /// номер "117" — "uploaded" и есть общее число. Раньше здесь по ошибке
+    /// стояло предположение про несуществующий `chap_count` (это поле в API
+    /// есть только как имя SORT/FILTER-параметра каталога, см. chap_count/
+    /// chap_count_min/max в MangaFilter.swift — к содержимому карточки
+    /// тайтла отношения не имеет). Нужен для "Начать 0/N" в Закладках
+    /// (плитка) — по прямой просьбе, эталон — реальный сайт.
+    let itemsCount: MangaItemsCount?
 
     /// Название для отображения: русское, если есть, иначе оригинальное.
     var displayTitle: String { rusName?.isEmpty == false ? rusName! : name }
@@ -984,6 +986,8 @@ struct MangaItem: Decodable, Identifiable, Hashable {
     /// Сколько ЕЩЁ глав вышло, кроме показанной latestChapter (для "+ ещё N").
     var extraLatestChaptersCount: Int { max(0, (metadata?.latestItems?.count ?? 1) - 1) }
     var lastItemDate: Date? { lastItemAt.flatMap(APIISODate.parse) ?? latestChapter?.createdAt.flatMap(APIISODate.parse) }
+    /// Общее число вышедших глав — см. itemsCount выше.
+    var uploadedChaptersCount: Int? { itemsCount?.uploaded }
     /// Число просмотров за выбранный период — первое непустое из трёх (см.
     /// viewsDay/viewsWeek/viewsMonth).
     var topViewsCount: Int? { viewsDay ?? viewsWeek ?? viewsMonth }
@@ -998,7 +1002,7 @@ struct MangaItem: Decodable, Identifiable, Hashable {
         case viewsDay = "views_day"
         case viewsWeek = "views_week"
         case viewsMonth = "views_month"
-        case chapCount = "chap_count"
+        case itemsCount = "items_count"
     }
 
     static func == (lhs: MangaItem, rhs: MangaItem) -> Bool { lhs.id == rhs.id }
@@ -1023,6 +1027,16 @@ struct MangaItemMetadata: Decodable, Hashable {
 struct MangaLatestItems: Decodable, Hashable {
     let count: Int
     let items: [MangaChapterMetadata]
+}
+
+/// `items_count` у элемента списка тайтлов — ПОДТВЕРЖДЕНО реальным
+/// перехватом `GET /bookmarks` (см. MangaItem.itemsCount): `{"uploaded":127,
+/// "total":0}` — "uploaded" = общее число реально загруженных глав тайтла,
+/// "total" в подтверждённых примерах всегда встречался 0 (назначение не
+/// подтверждено, не используется).
+struct MangaItemsCount: Decodable, Hashable {
+    let uploaded: Int?
+    let total: Int?
 }
 
 /// Краткое описание главы внутри metadata (НЕ то же самое, что ChapterItem/

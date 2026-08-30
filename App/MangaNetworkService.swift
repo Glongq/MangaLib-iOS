@@ -764,27 +764,18 @@ final class MangaNetworkService {
         // публикации тайтл), весь decode массива падает и synchFromServer
         // тихо ничего не получает вообще (см. комментарий у LossyArray).
         //
-        // fields[]=metadata/chap_count — НЕ подтверждено перехватом именно
-        // для /bookmarks (подтверждено только для /manga, /user-latest-updates
-        // и т.п., см. MangaItem.metadata/chapCount) — нужны для бэйджа
-        // "Глава N" (последняя вышедшая) и "Начать 0/N" в плитке Закладок, по
-        // прямой просьбе, эталон — реальный сайт. Один неизвестный серверу
-        // fields[] валит ВЕСЬ запрос 422 (та же экосистема, см. комментарий у
-        // fetchMangaDetailRawData) — при 422 повторяем БЕЗ этих двух полей, а
-        // не рискуем всем списком закладок.
-        let extraItems = items + [
-            URLQueryItem(name: "fields[]", value: "metadata"),
-            URLQueryItem(name: "fields[]", value: "chap_count")
-        ]
-        do {
-            let request = try makeRequest(path: "/bookmarks", queryItems: extraItems)
-            let response: LossyListResponse<BookmarkListEntry> = try await perform(request)
-            return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
-        } catch NetworkError.server(let code) where code == 422 {
-            let fallback = try makeRequest(path: "/bookmarks", queryItems: items)
-            let response: LossyListResponse<BookmarkListEntry> = try await perform(fallback)
-            return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
-        }
+        // Никаких доп. fields[] не нужно — ПОДТВЕРЖДЕНО реальным перехватом:
+        // metadata.last_item (бэйдж "Глава N" — см. MangaItem.latestChapter)
+        // и items_count.uploaded ("Начать 0/N" — см.
+        // MangaItem.uploadedChaptersCount) приходят в ответе /bookmarks И БЕЗ
+        // единого явного fields[] — в отличие от /manga/{slug}, здесь это,
+        // судя по всему, поля по умолчанию (раньше здесь стояло совсем
+        // другое, неверное предположение с fields[]=chap_count — такого поля
+        // в API вообще нет, chap_count существует только как имя sort/filter-
+        // параметра каталога).
+        let request = try makeRequest(path: "/bookmarks", queryItems: items)
+        let response: LossyListResponse<BookmarkListEntry> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
     }
 
     /// Изменить статус папки закладок тайтла в РЕАЛЬНОМ аккаунте.
