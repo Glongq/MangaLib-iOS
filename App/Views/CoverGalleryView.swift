@@ -70,16 +70,16 @@ struct CoverGalleryView: View {
     }
 
     var body: some View {
-        // Крестик закрытия и бабл номера страницы — ТЕПЕРЬ одна общая нижняя
-        // "полоса" (HStack), а не два независимых оверлея с одинаковым
-        // .padding(.bottom, 24), которые формально стояли на одной высоте, но
-        // визуально не были ничем связаны — бабл по центру, крестик отдельно
-        // в углу сам по себе, "как будто забыт там" (по прямой просьбе
-        // исправлено — "крестик теперь вообще в углу"). Бабл — по центру ВСЕЙ
-        // строки (Spacer с обеих сторон, тот же эффект, что и раньше давал
-        // .overlay(alignment: .bottom) на всю ширину), крестик — оверлеем
-        // поверх этой ЖЕ строки у trailing-края, то есть буквально на одной
-        // высоте и в одном визуальном "блоке", а не отдельно.
+        // Крестик закрытия и бабл номера страницы — ОДНА группа, ВМЕСТЕ по
+        // центру внизу, а не порознь (бабл по центру, крестик у trailing-
+        // края отдельно): при ОДНОЙ картинке в галерее бабл вообще не
+        // рисуется (images.count > 1 ниже) — крестик оставался в одиночестве
+        // у правого края, без бабла рядом выглядел ровно как "случайно
+        // забыт в углу" (по фото бага — реальная жалоба, не только "формально
+        // не в углу"). Сгруппированы в один HStack, центрированный как единое
+        // целое (.frame(maxWidth: .infinity, alignment: .center)) — крестик
+        // всегда рядом с бабблом (когда он есть) или один по центру (когда
+        // картинка одна), никогда не "болтается" отдельно у края.
         //
         // ОТДЕЛЬНЫЙ слой ПОВЕРХ содержимого (а не overlay уже
         // .ignoresSafeArea()'нутого TabView/фона) — чтобы позиция считалась
@@ -100,8 +100,14 @@ struct CoverGalleryView: View {
             }
             .ignoresSafeArea()
 
-            HStack {
-                Spacer(minLength: 0)
+            HStack(spacing: 12) {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 48, height: 48)
+                        .glassEffect(.regular, in: Circle())
+                }
                 // Тот же стеклянный бабл, что у номера страницы в читалке манги
                 // (см. MangaReaderView.pageBubble) — тот же шрифт/паддинг/капсула,
                 // просто белый текст (в читалке fg зависит от темы страницы, тут
@@ -114,18 +120,8 @@ struct CoverGalleryView: View {
                         .padding(.vertical, 8)
                         .glassEffect(.regular, in: Capsule())
                 }
-                Spacer(minLength: 0)
             }
-            .overlay(alignment: .trailing) {
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 48, height: 48)
-                        .glassEffect(.regular, in: Circle())
-                }
-            }
-            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.bottom, 24)
         }
         .persistentSystemOverlays(.hidden)
