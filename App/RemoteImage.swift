@@ -273,8 +273,16 @@ struct RemoteImage<Placeholder: View, Failure: View>: View {
                 failure()
             }
         }
-        .onAppear { loadCurrent() }
-        .onChange(of: url) { _, _ in loadCurrent() }
+        // .task(id:) вместо .onAppear+.onChange(of:) — надёжнее именно
+        // внутри TabView(.page)/переходов (.navigationTransition(.zoom) и
+        // т.п.): .onAppear там иногда СОВСЕМ не срабатывал (см. фидбек
+        // "картинка через раз появляется" в CoverGalleryView — блюр-фон
+        // грузится синхронно снимком, а сама картинка страницы иногда
+        // просто не запускала загрузку). .task(id:) — гарантированный SwiftUI
+        // API именно под "запустить асинхронную работу, привязанную к
+        // значению", сам перезапускается при смене url и сам отменяется при
+        // уходе view с экрана — не нужно вручную дублировать эту логику.
+        .task(id: url) { loadCurrent() }
     }
 
     private func loadCurrent() {
