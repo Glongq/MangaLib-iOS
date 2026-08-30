@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Запрос выдачи — тег/серия/... (см. ExternalTagBrowserView) ИЛИ свободный
 /// текстовый поиск (см. ExternalSearchView/ExternalCombinedCatalogView,
@@ -349,11 +350,39 @@ struct ExternalCatalogGridView: View {
         }
     }
 
+    // MARK: Текст под обложкой — размеры/шрифты 1-в-1 MangaCardView
+    // (titleFont/typeFont/textBlockHeight), см. card(item:width:) ниже.
+    // ОТЛИЧИЕ от MangaCardView: та считает высоту блока ПО РЯДУ (все
+    // карточки ряда видны сразу, т.к. viewModel.results уже полностью
+    // загружен) — здесь тайтлы сетки грузятся ЛЕНИВО, по карточке
+    // (onCardAppear → loadDetail), поэтому на момент раскладки соседи по
+    // ряду ещё МОГУТ быть без загруженной детали вовсе — точный построчный
+    // расчёт ряда потребовал бы знать финальные названия ЗАРАНЕЕ. Вместо
+    // этого КАЖДАЯ карточка сама резервирует МАКСИМУМ (2 строки названия +
+    // строка типа, даже когда типа нет или деталь ещё грузится) —
+    // тот же результат (сетка не "плывёт", жалоба "съезжает изза того что
+    // одни тайтлы название название тип, а название-тип", 31.08), просто
+    // без построчной экономии места на рядах с короткими названиями.
+    private static let textScale: CGFloat = 1.2
+    private static var titleUIFont: UIFont {
+        let base = UIFont.preferredFont(forTextStyle: .caption1)
+        return UIFont.systemFont(ofSize: base.pointSize * textScale, weight: .medium)
+    }
+    private static var typeUIFont: UIFont {
+        let base = UIFont.preferredFont(forTextStyle: .caption2)
+        return UIFont.systemFont(ofSize: base.pointSize * textScale, weight: .regular)
+    }
+    private static var titleTypeSpacing: CGFloat { titleUIFont.leading }
+    private static var textBlockHeight: CGFloat {
+        (titleUIFont.lineHeight * 2 + titleTypeSpacing + typeUIFont.lineHeight).rounded(.up)
+    }
+
     private func card(item: ExternalCatalogItem, width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let detail = details[item.id]
+        return VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topLeading) {
                 Group {
-                    if let detail = details[item.id], let cover = detail.coverURL {
+                    if let cover = detail?.coverURL {
                         ExternalImage(url: cover) { SkeletonBox() }
                             .scaledToFill()
                     } else {
@@ -375,26 +404,44 @@ struct ExternalCatalogGridView: View {
                 }
             }
 
-            Text(details[item.id]?.title ?? "…")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(width: width, alignment: .topLeading)
+            // Название + тип — тем же приёмом, что и в обычном каталоге
+            // (MangaCardView: название, сразу под ним тип секондари-цветом),
+            // тип НА АНГЛИЙСКОМ, как есть на самом сайте (hitomi отдаёт
+            // "manga"/"doujinshi"/"misc"/... строчными, e-hentai —
+            // "Manga"/... с большой) — не переводим и не меняем регистр.
+            // Пока деталь ещё не загрузилась — SkeletonBar (та же анимация
+            // шиммера, что у обложки/skeletonGrid выше), НЕ "…" (жалоба
+            // "скелетон это три точки просто", 31.08).
+            Group {
+                if let detail {
+                    VStack(alignment: .leading, spacing: Self.titleTypeSpacing) {
+                        Text(detail.title)
+                            .font(Font(Self.titleUIFont))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .frame(width: width, alignment: .topLeading)
 
-            // Тип тайтла — третьей строкой под названием, тем же приёмом,
-            // что и в обычном каталоге (MangaCardView: название, сразу под
-            // ним тип секондари-цветом), по прямой просьбе (30.08). НА
-            // АНГЛИЙСКОМ, как есть на самом сайте (hitomi отдаёт "manga"/
-            // "doujinshi"/"misc"/... строчными, e-hentai — "Manga"/... с
-            // большой) — не переводим и не меняем регистр.
-            if let type = details[item.id]?.type, !type.isEmpty {
-                Text(type)
-                    .font(.caption2)
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1)
-                    .frame(width: width, alignment: .leading)
+                        // Строка типа — ВСЕГДА занимает место (opacity 0
+                        // вместо условного исчезновения View, тот же
+                        // приём, что у MangaCardView.typeLabel), даже
+                        // когда у тайтла нет типа, чтобы соседняя карточка
+                        // ряда не оказывалась короче.
+                        Text(detail.type.isEmpty ? " " : detail.type)
+                            .font(Font(Self.typeUIFont))
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                            .frame(width: width, alignment: .leading)
+                            .opacity(detail.type.isEmpty ? 0 : 1)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: Self.titleTypeSpacing) {
+                        SkeletonBar(width: width * 0.85, height: Self.titleUIFont.lineHeight)
+                        SkeletonBar(width: width * 0.5, height: Self.typeUIFont.lineHeight)
+                    }
+                }
             }
+            .frame(width: width, height: Self.textBlockHeight, alignment: .top)
         }
         .frame(width: width, alignment: .top)
     }
