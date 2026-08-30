@@ -2,24 +2,25 @@ import SwiftUI
 
 /// Каталог-экран для внешних сайтов со свободным текстовым поиском вместо
 /// алфавитного справочника (capabilities.hasSearch && !hasTagBrowser — см.
-/// EHentaiProvider; у hitomi наоборот, см. ExternalTagBrowserView). Просто
-/// поле ввода (+ кнопки категорий у сайтов с capabilities.hasCategoryFilter,
-/// см. EHentaiCategoryPicker) + переход в ту же ExternalCatalogGridView, но
-/// с `.search(query:excludedCategoryBits:)` вместо `.tag(...)`.
+/// EHentaiProvider; у hitomi наоборот, см. ExternalTagBrowserView). Поле
+/// ввода (+ кнопки категорий у сайтов с capabilities.hasCategoryFilter, см.
+/// EHentaiCategoryPicker) — по прямой просьбе БЕЗ отдельного перехода:
+/// тайтлы появляются сразу под полем, на том же экране (см.
+/// ExternalCatalogGridView(embedded: true)), с небольшой задержкой после
+/// последнего нажатия клавиши (debounce), а не по отдельному "Искать".
 struct ExternalSearchView: View {
     let site: ExternalSite
 
     @State private var query = ""
+    /// Запрос, который реально сейчас ищется — отдельно от `query` (что
+    /// набрано в поле прямо сейчас), чтобы не дёргать сеть на КАЖДОЕ
+    /// нажатие клавиши (см. .task(id: query) ниже — debounce).
+    @State private var committedQuery = ""
     @State private var excludedCategories: Set<EHentaiCategory> = []
     @FocusState private var isFocused: Bool
 
     private var capabilities: ExternalSiteCapabilities { ExternalSiteRegistry.provider(for: site).capabilities }
     private var excludedCategoryBits: Int { excludedCategories.reduce(0) { $0 | $1.bit } }
-
-    private struct SearchRequest: Hashable {
-        let query: String
-        let excludedCategoryBits: Int
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,29 +32,29 @@ struct ExternalSearchView: View {
                     .padding(.bottom, 12)
             }
 
-            if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            if committedQuery.isEmpty {
                 StateView(icon: "magnifyingglass", title: "Введите запрос", fillScreen: true)
             } else {
-                NavigationLink(value: SearchRequest(query: query, excludedCategoryBits: excludedCategoryBits)) {
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                        Text("Искать «\(query)»")
-                        Spacer()
-                    }
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 48)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                Spacer()
+                // .id — принудительно НОВЫЙ экземпляр вью на каждое
+                // изменение запроса/категорий, чтобы @State сетки (items/
+                // cursors/...) сбрасывался и .task заново запускал загрузку
+                // — простая смена параметра `query:` этого не делает, SwiftUI
+                // считает это ТЕМ ЖЕ вью на том же месте дерева.
+                ExternalCatalogGridView(site: site, query: .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits), title: committedQuery, embedded: true)
+                    .id("\(committedQuery)#\(excludedCategoryBits)")
             }
         }
         .navigationTitle("Поиск")
         .navigationBarTitleDisplayMode(.inline)
         .background(Theme.background.ignoresSafeArea())
-        .navigationDestination(for: SearchRequest.self) { request in
-            ExternalCatalogGridView(site: site, query: .search(query: request.query, excludedCategoryBits: request.excludedCategoryBits), title: request.query)
+        .task(id: query) {
+            // Debounce — 400мс тишины после последнего нажатия, иначе
+            // каждая буква била бы отдельным сетевым запросом. .task(id:)
+            // сам отменяет предыдущую попытку, когда query меняется снова
+            // раньше, чем истекли эти 400мс.
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            committedQuery = query.trimmingCharacters(in: .whitespaces)
         }
     }
 

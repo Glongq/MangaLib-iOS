@@ -39,22 +39,30 @@ struct ExternalCatalogGridView: View {
     let sites: [ExternalSite]
     let query: ExternalCatalogQuery
     let title: String
+    /// true — встроена ПРЯМО в экран поиска (см. ExternalSearchView/
+    /// ExternalCombinedCatalogView, по прямой просьбе "тут же появляются
+    /// тайтлы", без отдельного перехода) — без своего заголовка/фона,
+    /// родительский экран уже даёт их. false (по умолчанию) — как раньше,
+    /// самостоятельный экран, на который переходят (см. ExternalTagBrowserView).
+    var embedded: Bool = false
 
     /// Обычный (не совместный) вызов — один сайт, самый частый случай
     /// (ExternalTagBrowserView/ExternalSearchView).
-    init(site: ExternalSite, query: ExternalCatalogQuery, title: String) {
+    init(site: ExternalSite, query: ExternalCatalogQuery, title: String, embedded: Bool = false) {
         self.sites = [site]
         self.query = query
         self.title = title
+        self.embedded = embedded
     }
 
     /// Совместная выдача — сразу НЕСКОЛЬКО сайтов (см.
     /// ExternalCombinedCatalogView) — каждая страница мержится по всем
     /// переданным сайтам разом (см. loadNextBatch).
-    init(sites: [ExternalSite], query: ExternalCatalogQuery, title: String) {
+    init(sites: [ExternalSite], query: ExternalCatalogQuery, title: String, embedded: Bool = false) {
         self.sites = sites
         self.query = query
         self.title = title
+        self.embedded = embedded
     }
 
     private static let pageSize = 25
@@ -71,7 +79,6 @@ struct ExternalCatalogGridView: View {
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var errorMessage: String?
-    @State private var showJumpPrompt = false
     @State private var jumpPageText = ""
 
     private let gridSpacing: CGFloat = 12
@@ -81,39 +88,57 @@ struct ExternalCatalogGridView: View {
     /// тайтл (см. ExternalTagBrowserView/ExternalSearchView, где sites — [x]).
     private var showsSourceBadge: Bool { sites.count > 1 }
     /// «Перейти на страницу» (см. ExternalSiteCapabilities.hasPageJump) —
-    /// хотя бы один из sites должен это уметь, иначе кнопка ни на что не
+    /// хотя бы один из sites должен это уметь, иначе строка ни на что не
     /// повлияет (см. jump(toPage:) — сайты без поддержки там просто
-    /// пропускаются, начинают заново с первой страницы).
+    /// пропускаются, начинают заново с первой страницы). По прямой просьбе
+    /// — всегда СВЕРХУ, видимой строкой, не спрятана за кнопкой/алертом.
     private var showsPageJump: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasPageJump } }
 
     var body: some View {
-        content
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .background(Theme.background.ignoresSafeArea())
-            .task { await loadFirstPage() }
-            .toolbar {
-                if showsPageJump {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            jumpPageText = ""
-                            showJumpPrompt = true
-                        } label: {
-                            Image(systemName: "arrow.forward.to.line")
-                        }
-                    }
-                }
+        if embedded {
+            innerContent
+                .task { await loadFirstPage() }
+        } else {
+            innerContent
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .background(Theme.background.ignoresSafeArea())
+                .task { await loadFirstPage() }
+        }
+    }
+
+    private var innerContent: some View {
+        VStack(spacing: 0) {
+            if showsPageJump {
+                pageJumpRow
             }
-            .alert("Перейти на страницу", isPresented: $showJumpPrompt) {
-                TextField("Номер страницы", text: $jumpPageText)
-                    .keyboardType(.numberPad)
-                Button("Перейти") {
-                    if let page = Int(jumpPageText), page > 0 { jump(toPage: page) }
-                }
-                Button("Отмена", role: .cancel) {}
-            } message: {
-                Text("У некоторых сайтов переход приблизительный — точный номер страницы не гарантирован.")
+            content
+        }
+    }
+
+    private var pageJumpRow: some View {
+        HStack(spacing: 8) {
+            Text("Стр.")
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+            TextField("№", text: $jumpPageText)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 6)
+                .frame(width: 52, height: 32)
+                .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Button {
+                if let page = Int(jumpPageText), page > 0 { jump(toPage: page) }
+            } label: {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Int(jumpPageText) != nil ? Theme.accent : Theme.textSecondary.opacity(0.4))
             }
+            .disabled(Int(jumpPageText) == nil)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder

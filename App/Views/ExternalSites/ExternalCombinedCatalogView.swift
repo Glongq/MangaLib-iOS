@@ -10,21 +10,19 @@ import SwiftUI
 /// категорий (см. EHentaiCategoryPicker) показываются, если ХОТЯ БЫ один
 /// из включённых сайтов их понимает (capabilities.hasCategoryFilter) —
 /// остальные сайты в выдаче просто честно игнорируют bitmask (см.
-/// ExternalSiteProvider.fetchIdsBySearch(excludedCategoryBits:)).
+/// ExternalSiteProvider.fetchIdsBySearch(excludedCategoryBits:)). Как и у
+/// ExternalSearchView — по прямой просьбе БЕЗ отдельного перехода, тайтлы
+/// появляются сразу под полем на этом же экране (debounce, см. .task(id:)).
 struct ExternalCombinedCatalogView: View {
     @ObservedObject private var session = ExternalSiteSession.shared
     @State private var query = ""
+    @State private var committedQuery = ""
     @State private var excludedCategories: Set<EHentaiCategory> = []
     @FocusState private var isFocused: Bool
 
     private var sites: [ExternalSite] { ExternalSite.allCases.filter { session.enabledSites.contains($0) } }
     private var showsCategoryFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter } }
     private var excludedCategoryBits: Int { excludedCategories.reduce(0) { $0 | $1.bit } }
-
-    private struct SearchRequest: Hashable {
-        let query: String
-        let excludedCategoryBits: Int
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,7 +34,7 @@ struct ExternalCombinedCatalogView: View {
                     .padding(.bottom, 12)
             }
 
-            if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            if committedQuery.isEmpty {
                 StateView(
                     icon: "square.grid.2x2",
                     title: "Введите запрос",
@@ -44,26 +42,17 @@ struct ExternalCombinedCatalogView: View {
                     fillScreen: true
                 )
             } else {
-                NavigationLink(value: SearchRequest(query: query, excludedCategoryBits: excludedCategoryBits)) {
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                        Text("Искать «\(query)» везде")
-                        Spacer()
-                    }
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 48)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                Spacer()
+                ExternalCatalogGridView(sites: sites, query: .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits), title: committedQuery, embedded: true)
+                    .id("\(committedQuery)#\(excludedCategoryBits)")
             }
         }
         .navigationTitle("Все сайты")
         .navigationBarTitleDisplayMode(.inline)
         .background(Theme.background.ignoresSafeArea())
-        .navigationDestination(for: SearchRequest.self) { request in
-            ExternalCatalogGridView(sites: sites, query: .search(query: request.query, excludedCategoryBits: request.excludedCategoryBits), title: request.query)
+        .task(id: query) {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            committedQuery = query.trimmingCharacters(in: .whitespaces)
         }
     }
 
