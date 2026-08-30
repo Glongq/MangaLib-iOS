@@ -46,23 +46,33 @@ struct ExternalCatalogGridView: View {
     /// самостоятельный экран, на который переходят (см. ExternalTagBrowserView).
     var embedded: Bool = false
 
+    /// Доп. кнопка(и) родительского экрана в общей нижней стеклянной панели
+    /// (см. controlsBar) — сейчас это «Фильтры» у ExternalSearchView/
+    /// ExternalCombinedCatalogView (капсула категорий e-hentai). `AnyView`,
+    /// не generic-параметр на весь struct — тип этой вью не должен
+    /// протекать во все места, где создаётся ExternalCatalogGridView (была
+    /// бы генерик-разводка ради одной необязательной кнопки).
+    var leadingControls: AnyView?
+
     /// Обычный (не совместный) вызов — один сайт, самый частый случай
     /// (ExternalTagBrowserView/ExternalSearchView).
-    init(site: ExternalSite, query: ExternalCatalogQuery, title: String, embedded: Bool = false) {
+    init(site: ExternalSite, query: ExternalCatalogQuery, title: String, embedded: Bool = false, leadingControls: AnyView? = nil) {
         self.sites = [site]
         self.query = query
         self.title = title
         self.embedded = embedded
+        self.leadingControls = leadingControls
     }
 
     /// Совместная выдача — сразу НЕСКОЛЬКО сайтов (см.
     /// ExternalCombinedCatalogView) — каждая страница мержится по всем
     /// переданным сайтам разом (см. loadNextBatch).
-    init(sites: [ExternalSite], query: ExternalCatalogQuery, title: String, embedded: Bool = false) {
+    init(sites: [ExternalSite], query: ExternalCatalogQuery, title: String, embedded: Bool = false, leadingControls: AnyView? = nil) {
         self.sites = sites
         self.query = query
         self.title = title
         self.embedded = embedded
+        self.leadingControls = leadingControls
     }
 
     private static let pageSize = 25
@@ -110,19 +120,34 @@ struct ExternalCatalogGridView: View {
     /// у e-hentai в совместной выдаче sortKey просто честно игнорируется
     /// (см. ExternalSiteProvider extension-дефолт).
     private var showsSortMenu: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasSortOptions } }
+    private var showsControlsBar: Bool { showsPageJump || showsSortMenu || leadingControls != nil }
+
+    @FocusState private var isJumpFieldFocused: Bool
 
     var body: some View {
-        if embedded {
-            innerContent
-                .task { await loadFirstPage() }
-                .onChange(of: sortKey) { _, _ in resetAndReload() }
-        } else {
-            innerContent
-                .navigationTitle(title)
-                .navigationBarTitleDisplayMode(.inline)
-                .background(Theme.background.ignoresSafeArea())
-                .task { await loadFirstPage() }
-                .onChange(of: sortKey) { _, _ in resetAndReload() }
+        Group {
+            if embedded {
+                content
+            } else {
+                content
+                    .navigationTitle(title)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .background(Theme.background.ignoresSafeArea())
+            }
+        }
+        .task { await loadFirstPage() }
+        .onChange(of: sortKey) { _, _ in resetAndReload() }
+        // Панель снизу, стеклянными пилюлями — 1-в-1 MangaCatalogView.
+        // controlsBar/controlLabel (по прямой просьбе 30.08 "кнопка
+        // фильтры внизу... быстрый переход к странице тоже сделай кнопку
+        // стеклянную внизу"), а не сверху обычными плашками, как было.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if showsControlsBar {
+                controlsBar
+                    .padding(.horizontal, 20)
+                    .padding(.top, 4)
+                    .padding(.bottom, 20)
+            }
         }
     }
 
@@ -135,48 +160,96 @@ struct ExternalCatalogGridView: View {
         Task { await performInitialLoad() }
     }
 
-    private var innerContent: some View {
-        VStack(spacing: 0) {
-            if showsPageJump || showsSortMenu {
-                controlsRow
-            }
-            content
-        }
-    }
-
-    private var controlsRow: some View {
-        HStack(spacing: 8) {
+    private var controlsBar: some View {
+        HStack(spacing: 10) {
+            leadingControls
             if showsPageJump {
-                pageJumpControls
+                pageJumpButton
             }
-            Spacer(minLength: 8)
             if showsSortMenu {
                 sortMenuButton
             }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
     }
 
-    private var pageJumpControls: some View {
-        HStack(spacing: 8) {
-            Text("Стр.")
-                .font(.footnote)
-                .foregroundStyle(Theme.textSecondary)
-            TextField("№", text: $jumpPageText)
-                .keyboardType(.numberPad)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 6)
-                .frame(width: 52, height: 32)
-                .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            Button {
-                if let page = Int(jumpPageText), page > 0 { jump(toPage: page) }
-            } label: {
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(Int(jumpPageText) != nil ? Theme.accent : Theme.textSecondary.opacity(0.4))
+    /// Тот же стиль стеклянной пилюли, что и у MangaCatalogView.controlLabel
+    /// (Фильтры/Сортировка внизу обычного каталога) — переиспользуют его и
+    /// «Фильтры» родительского экрана (см. leadingControls), и «Стр.»/
+    /// «Сортировка» здесь: единый вид всех кнопок нижней панели.
+    private func controlPill(icon: String, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.footnote.weight(.semibold))
+            Text(text).font(.footnote.weight(.medium)).lineLimit(1)
+        }
+        .foregroundStyle(Theme.textPrimary)
+        .padding(.horizontal, 14)
+        .frame(minHeight: Theme.pillControlHeight)
+        .glassEffect(.regular.interactive(), in: Capsule())
+    }
+
+    /// «Стр.» — пилюля с полем ввода + стрелкой, лист снизу (см.
+    /// jumpFieldSheet) вместо строки инлайн, чтобы поле ввода не торчало
+    /// прямо в нижней панели рядом с остальными кнопками. Тап по пилюле
+    /// открывает лист; клавиатура сворачивается кнопкой "Готово" в
+    /// toolbar(.keyboard) самого листа (см. jumpFieldSheet) — по прямой
+    /// просьбе "не забудь чтобы можно было свернуть клавиатуру".
+    @State private var showJumpSheet = false
+
+    private var pageJumpButton: some View {
+        Button {
+            showJumpSheet = true
+        } label: {
+            controlPill(icon: "arrow.right.to.line", text: "Стр.")
+        }
+        .sheet(isPresented: $showJumpSheet) {
+            jumpFieldSheet
+        }
+    }
+
+    private var jumpFieldSheet: some View {
+        VStack(spacing: 16) {
+            Text("Перейти на страницу")
+                .font(.headline)
+                .foregroundStyle(Theme.textPrimary)
+            HStack(spacing: 8) {
+                TextField("№", text: $jumpPageText)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.center)
+                    .focused($isJumpFieldFocused)
+                    .padding(.horizontal, 6)
+                    .frame(width: 64, height: 40)
+                    .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Button {
+                    if let page = Int(jumpPageText), page > 0 {
+                        jump(toPage: page)
+                        showJumpSheet = false
+                    }
+                } label: {
+                    Text("Перейти")
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .disabled(Int(jumpPageText) == nil)
             }
-            .disabled(Int(jumpPageText) == nil)
+        }
+        .padding(20)
+        .presentationDetents([.height(160)])
+        .presentationDragIndicator(.visible)
+        .background(Theme.background.ignoresSafeArea())
+        .onAppear { isJumpFieldFocused = true }
+        // Клавиатура (numberPad) сама по себе кнопки "Готово" не даёт —
+        // по прямой просьбе "не забудь чтобы можно было свернуть
+        // клавиатуру". Тулбар вешается ЗДЕСЬ, на содержимом самого листа
+        // (не на body ExternalCatalogGridView снаружи) — у .sheet своя
+        // независимая иерархия, внешний toolbar(.keyboard) над её
+        // клавиатурой не показался бы.
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Готово") { isJumpFieldFocused = false }
+            }
         }
     }
 
@@ -199,17 +272,7 @@ struct ExternalCatalogGridView: View {
                 }
             }
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.footnote)
-                Text(sortSelection.wrappedValue.label)
-                    .font(.footnote)
-                    .lineLimit(1)
-            }
-            .foregroundStyle(Theme.textPrimary)
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            controlPill(icon: "arrow.up.arrow.down", text: sortSelection.wrappedValue.label)
         }
     }
 

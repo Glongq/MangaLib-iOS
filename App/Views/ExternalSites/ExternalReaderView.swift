@@ -308,13 +308,22 @@ struct ExternalReaderView: View {
         }
     }
 
+    /// `preloadExternalImage` (ExternalImage.swift), НЕ RemoteImageLoader.
+    /// preload — та использует Referer от MangaNetworkService (текущий
+    /// активный сайт MangaLib), неверный для tn.gold-usergeneratedcontent.
+    /// net/ehgt.org/*.hath.network — CDN отвечал 404/403, предзагрузка
+    /// молча ничего не давала (жалоба "вижу стыки", 30.08). См. её
+    /// doc-comment — картинка кладётся в тот же RemoteImageCache.shared,
+    /// который проверяет ZoomableImageScrollView/VerticalPageImage, так что
+    /// сами эти (переиспользуемые из MangaReaderView.swift) вью просто
+    /// находят её уже готовой.
     private func preloadPage(_ page: ExternalGalleryPage) {
         guard !preloadedIndices.contains(page.index) else { return }
         preloadedIndices.insert(page.index)
         let galleryId = detail.id
         Task {
             guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
-            RemoteImageLoader.preload(candidates: [url])
+            await preloadExternalImage(url)
         }
     }
 

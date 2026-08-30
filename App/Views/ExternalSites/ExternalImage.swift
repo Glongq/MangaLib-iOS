@@ -47,6 +47,31 @@ private func fetchExternalImage(_ url: URL) async -> UIImage? {
     return decoded
 }
 
+/// Реальная предзагрузка "про запас" для внешних сайтов — используется
+/// читалкой (см. ExternalReaderView.preloadPage/preloadUpcoming/
+/// preloadVerticalWindow). НЕ RemoteImageLoader.preload (то, что было
+/// здесь раньше) — та качает через СВОЮ сессию с Referer от
+/// MangaNetworkService.referer (текущий активный сайт MangaLib —
+/// mangalib.me/etc), которая для tn.gold-usergeneratedcontent.net/ehgt.org/
+/// *.hath.network просто НЕВЕРНАЯ (см. externalImageReferer выше) — CDN с
+/// хотлинк-защитой на неё отвечает 404/403, предзагрузка молча ничего не
+/// давала, картинки реально начинали грузиться только когда попадали в
+/// кадр (жалоба "вижу стыки", 30.08). Настоящая читалка (ZoomableImageScroll
+/// View/VerticalPageImage, см. MangaReaderView.swift — переиспользуются
+/// НАПРЯМУЮ, не копируются) внутри себя дёргает именно
+/// `RemoteImageLoader.fetchImage`, а та СНАЧАЛА проверяет
+/// `RemoteImageCache.shared` (простой NSCache по URL, без привязки к
+/// конкретной сессии/заголовкам) — поэтому вместо попытки подменить сессию
+/// внутри чужого файла (не трогаем MangaReaderView.swift) сюда просто
+/// заранее кладётся УЖЕ скачанная (нашей, правильной Referer-сессией)
+/// картинка — RemoteImageLoader.fetchImage находит её в кэше и сеть больше
+/// не трогает вовсе.
+func preloadExternalImage(_ url: URL) async {
+    guard RemoteImageCache.shared.image(for: url) == nil else { return }
+    guard let image = await fetchExternalImage(url) else { return }
+    RemoteImageCache.shared.insert(image, for: url)
+}
+
 @MainActor
 private final class ExternalImageLoader: ObservableObject {
     @Published var image: UIImage?
