@@ -209,27 +209,62 @@ struct ExternalGalleryDetailView: View {
     // MARK: Tab «О тайтле»
 
     private func aboutTab(_ detail: ExternalGalleryDetail) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        let categories = tagsByCategory(detail)
+        return VStack(alignment: .leading, spacing: 18) {
             infoRow(detail)
             if !detail.groups.isEmpty { chipsBlock("Группа", detail.groups.map { .init(text: $0) }) }
+            // Порядок и разбивка ниже — по прямой просьбе (30.08): теги
+            // делятся ПОЛНОСТЬЮ на отдельные подкатегории со своим
+            // заголовком каждая (не одним общим блоком "Теги"), в этом же
+            // порядке — Серия(parody)/Персонажи(character)/Язык(language)/
+            // Автор(artist)/Женское(female)/Мужское(male)/Смешанное(mixed)/
+            // Другое(other), каждый тег в своей отдельной чипе.
             if !detail.series.isEmpty { chipsBlock("Серия", detail.series.map { .init(text: $0) }) }
             if !detail.characters.isEmpty { chipsBlock("Персонажи", detail.characters.map { .init(text: $0) }) }
-            if !detail.tags.isEmpty { chipsBlock("Теги", tagItems(detail)) }
+            if let language = detail.language, !language.isEmpty { chipsBlock("Язык", [.init(text: language)]) }
+            if !detail.artists.isEmpty { chipsBlock("Автор", detail.artists.map { .init(text: $0) }) }
+            if !categories.female.isEmpty { chipsBlock("Женское", categories.female.map { .init(text: $0.name) }) }
+            if !categories.male.isEmpty { chipsBlock("Мужское", categories.male.map { .init(text: $0.name) }) }
+            if !categories.mixed.isEmpty { chipsBlock("Смешанное", categories.mixed.map { .init(text: $0.name) }) }
+            if !categories.other.isEmpty { chipsBlock("Другое", categories.other.map { .init(text: $0.name) }) }
             if !detail.pages.isEmpty { previewGridSection(detail) }
             relatedSection(detail)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// female/male оба true — "смешанный" тег (подтверждено реальным
+    /// `galleries/{id}.js` у hitomi: `tags[]` там имеет ОБА поля
+    /// одновременно у части тегов); ни одного — нейтральный ("Другое").
+    /// У e-hentai намеспейс тега строго один (нет одновременно "female" и
+    /// "male" на одном теге, см. EHentaiProvider.parseMetadata) — там
+    /// "Смешанное" просто никогда не наполнится, секция честно не покажется.
+    private func tagsByCategory(_ detail: ExternalGalleryDetail) -> (female: [ExternalGalleryTag], male: [ExternalGalleryTag], mixed: [ExternalGalleryTag], other: [ExternalGalleryTag]) {
+        var female: [ExternalGalleryTag] = []
+        var male: [ExternalGalleryTag] = []
+        var mixed: [ExternalGalleryTag] = []
+        var other: [ExternalGalleryTag] = []
+        for tag in detail.tags {
+            switch (tag.female, tag.male) {
+            case (true, true): mixed.append(tag)
+            case (true, false): female.append(tag)
+            case (false, true): male.append(tag)
+            case (false, false): other.append(tag)
+            }
+        }
+        return (female, male, mixed, other)
+    }
+
     // MARK: Info row — 1-в-1 MangaDetailView.infoRow/infoBlock (Тип/Статус/
-    // Год/Просмотры/Формат) — здесь Тип/Язык/Опубликовано/Длина + то, что
-    // есть ТОЛЬКО у e-hentai (Родитель/Видимость/Размер/В избранном), у
-    // hitomi этих полей физически нет, просто не добавляются в список.
+    // Год/Просмотры/Формат) — здесь Тип/Опубликовано/Длина + то, что есть
+    // ТОЛЬКО у e-hentai (Родитель/Видимость/Размер/В избранном); Язык
+    // вынесен в свой отдельный чип-блок (см. aboutTab — часть общей
+    // разбивки по подкатегориям), не дублируется здесь. У hitomi этих
+    // e-hentai-полей физически нет, просто не добавляются в список.
 
     private func infoRow(_ detail: ExternalGalleryDetail) -> some View {
         let rawItems: [(heading: String, value: String?)] = [
             (heading: "Тип", value: detail.type.isEmpty ? nil : detail.type.capitalized),
-            (heading: "Язык", value: detail.language),
             (heading: "Опубликовано", value: detail.posted),
             (heading: "Длина", value: "\(detail.pages.count) стр."),
             (heading: "Родитель", value: detail.parentId.map { "#\($0)" }),
@@ -276,22 +311,6 @@ struct ExternalGalleryDetailView: View {
             blockTitle(title)
             CollapsibleChips(items: items)
         }
-    }
-
-    /// female (♀)/male (♂) — цветные чипы (розовый/голубой), как возрастной
-    /// рейтинг 18+/16+ в MangaDetailView (см. ageRatingChip — тот же приём
-    /// tint на CollapsibleChips.Item).
-    private func tagItems(_ detail: ExternalGalleryDetail) -> [CollapsibleChips.Item] {
-        detail.tags.map { tag in
-            let tint: Color? = tag.female ? .pink : (tag.male ? .blue : nil)
-            return CollapsibleChips.Item(text: tagLabel(tag), tint: tint)
-        }
-    }
-
-    private func tagLabel(_ tag: ExternalGalleryTag) -> String {
-        if tag.female { return "\(tag.name) ♀" }
-        if tag.male { return "\(tag.name) ♂" }
-        return tag.name
     }
 
     // MARK: Превью-грид страниц + пагинация + jump-to-page (B.3) — своего

@@ -81,12 +81,28 @@ actor EHentaiProvider: ExternalSiteProvider {
     )
 
     /// Отдельная сессия — своя, не пересекается ни с HitomiProvider.session,
-    /// ни тем более с MangaNetworkService.
+    /// ни тем более с MangaNetworkService. `Cookie: nw=1` — подтверждено
+    /// живым HAR (30.08, ProxyPin830_18_35_43.har): страница тайтла
+    /// `/g/{id}/{token}/` без этой куки отдаёт НЕ реальный контент, а
+    /// промежуточную страницу "Content Warning" (для галерей, помеченных
+    /// как "Offensive For Everyone" — у e-hentai таких прилично, любой
+    /// поиск с scat/guro/т.п. категориями почти гарантированно на них
+    /// натыкается) с двумя ссылками `?nw=session`/`?nw=always` ("Never Warn
+    /// Me Again") — обе просто СТАВЯТ эту куку (`Set-Cookie: nw=1`) и
+    /// редиректят обратно на ту же страницу, уже с реальной разметкой.
+    /// Без неё parseMetadata/parsePages молча находят 0 совпадений на
+    /// странице-предупреждении (там нет ни gdt1/gdt2, ни тегов, ни ссылок
+    /// на страницы) — отсюда "не грузит тайтл"/пустая обложка-скелетон в
+    /// сетке каталога/пустой превью-грид у ЛЮБОЙ помеченной так галереи.
+    /// Ставим куку СРАЗУ на все запросы сессии — тот же эффект, что и один
+    /// клик "Never Warn Me Again", просто заранее, без отдельного разбора
+    /// warning-страницы и редиректа на каждую такую галерею.
     nonisolated private let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.httpAdditionalHeaders = [
             "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1",
-            "Referer": "https://e-hentai.org/"
+            "Referer": "https://e-hentai.org/",
+            "Cookie": "nw=1"
         ]
         return URLSession(configuration: config)
     }()
