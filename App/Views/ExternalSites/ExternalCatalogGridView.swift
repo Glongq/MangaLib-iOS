@@ -38,7 +38,15 @@ struct ExternalCatalogItem: Identifiable, Hashable {
 /// кодом).
 struct ExternalCatalogGridView: View {
     let sites: [ExternalSite]
-    let query: ExternalCatalogQuery
+    /// Запрос — ФУНКЦИЯ от сайта, не одно общее значение. По прямой
+    /// просьбе (31.08): в совместной выдаче ("Все сайты") у каждого сайта
+    /// должен быть СВОЙ независимый запрос — тег/поиск, набранный для
+    /// imhentai в «Фильтрах», не должен утекать в запрос e-hentai/hitomi/
+    /// 3hentai, и наоборот (см. ExternalCombinedCatalogView.query(for:)).
+    /// Обычный одно-сайтовый вызов (ExternalTagBrowserView/
+    /// ExternalSearchView) просто игнорирует параметр сайта — там он и
+    /// так всегда один и тот же.
+    let queryForSite: (ExternalSite) -> ExternalCatalogQuery
     let title: String
     /// true — встроена ПРЯМО в экран поиска (см. ExternalSearchView/
     /// ExternalCombinedCatalogView, по прямой просьбе "тут же появляются
@@ -56,10 +64,11 @@ struct ExternalCatalogGridView: View {
     var leadingControls: AnyView?
 
     /// Обычный (не совместный) вызов — один сайт, самый частый случай
-    /// (ExternalTagBrowserView/ExternalSearchView).
+    /// (ExternalTagBrowserView/ExternalSearchView). Тут `query` и правда
+    /// один на весь вызов — оборачиваем в константную функцию.
     init(site: ExternalSite, query: ExternalCatalogQuery, title: String, embedded: Bool = false, leadingControls: AnyView? = nil) {
         self.sites = [site]
-        self.query = query
+        self.queryForSite = { _ in query }
         self.title = title
         self.embedded = embedded
         self.leadingControls = leadingControls
@@ -67,10 +76,11 @@ struct ExternalCatalogGridView: View {
 
     /// Совместная выдача — сразу НЕСКОЛЬКО сайтов (см.
     /// ExternalCombinedCatalogView) — каждая страница мержится по всем
-    /// переданным сайтам разом (см. loadNextBatch).
-    init(sites: [ExternalSite], query: ExternalCatalogQuery, title: String, embedded: Bool = false, leadingControls: AnyView? = nil) {
+    /// переданным сайтам разом (см. loadNextBatch), но запрос у каждого
+    /// сайта СВОЙ (см. queryForSite doc-comment).
+    init(sites: [ExternalSite], queryForSite: @escaping (ExternalSite) -> ExternalCatalogQuery, title: String, embedded: Bool = false, leadingControls: AnyView? = nil) {
         self.sites = sites
-        self.query = query
+        self.queryForSite = queryForSite
         self.title = title
         self.embedded = embedded
         self.leadingControls = leadingControls
@@ -546,16 +556,20 @@ struct ExternalCatalogGridView: View {
     private func loadNextBatch() async -> Bool {
         let sitesToQuery = Array(pending)
         guard !sitesToQuery.isEmpty else { return true }
-        let currentQuery = query
+        // Снимок ПО КАЖДОМУ сайту заранее (до withTaskGroup) — тот же
+        // приём, что раньше был у currentQuery, просто теперь на каждый
+        // сайт своё значение функции (см. queryForSite doc-comment).
+        let queriesBySite = Dictionary(uniqueKeysWithValues: sitesToQuery.map { ($0, queryForSite($0)) })
         let currentSortKey = sortKey
         let cursorsSnapshot = cursors
 
         let results = await withTaskGroup(of: (ExternalSite, [Int], String?, Bool).self) { group in
             for site in sitesToQuery {
                 let cursor = cursorsSnapshot[site]
+                let siteQuery = queriesBySite[site] ?? .search(query: "", excludedCategoryBits: 0)
                 group.addTask {
                     do {
-                        let page = try await Self.fetchPage(site: site, cursor: cursor, query: currentQuery, sortKey: currentSortKey)
+                        let page = try await Self.fetchPage(site: site, cursor: cursor, query: siteQuery, sortKey: currentSortKey)
                         return (site, page.ids, page.nextCursor, true)
                     } catch {
                         return (site, [], nil, false)

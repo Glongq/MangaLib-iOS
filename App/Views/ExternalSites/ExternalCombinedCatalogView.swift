@@ -58,19 +58,26 @@ struct ExternalCombinedCatalogView: View {
         return excludedCategoriesEH.count + excludedCategoriesIH.count + excludedLanguagesIH.count
             + advanced.tags.count + advanced.parodies.count + advanced.artists.count + advanced.characters.count + advanced.groups.count
     }
-    /// Расширенные поля imhentai применяются к общему запросу только когда
-    /// imhentai реально включён среди sites — иначе они клеились бы к
-    /// запросу и для e-hentai/hitomi/3hentai тоже, для которых этот
-    /// синтаксис бессмысленен (см. ExternalSearchView.composedQuery — тот
-    /// же принцип, здесь просто нет одного конкретного `site`, а множество).
-    private var composedQuery: String {
-        guard showsImhentaiFilter else { return committedQuery }
-        let clauses = advancedQueryIH.clauses()
-        guard !clauses.isEmpty else { return committedQuery }
+    /// Запрос ПО КАЖДОМУ сайту отдельно — по прямой просьбе (31.08):
+    /// imhentai не должен видеть общее поле поиска вообще (та же причина,
+    /// что и в ExternalSearchView.composedQuery — `/search/`/`/advsearch/`
+    /// два разных парсера одного `key=`, обычный текст надёжно не
+    /// находит ничего), а остальные сайты не должны видеть теги/поиск,
+    /// набранные в «Фильтрах» имхентая. Раньше был ОДИН общий
+    /// composedQuery на весь ExternalCatalogGridView — он утекал во ВСЕ
+    /// включённые сайты разом (ExternalCatalogGridView.fetchPage дёргает
+    /// один и тот же query для каждого сайта), теперь у каждого сайта
+    /// свой независимый запрос (см. ExternalCatalogGridView.queryForSite).
+    private func query(for site: ExternalSite) -> ExternalCatalogQuery {
+        guard site == .imhentai else {
+            return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
+        }
+        let advanced = advancedQueryIH
         var parts: [String] = []
-        if !committedQuery.isEmpty { parts.append(committedQuery) }
-        parts.append(contentsOf: clauses)
-        return parts.joined(separator: " ")
+        let trimmedSearch = advanced.searchText.trimmingCharacters(in: .whitespaces)
+        if !trimmedSearch.isEmpty { parts.append(trimmedSearch) }
+        parts.append(contentsOf: advanced.clauses())
+        return .search(query: parts.joined(separator: " "), excludedCategoryBits: excludedCategoryBits)
     }
 
     var body: some View {
@@ -79,12 +86,16 @@ struct ExternalCombinedCatalogView: View {
         // требует сначала что-то ввести.
         ExternalCatalogGridView(
             sites: sites,
-            query: .search(query: composedQuery, excludedCategoryBits: excludedCategoryBits),
+            queryForSite: query(for:),
             title: committedQuery.isEmpty ? "Recently" : committedQuery,
             embedded: true,
             leadingControls: showsCategoryFilter ? AnyView(filtersButton) : nil
         )
-        .id("\(composedQuery)#\(excludedCategoryBits)")
+        // .id — тот же приём, что у ExternalSearchView: принудительно
+        // новый экземпляр вью при любом изменении хоть одного из
+        // независимых запросов (общего ИЛИ imhentai-специфичного), чтобы
+        // @State сетки сбрасывался и .task перезапускал загрузку.
+        .id("\(committedQuery)#\(advancedQueryIH.searchText)#\(advancedQueryIH.clauses().joined())#\(excludedCategoryBits)")
         .navigationTitle("Каталог")
         .navigationBarTitleDisplayMode(.large)
         .searchable(text: $query, prompt: "Название, тег, автор…")

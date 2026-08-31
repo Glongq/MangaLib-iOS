@@ -155,19 +155,18 @@ enum ImhentaiLanguage: CaseIterable, Identifiable {
 /// как в большинстве подобных мини-языков поиска.
 struct ImhentaiAdvancedQuery {
     /// Собственная строка поиска IMHentai — по прямой просьбе (31.08)
-    /// ОТДЕЛЬНАЯ от общего верхнего поля поиска ExternalSearchView: обычный
-    /// текст, набранный "как для других сайтов", у imhentai надёжно не
-    /// находит ничего (см. doc-comment fetchIdsBySearch — `/search/` и
-    /// `/advsearch/` два РАЗНЫХ парсера одного и того же `key=`). Поэтому
-    /// на экране ОДНОГО сайта (ExternalSearchView.composedQuery/
-    /// displayTitle) imhentai вообще не смотрит на общее поле — только на
-    /// это, живёт в тех же «Фильтрах», что и Tags/Parodies/...
-    /// ВАЖНО: в совместном каталоге "Все сайты" (ExternalCombinedCatalogView)
-    /// это поле пока НЕ подключено — там один общий `key=` уходит сразу во
-    /// все включённые сайты (см. её composedQuery), и imhentai там всё ещё
-    /// получает общий текст вместе с остальными; тронуть это отдельно не
-    /// просили, threshold другой (пришлось бы городить свой запрос на
-    /// сайт вместо одного общего).
+    /// ОТДЕЛЬНАЯ от общего верхнего поля поиска: обычный текст, набранный
+    /// "как для других сайтов", у imhentai надёжно не находит ничего (см.
+    /// doc-comment fetchIdsBySearch — `/search/` и `/advsearch/` два
+    /// РАЗНЫХ парсера одного и того же `key=`). Поэтому imhentai вообще
+    /// не смотрит на общее поле — ни на экране ОДНОГО сайта
+    /// (ExternalSearchView.composedQuery/displayTitle), ни в совместном
+    /// каталоге "Все сайты" (ExternalCombinedCatalogView.query(for:) —
+    /// там у КАЖДОГО сайта теперь свой независимый запрос, см.
+    /// ExternalCatalogGridView.queryForSite; раньше был один общий на все
+    /// сайты разом, и тег/поиск имхентая утекал в запрос остальных —
+    /// исправлено по прямой просьбе). Живёт в тех же «Фильтрах», что и
+    /// Tags/Parodies/...
     var searchText: String = ""
     var tags: [String] = []
     var parodies: [String] = []
