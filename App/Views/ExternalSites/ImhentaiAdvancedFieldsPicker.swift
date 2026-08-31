@@ -66,7 +66,11 @@ private final class ImhentaiTagSuggestionCache: ObservableObject {
     private static let allKinds: [ExternalTagKind] = [.tags, .series, .artists, .characters, .groups]
     /// "0" — сигнал "num"-бакета (см. ImhentaiProvider.fetchTagIndex —
     /// letter.isNumber), сама цифра значения не имеет.
-    private static let letters: [Character] = Array("abcdefghijklmnopqrstuvwxyz") + ["0"]
+    private static let letters: [Character] = {
+        var result: [Character] = Array("abcdefghijklmnopqrstuvwxyz")
+        result.append("0")
+        return result
+    }()
 
     @Published private var fullIndex: [ExternalTagKind: [ExternalTagEntry]] = [:]
     private var loadingTasks: [ExternalTagKind: Task<Void, Never>] = [:]
