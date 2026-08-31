@@ -1,21 +1,23 @@
 import SwiftUI
 
-/// Совместный каталог/выдача — «Все сайты» (см. ExternalSiteSession.
-/// combinedModeActive, выбирается в переключателе сайта — SideMenuView.
-/// siteRow). Один запрос уходит СРАЗУ на все включённые сайты
-/// (ExternalSiteSession.enabledSites), результат мержится в одну сетку
-/// (см. ExternalCatalogGridView, поддержка нескольких `sites`) — карточка
-/// каждого тайтла подписана источником (ExternalCatalogGridView.
-/// showsSourceBadge / ExternalGalleryDetailView "Источник").
+/// Combined catalog/result set — "All sites" (see ExternalSiteSession.
+/// combinedModeActive, chosen in the site switcher — SideMenuView.
+/// siteRow). One query is sent to ALL enabled sites AT ONCE
+/// (ExternalSiteSession.enabledSites), the results are merged into one grid
+/// (see ExternalCatalogGridView, support for multiple `sites`) — each
+/// title's card is labeled with its source (ExternalCatalogGridView.
+/// showsSourceBadge / ExternalGalleryDetailView "Source").
 ///
-/// Визуально — тот же 1-в-1 порт MangaCatalogView, что и у ExternalSearchView
-/// (см. её doc-comment): "Каталог" крупным .large, родной `.searchable()`,
-/// «Фильтры» — стеклянная пилюля в общей нижней панели (показывается, если
-/// ХОТЯ БЫ один из включённых сайтов понимает capabilities.hasCategoryFilter
-/// — остальные в выдаче честно игнорируют bitmask, см.
-/// ExternalSiteProvider.fetchIdsBySearch(excludedCategoryBits:)). Тайтлы —
-/// без отдельного перехода, сразу под полем (debounce, см. .task(id:)), а
-/// состояние (запрос/категории) переживает уход/возврат на вкладку (см.
+/// Visually — the same 1:1 port of MangaCatalogView as ExternalSearchView
+/// (see its doc-comment): "Catalog" in large .large title style, the native
+/// `.searchable()`, "Filters" as a glass pill in the shared bottom panel
+/// (shown if AT LEAST ONE of the enabled sites supports
+/// capabilities.hasCategoryFilter — the rest simply and honestly ignore the
+/// bitmask in the result set, see
+/// ExternalSiteProvider.fetchIdsBySearch(excludedCategoryBits:)). Titles —
+/// no separate navigation, appear right under the field (debounced, see
+/// .task(id:)), and the state (query/categories) survives leaving/returning
+/// to the tab (see
 /// ExternalCatalogFilterStore.combinedQuery/combinedExcludedCategories).
 struct ExternalCombinedCatalogView: View {
     @ObservedObject private var session = ExternalSiteSession.shared
@@ -25,23 +27,24 @@ struct ExternalCombinedCatalogView: View {
     @State private var showFilters = false
 
     private var sites: [ExternalSite] { ExternalSite.allCases.filter { session.enabledSites.contains($0) } }
-    /// В отличие от ExternalSearchView (там всегда РОВНО один сайт — можно
-    /// switch по `site`), здесь одновременно может быть включено несколько
-    /// сайтов сразу — поэтому ОБА набора категорий (e-hentai/imhentai)
-    /// суммируются, а не выбираются по одному активному сайту.
+    /// Unlike ExternalSearchView (there it's always EXACTLY one site — you
+    /// can switch on `site`), here several sites can be enabled at once —
+    /// so BOTH category sets (e-hentai/imhentai) are summed, not selected
+    /// by one active site.
     private var showsEHentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .ehentai } }
     private var showsImhentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .imhentai } }
-    /// Работает и когда включён ровно ОДИН simplyHentai — `sites` тут же
-    /// содержит его одного, `.contains` истинен, фильтр показывается (по
-    /// прямой просьбе: "если 1 сайт там выбран тоже были эта фильтрация").
+    /// Also works when exactly ONE simplyHentai is enabled — `sites`
+    /// contains just it, `.contains` is true, the filter is shown (per
+    /// direct feedback: "if 1 site is selected, that filtering should also
+    /// be there").
     private var showsSimplyHentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .simplyHentai } }
     private var showsThreeHentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .threeHentai } }
     private var showsHentaiPillFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .hentaiPill } }
     private var showsCategoryFilter: Bool {
         showsEHentaiFilter || showsImhentaiFilter || showsSimplyHentaiFilter || showsThreeHentaiFilter || showsHentaiPillFilter
     }
-    /// Сайты, у которых сейчас реально есть что показать во вкладке
-    /// «Фильтры» — источник чипов переключателя (см. filtersSheet).
+    /// Sites that currently have something to show in the "Filters" tab —
+    /// the source of the switcher chips (see filtersSheet).
     private var filterableSites: [ExternalSite] {
         sites.filter { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter }
     }
@@ -77,8 +80,8 @@ struct ExternalCombinedCatalogView: View {
         get { filterStore.combinedHentaiPillAdvancedQuery }
         nonmutating set { filterStore.combinedHentaiPillAdvancedQuery = newValue }
     }
-    /// Активная вкладка чипа во «Фильтрах» — nil означает «Все» (все
-    /// разделы стопкой, как раньше). См. filtersSheet.
+    /// The active chip tab in "Filters" — nil means "All" (all sections
+    /// stacked, as before). See filtersSheet.
     private var activeFiltersSite: ExternalSite? {
         get { filterStore.combinedFiltersActiveSite }
         nonmutating set { filterStore.combinedFiltersActiveSite = newValue }
@@ -101,9 +104,9 @@ struct ExternalCombinedCatalogView: View {
             + th.tags.count
             + (advancedQueryHP.isEmpty ? 0 : 1)
     }
-    /// Счётчик активных фильтров ОДНОГО сайта — используется только чипами
-    /// переключателя (см. filtersSheet), чтобы показывать badge не общий,
-    /// а по разделу.
+    /// Active filter count for ONE site — used only by the switcher chips
+    /// (see filtersSheet), to show a per-section badge instead of the
+    /// overall total.
     private func excludedCategoryCount(for site: ExternalSite) -> Int {
         switch site {
         case .ehentai:
@@ -125,16 +128,16 @@ struct ExternalCombinedCatalogView: View {
             return 0
         }
     }
-    /// Запрос ПО КАЖДОМУ сайту отдельно — по прямой просьбе (31.08):
-    /// imhentai не должен видеть общее поле поиска вообще (та же причина,
-    /// что и в ExternalSearchView.resolvedQuery — `/search/`/`/advsearch/`
-    /// два разных парсера одного `key=`, обычный текст надёжно не
-    /// находит ничего), а остальные сайты не должны видеть теги/поиск,
-    /// набранные в «Фильтрах» имхентая. Раньше был ОДИН общий
-    /// composedQuery на весь ExternalCatalogGridView — он утекал во ВСЕ
-    /// включённые сайты разом (ExternalCatalogGridView.fetchPage дёргает
-    /// один и тот же query для каждого сайта), теперь у каждого сайта
-    /// свой независимый запрос (см. ExternalCatalogGridView.queryForSite).
+    /// A separate query PER SITE — per direct feedback (Aug 31): imhentai
+    /// must not see the shared search field at all (same reason as in
+    /// ExternalSearchView.resolvedQuery — `/search/`/`/advsearch/` are two
+    /// different parsers for one `key=`, plain text reliably finds
+    /// nothing), and the other sites must not see tags/search typed into
+    /// imhentai's "Filters". There used to be ONE shared composedQuery for
+    /// the whole ExternalCatalogGridView — it leaked into ALL enabled
+    /// sites at once (ExternalCatalogGridView.fetchPage used the same
+    /// query for every site), now each site has its own independent query
+    /// (see ExternalCatalogGridView.queryForSite).
     private func query(for site: ExternalSite) -> ExternalCatalogQuery {
         if site == .imhentai {
             let advanced = advancedQueryIH
@@ -144,9 +147,9 @@ struct ExternalCombinedCatalogView: View {
             parts.append(contentsOf: advanced.clauses())
             return .search(query: parts.joined(separator: " "), excludedCategoryBits: excludedCategoryBits)
         }
-        // HentaiPill не умеет комбинировать измерения ни между собой, ни с
-        // текстом (см. ExternalSearchView.resolvedQuery) — при непустом
-        // advancedQueryHP это отдельный `.tag(...)`, не `.search(...)`.
+        // HentaiPill can't combine dimensions with each other or with free
+        // text (see ExternalSearchView.resolvedQuery) — when advancedQueryHP
+        // isn't empty this is a separate `.tag(...)`, not `.search(...)`.
         if site == .hentaiPill {
             let advanced = advancedQueryHP
             if !advanced.isEmpty {
@@ -154,9 +157,9 @@ struct ExternalCombinedCatalogView: View {
             }
             return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
         }
-        // Правило ЭКСКЛЮЗИВНОСТИ (см. ExternalSearchView.resolvedQuery, тот
-        // же принцип): если у сайта заполнено хоть одно расширенное поле —
-        // общее committedQuery для ЭТОГО сайта больше не участвует.
+        // The EXCLUSIVITY rule (see ExternalSearchView.resolvedQuery, same
+        // principle): if a site has at least one advanced field filled in,
+        // the shared committedQuery no longer applies to THAT site.
         if site == .simplyHentai {
             let advanced = advancedQuerySH
             let text = advanced.isEmpty ? committedQuery : advanced.encoded()
@@ -174,9 +177,9 @@ struct ExternalCombinedCatalogView: View {
         }
         return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
     }
-    /// Строковый "отпечаток" запроса каждого сайта — только для `.id(...)`
-    /// (см. body), в саму сеть уходит query(for:) целиком (в т.ч.
-    /// hentaiPill's `.tag`).
+    /// A string "fingerprint" of each site's query — only for `.id(...)`
+    /// (see body), the actual network call gets query(for:) in full
+    /// (including hentaiPill's `.tag`).
     private func queryIdentity(for site: ExternalSite) -> String {
         switch query(for: site) {
         case .tag(let namespace, let value): return "tag:\(namespace)/\(value)"
@@ -185,9 +188,9 @@ struct ExternalCombinedCatalogView: View {
     }
 
     var body: some View {
-        // Пустой запрос — лента "Recently" сразу по всем включённым
-        // сайтам (см. ExternalSearchView — тот же принцип), не
-        // требует сначала что-то ввести.
+        // Empty query — the "Recently" feed right away across all enabled
+        // sites (see ExternalSearchView — same principle), no need to
+        // type something first.
         ExternalCatalogGridView(
             sites: sites,
             queryForSite: query(for:),
@@ -195,10 +198,10 @@ struct ExternalCombinedCatalogView: View {
             embedded: true,
             leadingControls: showsCategoryFilter ? AnyView(filtersButton) : nil
         )
-        // .id — тот же приём, что у ExternalSearchView: принудительно
-        // новый экземпляр вью при любом изменении хоть одного из
-        // независимых запросов (общего ИЛИ imhentai-специфичного), чтобы
-        // @State сетки сбрасывался и .task перезапускал загрузку.
+        // .id — the same trick as ExternalSearchView: force a new view
+        // instance on any change to any of the independent queries (shared
+        // OR imhentai-specific), so the grid's @State resets and .task
+        // reloads from scratch.
         .id("\(committedQuery)#\(sites.map { queryIdentity(for: $0) }.joined(separator: "|"))#\(excludedCategoryBits)")
         .navigationTitle("Каталог")
         .navigationBarTitleDisplayMode(.large)
@@ -219,9 +222,9 @@ struct ExternalCombinedCatalogView: View {
         }
     }
 
-    // MARK: Фильтры — см. ExternalSearchView.filtersButton (тот же стиль,
-    // скопирован построчно — отдельные вью, общий компонент не заводим
-    // ради одной пилюли).
+    // MARK: Filters — see ExternalSearchView.filtersButton (same style,
+    // copied line-for-line — separate views, no shared component just for
+    // one pill).
 
     private var filtersButton: some View {
         Button {
@@ -245,19 +248,23 @@ struct ExternalCombinedCatalogView: View {
         }
     }
 
-    /// Лист «Фильтры» — переключалка чипами внизу навбара: «Все» (все
-    /// разделы включённых сайтов стопкой, как было раньше) + отдельный чип
-    /// на каждый включённый сайт с фильтрами (показывает ТОЛЬКО его
-    /// раздел). Активная вкладка хранится в filterStore — переживает
-    /// закрытие/повторное открытие листа (см. combinedFiltersActiveSite).
+    /// The "Filters" sheet — a chip switcher pinned to the BOTTOM of the
+    /// sheet, floating over the scrolled content (per direct feedback
+    /// 01.09 — the row used to sit at the top, cramped between the nav bar
+    /// and the content, where its buttons also tapped unreliably; moved to
+    /// a `.safeAreaInset(edge: .bottom)`, the same proven bottom-glass-pill
+    /// pattern already used by ExternalCatalogGridView.controlsBar, and
+    /// each chip now gets an explicit `.contentShape(Capsule())` so its
+    /// whole capsule — not just the glyph bounds — is a reliable tap
+    /// target): "All" (all enabled sites' sections stacked, as before) +
+    /// one chip per enabled site with filters (shows ONLY that site's
+    /// section). The active tab lives in filterStore — it survives
+    /// closing/reopening the sheet (see combinedFiltersActiveSite).
     private var filtersSheet: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                filterSiteChips
-                ScrollView {
-                    filterSectionsContent
-                        .padding(16)
-                }
+            ScrollView {
+                filterSectionsContent
+                    .padding(16)
             }
             .background(Theme.background.ignoresSafeArea())
             .navigationTitle("Фильтры")
@@ -271,6 +278,12 @@ struct ExternalCombinedCatalogView: View {
                     Button("Готово") { showFilters = false }
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                filterSiteChips
+                    .padding(.horizontal, 20)
+                    .padding(.top, 4)
+                    .padding(.bottom, 20)
+            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
@@ -278,7 +291,7 @@ struct ExternalCombinedCatalogView: View {
 
     private var filterSiteChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 filterChip(title: "Все", count: excludedCategoryCount, isActive: activeFiltersSite == nil) {
                     activeFiltersSite = nil
                 }
@@ -288,12 +301,15 @@ struct ExternalCombinedCatalogView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
         }
-        .background(Theme.surface)
+        .scrollClipDisabled()
     }
 
+    /// Same glass-pill treatment as filtersButton/ExternalCatalogGridView.
+    /// controlPill (proven to tap reliably elsewhere in the app) instead of
+    /// a plain flat-color capsule — plus an explicit `.contentShape(Capsule())`
+    /// so the button's hit area is always the full visible pill, never just
+    /// the label glyphs.
     private func filterChip(title: String, count: Int, isActive: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
@@ -305,9 +321,13 @@ struct ExternalCombinedCatalogView: View {
                 }
             }
             .foregroundStyle(isActive ? Theme.background : Theme.textPrimary)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 32)
-            .background(isActive ? Theme.accent : Theme.surfaceElevated, in: Capsule())
+            .padding(.horizontal, 14)
+            .frame(minHeight: Theme.pillControlHeight)
+            .background {
+                if isActive { Capsule().fill(Theme.accent) }
+            }
+            .glassEffect(.regular.interactive(), in: Capsule())
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -400,10 +420,10 @@ struct ExternalCombinedCatalogView: View {
         }
     }
 
-    /// Сброс — только ТЕКУЩЕГО раздела (вкладка активного чипа); на вкладке
-    /// «Все» чистит фильтры сразу всех сайтов, у которых они есть (по
-    /// прямой просьбе — "сбрасывает в конкретном разделе", а «Все» и есть
-    /// раздел, просто составной).
+    /// Reset — only the CURRENT section (active chip's tab); on the "All"
+    /// tab it clears every site's filters at once (per direct feedback —
+    /// "resets the specific section", and "All" is itself a section, just
+    /// a composite one).
     private var resetDisabled: Bool {
         if let site = activeFiltersSite { return excludedCategoryCount(for: site) == 0 }
         return excludedCategoryCount == 0
