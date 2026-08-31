@@ -20,6 +20,12 @@ struct ExternalGalleryDetailView: View {
     /// не грузим её ещё раз — просто используем сразу.
     var preloaded: ExternalGalleryDetail?
 
+    /// Локальные закладки (см. ExternalBookmarksStore doc-comment — у
+    /// внешних сайтов нет аккаунтов, значит нет и серверных закладок,
+    /// поэтому целиком локальный список) — кнопка "Добавить в закладки" в
+    /// actionButtons ниже.
+    @ObservedObject private var bookmarksStore = ExternalBookmarksStore.shared
+
     @State private var detail: ExternalGalleryDetail?
     @State private var errorMessage: String?
     @State private var tab: Tab = .about
@@ -109,7 +115,7 @@ struct ExternalGalleryDetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 coverSection(detail)
                 titleBlock(detail)
-                readButton(detail)
+                actionButtons(detail)
 
                 // См. план ЧАСТЬ B.5 — у hitomi/3hentai комментариев как
                 // концепции нет вообще (ни одного comment-related запроса
@@ -201,18 +207,42 @@ struct ExternalGalleryDetailView: View {
         }
     }
 
-    /// «Начать» — 1-в-1 MangaDetailView.readerLink (native
-    /// .borderedProminent + Theme.accent, не самодельная Capsule). Кнопка,
-    /// не NavigationLink — открывает `.fullScreenCover` (см. readerOpen).
-    private func readButton(_ detail: ExternalGalleryDetail) -> some View {
-        Button {
-            readerOpen = ReaderOpen(initialPage: nil)
-        } label: {
-            Text("Читать (\(detail.pages.count) стр.)")
-                .frame(maxWidth: .infinity, minHeight: 44)
+    /// «Добавить в закладки» + «Читать» — 1-в-1 MangaDetailView.actionButtons
+    /// (тот же 50/50 сплит, тот же .bordered/.borderedProminent приём:
+    /// серая bordered-кнопка закладки слева, акцентная заливка "Читать"
+    /// справа). В отличие от обычной карточки — без выбора ПАПКИ (см.
+    /// ExternalBookmarksStore doc-comment: локальные закладки внешних
+    /// сайтов — простой список, без папок), поэтому тап сразу переключает
+    /// (toggle), без листа выбора.
+    private func actionButtons(_ detail: ExternalGalleryDetail) -> some View {
+        let inList = bookmarksStore.isBookmarked(site: detail.site, id: detail.id)
+        return HStack(spacing: 8) {
+            Button {
+                bookmarksStore.toggle(detail)
+            } label: {
+                Label(inList ? "В закладках" : "Добавить в закладки", systemImage: inList ? "bookmark.fill" : "bookmark")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .buttonStyle(.bordered)
+            .tint(inList ? Theme.accent : Theme.textSecondary)
+
+            // «Начать» — 1-в-1 MangaDetailView.readerLink (native
+            // .borderedProminent + Theme.accent, не самодельная Capsule).
+            // Кнопка, не NavigationLink — открывает `.fullScreenCover`
+            // (см. readerOpen).
+            Button {
+                readerOpen = ReaderOpen(initialPage: nil)
+            } label: {
+                Text("Читать (\(detail.pages.count) стр.)")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.accent)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(Theme.accent)
     }
 
     // MARK: Вкладки «О тайтле»/«Комментарии» — 1-в-1 MangaDetailView.tabBar/

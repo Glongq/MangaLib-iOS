@@ -6,7 +6,7 @@ import Foundation
 /// код почти не пересекается со старым сетевым слоем — см. весь этот файл
 /// и остальные в App/ExternalSites/: ничего отсюда не импортируется в
 /// MangaNetworkService.swift/LibSite.swift, и наоборот.
-enum ExternalSite: String, CaseIterable, Identifiable {
+enum ExternalSite: String, CaseIterable, Identifiable, Codable {
     case hitomi
     case ehentai
     case threeHentai

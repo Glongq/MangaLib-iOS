@@ -20,12 +20,17 @@ final class ExternalCatalogFilterStore: ObservableObject {
     /// т.к. e-hentai и imhentai могут быть оба выбраны одновременно
     /// (см. combinedExcludedImhentaiCategories) и у каждого своё множество.
     @Published var excludedImhentaiCategories: [ExternalSite: Set<ImhentaiCategory>] = [:]
+    /// Языки imhentai (см. ImhentaiLanguage.bit doc-comment) — тот же
+    /// принцип, что и excludedImhentaiCategories, отдельное измерение
+    /// фильтра, тот же общий bitmask-канал.
+    @Published var excludedImhentaiLanguages: [ExternalSite: Set<ImhentaiLanguage>] = [:]
 
     /// Совместный каталог «Все сайты» (ExternalCombinedCatalogView) — своё
     /// отдельное состояние, не смешивается с одиночными.
     @Published var combinedQuery: String = ""
     @Published var combinedExcludedCategories: Set<EHentaiCategory> = []
     @Published var combinedExcludedImhentaiCategories: Set<ImhentaiCategory> = []
+    @Published var combinedExcludedImhentaiLanguages: Set<ImhentaiLanguage> = []
 
     private init() {}
 }

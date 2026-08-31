@@ -40,10 +40,16 @@ struct ExternalCombinedCatalogView: View {
         get { filterStore.combinedExcludedImhentaiCategories }
         nonmutating set { filterStore.combinedExcludedImhentaiCategories = newValue }
     }
-    private var excludedCategoryBits: Int {
-        excludedCategoriesEH.reduce(0) { $0 | $1.bit } | excludedCategoriesIH.reduce(0) { $0 | $1.bit }
+    private var excludedLanguagesIH: Set<ImhentaiLanguage> {
+        get { filterStore.combinedExcludedImhentaiLanguages }
+        nonmutating set { filterStore.combinedExcludedImhentaiLanguages = newValue }
     }
-    private var excludedCategoryCount: Int { excludedCategoriesEH.count + excludedCategoriesIH.count }
+    private var excludedCategoryBits: Int {
+        excludedCategoriesEH.reduce(0) { $0 | $1.bit }
+            | excludedCategoriesIH.reduce(0) { $0 | $1.bit }
+            | excludedLanguagesIH.reduce(0) { $0 | $1.bit }
+    }
+    private var excludedCategoryCount: Int { excludedCategoriesEH.count + excludedCategoriesIH.count + excludedLanguagesIH.count }
 
     var body: some View {
         // Пустой запрос — лента "Recently" сразу по всем включённым
@@ -117,10 +123,17 @@ struct ExternalCombinedCatalogView: View {
                     }
                     if showsImhentaiFilter {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("IMHentai").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                            Text("IMHentai — категории").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
                             ImhentaiCategoryPicker(excluded: Binding(
                                 get: { excludedCategoriesIH },
                                 set: { excludedCategoriesIH = $0 }
+                            ))
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("IMHentai — языки").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                            ImhentaiLanguagePicker(excluded: Binding(
+                                get: { excludedLanguagesIH },
+                                set: { excludedLanguagesIH = $0 }
                             ))
                         }
                     }

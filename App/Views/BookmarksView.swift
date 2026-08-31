@@ -81,16 +81,15 @@ struct BookmarksView: View {
 
     var body: some View {
         // Добавочная ветка (см. план внешних сайтов) — у hitomi.la и
-        // подобных нет аккаунтов, значит нет и закладок. Ветка else —
-        // буквально то, что уже было, без изменений (просто отступ вырос
+        // подобных нет аккаунтов, значит не может быть СЕРВЕРНЫХ закладок —
+        // но, по прямой просьбе (31.08), локальный список (см.
+        // ExternalBookmarksView/ExternalBookmarksStore) — тоже закладки,
+        // просто без сервера. Раньше здесь была заглушка «Недоступно»
+        // (ExternalScreenContent) — заменена на реальный экран. Ветка else
+        // — буквально то, что уже было, без изменений (просто отступ вырос
         // на один уровень).
         if externalSiteSession.isExternalModeActive {
-            NavigationStack {
-                ExternalScreenContent(site: externalSiteSession.activeExternalSite, featureTitle: "Закладки")
-                    .navigationTitle("Закладки")
-                    .navigationBarTitleDisplayMode(.large)
-            }
-            .tint(Theme.accent)
+            ExternalBookmarksView()
         } else {
         NavigationStack {
             ZStack {

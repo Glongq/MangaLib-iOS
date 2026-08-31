@@ -40,17 +40,24 @@ struct ExternalSearchView: View {
         get { filterStore.excludedImhentaiCategories[site] ?? [] }
         nonmutating set { filterStore.excludedImhentaiCategories[site] = newValue }
     }
+    /// Языки imhentai (см. ImhentaiLanguage.bit doc-comment) — отдельное
+    /// измерение фильтра, тот же общий bitmask-канал, что и категории.
+    private var excludedLanguagesIH: Set<ImhentaiLanguage> {
+        get { filterStore.excludedImhentaiLanguages[site] ?? [] }
+        nonmutating set { filterStore.excludedImhentaiLanguages[site] = newValue }
+    }
     private var excludedCategoryBits: Int {
         switch site {
         case .ehentai: return excludedCategoriesEH.reduce(0) { $0 | $1.bit }
-        case .imhentai: return excludedCategoriesIH.reduce(0) { $0 | $1.bit }
+        case .imhentai:
+            return excludedCategoriesIH.reduce(0) { $0 | $1.bit } | excludedLanguagesIH.reduce(0) { $0 | $1.bit }
         default: return 0
         }
     }
     private var excludedCategoryCount: Int {
         switch site {
         case .ehentai: return excludedCategoriesEH.count
-        case .imhentai: return excludedCategoriesIH.count
+        case .imhentai: return excludedCategoriesIH.count + excludedLanguagesIH.count
         default: return 0
         }
     }
@@ -152,10 +159,22 @@ struct ExternalSearchView: View {
                 set: { excludedCategoriesEH = $0 }
             ))
         case .imhentai:
-            ImhentaiCategoryPicker(excluded: Binding(
-                get: { excludedCategoriesIH },
-                set: { excludedCategoriesIH = $0 }
-            ))
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Категории").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                    ImhentaiCategoryPicker(excluded: Binding(
+                        get: { excludedCategoriesIH },
+                        set: { excludedCategoriesIH = $0 }
+                    ))
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Языки").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                    ImhentaiLanguagePicker(excluded: Binding(
+                        get: { excludedLanguagesIH },
+                        set: { excludedLanguagesIH = $0 }
+                    ))
+                }
+            }
         case .hitomi, .threeHentai:
             EmptyView()
         }

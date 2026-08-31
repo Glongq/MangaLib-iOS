@@ -65,6 +65,77 @@ enum ImhentaiCategory: CaseIterable, Identifiable {
     }
 }
 
+/// Языки imhentai.com/imhentai.xxx (English/Japanese/Spanish/French/Korean/
+/// German/Russian — флаги-чекбоксы на `/advsearch/`) — ПОДТВЕРЖДЕНО живым
+/// HAR (31.08, третий заход): реальные последовательные запросы
+/// `/advsearch/?...&en=1&jp=1&es=1&fr=1&kr=1&de=1&ru=1&key=...` →
+/// `...&en=1&jp=1&es=0&fr=1&kr=1&de=0&ru=1&key=...` → ... — та же семантика
+/// "1" включена/"0" исключена, тот же приём тапа-выключения, что и у
+/// ImhentaiCategory (по умолчанию ВСЕ включены).
+///
+/// `.bit` — СВОЙ диапазон (16...22), НЕ пересекается ни с EHentaiCategory
+/// (0...9), ни с ImhentaiCategory (10...15) — тот же общий Int
+/// `excludedCategoryBits` безопасно несёт категории И языки одновременно
+/// (см. doc-comment ImhentaiCategory.bit — тот же принцип, просто ещё одно
+/// непересекающееся измерение в том же канале, без правки протокола
+/// ExternalSiteProvider).
+enum ImhentaiLanguage: CaseIterable, Identifiable {
+    case english, japanese, spanish, french, korean, german, russian
+
+    var id: Self { self }
+
+    var bit: Int {
+        switch self {
+        case .english: return 1 << 16
+        case .japanese: return 1 << 17
+        case .spanish: return 1 << 18
+        case .french: return 1 << 19
+        case .korean: return 1 << 20
+        case .german: return 1 << 21
+        case .russian: return 1 << 22
+        }
+    }
+
+    /// Query-параметр — подтверждено HAR (en/jp/es/fr/kr/de/ru).
+    var queryKey: String {
+        switch self {
+        case .english: return "en"
+        case .japanese: return "jp"
+        case .spanish: return "es"
+        case .french: return "fr"
+        case .korean: return "kr"
+        case .german: return "de"
+        case .russian: return "ru"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .english: return "English"
+        case .japanese: return "Japanese"
+        case .spanish: return "Spanish"
+        case .french: return "French"
+        case .korean: return "Korean"
+        case .german: return "German"
+        case .russian: return "Russian"
+        }
+    }
+
+    /// Флаг-эмодзи — чисто для узнаваемости в ImhentaiLanguagePicker, не
+    /// подтверждено HAR (это иконки самого сайта — свои PNG, не эмодзи).
+    var flag: String {
+        switch self {
+        case .english: return "🇬🇧"
+        case .japanese: return "🇯🇵"
+        case .spanish: return "🇪🇸"
+        case .french: return "🇫🇷"
+        case .korean: return "🇰🇷"
+        case .german: return "🇩🇪"
+        case .russian: return "🇷🇺"
+        }
+    }
+}
+
 /// Клиент imhentai.xxx — СВОЯ, полностью отдельная реализация. Все URL/
 /// форматы ниже подтверждены реальным HAR (31.08, три захода — каталог/
 /// поиск, затем карточка тайтла + читалка живьём с телефона пользователя)
@@ -343,12 +414,24 @@ struct ImhentaiProvider: ExternalSiteProvider {
         let encodedQuery = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
         var params = ["key=\(encodedQuery)"]
 
-        let ownMask = ImhentaiCategory.allCases.reduce(0) { $0 | $1.bit }
-        let ownExcludedBits = excludedCategoryBits & ownMask
-        if ownExcludedBits != 0 {
+        let ownCategoryMask = ImhentaiCategory.allCases.reduce(0) { $0 | $1.bit }
+        let ownExcludedCategoryBits = excludedCategoryBits & ownCategoryMask
+        if ownExcludedCategoryBits != 0 {
             for category in ImhentaiCategory.allCases {
-                let included = (ownExcludedBits & category.bit) == 0
+                let included = (ownExcludedCategoryBits & category.bit) == 0
                 params.append("\(category.queryKey)=\(included ? 1 : 0)")
+            }
+        }
+
+        // Языки — тот же принцип, что и категории выше, просто своё
+        // непересекающееся подмножество битов того же Int (см.
+        // ImhentaiLanguage.bit doc-comment).
+        let ownLanguageMask = ImhentaiLanguage.allCases.reduce(0) { $0 | $1.bit }
+        let ownExcludedLanguageBits = excludedCategoryBits & ownLanguageMask
+        if ownExcludedLanguageBits != 0 {
+            for language in ImhentaiLanguage.allCases {
+                let included = (ownExcludedLanguageBits & language.bit) == 0
+                params.append("\(language.queryKey)=\(included ? 1 : 0)")
             }
         }
 
