@@ -66,8 +66,12 @@ private final class ImhentaiTagSuggestionCache: ObservableObject {
     private static let allKinds: [ExternalTagKind] = [.tags, .series, .artists, .characters, .groups]
     /// "0" — сигнал "num"-бакета (см. ImhentaiProvider.fetchTagIndex —
     /// letter.isNumber), сама цифра значения не имеет.
-    private static let letters: [Character] = {
-        var result: [Character] = Array("abcdefghijklmnopqrstuvwxyz")
+    // `Swift.Character`, НЕ голое `Character` — в модуле есть свой тип
+    // `Character` (модель персонажа тайтла, см. MangaModels.swift), он
+    // затеняет стандартный однобуквенный тип (та же гочка, что и в
+    // ExternalSiteProvider.fetchTagIndex — см. её doc-comment).
+    private static let letters: [Swift.Character] = {
+        var result: [Swift.Character] = Array("abcdefghijklmnopqrstuvwxyz")
         result.append("0")
         return result
     }()
