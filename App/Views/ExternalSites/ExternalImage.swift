@@ -45,6 +45,13 @@ private func externalImageReferer(for url: URL) -> String {
     if host.hasSuffix("imhentai.xxx") || host.hasSuffix("imhentai.com") {
         return "https://imhentai.xxx/"
     }
+    // b{N}.hentaipill.{com,me,...} — CDN картинок HentaiPill. Хотлинк-защиты
+    // не имеет (подтверждено живым curl — 200 без Referer, 200 с ЛЮБЫМ чужим
+    // Referer тоже, ровно как у 3hentai), но ветка добавлена сразу — тот же
+    // урок, что и с imhentai выше (забытая ветка молча падала в дефолт).
+    if host.hasSuffix("hentaipill.com") || host.hasSuffix("hentaipill.me") {
+        return "https://hentaipill.com/"
+    }
     return "https://hitomi.la/"
 }
 

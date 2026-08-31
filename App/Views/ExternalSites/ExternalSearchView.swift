@@ -233,7 +233,7 @@ struct ExternalSearchView: View {
                     set: { advancedQueryIH = $0 }
                 ))
             }
-        case .hitomi, .threeHentai:
+        case .hitomi, .threeHentai, .hentaiPill:
             EmptyView()
         }
     }

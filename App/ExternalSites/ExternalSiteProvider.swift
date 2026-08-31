@@ -258,7 +258,8 @@ enum ExternalSiteRegistry {
         .hitomi: HitomiProvider(),
         .ehentai: EHentaiProvider(),
         .threeHentai: ThreeHentaiProvider(),
-        .imhentai: ImhentaiProvider()
+        .imhentai: ImhentaiProvider(),
+        .hentaiPill: HentaiPillProvider()
     ]
 
     static func provider(for site: ExternalSite) -> any ExternalSiteProvider {
