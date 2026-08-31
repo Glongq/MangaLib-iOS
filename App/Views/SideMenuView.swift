@@ -89,8 +89,8 @@ struct SideMenuView: View {
                         catalogSection
                         otherSection
                         searchSitesBlock
-                        externalSitesBlock
                         combinedCatalogBlock
+                        externalSitesSection
                     }
                     .padding(.horizontal, 16)
                     // Компенсация за отсутствующую строку поиска (была здесь
@@ -183,6 +183,14 @@ struct SideMenuView: View {
                     Text("Сайт")
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
+                    // Показывает РЕАЛЬНО активное — даже когда это внешний
+                    // сайт/совместный режим (см. externalSitesSection ниже) —
+                    // но список ВЫБОРА под ней (см. if siteExpanded) теперь
+                    // ВСЕГДА только сайты экосистемы Lib, по прямой просьбе
+                    // (31.08): "в обычном меню выбор сайтов остаётся всегда
+                    // только с сайтов от мангалиба" — переключение внешних
+                    // сайтов переехало целиком в отдельный раздел «Другие
+                    // сайты» в самом низу меню (см. externalSitesSection).
                     Text(externalSiteSession.combinedModeActive ? "Все сайты" : (externalSiteSession.activeExternalSite?.displayName ?? siteSession.activeSite.displayName))
                         .foregroundStyle(Theme.textSecondary)
                     Image(systemName: siteExpanded ? "chevron.up" : "chevron.down")
@@ -210,56 +218,25 @@ struct SideMenuView: View {
                     }
                     .buttonStyle(.plain)
                 }
-
-                // «Другие сайты» — включённые в Настройках (см.
-                // ExternalSitesSettingsView) внешние сайты (сейчас hitomi.la,
-                // дальше по мере разбора HAR), той же строкой в конце того
-                // же списка — SiteSession/LibSite при этом не трогаются,
-                // просто рядом появляется независимый переключатель (см.
-                // ExternalSiteSession).
-                ForEach(ExternalSite.allCases.filter { externalSiteSession.enabledSites.contains($0) }) { site in
-                    let isActive = externalSiteSession.activeExternalSite == site
-                    Divider().overlay(Theme.separator)
-                        .padding(.leading, 16 + 52 + 14).padding(.trailing, 16)
-                    Button {
-                        externalSiteSession.activeExternalSite = site
-                        externalSiteSession.combinedModeActive = false
-                        withAnimation(.easeInOut(duration: 0.2)) { siteExpanded = false }
-                    } label: {
-                        siteOptionRow(title: site.displayName, isActive: isActive)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                // «Все сайты» — совместный каталог/выдача сразу по всем
-                // включённым внешним сайтам (см. ExternalSiteSession.
-                // combinedModeActive, ExternalCombinedCatalogView). Имеет
-                // смысл только когда включено 2+ — с одним это просто то же
-                // самое, что и выбор этого одного сайта выше.
-                if externalSiteSession.enabledSites.count >= 2 {
-                    let isActive = externalSiteSession.combinedModeActive
-                    Divider().overlay(Theme.separator)
-                        .padding(.leading, 16 + 52 + 14).padding(.trailing, 16)
-                    Button {
-                        externalSiteSession.activeExternalSite = nil
-                        externalSiteSession.combinedModeActive = true
-                        withAnimation(.easeInOut(duration: 0.2)) { siteExpanded = false }
-                    } label: {
-                        siteOptionRow(title: "Все сайты", isActive: isActive)
-                    }
-                    .buttonStyle(.plain)
-                }
+                // Внешние сайты (hitomi/e-hentai/3hentai/imhentai) и «Все
+                // сайты» здесь БОЛЬШЕ НЕ показываются — переехали целиком в
+                // раздел «Другие сайты» в самом низу меню (см.
+                // externalSitesSection/externalActiveSiteRows), по прямой
+                // просьбе (31.08).
             }
         }
     }
 
-    /// Одна строка в развёрнутом списке выбора сайта — общая для LibSite и
-    /// ExternalSite (см. siteRow выше).
-    private func siteOptionRow(title: String, isActive: Bool) -> some View {
+    /// Одна строка в развёрнутом списке выбора сайта — общая для LibSite
+    /// (см. siteRow, iconWidth по умолчанию 52 — под её иконку "globe") и
+    /// ExternalSite (см. externalActiveSiteRows — iconWidth 24, под её
+    /// чекбокс-квадратики, чтобы отступ совпадал с остальными строками той
+    /// же карточки).
+    private func siteOptionRow(title: String, isActive: Bool, iconWidth: CGFloat = 52) -> some View {
         HStack(spacing: 14) {
             // Пустая колонка шириной иконки — чтобы название выровнялось
-            // под «Сайт» выше.
-            Color.clear.frame(width: 52)
+            // под заголовком строки выше.
+            Color.clear.frame(width: iconWidth)
             Text(title)
                 .foregroundStyle(isActive ? Theme.accent : Theme.textPrimary)
             Spacer()
@@ -313,45 +290,45 @@ struct SideMenuView: View {
     // Сворачиваемый раздел «Каталог». Особый: у «Тайтлы» стрелка вправо, тап по
     // ней ЗАМЕНЯЕТ содержимое подложки на под-экран выбора типа (см.
     // catalogTypesView). Остальные пункты — заглушки.
+    // Целиком скрыт во внешнем режиме (см. ExternalSiteSession.
+    // isExternalModeActive) — раньше вместо обычного списка показывался
+    // пункт-указатель "Каталог — во вкладке «Каталог»", убран по прямой
+    // просьбе (31.08); список тегов/поиск внешнего сайта и так уже живут
+    // СВОЕЙ менюшкой прямо во вкладке «Каталог» (см.
+    // ExternalCatalogMenuView/ExternalCombinedCatalogView), а сами пункты
+    // ниже (Команды/Персонажи/Франшизы и т.д.) — сущности ИМЕННО экосистемы
+    // Lib, во внешнем режиме им попросту нечего показывать.
+    @ViewBuilder
     private var catalogSection: some View {
-        let expanded = expandedSections.contains("Каталог")
-        return card {
-            sectionHeader("Каталог", expanded: expanded)
-            if expanded {
-                sectionDivider
-                if catalogShowingTypes {
-                    catalogTypesView
-                } else {
-                    catalogRootRows
+        if !externalSiteSession.isExternalModeActive {
+            let expanded = expandedSections.contains("Каталог")
+            card {
+                sectionHeader("Каталог", expanded: expanded)
+                if expanded {
+                    sectionDivider
+                    if catalogShowingTypes {
+                        catalogTypesView
+                    } else {
+                        catalogRootRows
+                    }
                 }
             }
         }
     }
 
-    @ViewBuilder
     private var catalogRootRows: some View {
-        // Внешний сайт активен (см. ExternalSiteSession) — обычные пункты
-        // каталога MangaLib здесь не при чём (Команды/Персонажи/Франшизы и
-        // т.д. — это сущности ИМЕННО экосистемы Lib). Список тегов/поиск
-        // теперь живут СВОЕЙ менюшкой прямо во вкладке «Каталог» (см.
-        // ExternalCatalogMenuView/ExternalCombinedCatalogView) — здесь
-        // просто указатель, без дублирующего пункта.
-        if externalSiteSession.isExternalModeActive {
-            row("Каталог — во вкладке «Каталог»", icon: "square.grid.2x2", showDivider: false, showChevron: false)
-        } else {
-            VStack(spacing: 0) {
-                row("Тайтлы", icon: "book", action: {
-                    withAnimation(.easeInOut(duration: 0.2)) { catalogShowingTypes = true }
-                })
-                row("Сейчас читают", icon: "flame", action: { path.append(MenuRoute.nowReading) })
-                row("Коллекции", icon: "square.stack", action: { path.append(MenuRoute.collections) })
-                row("Команды", icon: "person.3", action: { path.append(MenuRoute.teams) })
-                row("Люди", icon: "person.crop.rectangle", action: { path.append(MenuRoute.people) })
-                row("Персонажи", icon: "face.smiling", action: { path.append(MenuRoute.characters) })
-                row("Франшизы", icon: "sparkles", action: { path.append(MenuRoute.franchises) })
-                row("Издательства", icon: "building.2", action: { path.append(MenuRoute.publishers) })
-                row("Пользователи", icon: "person.crop.circle", showDivider: false, action: { path.append(MenuRoute.users) })
-            }
+        VStack(spacing: 0) {
+            row("Тайтлы", icon: "book", action: {
+                withAnimation(.easeInOut(duration: 0.2)) { catalogShowingTypes = true }
+            })
+            row("Сейчас читают", icon: "flame", action: { path.append(MenuRoute.nowReading) })
+            row("Коллекции", icon: "square.stack", action: { path.append(MenuRoute.collections) })
+            row("Команды", icon: "person.3", action: { path.append(MenuRoute.teams) })
+            row("Люди", icon: "person.crop.rectangle", action: { path.append(MenuRoute.people) })
+            row("Персонажи", icon: "face.smiling", action: { path.append(MenuRoute.characters) })
+            row("Франшизы", icon: "sparkles", action: { path.append(MenuRoute.franchises) })
+            row("Издательства", icon: "building.2", action: { path.append(MenuRoute.publishers) })
+            row("Пользователи", icon: "person.crop.circle", showDivider: false, action: { path.append(MenuRoute.users) })
         }
     }
 
@@ -530,25 +507,110 @@ struct SideMenuView: View {
         }
     }
 
-    // Блок «Отдельные сайты» — самый низ меню, по прямой просьбе. Чекбоксы —
-    // ТО ЖЕ САМОЕ состояние, что и в Настройки → «Другие сайты» (см.
-    // ExternalSitesSettingsView, ExternalSiteSession.enabledSites) — просто
-    // ещё один способ его редактировать, без похода в Настройки. Тот же
-    // визуальный приём (чекбокс-квадратик), что и у searchSitesBlock выше,
-    // но это ДВА разных, не связанных друг с другом понятия: там — LibSite
-    // (mangalib/slashlib/...), здесь — ExternalSite (hitomi/e-hentai/...).
-    private var externalSitesBlock: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Отдельные сайты")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.horizontal, 4)
-
-            card {
+    // Раздел «Другие сайты» — самый низ меню, по прямой просьбе (31.08):
+    // "добавить в меню в самом низу раздел другие сайты, перенести туда
+    // всё" — раньше выбор АКТИВНОГО внешнего сайта жил внутри siteRow (см.
+    // её doc-comment выше — оттуда убран), а какие внешние сайты вообще
+    // ВКЛЮЧЕНЫ — отдельным блоком "Отдельные сайты" (тоже убран, слит
+    // сюда же, в одну карточку). Тумблер в заголовке — простой
+    // мастер-переключатель "работать только с внешними сайтами": включил —
+    // приложение переходит в внешний режим (см. ExternalSiteSession.
+    // isExternalModeActive), выключил — возвращается к обычной экосистеме
+    // Lib (siteSession.activeSite при этом не трогается, как и раньше —
+    // просто снова выходит на передний план).
+    private var externalSitesSection: some View {
+        card {
+            externalModeToggleRow
+            if externalSiteSession.isExternalModeActive {
+                sectionDivider
                 ForEach(Array(ExternalSite.allCases.enumerated()), id: \.element) { index, site in
+                    // Без разделителя на последнем чекбоксе — сразу следом
+                    // идёт свой собственный (ВЕДУЩИЙ) разделитель у первой
+                    // строки externalActiveSiteRows, иначе задвоился бы.
                     externalSiteCheckboxRow(site, showDivider: index != ExternalSite.allCases.count - 1)
                 }
+                externalActiveSiteRows
             }
+        }
+    }
+
+    private var externalModeToggleRow: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "network")
+                .font(.title3)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 24)
+            Text("Другие сайты")
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Toggle("", isOn: externalModeToggle)
+                .labelsHidden()
+                .tint(Theme.accent)
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 52)
+    }
+
+    /// Включение — если ни один внешний сайт ещё не включён (см.
+    /// enabledSites), включает СРАЗУ ВСЕ (иначе тумблер щёлкнул бы, а
+    /// работать не с чем — ни один сайт не выбран) и переключает на «Все
+    /// сайты» при 2+ включённых либо на единственный включённый.
+    /// Выключение — просто выходит из внешнего режима, enabledSites не
+    /// трогает (чтобы при следующем включении не пришлось выбирать заново).
+    private var externalModeToggle: Binding<Bool> {
+        Binding(
+            get: { externalSiteSession.isExternalModeActive },
+            set: { newValue in
+                if newValue {
+                    if externalSiteSession.enabledSites.isEmpty {
+                        externalSiteSession.enabledSites = Set(ExternalSite.allCases)
+                    }
+                    if externalSiteSession.enabledSites.count >= 2 {
+                        externalSiteSession.combinedModeActive = true
+                    } else {
+                        externalSiteSession.activeExternalSite = externalSiteSession.enabledSites.first
+                    }
+                } else {
+                    externalSiteSession.activeExternalSite = nil
+                    externalSiteSession.combinedModeActive = false
+                }
+            }
+        )
+    }
+
+    /// Какой ИМЕННО внешний сайт активен (или «Все сайты» сразу, см.
+    /// combinedModeActive) — тот же приём (siteOptionRow + разделитель
+    /// ПЕРЕД каждой строкой), что раньше жил внутри siteRow, просто теперь
+    /// здесь, среди остальных настроек этого раздела.
+    @ViewBuilder
+    private var externalActiveSiteRows: some View {
+        ForEach(ExternalSite.allCases.filter { externalSiteSession.enabledSites.contains($0) }) { site in
+            let isActive = externalSiteSession.activeExternalSite == site
+            Divider().overlay(Theme.separator)
+                .padding(.leading, 16 + 24 + 14).padding(.trailing, 16)
+            Button {
+                externalSiteSession.activeExternalSite = site
+                externalSiteSession.combinedModeActive = false
+            } label: {
+                siteOptionRow(title: site.displayName, isActive: isActive, iconWidth: 24)
+            }
+            .buttonStyle(.plain)
+        }
+        // «Все сайты» — совместный каталог/выдача сразу по всем включённым
+        // сайтам (см. ExternalSiteSession.combinedModeActive,
+        // ExternalCombinedCatalogView). Имеет смысл только когда включено
+        // 2+ — с одним это то же самое, что и выбор этого одного сайта выше.
+        if externalSiteSession.enabledSites.count >= 2 {
+            let isActive = externalSiteSession.combinedModeActive
+            Divider().overlay(Theme.separator)
+                .padding(.leading, 16 + 24 + 14).padding(.trailing, 16)
+            Button {
+                externalSiteSession.activeExternalSite = nil
+                externalSiteSession.combinedModeActive = true
+            } label: {
+                siteOptionRow(title: "Все сайты", isActive: isActive, iconWidth: 24)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -591,14 +653,13 @@ struct SideMenuView: View {
 
     // Совместный каталог/поиск СРАЗУ по всем включённым внешним сайтам
     // (см. ExternalCombinedCatalogView) — по прямой просьбе (31.08),
-    // отдельный ВСЕГДА видимый пункт в самом низу меню (не только внутри
-    // развёрнутого siteRow под "Все сайты", и не гейтится числом включённых
-    // сайтов — тот вариант это переключатель ГЛОБАЛЬНОГО активного режима
-    // приложения, этот — просто отдельный экран поиска, открывается
-    // ПОВЕРХ текущего режима, ничего не переключая). С 0 включёнными
-    // сайтами экран честно покажет "Тайтлов не найдено" — тот же принцип,
-    // что и у searchSitesBlock/externalSitesBlock выше (без искусственного
-    // скрытия строки).
+    // отдельный ВСЕГДА видимый пункт (не гейтится ни числом включённых
+    // сайтов, ни тумблером externalModeToggle ниже — тот переключает
+    // ГЛОБАЛЬНЫЙ активный режим приложения, этот просто отдельный экран
+    // поиска, открывается ПОВЕРХ текущего режима, ничего не переключая). С
+    // 0 включёнными сайтами экран честно покажет "Тайтлов не найдено" — тот
+    // же принцип, что и у searchSitesBlock/externalSitesSection ниже (без
+    // искусственного скрытия строки).
     private var combinedCatalogBlock: some View {
         card {
             row("Совместный каталог", icon: "square.grid.3x3", showDivider: false, action: { path.append(MenuRoute.combinedCatalog) })
