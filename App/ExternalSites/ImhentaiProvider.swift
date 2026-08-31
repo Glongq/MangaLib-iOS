@@ -136,6 +136,43 @@ enum ImhentaiLanguage: CaseIterable, Identifiable {
     }
 }
 
+/// Расширенные поля поиска — Tags/Parodies/Artists/Characters/Groups (см.
+/// `/advsearch/`, скриншот пользователя 31.08: "Tags (1/16632)"/"Parodies
+/// (0/5014)"/... — отдельное поле на КАЖДУЮ категорию, не общая строка
+/// поиска, каждое может копить НЕСКОЛЬКО значений сразу — счётчик рядом с
+/// заголовком считает уже добавленные). Собирается в спец-синтаксис
+/// `+kind:"значение"` (см. ImhentaiProvider.fetchIdsBySearch doc-comment —
+/// живым HAR ПОДТВЕРЖДЁН только `tag` — `+tag:"anal"`, ровно то, что
+/// собирает сама страница `/advsearch/` в скрытое поле `key`; `parody`/
+/// `artist`/`character`/`group` — по симметрии с реальными URL-сегментами
+/// карточки одного значения, `/parody/{slug}/`/`/artist/{slug}/`/
+/// `/character/{slug}/`/`/group/{slug}/` (см. ImhentaiProvider.
+/// tagBasePath) — тот же принцип, что и у `tag`/`/tag/{slug}/`, но НЕ
+/// подтверждено отдельным HAR именно для этих четырёх. Комбинация
+/// НЕСКОЛЬКИХ значений (несколько тегов сразу, тег+пародия одновременно) —
+/// тоже не подтверждена отдельно (в HAR встретился только ОДИН активный
+/// тег), собирается по аналогии — несколько `+kind:"..."` через пробел,
+/// как в большинстве подобных мини-языков поиска.
+struct ImhentaiAdvancedQuery {
+    var tags: [String] = []
+    var parodies: [String] = []
+    var artists: [String] = []
+    var characters: [String] = []
+    var groups: [String] = []
+
+    var isEmpty: Bool { tags.isEmpty && parodies.isEmpty && artists.isEmpty && characters.isEmpty && groups.isEmpty }
+
+    /// Значения — как есть, БЕЗ слагификации (не URL-путь, а значение
+    /// внутри строки `key=` в кавычках — на скриншоте пользователя чип
+    /// показывает человекочитаемое "Tag: Anal", не "anal-female"/slug).
+    func clauses() -> [String] {
+        func kind(_ name: String, _ values: [String]) -> [String] {
+            values.map { "+\(name):\"\($0)\"" }
+        }
+        return kind("tag", tags) + kind("parody", parodies) + kind("artist", artists) + kind("character", characters) + kind("group", groups)
+    }
+}
+
 /// Клиент imhentai.xxx — СВОЯ, полностью отдельная реализация. Все URL/
 /// форматы ниже подтверждены реальным HAR (31.08, три захода — каталог/
 /// поиск, затем карточка тайтла + читалка живьём с телефона пользователя)
@@ -405,13 +442,43 @@ struct ImhentaiProvider: ExternalSiteProvider {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: excludedCategoryBits, sortKey: nil, cursor: cursor, limit: limit)
     }
 
-    /// `/search/?key=...` — подтверждено HAR (200, реальные карточки).
-    /// Категории — только СВОИ биты (см. ImhentaiCategory.bit doc-comment —
-    /// непересекающийся диапазон с EHentaiCategory, маскируем на входе,
-    /// чужие биты в том же Int просто игнорируются).
+    /// Строго алфавитно-цифровой набор для percent-encoding значения `key=`
+    /// — НЕ `.urlQueryAllowed` (тот RFC3986-набор оставляет `+`/`:` как
+    /// есть, не экранирует), а вручную суженный: `+`/`:`/`"` в
+    /// ImhentaiAdvancedQuery.clauses() ОБЯЗАНЫ уйти percent-encoded (иначе
+    /// сырой "+" PHP на стороне сервера раскодирует как пробел — та же
+    /// семантика application/x-www-form-urlencoded, что и у $_GET, — и
+    /// спецсинтаксис "+tag:..." развалится на пробел+"tag:..."). Реальный
+    /// браузер (см. HAR, 31.08) кодирует ИМЕННО так — `%2Btag%3A%22anal%22`,
+    /// то есть буквально JS-эквивалент `encodeURIComponent`, не
+    /// RFC3986-safe набор.
+    private static let searchValueAllowedCharacters: CharacterSet = {
+        var set = CharacterSet.alphanumerics
+        set.insert(charactersIn: "-_.~")
+        return set
+    }()
+
+    /// `/search/?key=...` — подтверждено HAR (200, реальные карточки) для
+    /// ОБЫЧНОГО текста. Специальный синтаксис `+tag:"..."`/`+parody:"..."`/
+    /// ... (см. ImhentaiAdvancedQuery — Tags/Parodies/Artists/Characters/
+    /// Groups на `/advsearch/`, скриншот пользователя 31.08) `/search/` НЕ
+    /// понимает — перепроверено живым curl: `key=+tag:"anal"` через
+    /// `/search/` даёт "(0) results found" (буквально ищет как ТЕКСТ), тот
+    /// же запрос через `/advsearch/` в реальном HAR дал "(219,197) results
+    /// found" — эти два эндпоинта РАЗНО парсят один и тот же `key=`.
+    /// `/advsearch/` из песочницы этой сессии за Cloudflare (403, тот же
+    /// джва-челлендж, что у `/gallery/`/`/view/`) — маршрутизация ниже
+    /// (`usesAdvancedSyntax`) подтверждена только КОСВЕННО (реальным HAR +
+    /// логикой "два разных парсера"), сам финальный запрос с реального
+    /// устройства НЕ перепроверен — как и остальные HTML-страницы этого
+    /// сайта, см. doc-comment типа.
+    /// Категории/языки — только СВОИ биты (см. ImhentaiCategory/
+    /// ImhentaiLanguage.bit doc-comment — непересекающиеся диапазоны с
+    /// EHentaiCategory, маскируем на входе, чужие биты в том же Int просто
+    /// игнорируются).
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        let encodedQuery = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
+        let encodedQuery = trimmed.addingPercentEncoding(withAllowedCharacters: Self.searchValueAllowedCharacters) ?? trimmed
         var params = ["key=\(encodedQuery)"]
 
         let ownCategoryMask = ImhentaiCategory.allCases.reduce(0) { $0 | $1.bit }
@@ -440,7 +507,18 @@ struct ImhentaiProvider: ExternalSiteProvider {
         let page = Int(cursor ?? "1") ?? 1
         if page > 1 { params.append("page=\(page)") }
 
-        let urlString = "\(Self.baseURL)/search/?" + params.joined(separator: "&")
+        // `+tag:"..."`/`+parody:"..."`/`+artist:"..."`/`+character:"..."`/
+        // `+group:"..."` — ЕДИНСТВЕННЫЙ источник этой конструкции в
+        // приложении, см. ImhentaiAdvancedQuery.clauses() — обычный
+        // свободный текст никогда так не выглядит, ложных срабатываний не
+        // бывает. `apply=Search` — присутствует во ВСЕХ подтверждённых HAR
+        // запросах на `/advsearch/`, добавляется только тут же, вместе со
+        // сменой пути (см. doc-comment функции выше).
+        let usesAdvancedSyntax = trimmed.range(of: #"\+(tag|parody|artist|character|group):"#, options: .regularExpression) != nil
+        let path = usesAdvancedSyntax ? "advsearch" : "search"
+        if usesAdvancedSyntax { params.append("apply=Search") }
+
+        let urlString = "\(Self.baseURL)/\(path)/?" + params.joined(separator: "&")
         return try await fetchGalleryList(urlString: urlString, currentPage: page)
     }
 

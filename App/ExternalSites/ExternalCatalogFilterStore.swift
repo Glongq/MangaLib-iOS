@@ -24,6 +24,10 @@ final class ExternalCatalogFilterStore: ObservableObject {
     /// принцип, что и excludedImhentaiCategories, отдельное измерение
     /// фильтра, тот же общий bitmask-канал.
     @Published var excludedImhentaiLanguages: [ExternalSite: Set<ImhentaiLanguage>] = [:]
+    /// Расширенные поля поиска (Tags/Parodies/Artists/Characters/Groups,
+    /// см. ImhentaiAdvancedQuery/ImhentaiAdvancedFieldsPicker) — тот же
+    /// принцип персистентности, что и у остального в этом файле.
+    @Published var imhentaiAdvancedQueries: [ExternalSite: ImhentaiAdvancedQuery] = [:]
 
     /// Совместный каталог «Все сайты» (ExternalCombinedCatalogView) — своё
     /// отдельное состояние, не смешивается с одиночными.
@@ -31,6 +35,7 @@ final class ExternalCatalogFilterStore: ObservableObject {
     @Published var combinedExcludedCategories: Set<EHentaiCategory> = []
     @Published var combinedExcludedImhentaiCategories: Set<ImhentaiCategory> = []
     @Published var combinedExcludedImhentaiLanguages: Set<ImhentaiLanguage> = []
+    @Published var combinedImhentaiAdvancedQuery = ImhentaiAdvancedQuery()
 
     private init() {}
 }

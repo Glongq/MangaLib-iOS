@@ -54,12 +54,36 @@ struct ExternalSearchView: View {
         default: return 0
         }
     }
+    /// Расширенные поля (Tags/Parodies/Artists/Characters/Groups, см.
+    /// ImhentaiAdvancedQuery) — только у imhentai, только внутри «Фильтры».
+    private var advancedQueryIH: ImhentaiAdvancedQuery {
+        get { filterStore.imhentaiAdvancedQueries[site] ?? ImhentaiAdvancedQuery() }
+        nonmutating set { filterStore.imhentaiAdvancedQueries[site] = newValue }
+    }
     private var excludedCategoryCount: Int {
         switch site {
         case .ehentai: return excludedCategoriesEH.count
-        case .imhentai: return excludedCategoriesIH.count + excludedLanguagesIH.count
+        case .imhentai:
+            let advanced = advancedQueryIH
+            return excludedCategoriesIH.count + excludedLanguagesIH.count
+                + advanced.tags.count + advanced.parodies.count + advanced.artists.count + advanced.characters.count + advanced.groups.count
         default: return 0
         }
+    }
+    /// Итоговая строка, реально уходящая в `key=` — свободный текст из
+    /// строки поиска + расширенные поля (см. ImhentaiAdvancedQuery.
+    /// clauses() doc-comment насчёт того, что комбинация нескольких значений
+    /// не подтверждена отдельным HAR, собрана по аналогии). У сайтов без
+    /// расширенных полей (всё, кроме imhentai) — просто committedQuery как
+    /// есть, поведение не меняется.
+    private var composedQuery: String {
+        guard site == .imhentai else { return committedQuery }
+        let clauses = advancedQueryIH.clauses()
+        guard !clauses.isEmpty else { return committedQuery }
+        var parts: [String] = []
+        if !committedQuery.isEmpty { parts.append(committedQuery) }
+        parts.append(contentsOf: clauses)
+        return parts.joined(separator: " ")
     }
 
     var body: some View {
@@ -73,12 +97,12 @@ struct ExternalSearchView: View {
         // вью на том же месте дерева.
         ExternalCatalogGridView(
             site: site,
-            query: .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits),
+            query: .search(query: composedQuery, excludedCategoryBits: excludedCategoryBits),
             title: committedQuery.isEmpty ? "Recently" : committedQuery,
             embedded: true,
             leadingControls: capabilities.hasCategoryFilter ? AnyView(filtersButton) : nil
         )
-        .id("\(committedQuery)#\(excludedCategoryBits)")
+        .id("\(composedQuery)#\(excludedCategoryBits)")
         .navigationTitle("Каталог")
         .navigationBarTitleDisplayMode(.large)
         .searchable(text: $query, prompt: "Название, тег, автор…")
@@ -174,6 +198,10 @@ struct ExternalSearchView: View {
                         set: { excludedLanguagesIH = $0 }
                     ))
                 }
+                ImhentaiAdvancedFieldsPicker(query: Binding(
+                    get: { advancedQueryIH },
+                    set: { advancedQueryIH = $0 }
+                ))
             }
         case .hitomi, .threeHentai:
             EmptyView()

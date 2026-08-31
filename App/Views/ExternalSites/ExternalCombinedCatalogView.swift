@@ -44,12 +44,34 @@ struct ExternalCombinedCatalogView: View {
         get { filterStore.combinedExcludedImhentaiLanguages }
         nonmutating set { filterStore.combinedExcludedImhentaiLanguages = newValue }
     }
+    private var advancedQueryIH: ImhentaiAdvancedQuery {
+        get { filterStore.combinedImhentaiAdvancedQuery }
+        nonmutating set { filterStore.combinedImhentaiAdvancedQuery = newValue }
+    }
     private var excludedCategoryBits: Int {
         excludedCategoriesEH.reduce(0) { $0 | $1.bit }
             | excludedCategoriesIH.reduce(0) { $0 | $1.bit }
             | excludedLanguagesIH.reduce(0) { $0 | $1.bit }
     }
-    private var excludedCategoryCount: Int { excludedCategoriesEH.count + excludedCategoriesIH.count + excludedLanguagesIH.count }
+    private var excludedCategoryCount: Int {
+        let advanced = advancedQueryIH
+        return excludedCategoriesEH.count + excludedCategoriesIH.count + excludedLanguagesIH.count
+            + advanced.tags.count + advanced.parodies.count + advanced.artists.count + advanced.characters.count + advanced.groups.count
+    }
+    /// Расширенные поля imhentai применяются к общему запросу только когда
+    /// imhentai реально включён среди sites — иначе они клеились бы к
+    /// запросу и для e-hentai/hitomi/3hentai тоже, для которых этот
+    /// синтаксис бессмысленен (см. ExternalSearchView.composedQuery — тот
+    /// же принцип, здесь просто нет одного конкретного `site`, а множество).
+    private var composedQuery: String {
+        guard showsImhentaiFilter else { return committedQuery }
+        let clauses = advancedQueryIH.clauses()
+        guard !clauses.isEmpty else { return committedQuery }
+        var parts: [String] = []
+        if !committedQuery.isEmpty { parts.append(committedQuery) }
+        parts.append(contentsOf: clauses)
+        return parts.joined(separator: " ")
+    }
 
     var body: some View {
         // Пустой запрос — лента "Recently" сразу по всем включённым
@@ -57,12 +79,12 @@ struct ExternalCombinedCatalogView: View {
         // требует сначала что-то ввести.
         ExternalCatalogGridView(
             sites: sites,
-            query: .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits),
+            query: .search(query: composedQuery, excludedCategoryBits: excludedCategoryBits),
             title: committedQuery.isEmpty ? "Recently" : committedQuery,
             embedded: true,
             leadingControls: showsCategoryFilter ? AnyView(filtersButton) : nil
         )
-        .id("\(committedQuery)#\(excludedCategoryBits)")
+        .id("\(composedQuery)#\(excludedCategoryBits)")
         .navigationTitle("Каталог")
         .navigationBarTitleDisplayMode(.large)
         .searchable(text: $query, prompt: "Название, тег, автор…")
@@ -134,6 +156,13 @@ struct ExternalCombinedCatalogView: View {
                             ImhentaiLanguagePicker(excluded: Binding(
                                 get: { excludedLanguagesIH },
                                 set: { excludedLanguagesIH = $0 }
+                            ))
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("IMHentai — расширенный поиск").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                            ImhentaiAdvancedFieldsPicker(query: Binding(
+                                get: { advancedQueryIH },
+                                set: { advancedQueryIH = $0 }
                             ))
                         }
                     }
