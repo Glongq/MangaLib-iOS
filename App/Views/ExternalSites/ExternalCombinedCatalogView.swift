@@ -31,7 +31,11 @@ struct ExternalCombinedCatalogView: View {
     /// суммируются, а не выбираются по одному активному сайту.
     private var showsEHentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .ehentai } }
     private var showsImhentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .imhentai } }
-    private var showsCategoryFilter: Bool { showsEHentaiFilter || showsImhentaiFilter }
+    /// Работает и когда включён ровно ОДИН simplyHentai — `sites` тут же
+    /// содержит его одного, `.contains` истинен, фильтр показывается (по
+    /// прямой просьбе: "если 1 сайт там выбран тоже были эта фильтрация").
+    private var showsSimplyHentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .simplyHentai } }
+    private var showsCategoryFilter: Bool { showsEHentaiFilter || showsImhentaiFilter || showsSimplyHentaiFilter }
     private var excludedCategoriesEH: Set<EHentaiCategory> {
         get { filterStore.combinedExcludedCategories }
         nonmutating set { filterStore.combinedExcludedCategories = newValue }
@@ -48,6 +52,10 @@ struct ExternalCombinedCatalogView: View {
         get { filterStore.combinedImhentaiAdvancedQuery }
         nonmutating set { filterStore.combinedImhentaiAdvancedQuery = newValue }
     }
+    private var advancedQuerySH: SimplyHentaiAdvancedQuery {
+        get { filterStore.combinedSimplyHentaiAdvancedQuery }
+        nonmutating set { filterStore.combinedSimplyHentaiAdvancedQuery = newValue }
+    }
     private var excludedCategoryBits: Int {
         excludedCategoriesEH.reduce(0) { $0 | $1.bit }
             | excludedCategoriesIH.reduce(0) { $0 | $1.bit }
@@ -55,8 +63,11 @@ struct ExternalCombinedCatalogView: View {
     }
     private var excludedCategoryCount: Int {
         let advanced = advancedQueryIH
+        let sh = advancedQuerySH
         return excludedCategoriesEH.count + excludedCategoriesIH.count + excludedLanguagesIH.count
             + advanced.tags.count + advanced.parodies.count + advanced.artists.count + advanced.characters.count + advanced.groups.count
+            + sh.tags.count + sh.parodies.count + sh.characters.count + sh.artists.count + sh.translators.count + sh.language.count
+            + (sh.seriesTitle.trimmingCharacters(in: .whitespaces).isEmpty ? 0 : 1)
     }
     /// Запрос ПО КАЖДОМУ сайту отдельно — по прямой просьбе (31.08):
     /// imhentai не должен видеть общее поле поиска вообще (та же причина,
@@ -69,15 +80,22 @@ struct ExternalCombinedCatalogView: View {
     /// один и тот же query для каждого сайта), теперь у каждого сайта
     /// свой независимый запрос (см. ExternalCatalogGridView.queryForSite).
     private func query(for site: ExternalSite) -> ExternalCatalogQuery {
-        guard site == .imhentai else {
-            return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
+        if site == .imhentai {
+            let advanced = advancedQueryIH
+            var parts: [String] = []
+            let trimmedSearch = advanced.searchText.trimmingCharacters(in: .whitespaces)
+            if !trimmedSearch.isEmpty { parts.append(trimmedSearch) }
+            parts.append(contentsOf: advanced.clauses())
+            return .search(query: parts.joined(separator: " "), excludedCategoryBits: excludedCategoryBits)
         }
-        let advanced = advancedQueryIH
-        var parts: [String] = []
-        let trimmedSearch = advanced.searchText.trimmingCharacters(in: .whitespaces)
-        if !trimmedSearch.isEmpty { parts.append(trimmedSearch) }
-        parts.append(contentsOf: advanced.clauses())
-        return .search(query: parts.joined(separator: " "), excludedCategoryBits: excludedCategoryBits)
+        // Simply Hentai — общее поле СОХРАНЯЕТСЯ (в отличие от imhentai),
+        // расширенные поля лишь впаиваются поверх (см. ExternalSearchView.
+        // composedQuery — тот же принцип, здесь просто нет одного
+        // конкретного `site`, а множество).
+        if site == .simplyHentai {
+            return .search(query: advancedQuerySH.encoded(freeText: committedQuery), excludedCategoryBits: excludedCategoryBits)
+        }
+        return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
     }
 
     var body: some View {
@@ -95,7 +113,7 @@ struct ExternalCombinedCatalogView: View {
         // новый экземпляр вью при любом изменении хоть одного из
         // независимых запросов (общего ИЛИ imhentai-специфичного), чтобы
         // @State сетки сбрасывался и .task перезапускал загрузку.
-        .id("\(committedQuery)#\(advancedQueryIH.searchText)#\(advancedQueryIH.clauses().joined())#\(excludedCategoryBits)")
+        .id("\(committedQuery)#\(advancedQueryIH.searchText)#\(advancedQueryIH.clauses().joined())#\(advancedQuerySH.encoded(freeText: ""))#\(excludedCategoryBits)")
         .navigationTitle("Каталог")
         .navigationBarTitleDisplayMode(.large)
         .searchable(text: $query, prompt: "Название, тег, автор…")
@@ -174,6 +192,15 @@ struct ExternalCombinedCatalogView: View {
                             ImhentaiAdvancedFieldsPicker(query: Binding(
                                 get: { advancedQueryIH },
                                 set: { advancedQueryIH = $0 }
+                            ))
+                        }
+                    }
+                    if showsSimplyHentaiFilter {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Simply Hentai").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                            SimplyHentaiAdvancedFieldsPicker(query: Binding(
+                                get: { advancedQuerySH },
+                                set: { advancedQuerySH = $0 }
                             ))
                         }
                     }

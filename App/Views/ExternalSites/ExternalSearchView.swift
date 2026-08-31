@@ -60,6 +60,14 @@ struct ExternalSearchView: View {
         get { filterStore.imhentaiAdvancedQueries[site] ?? ImhentaiAdvancedQuery() }
         nonmutating set { filterStore.imhentaiAdvancedQueries[site] = newValue }
     }
+    /// Расширенные поля Simply Hentai (Tags/Parodies/Characters/Artists/
+    /// Translators/Language/Series title, см. SimplyHentaiAdvancedQuery) —
+    /// в отличие от imhentai, ДОБАВЛЯЮТСЯ поверх общего committedQuery, не
+    /// заменяют его (см. composedQuery doc-comment).
+    private var advancedQuerySH: SimplyHentaiAdvancedQuery {
+        get { filterStore.simplyHentaiAdvancedQueries[site] ?? SimplyHentaiAdvancedQuery() }
+        nonmutating set { filterStore.simplyHentaiAdvancedQueries[site] = newValue }
+    }
     private var excludedCategoryCount: Int {
         switch site {
         case .ehentai: return excludedCategoriesEH.count
@@ -67,6 +75,11 @@ struct ExternalSearchView: View {
             let advanced = advancedQueryIH
             return excludedCategoriesIH.count + excludedLanguagesIH.count
                 + advanced.tags.count + advanced.parodies.count + advanced.artists.count + advanced.characters.count + advanced.groups.count
+        case .simplyHentai:
+            let advanced = advancedQuerySH
+            return advanced.tags.count + advanced.parodies.count + advanced.characters.count
+                + advanced.artists.count + advanced.translators.count + advanced.language.count
+                + (advanced.seriesTitle.trimmingCharacters(in: .whitespaces).isEmpty ? 0 : 1)
         default: return 0
         }
     }
@@ -81,13 +94,24 @@ struct ExternalSearchView: View {
     /// расширенных полей (всё, кроме imhentai) — просто committedQuery как
     /// есть, поведение не меняется.
     private var composedQuery: String {
-        guard site == .imhentai else { return committedQuery }
-        let advanced = advancedQueryIH
-        var parts: [String] = []
-        let trimmedSearch = advanced.searchText.trimmingCharacters(in: .whitespaces)
-        if !trimmedSearch.isEmpty { parts.append(trimmedSearch) }
-        parts.append(contentsOf: advanced.clauses())
-        return parts.joined(separator: " ")
+        if site == .imhentai {
+            let advanced = advancedQueryIH
+            var parts: [String] = []
+            let trimmedSearch = advanced.searchText.trimmingCharacters(in: .whitespaces)
+            if !trimmedSearch.isEmpty { parts.append(trimmedSearch) }
+            parts.append(contentsOf: advanced.clauses())
+            return parts.joined(separator: " ")
+        }
+        // Simply Hentai — в отличие от imhentai, /search/complex один
+        // парсер и на query=, и на filter[...]= сразу (см.
+        // SimplyHentaiAdvancedQuery doc-comment) — поэтому общее
+        // committedQuery СОХРАНЯЕТСЯ как есть, расширенные поля лишь
+        // впаиваются поверх него (encoded распаковывается обратно в
+        // SimplyHentaiProvider.fetchIdsBySearch).
+        if site == .simplyHentai {
+            return advancedQuerySH.encoded(freeText: committedQuery)
+        }
+        return committedQuery
     }
 
     /// Заголовок ленты результатов — у imhentai отражает СВОЮ строку
@@ -233,7 +257,12 @@ struct ExternalSearchView: View {
                     set: { advancedQueryIH = $0 }
                 ))
             }
-        case .hitomi, .threeHentai, .hentaiPill, .simplyHentai:
+        case .simplyHentai:
+            SimplyHentaiAdvancedFieldsPicker(query: Binding(
+                get: { advancedQuerySH },
+                set: { advancedQuerySH = $0 }
+            ))
+        case .hitomi, .threeHentai, .hentaiPill:
             EmptyView()
         }
     }

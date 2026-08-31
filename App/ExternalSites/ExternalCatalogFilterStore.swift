@@ -28,6 +28,11 @@ final class ExternalCatalogFilterStore: ObservableObject {
     /// см. ImhentaiAdvancedQuery/ImhentaiAdvancedFieldsPicker) — тот же
     /// принцип персистентности, что и у остального в этом файле.
     @Published var imhentaiAdvancedQueries: [ExternalSite: ImhentaiAdvancedQuery] = [:]
+    /// Расширенные поля поиска Simply Hentai (Tags/Parodies/Characters/
+    /// Artists/Translators/Language/Series title, см.
+    /// SimplyHentaiAdvancedQuery/SimplyHentaiAdvancedFieldsPicker) — тот же
+    /// принцип, что и у imhentaiAdvancedQueries.
+    @Published var simplyHentaiAdvancedQueries: [ExternalSite: SimplyHentaiAdvancedQuery] = [:]
 
     /// Совместный каталог «Все сайты» (ExternalCombinedCatalogView) — своё
     /// отдельное состояние, не смешивается с одиночными.
@@ -36,6 +41,7 @@ final class ExternalCatalogFilterStore: ObservableObject {
     @Published var combinedExcludedImhentaiCategories: Set<ImhentaiCategory> = []
     @Published var combinedExcludedImhentaiLanguages: Set<ImhentaiLanguage> = []
     @Published var combinedImhentaiAdvancedQuery = ImhentaiAdvancedQuery()
+    @Published var combinedSimplyHentaiAdvancedQuery = SimplyHentaiAdvancedQuery()
 
     private init() {}
 }

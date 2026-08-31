@@ -9,6 +9,70 @@ enum SimplyHentaiError: Error {
     case unknownSlug
 }
 
+/// Расширенные поля поиска — по прямой просьбе (31.08): у simply-hentai, в
+/// отличие от imhentai, `/search/complex` реально принимает `query=` И
+/// `filter[tags][N]=`/`filter[parodies][N]=`/`filter[characters][N]=`/
+/// `filter[artists][N]=`/`filter[translators][N]=`/`filter[language][N]=`/
+/// `filter[series_title][N]=` В ОДНОМ запросе (подтверждено HAR — реальная
+/// цепочка из HAR буквально несёт все три сразу: `filter[series_title][0]=
+/// Danganronpa&filter[tags][0]=Bondage&filter[tags][1]=Ahegao&filter[tags]
+/// [2]=Anal&filter[artists][0]=matou&query=scat&page=1`). Общее поле поиска
+/// экрана (committedQuery) продолжает работать как есть — эти поля лишь
+/// ДОБАВЛЯЮТ отдельные `filter[...]=` параметры к тому же запросу, не
+/// подменяют и не мешают ему (в отличие от imhentai, где общий текст
+/// пришлось убрать вообще — здесь `/search/complex` один парсер на всё,
+/// такой проблемы просто нет).
+struct SimplyHentaiAdvancedQuery {
+    var tags: [String] = []
+    var parodies: [String] = []
+    var characters: [String] = []
+    var artists: [String] = []
+    var translators: [String] = []
+    var language: [String] = []
+    var seriesTitle: String = ""
+
+    var isEmpty: Bool {
+        tags.isEmpty && parodies.isEmpty && characters.isEmpty && artists.isEmpty
+            && translators.isEmpty && language.isEmpty
+            && seriesTitle.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// Разделитель — управляющий символ U+0001, который ни один пользователь
+    /// не наберёт руками в строке поиска — НЕ синтаксис самого сайта (как
+    /// `+tag:"..."` у imhentai), это ЧИСТО внутренний канал между
+    /// ExternalSearchView/ExternalCombinedCatalogView.composedQuery и
+    /// SimplyHentaiProvider.fetchIdsBySearch: протокол ExternalSiteProvider
+    /// несёт запрос ОДНОЙ строкой (см. ExternalCatalogQuery.search), поэтому
+    /// сюда "впаиваются" доп. поля, а провайдер их же и распаковывает
+    /// обратно в отдельные `filter[...]=` параметры перед реальным запросом
+    /// — наружу (в URL) эти управляющие символы никогда не попадают.
+    fileprivate static let fieldDelimiter = "\u{1}"
+
+    /// Кодирует себя поверх свободного текста в одну строку для
+    /// ExternalCatalogQuery.search(query:) — см. fieldDelimiter doc-comment.
+    func encoded(freeText: String) -> String {
+        var parts = [freeText]
+        func append(_ key: String, _ values: [String]) {
+            for value in values {
+                let trimmed = value.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else { continue }
+                parts.append("\(Self.fieldDelimiter)\(key)=\(trimmed)")
+            }
+        }
+        append("tags", tags)
+        append("parodies", parodies)
+        append("characters", characters)
+        append("artists", artists)
+        append("translators", translators)
+        append("language", language)
+        let trimmedSeries = seriesTitle.trimmingCharacters(in: .whitespaces)
+        if !trimmedSeries.isEmpty {
+            parts.append("\(Self.fieldDelimiter)series_title=\(trimmedSeries)")
+        }
+        return parts.joined()
+    }
+}
+
 /// Клиент simply-hentai.com — СВОЯ, полностью отдельная реализация. Все
 /// эндпоинты ниже подтверждены реальным HAR пользователя (31.08 вечер,
 /// `ProxyPin8-31_22_33_54.har`) — живым curl НЕ перепроверено: `api-v3.
@@ -55,13 +119,16 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         // запросы). Отдельно подтверждён и мульти-фильтр (filter[tags][]/
         // filter[parodies][]/filter[characters][]/filter[artists][]/
         // filter[translators][]/filter[language][]/filter[series_title][]
-        // — все встретились в HAR как реальные комбинации), но отдельный
-        // UI под это (как ImhentaiAdvancedFieldsPicker) не строился —
-        // возможно, если понадобится точнее.
+        // — все встретились в HAR как реальные комбинации ВМЕСТЕ с query=,
+        // см. SimplyHentaiAdvancedQuery/SimplyHentaiAdvancedFieldsPicker).
         hasSearch: true,
-        // Отдельного EHentaiCategory-подобного битового фильтра на сайте
-        // нет — честно false.
-        hasCategoryFilter: false,
+        // Нет EHentaiCategory-подобного bitmask-переключателя категорий —
+        // но флаг переиспользован (тот же приём, что и у imhentai) как
+        // общий гейт "есть лист «Фильтры»" в ExternalSearchView/
+        // ExternalCombinedCatalogView: здесь он открывает
+        // SimplyHentaiAdvancedFieldsPicker (Tags/Parodies/Characters/
+        // Artists/Translators/Language/Series title), а не категории.
+        hasCategoryFilter: true,
         // Пагинация — ЧЕСТНАЯ, с сервера: `pagination.current/next/pages/
         // count` в каждом ответе (не наше предположение по наличию кнопки
         // "next", как у HTML-сайтов) — подтверждено на /tags, /tag/{slug},
@@ -355,28 +422,47 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: excludedCategoryBits, sortKey: nil, cursor: cursor, limit: limit)
     }
 
-    /// Пустой запрос → `/v3/mangas?sort=spotlight` (единственная
-    /// подтверждённая HAR "лента по умолчанию" без явного запроса; сайт
-    /// честно её пагинирует — 415 страниц в ответе, реальная пагинация, не
-    /// заглушка одной страницей, как у HentaiPill). Непустой →
-    /// `/v3/search/complex?query=...` — подтверждено HAR как настоящий
-    /// текстовый поиск с релевантными результатами.
+    /// `query` может нести встроенные `filter[...]`-токены поверх
+    /// свободного текста (см. SimplyHentaiAdvancedQuery.encoded/
+    /// fieldDelimiter doc-comment — ExternalSearchView/
+    /// ExternalCombinedCatalogView впаивают их туда) — здесь распаковываются
+    /// обратно в реальные `filter[key][N]=value` параметры `/search/complex`.
+    /// Полностью пустой запрос (ни текста, ни фильтров) → `/v3/mangas?
+    /// sort=spotlight` (единственная подтверждённая HAR "лента по умолчанию";
+    /// сайт честно её пагинирует — 415 страниц в ответе, реальная
+    /// пагинация, не заглушка одной страницей, как у HentaiPill). Иначе →
+    /// `/v3/search/complex?query=...&filter[...]=...` — сама комбинация
+    /// query+filter подтверждена HAR (см. doc-comment SimplyHentaiAdvancedQuery
+    /// с точной цепочкой параметров из живого запроса пользователя).
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        let (freeText, filters) = Self.decodeQuery(query)
+        let trimmedFreeText = freeText.trimmingCharacters(in: .whitespaces)
         let page = Int(cursor ?? "1") ?? 1
+        let isSpotlight = trimmedFreeText.isEmpty && filters.isEmpty
         let urlString: String
-        if trimmed.isEmpty {
+        if isSpotlight {
             urlString = "\(Self.baseURL)/mangas?sort=spotlight&page=\(page)"
         } else {
-            let encodedQuery = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
-            urlString = "\(Self.baseURL)/search/complex?query=\(encodedQuery)&page=\(page)"
+            var items: [String] = []
+            if !trimmedFreeText.isEmpty {
+                let encoded = trimmedFreeText.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmedFreeText
+                items.append("query=\(encoded)")
+            }
+            for (key, values) in filters {
+                for (index, value) in values.enumerated() {
+                    let encodedValue = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+                    items.append("filter[\(key)][\(index)]=\(encodedValue)")
+                }
+            }
+            items.append("page=\(page)")
+            urlString = "\(Self.baseURL)/search/complex?" + items.joined(separator: "&")
         }
         guard let url = URL(string: urlString) else { throw SimplyHentaiError.badResponse }
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw SimplyHentaiError.badResponse }
         var ids: [Int] = []
         let nextCursor: String?
-        if trimmed.isEmpty {
+        if isSpotlight {
             let decoded = try Self.decoder.decode(ListResponseDTO<AlbumDTO>.self, from: data)
             for album in decoded.data {
                 await SlugCache.shared.store(id: album.id, slug: album.slug)
@@ -392,6 +478,25 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
             nextCursor = decoded.pagination?.next.map(String.init)
         }
         return (ids, nextCursor)
+    }
+
+    /// Распаковывает embedded-токены SimplyHentaiAdvancedQuery.encoded(freeText:)
+    /// обратно в (свободный текст, [ключ фильтра: значения]) — см. её
+    /// fieldDelimiter doc-comment. Порядок ключей словаря непредсказуем —
+    /// это ОК, `/search/complex` не документирует порядок filter-полей,
+    /// каждый ключ идёт своим отдельным набором `[N]`-индексов.
+    private static func decodeQuery(_ raw: String) -> (freeText: String, filters: [String: [String]]) {
+        let pieces = raw.components(separatedBy: SimplyHentaiAdvancedQuery.fieldDelimiter)
+        let freeText = pieces.first ?? ""
+        var filters: [String: [String]] = [:]
+        for piece in pieces.dropFirst() {
+            guard let eq = piece.firstIndex(of: "=") else { continue }
+            let key = String(piece[..<eq])
+            let value = String(piece[piece.index(after: eq)...])
+            guard !value.isEmpty else { continue }
+            filters[key, default: []].append(value)
+        }
+        return (freeText, filters)
     }
 
     // MARK: Карточка тайтла
