@@ -6,6 +6,59 @@ enum EHentaiError: Error {
     case missingToken
 }
 
+/// Расширенные поля поиска — по прямой просьбе (01.09). У e-hentai, в
+/// отличие от остальных сайтов, `namespace:value`-команда — это ПРЯМОЙ
+/// синтаксис самого f_search (подтверждено HAR: `f_search=anal+anime+
+/// series%3Agenshin` — обычный текст и тег-команда в одном запросе сразу,
+/// см. EHentaiProvider.tagPrefix doc-comment) — поэтому `encoded()` здесь
+/// НЕ нужен приватный разделитель-канал, как у SimplyHentaiAdvancedQuery:
+/// результат — это уже готовый, реальный f_search-текст, который можно
+/// слать как есть.
+///
+/// ЭКСКЛЮЗИВНАЯ схема, единая для всех сайтов с расширенными полями (см.
+/// ExternalSearchView.resolvedQuery): если хотя бы одно поле здесь
+/// заполнено (включая собственный search), общее поле поиска экрана для
+/// e-hentai перестаёт участвовать — запрос строится ТОЛЬКО из этих полей.
+///
+/// Многословные значения ВНУТРИ f_search-команды (`parody:"kimi no na
+/// wa$"` — так делают публичные гайды по сайту) HAR не подтверждает — по
+/// аналогии с обычным словом заменяем пробел на `+` (та же формула, что и
+/// в EHentaiProvider.formEncoded для остального f_search), это
+/// ПРЕДПОЛОЖЕНИЕ по симметрии с подтверждённым путём `/tag/other:nudity+
+/// only`, не отдельно подтверждено именно внутри f_search-команды.
+struct EHentaiAdvancedQuery {
+    var search: String = ""
+    var tags: [String] = []
+    var series: [String] = []
+    var characters: [String] = []
+    var artists: [String] = []
+    var groups: [String] = []
+
+    var isEmpty: Bool {
+        search.trimmingCharacters(in: .whitespaces).isEmpty
+            && tags.isEmpty && series.isEmpty && characters.isEmpty && artists.isEmpty && groups.isEmpty
+    }
+
+    /// Вызывается ТОЛЬКО когда !isEmpty (см. ExternalSearchView.resolvedQuery)
+    /// — собственный search заменяет общее поле экрана, а не складывается с ним.
+    func encoded() -> String {
+        var parts = [search.trimmingCharacters(in: .whitespaces)]
+        func append(_ namespace: String, _ values: [String]) {
+            for value in values {
+                let trimmed = value.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else { continue }
+                parts.append("\(namespace):\(trimmed.replacingOccurrences(of: " ", with: "+"))")
+            }
+        }
+        append("other", tags)
+        append("parody", series)
+        append("character", characters)
+        append("artist", artists)
+        append("group", groups)
+        return parts.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+}
+
 /// Категории e-hentai (кнопки Doujinshi/Manga/Artist CG/... на главной
 /// странице сайта — см. EHentaiCategoryPicker) и их `f_cats` bitmask.
 /// Подтверждено HAR: `f_cats=1019` встречался в реальном запросе, и

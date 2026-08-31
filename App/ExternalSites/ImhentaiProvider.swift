@@ -160,7 +160,7 @@ struct ImhentaiAdvancedQuery {
     /// doc-comment fetchIdsBySearch — `/search/` и `/advsearch/` два
     /// РАЗНЫХ парсера одного и того же `key=`). Поэтому imhentai вообще
     /// не смотрит на общее поле — ни на экране ОДНОГО сайта
-    /// (ExternalSearchView.composedQuery/displayTitle), ни в совместном
+    /// (ExternalSearchView.resolvedQuery/displayTitle), ни в совместном
     /// каталоге "Все сайты" (ExternalCombinedCatalogView.query(for:) —
     /// там у КАЖДОГО сайта теперь свой независимый запрос, см.
     /// ExternalCatalogGridView.queryForSite; раньше был один общий на все

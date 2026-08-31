@@ -25,7 +25,7 @@ struct ImhentaiAdvancedFieldsPicker: View {
     /// Своя строка поиска IMHentai (по прямой просьбе 31.08) — ОТДЕЛЬНО от
     /// Tags и от общего верхнего поиска экрана (тот у imhentai больше не
     /// участвует в запросе вообще, см. ImhentaiAdvancedQuery.searchText
-    /// doc-comment / ExternalSearchView.composedQuery).
+    /// doc-comment / ExternalSearchView.resolvedQuery).
     private var searchField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Поиск").font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)

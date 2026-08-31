@@ -1,16 +1,20 @@
 import SwiftUI
 
-/// Расширенные поля поиска Simply Hentai — Series title (одна строка) +
-/// Tags/Parodies/Characters/Artists/Translators/Language (каждое копит
-/// СВОЙ список значений) — все вместе combинируются с общим полем поиска
-/// экрана в одном запросе `/search/complex` (см. SimplyHentaiAdvancedQuery
+/// Расширенные поля поиска Simply Hentai — своя строка поиска + Series
+/// title (одна строка) + Tags/Parodies/Characters/Artists/Translators/
+/// Language (каждое копит СВОЙ список значений) — комбинируются между
+/// собой в одном запросе `/search/complex` (см. SimplyHentaiAdvancedQuery
 /// doc-comment в SimplyHentaiProvider.swift — комбинация `query=`+
-/// `filter[...]=` подтверждена реальным HAR пользователя).
+/// `filter[...]=` подтверждена реальным HAR пользователя), но ЭКСКЛЮЗИВНО
+/// по отношению к общему полю поиска экрана — как только хотя бы одно из
+/// них заполнено, общее поле для simplyHentai перестаёт участвовать (см.
+/// ExternalSearchView.resolvedQuery).
 struct SimplyHentaiAdvancedFieldsPicker: View {
     @Binding var query: SimplyHentaiAdvancedQuery
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            searchField
             seriesTitleField
             field("Tags", values: $query.tags)
             field("Parodies", values: $query.parodies)
@@ -18,6 +22,17 @@ struct SimplyHentaiAdvancedFieldsPicker: View {
             field("Artists", values: $query.artists)
             field("Translators", values: $query.translators)
             field("Language", values: $query.language)
+        }
+    }
+
+    private var searchField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Поиск").font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+            TextField("Свободный текст…", text: $query.search)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 10)
+                .frame(height: 34)
+                .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
     }
 

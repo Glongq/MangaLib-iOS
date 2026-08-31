@@ -33,6 +33,16 @@ final class ExternalCatalogFilterStore: ObservableObject {
     /// SimplyHentaiAdvancedQuery/SimplyHentaiAdvancedFieldsPicker) — тот же
     /// принцип, что и у imhentaiAdvancedQueries.
     @Published var simplyHentaiAdvancedQueries: [ExternalSite: SimplyHentaiAdvancedQuery] = [:]
+    /// Расширенные поля E-Hentai (Tags/Parodies/Characters/Artists/Groups +
+    /// собственный search, см. EHentaiAdvancedQuery/EHentaiAdvancedFieldsPicker).
+    @Published var ehentaiAdvancedQueries: [ExternalSite: EHentaiAdvancedQuery] = [:]
+    /// Расширенное поле 3Hentai (Tags + собственный search, см.
+    /// ThreeHentaiAdvancedQuery/ThreeHentaiAdvancedFieldsPicker).
+    @Published var threeHentaiAdvancedQueries: [ExternalSite: ThreeHentaiAdvancedQuery] = [:]
+    /// Выбор ОДНОГО измерения+значения HentaiPill (Tags/Parodies/
+    /// Characters/Artists — сайт не умеет их комбинировать, см.
+    /// HentaiPillAdvancedQuery/HentaiPillAdvancedFieldsPicker).
+    @Published var hentaiPillAdvancedQueries: [ExternalSite: HentaiPillAdvancedQuery] = [:]
 
     /// Совместный каталог «Все сайты» (ExternalCombinedCatalogView) — своё
     /// отдельное состояние, не смешивается с одиночными.
@@ -42,6 +52,16 @@ final class ExternalCatalogFilterStore: ObservableObject {
     @Published var combinedExcludedImhentaiLanguages: Set<ImhentaiLanguage> = []
     @Published var combinedImhentaiAdvancedQuery = ImhentaiAdvancedQuery()
     @Published var combinedSimplyHentaiAdvancedQuery = SimplyHentaiAdvancedQuery()
+    @Published var combinedEHentaiAdvancedQuery = EHentaiAdvancedQuery()
+    @Published var combinedThreeHentaiAdvancedQuery = ThreeHentaiAdvancedQuery()
+    @Published var combinedHentaiPillAdvancedQuery = HentaiPillAdvancedQuery()
+    /// Активный чип в листе «Фильтры» совместного каталога — какой раздел
+    /// сейчас показан (см. ExternalCombinedCatalogView.filtersSheet). nil =
+    /// «Все» (все секции разом, старое поведение). Персистентно — та же
+    /// причина, что и у остального состояния в этом файле: лист
+    /// пересоздаётся при каждом открытии, положение чипа не должно
+    /// сбрасываться.
+    @Published var combinedFiltersActiveSite: ExternalSite?
 
     private init() {}
 }

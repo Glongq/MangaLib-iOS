@@ -373,87 +373,22 @@ struct ExternalCatalogGridView: View {
     // тот же результат (сетка не "плывёт", жалоба "съезжает изза того что
     // одни тайтлы название название тип, а название-тип", 31.08), просто
     // без построчной экономии места на рядах с короткими названиями.
-    private static let textScale: CGFloat = 1.2
-    private static var titleUIFont: UIFont {
+    fileprivate static let textScale: CGFloat = 1.2
+    fileprivate static var titleUIFont: UIFont {
         let base = UIFont.preferredFont(forTextStyle: .caption1)
         return UIFont.systemFont(ofSize: base.pointSize * textScale, weight: .medium)
     }
-    private static var typeUIFont: UIFont {
+    fileprivate static var typeUIFont: UIFont {
         let base = UIFont.preferredFont(forTextStyle: .caption2)
         return UIFont.systemFont(ofSize: base.pointSize * textScale, weight: .regular)
     }
-    private static var titleTypeSpacing: CGFloat { titleUIFont.leading }
-    private static var textBlockHeight: CGFloat {
+    fileprivate static var titleTypeSpacing: CGFloat { titleUIFont.leading }
+    fileprivate static var textBlockHeight: CGFloat {
         (titleUIFont.lineHeight * 2 + titleTypeSpacing + typeUIFont.lineHeight).rounded(.up)
     }
 
     private func card(item: ExternalCatalogItem, width: CGFloat) -> some View {
-        let detail = details[item.id]
-        return VStack(alignment: .leading, spacing: 6) {
-            ZStack(alignment: .topLeading) {
-                Group {
-                    if let cover = detail?.coverURL {
-                        ExternalImage(url: cover) { SkeletonBox() }
-                            .scaledToFill()
-                    } else {
-                        SkeletonBox()
-                    }
-                }
-                .frame(width: width, height: (width * 3 / 2).rounded())
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .clipped()
-
-                if showsSourceBadge {
-                    Text(item.site.displayName)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .frame(height: 16)
-                        .background(.black.opacity(0.55), in: Capsule())
-                        .padding(6)
-                }
-            }
-
-            // Название + тип — тем же приёмом, что и в обычном каталоге
-            // (MangaCardView: название, сразу под ним тип секондари-цветом),
-            // тип НА АНГЛИЙСКОМ, как есть на самом сайте (hitomi отдаёт
-            // "manga"/"doujinshi"/"misc"/... строчными, e-hentai —
-            // "Manga"/... с большой) — не переводим и не меняем регистр.
-            // Пока деталь ещё не загрузилась — SkeletonBar (та же анимация
-            // шиммера, что у обложки/skeletonGrid выше), НЕ "…" (жалоба
-            // "скелетон это три точки просто", 31.08).
-            Group {
-                if let detail {
-                    VStack(alignment: .leading, spacing: Self.titleTypeSpacing) {
-                        Text(detail.title)
-                            .font(Font(Self.titleUIFont))
-                            .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                            .frame(width: width, alignment: .topLeading)
-
-                        // Строка типа — ВСЕГДА занимает место (opacity 0
-                        // вместо условного исчезновения View, тот же
-                        // приём, что у MangaCardView.typeLabel), даже
-                        // когда у тайтла нет типа, чтобы соседняя карточка
-                        // ряда не оказывалась короче.
-                        Text(detail.type.isEmpty ? " " : detail.type)
-                            .font(Font(Self.typeUIFont))
-                            .foregroundStyle(Theme.textSecondary)
-                            .lineLimit(1)
-                            .frame(width: width, alignment: .leading)
-                            .opacity(detail.type.isEmpty ? 0 : 1)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: Self.titleTypeSpacing) {
-                        SkeletonBar(width: width * 0.85, height: Self.titleUIFont.lineHeight)
-                        SkeletonBar(width: width * 0.5, height: Self.typeUIFont.lineHeight)
-                    }
-                }
-            }
-            .frame(width: width, height: Self.textBlockHeight, alignment: .top)
-        }
-        .frame(width: width, alignment: .top)
+        CatalogCard(item: item, detail: details[item.id], width: width, showsSourceBadge: showsSourceBadge)
     }
 
     private func onCardAppear(_ item: ExternalCatalogItem) {
@@ -609,6 +544,196 @@ struct ExternalCatalogGridView: View {
         let existing = Set(items.map(\.id))
         items.append(contentsOf: merged.filter { !existing.contains($0.id) })
         return anySucceeded
+    }
+}
+
+/// Одна карточка сетки — вынесена в отдельный View-струкt (а не просто
+/// функция, как раньше), потому что ей теперь нужно СВОЁ состояние: успел
+/// ли заголовок обрезаться на 2 строках (см. updateTruncation) и открыт ли
+/// лист с полным названием (по прямой просьбе 01.09 — "добавить возможность
+/// открыть щит меню с полным названием если оно не влазит в карточке
+/// тайтла"). У функции-хелпера (как было) не может быть @State — оно
+/// привязывается к экземпляру View, а не к вызову функции внутри чужого body.
+private struct CatalogCard: View {
+    let item: ExternalCatalogItem
+    let detail: ExternalGalleryDetail?
+    let width: CGFloat
+    let showsSourceBadge: Bool
+
+    @State private var isTitleTruncated = false
+    @State private var showFullTitle = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            cover
+            titleBlock
+        }
+        .frame(width: width, alignment: .top)
+    }
+
+    private var cover: some View {
+        Group {
+            if let cover = detail?.coverURL {
+                ExternalImage(url: cover) { SkeletonBox() }
+                    .scaledToFill()
+            } else {
+                SkeletonBox()
+            }
+        }
+        .frame(width: width, height: (width * 3 / 2).rounded())
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipped()
+        .overlay(alignment: .topLeading) {
+            if showsSourceBadge {
+                Text(item.site.displayName)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .frame(height: 16)
+                    .background(.black.opacity(0.55), in: Capsule())
+                    .padding(6)
+            }
+        }
+        // Кол-во страниц — чипом справа снизу на обложке (по прямой
+        // просьбе 01.09 — "везде отдельным чипом на обложке справа снизу
+        // пишется сразу кол-во страниц"), тот же визуальный стиль, что и у
+        // бейджа источника (showsSourceBadge) выше, просто другой угол.
+        // Появляется, только когда деталь тайтла УЖЕ загружена (см.
+        // onCardAppear → loadDetail) — pages известны только оттуда, до
+        // этого момента честно ничего не показываем (не выдумываем число).
+        .overlay(alignment: .bottomTrailing) {
+            if let count = detail?.pages.count, count > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "square.stack.fill").font(.system(size: 8, weight: .semibold))
+                    Text("\(count)").font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .frame(height: 16)
+                .background(.black.opacity(0.55), in: Capsule())
+                .padding(6)
+            }
+        }
+    }
+
+    // Название + тип — тем же приёмом, что и в обычном каталоге
+    // (MangaCardView: название, сразу под ним тип секондари-цветом),
+    // тип НА АНГЛИЙСКОМ, как есть на самом сайте (hitomi отдаёт
+    // "manga"/"doujinshi"/"misc"/... строчными, e-hentai —
+    // "Manga"/... с большой) — не переводим и не меняем регистр.
+    // Пока деталь ещё не загрузилась — SkeletonBar (та же анимация
+    // шиммера, что у обложки/skeletonGrid выше), НЕ "…" (жалоба
+    // "скелетон это три точки просто", 31.08).
+    private var titleBlock: some View {
+        Group {
+            if let detail {
+                VStack(alignment: .leading, spacing: ExternalCatalogGridView.titleTypeSpacing) {
+                    Button {
+                        guard isTitleTruncated else { return }
+                        showFullTitle = true
+                    } label: {
+                        Text(detail.title)
+                            .font(Font(ExternalCatalogGridView.titleUIFont))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .frame(width: width, alignment: .topLeading)
+                            .background(titleMeasurement(detail.title))
+                    }
+                    .buttonStyle(.plain)
+                    // Тап работает только когда заголовок ДЕЙСТВИТЕЛЬНО не
+                    // влез — иначе карточка выглядела бы кликабельной там,
+                    // где открывать нечего.
+                    .disabled(!isTitleTruncated)
+
+                    Text(detail.type.isEmpty ? " " : detail.type)
+                        .font(Font(ExternalCatalogGridView.typeUIFont))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                        .frame(width: width, alignment: .leading)
+                        .opacity(detail.type.isEmpty ? 0 : 1)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: ExternalCatalogGridView.titleTypeSpacing) {
+                    SkeletonBar(width: width * 0.85, height: ExternalCatalogGridView.titleUIFont.lineHeight)
+                    SkeletonBar(width: width * 0.5, height: ExternalCatalogGridView.typeUIFont.lineHeight)
+                }
+            }
+        }
+        .frame(width: width, height: ExternalCatalogGridView.textBlockHeight, alignment: .top)
+        .sheet(isPresented: $showFullTitle) {
+            if let detail {
+                ExternalGalleryTitleSheet(title: detail.title)
+            }
+        }
+    }
+
+    /// Невидимая подложка под названием — считает, действительно ли ПОЛНЫЙ
+    /// текст (без ограничения в 2 строки) занял бы больше места, чем сама
+    /// Text (та зажата lineLimit(2), поэтому её СОБСТВЕННЫЙ рендер-размер
+    /// всегда ≤ высоты двух строк — сравнивать с ним самим бессмысленно).
+    /// Вместо этого — независимый расчёт через NSString.boundingRect на
+    /// той же ширине и том же шрифте, что и видимый Text.
+    private func titleMeasurement(_ title: String) -> some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear { updateTruncation(title: title, width: proxy.size.width) }
+                .onChange(of: proxy.size.width) { _, newWidth in updateTruncation(title: title, width: newWidth) }
+        }
+    }
+
+    private func updateTruncation(title: String, width: CGFloat) {
+        guard width > 0 else { return }
+        let twoLineHeight = (ExternalCatalogGridView.titleUIFont.lineHeight * 2).rounded(.up)
+        let bounding = (title as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: ExternalCatalogGridView.titleUIFont],
+            context: nil
+        )
+        isTitleTruncated = bounding.height.rounded(.up) > twoLineHeight + 1
+    }
+}
+
+/// Полное название тайтла внешнего сайта — открывается тапом по обрезанному
+/// названию в карточке (см. CatalogCard.titleBlock). В отличие от
+/// TitleNamesSheet (несколько подписанных полей — рус/ориг/англ/
+/// альтернативные, специфично для основного каталога MangaLib) у внешних
+/// сайтов только ОДНО поле названия (см. ExternalGalleryDetail.title) —
+/// здесь просто полный текст без обрезки.
+private struct ExternalGalleryTitleSheet: View {
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Название")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer(minLength: 8)
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 28)
+        }
+        .scrollIndicators(.hidden)
+        .background(Theme.surface)
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 }
 

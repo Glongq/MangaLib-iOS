@@ -9,20 +9,26 @@ enum SimplyHentaiError: Error {
     case unknownSlug
 }
 
-/// Расширенные поля поиска — по прямой просьбе (31.08): у simply-hentai, в
-/// отличие от imhentai, `/search/complex` реально принимает `query=` И
+/// Расширенные поля поиска — по прямой просьбе (31.08, затем уточнено
+/// 01.09): у simply-hentai `/search/complex` реально принимает `query=` И
 /// `filter[tags][N]=`/`filter[parodies][N]=`/`filter[characters][N]=`/
 /// `filter[artists][N]=`/`filter[translators][N]=`/`filter[language][N]=`/
 /// `filter[series_title][N]=` В ОДНОМ запросе (подтверждено HAR — реальная
-/// цепочка из HAR буквально несёт все три сразу: `filter[series_title][0]=
+/// цепочка из HAR буквально несёт все сразу: `filter[series_title][0]=
 /// Danganronpa&filter[tags][0]=Bondage&filter[tags][1]=Ahegao&filter[tags]
-/// [2]=Anal&filter[artists][0]=matou&query=scat&page=1`). Общее поле поиска
-/// экрана (committedQuery) продолжает работать как есть — эти поля лишь
-/// ДОБАВЛЯЮТ отдельные `filter[...]=` параметры к тому же запросу, не
-/// подменяют и не мешают ему (в отличие от imhentai, где общий текст
-/// пришлось убрать вообще — здесь `/search/complex` один парсер на всё,
-/// такой проблемы просто нет).
+/// [2]=Anal&filter[artists][0]=matou&query=scat&page=1`).
+///
+/// ЭКСКЛЮЗИВНАЯ схема (по прямой просьбе, единая для всех сайтов с
+/// расширенными полями — см. ExternalSearchView.resolvedQuery): если хотя
+/// бы одно из этих полей заполнено (включая собственное search — оно
+/// заменяет общее поле экрана, НЕ складывается с ним), общее поле поиска
+/// экрана для этого сайта перестаёт участвовать вообще — запрос строится
+/// ТОЛЬКО из этих полей. Если все они пусты — как раньше, обычное общее
+/// поле.
 struct SimplyHentaiAdvancedQuery {
+    /// Собственная строка поиска — используется ВМЕСТО общего поля экрана,
+    /// когда хотя бы одно поле этой структуры заполнено (см. isEmpty).
+    var search: String = ""
     var tags: [String] = []
     var parodies: [String] = []
     var characters: [String] = []
@@ -32,7 +38,8 @@ struct SimplyHentaiAdvancedQuery {
     var seriesTitle: String = ""
 
     var isEmpty: Bool {
-        tags.isEmpty && parodies.isEmpty && characters.isEmpty && artists.isEmpty
+        search.trimmingCharacters(in: .whitespaces).isEmpty
+            && tags.isEmpty && parodies.isEmpty && characters.isEmpty && artists.isEmpty
             && translators.isEmpty && language.isEmpty
             && seriesTitle.trimmingCharacters(in: .whitespaces).isEmpty
     }
@@ -40,7 +47,7 @@ struct SimplyHentaiAdvancedQuery {
     /// Разделитель — управляющий символ U+0001, который ни один пользователь
     /// не наберёт руками в строке поиска — НЕ синтаксис самого сайта (как
     /// `+tag:"..."` у imhentai), это ЧИСТО внутренний канал между
-    /// ExternalSearchView/ExternalCombinedCatalogView.composedQuery и
+    /// ExternalSearchView/ExternalCombinedCatalogView.resolvedQuery и
     /// SimplyHentaiProvider.fetchIdsBySearch: протокол ExternalSiteProvider
     /// несёт запрос ОДНОЙ строкой (см. ExternalCatalogQuery.search), поэтому
     /// сюда "впаиваются" доп. поля, а провайдер их же и распаковывает
@@ -48,10 +55,12 @@ struct SimplyHentaiAdvancedQuery {
     /// — наружу (в URL) эти управляющие символы никогда не попадают.
     fileprivate static let fieldDelimiter = "\u{1}"
 
-    /// Кодирует себя поверх свободного текста в одну строку для
-    /// ExternalCatalogQuery.search(query:) — см. fieldDelimiter doc-comment.
-    func encoded(freeText: String) -> String {
-        var parts = [freeText]
+    /// Кодирует себя целиком в одну строку для ExternalCatalogQuery.
+    /// search(query:) — см. fieldDelimiter doc-comment. Вызывается ТОЛЬКО
+    /// когда !isEmpty (см. ExternalSearchView.resolvedQuery) — собственный
+    /// search заменяет общее поле экрана, а не складывается с ним.
+    func encoded() -> String {
+        var parts = [search.trimmingCharacters(in: .whitespaces)]
         func append(_ key: String, _ values: [String]) {
             for value in values {
                 let trimmed = value.trimmingCharacters(in: .whitespaces)
@@ -480,7 +489,7 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         return (ids, nextCursor)
     }
 
-    /// Распаковывает embedded-токены SimplyHentaiAdvancedQuery.encoded(freeText:)
+    /// Распаковывает embedded-токены SimplyHentaiAdvancedQuery.encoded()
     /// обратно в (свободный текст, [ключ фильтра: значения]) — см. её
     /// fieldDelimiter doc-comment. Порядок ключей словаря непредсказуем —
     /// это ОК, `/search/complex` не документирует порядок filter-полей,

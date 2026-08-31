@@ -6,6 +6,35 @@ enum ThreeHentaiError: Error {
     case badResponse
 }
 
+/// Расширенные поля поиска — по прямой просьбе (01.09). У 3hentai
+/// подтверждено HAR только ОДНО: запятая в `q=` — это AND нескольких
+/// тегов (`q=anal,diaper` → "Anal,diaper", оба тега учтены сразу, см.
+/// capabilities.hasSearch doc-comment) — свободного текста ВМЕСТЕ с тегами
+/// через запятую HAR не подтверждает отдельно (в живом примере были два
+/// голых тега, не текст+тег), объединяем по аналогии с той же самой
+/// запятой-AND, раз это единственный подтверждённый механизм комбинации на
+/// сайте. Никаких Parodies/Characters/Artists/Groups-полей здесь нет —
+/// честно только Tags, единственное подтверждённое измерение.
+///
+/// ЭКСКЛЮЗИВНАЯ схема, единая для всех сайтов с расширенными полями (см.
+/// ExternalSearchView.resolvedQuery): если поле Tags или собственный search
+/// заполнены, общее поле поиска экрана для 3hentai перестаёт участвовать.
+struct ThreeHentaiAdvancedQuery {
+    var search: String = ""
+    var tags: [String] = []
+
+    var isEmpty: Bool {
+        search.trimmingCharacters(in: .whitespaces).isEmpty && tags.isEmpty
+    }
+
+    /// Вызывается ТОЛЬКО когда !isEmpty (см. ExternalSearchView.resolvedQuery).
+    func encoded() -> String {
+        var parts = [search.trimmingCharacters(in: .whitespaces)]
+        parts.append(contentsOf: tags.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        return parts.filter { !$0.isEmpty }.joined(separator: ",")
+    }
+}
+
 /// Клиент 3hentai.net — СВОЯ, полностью отдельная реализация, никак не
 /// связанная с MangaNetworkService/LibSite/HitomiProvider/EHentaiProvider.
 /// Все URL/форматы ниже подтверждены реальным HAR (`de8dcedb-
@@ -50,9 +79,12 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         // явно поддерживает и другие (Manga/Artist CG/... — обычная для
         // таких сайтов таксономия), но без реального списка категорий в
         // HAR честно не берёмся её выдумывать (см. отчёт пользователю) —
-        // поэтому UI-фильтра по категориям здесь нет вообще, только сам
-        // тип показывается в карточке тайтла (metadata.type).
-        hasCategoryFilter: false,
+        // поэтому переключателя КАТЕГОРИЙ здесь нет. Флаг тем не менее
+        // `true` — тот же приём, что у hentaiPill (см. его doc-comment):
+        // здесь это ворота для кнопки «Фильтры» вообще, под которой теперь
+        // ThreeHentaiAdvancedFieldsPicker (своя строка поиска + Tags, см.
+        // ThreeHentaiAdvancedQuery в этом файле).
+        hasCategoryFilter: true,
         // Номер страницы — БУКВАЛЬНО кусок пути (`/category/doujinshi/2`,
         // `/tags/{slug}/2`, `/search?q=...&page=2`) — точный переход, тот
         // же принцип, что у hitomi (в отличие от e-hentai — там range=

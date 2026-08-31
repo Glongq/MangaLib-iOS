@@ -6,6 +6,32 @@ enum HentaiPillError: Error {
     case badResponse
 }
 
+/// Расширенное поле поиска — по прямой просьбе (01.09), но у hentaipill
+/// принципиально ДРУГАЯ форма, чем у остальных сайтов: здесь НЕТ единого
+/// поискового параметра, куда можно было бы приписать `tag:значение` —
+/// Tags/Parodies/Characters/Artists это ОТДЕЛЬНЫЕ несовместимые маршруты
+/// (`/genre/{slug}`, `/parody/{slug}`, `/character/{slug}`, `/artist/
+/// {slug}` — см. HentaiPillProvider.capabilities.hasCategoryFilter
+/// doc-comment), ни одной комбинации "тег + текст" или "тег + тег" HAR не
+/// подтверждает. Честно — это НЕ список чипов, а выбор РОВНО ОДНОГО
+/// измерения (Tags/Parodies/Characters/Artists) и ОДНОГО значения к нему;
+/// собственного текстового search-поля тоже нет отдельно от общего —
+/// общее поле и так уже прямой `/search?q=` (см. ExternalSearchView —
+/// `.searchable()` у hentaipill работает как обычно).
+///
+/// ЭКСКЛЮЗИВНАЯ схема, единая для всех сайтов с расширенными полями: если
+/// value не пусто, общее поле поиска экрана для hentaipill перестаёт
+/// участвовать — запрос уходит В ОБХОД fetchIdsBySearch, напрямую как
+/// fetchIdsByTag(namespace: kind, value: value, ...) (см.
+/// ExternalSearchView.resolvedQuery — там это единственный сайт, где
+/// расширенное поле даёт ExternalCatalogQuery.tag(...), а не .search(...)).
+struct HentaiPillAdvancedQuery {
+    var kind: ExternalTagNamespace = .tag
+    var value: String = ""
+
+    var isEmpty: Bool { value.trimmingCharacters(in: .whitespaces).isEmpty }
+}
+
 /// Клиент hentaipill.com — СВОЯ, полностью отдельная реализация. Все URL/
 /// форматы ниже подтверждены реальным HAR пользователя (31.08,
 /// `ProxyPin831_22_09_01.har`) И перепроверены живым curl из этой песочницы
@@ -44,13 +70,14 @@ struct HentaiPillProvider: ExternalSiteProvider {
         // отдаёт 404 (перепроверено живым curl) — поэтому пустой ввод здесь
         // подставляет главную ленту (`/`), см. fetchIdsBySearch.
         hasSearch: true,
-        // Category (`/category/{doujin|manga|comic-hentai|cg-hentai}`) —
-        // ОТДЕЛЬНЫЕ несовместимые между собой маршруты (не toggle-битмаска
-        // поверх search/tag, как EHentaiCategory/ImhentaiCategory), и ни
-        // одного примера в HAR, где категория комбинируется с `?q=`/тегом
-        // — честно НЕ утверждаем такую комбинацию, поэтому UI-фильтра
-        // здесь нет; сам тип тайтла всё равно виден в карточке (metadata.type).
-        hasCategoryFilter: false,
+        // Нет EHentaiCategory-подобного bitmask-переключателя категорий
+        // (Category — `/category/{slug}`, ОТДЕЛЬНЫЙ несовместимый маршрут,
+        // ни одного примера в HAR, где комбинируется с `?q=`/тегом) — но
+        // флаг переиспользован (тот же приём, что у imhentai/simplyHentai)
+        // как общий гейт "есть лист «Фильтры»": здесь он открывает выбор
+        // ОДНОГО измерения (Tags/Parodies/Characters/Artists) + значения
+        // (см. HentaiPillAdvancedQuery doc-comment), а не категории.
+        hasCategoryFilter: true,
         // Номер страницы — БУКВАЛЬНО путь (`/genre/{slug}/{page}`,
         // `/category/{slug}/{page}`) или query (`/search?q=...&page=N`) —
         // точный переход, перепроверено живым curl. ИСКЛЮЧЕНИЕ: главная
