@@ -1,24 +1,24 @@
 import SwiftUI
 
-/// Раздел «Закладки» для «Других сайтов» (hitomi.la, e-hentai.org,
-/// 3hentai.net, imhentai.xxx — см. App/ExternalSites/) — ЦЕЛИКОМ ЛОКАЛЬНЫЙ
-/// список (см. ExternalBookmarksStore doc-comment: у этих сайтов нет
-/// аккаунтов, значит закладки не могут синхронизироваться с сервером,
-/// только жить на устройстве), по прямой просьбе (31.08) — заменяет собой
-/// прежнюю заглушку «Недоступно» в BookmarksView.body для внешнего режима.
+/// The "Bookmarks" section for "Other Sites" (hitomi.la, e-hentai.org,
+/// 3hentai.net, imhentai.xxx — see App/ExternalSites/) — an ENTIRELY LOCAL
+/// list (see the ExternalBookmarksStore doc comment: these sites have no
+/// accounts, so bookmarks can't sync with a server, they can only
+/// live on the device), per direct request (Aug 31) — this replaces the
+/// former "Unavailable" placeholder in BookmarksView.body for external mode.
 ///
-/// «Всё остальное как в деф закладках, что совпадает» — визуально повторяет
-/// BookmarksView (см. её doc-comment): та же архитектура карточки-плитки
-/// (точный расчёт ширины через MangaCardView.gridCardWidth, тот же общий
-/// @AppStorage("personalization_cards_per_row")), тот же список/плитка
-/// переключатель, тот же .searchable() под крупным заголовком. НЕ совпадает
-/// (честно нет аналога): папки (BookmarkFolder — серверная концепция 5
-/// стандартных папок реального сайта, здесь неоткуда её взять),
-/// мультивыбор/bulk-операции, прогресс чтения/личная оценка (у внешних
-/// тайтлов такого просто нет — см. ExternalGalleryDetail, ни рейтинга
-/// пользователя, ни прогресса чтения не хранится). Карточка ВСЕГДА подписана
-/// источником (site.displayName) — по прямой просьбе, закладки могут быть
-/// сразу с нескольких разных сайтов.
+/// "Everything else matches the default bookmarks screen where it overlaps" — visually mirrors
+/// BookmarksView (see its doc comment): the same card-tile architecture
+/// (exact width computed via MangaCardView.gridCardWidth, the same shared
+/// @AppStorage("personalization_cards_per_row")), the same list/grid
+/// toggle, the same .searchable() under a large title. What does NOT match
+/// (honestly, there's no equivalent): folders (BookmarkFolder — a server-side concept of the 5
+/// standard folders on the real site, there's nowhere to get that here),
+/// multi-select/bulk operations, reading progress/personal rating (external
+/// titles simply don't have that — see ExternalGalleryDetail, neither a user
+/// rating nor reading progress is stored). A card is ALWAYS labeled with its
+/// source (site.displayName) — per direct request, since bookmarks can come
+/// from several different sites at once.
 struct ExternalBookmarksView: View {
     @ObservedObject private var store = ExternalBookmarksStore.shared
     @State private var query = ""
@@ -28,8 +28,8 @@ struct ExternalBookmarksView: View {
     @AppStorage("external_bookmarks_view_mode") private var viewMode: BookmarksViewMode = .grid
     @AppStorage("external_bookmarks_sort_option") private var sortOption: ExternalBookmarksSortOption = .dateAdded
     @AppStorage("external_bookmarks_sort_direction") private var sortDirection: BookmarksSortDirection = .newestFirst
-    /// Та же общая настройка Персонализации, что и у обычного каталога/
-    /// закладок (2/3/4/Авто) — общий @AppStorage-ключ, не свой отдельный.
+    /// The same shared Personalization setting as the regular catalog/
+    /// bookmarks (2/3/4/Auto) — a shared @AppStorage key, not a separate one of its own.
     @AppStorage("personalization_cards_per_row") private var cardsPerRow: CardsPerRow = .auto
 
     @State private var showViewSortSheet = false
@@ -87,8 +87,8 @@ struct ExternalBookmarksView: View {
     @ViewBuilder
     private var content: some View {
         if store.bookmarks.isEmpty {
-            // ScrollView (не голый StateView) — иначе .navigationTitle
-            // пропадает целиком, тот же приём, что и в BookmarksView.
+            // ScrollView (not a bare StateView) — otherwise .navigationTitle
+            // disappears entirely, the same trick used in BookmarksView.
             ScrollView {
                 StateView(icon: "bookmark", title: "Пусто", description: "Добавляйте тайтлы через кнопку «Добавить в закладки» на странице тайтла.", fillScreen: true)
                     .containerRelativeFrame(.vertical)
@@ -105,9 +105,9 @@ struct ExternalBookmarksView: View {
         }
     }
 
-    // MARK: Тап на строку/карточку — открыть карточку тайтла, долгое
-    // нажатие/свайп — убрать из закладок (нет папок — нет отдельного листа
-    // выбора, как у обычных закладок, просто прямое удаление).
+    // MARK: Tapping a row/card opens the title detail; a long
+    // press/swipe removes it from bookmarks (no folders — no separate
+    // selection sheet like regular bookmarks have, just a direct removal).
 
     @ViewBuilder
     private func tapTarget<Content: View>(_ bm: ExternalBookmark, @ViewBuilder content: () -> Content) -> some View {
@@ -127,7 +127,7 @@ struct ExternalBookmarksView: View {
         }
     }
 
-    // MARK: Список
+    // MARK: List
 
     private var listContent: some View {
         ScrollView {
@@ -171,8 +171,8 @@ struct ExternalBookmarksView: View {
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    // MARK: Плитка — та же архитектура точного расчёта ширины, что и
-    // MangaCatalogView.grid/BookmarksView.gridContent (см. их комментарии).
+    // MARK: Grid — the same exact-width-computation architecture as
+    // MangaCatalogView.grid/BookmarksView.gridContent (see their comments).
 
     private var gridContent: some View {
         GeometryReader { proxy in
@@ -224,10 +224,10 @@ struct ExternalBookmarksView: View {
         .frame(width: width, alignment: .top)
     }
 
-    /// Источник тайтла — ВСЕГДА виден (не только когда несколько сайтов
-    /// одновременно включено, как у showsSourceBadge в
-    /// ExternalCatalogGridView) — по прямой просьбе: "на карточке пусть
-    /// пишется с какого сайта это тайтл".
+    /// The title's source — ALWAYS visible (not only when several sites
+    /// are enabled at once, like showsSourceBadge in
+    /// ExternalCatalogGridView) — per direct request: "the card should always
+    /// show which site the title is from".
     private func siteBadge(_ bm: ExternalBookmark) -> some View {
         Text(bm.site.displayName)
             .font(.system(size: 9, weight: .semibold))
@@ -239,9 +239,9 @@ struct ExternalBookmarksView: View {
     }
 }
 
-/// Поле сортировки — отдельный тип от BookmarksSortOption (то завязано на
-/// серверные `sort_by`-поля реальных закладок Lib.social, здесь только
-/// дата добавления/название, больше сортировать не по чему).
+/// The sort field — a separate type from BookmarksSortOption (that one is tied
+/// to the server-side `sort_by` fields of real Lib.social bookmarks; here there's only
+/// date added/title, nothing else to sort by).
 enum ExternalBookmarksSortOption: String, CaseIterable, Identifiable {
     case dateAdded, title
     var id: String { rawValue }
@@ -253,11 +253,11 @@ enum ExternalBookmarksSortOption: String, CaseIterable, Identifiable {
     }
 }
 
-/// Щит «Вид»/«Сортировка» — тот же общий стиль, что и BookmarksView.
-/// ViewSortSheet (список/плитка + поле сортировки + направление,
-/// BookmarksSortDirection переиспользован как есть — то же самое понятие
-/// "сначала новые/старые", ни к чему заводить второй одинаковый enum),
-/// упрощённый под меньшее число полей (нет папок/рейтинга/прогресса чтения).
+/// The "View"/"Sort" sheet — the same general style as BookmarksView.
+/// ViewSortSheet (list/grid + sort field + direction,
+/// BookmarksSortDirection reused as-is — the same "newest/oldest first" concept,
+/// no point introducing a second identical enum),
+/// simplified to fewer fields (no folders/rating/reading progress).
 private struct ExternalBookmarksViewSortSheet: View {
     @Binding var viewMode: BookmarksViewMode
     @Binding var sortOption: ExternalBookmarksSortOption

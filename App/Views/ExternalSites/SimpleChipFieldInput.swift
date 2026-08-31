@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// Поле ввода одной категории — текст + кнопка добавления, ниже уже
-/// добавленные значения чипами (тап по чипу убирает значение). БЕЗ
-/// подсказок при наборе — общий переиспользуемый компонент для сайтов, где
-/// автокомплит не подтверждён HAR (E-Hentai, 3Hentai — см. их
-/// AdvancedFieldsPicker). Там, где подсказки ЕСТЬ (imhentai — локальная
-/// таблица, Simply Hentai — реальный /search/autocomplete), у каждого
-/// сайта свой собственный вариант этого поля с добавленным списком
-/// подсказок — этот компонент такой логики намеренно не несёт, чтобы не
-/// путать "подтверждено" с "нет".
+/// Input field for one category — text + an add button, below it the
+/// already-added values as chips (tapping a chip removes the value). NO
+/// suggestions while typing — a shared reusable component for sites where
+/// autocomplete isn't confirmed by HAR (E-Hentai, 3Hentai — see their
+/// AdvancedFieldsPicker). Where suggestions DO exist (imhentai — a local
+/// table, Simply Hentai — a real /search/autocomplete), each site has its
+/// own dedicated variant of this field with a suggestion list added — this
+/// component deliberately doesn't carry that logic, so as not to blur
+/// "confirmed" with "not".
 struct SimpleChipFieldInput: View {
     @Binding var values: [String]
     @State private var draft = ""

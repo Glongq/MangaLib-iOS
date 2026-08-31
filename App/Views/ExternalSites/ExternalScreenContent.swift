@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Общий «недоступно на внешнем сайте» экран — используется в начале
-/// `body` затронутых экранов (Закладки/Читают/Новое, см. план Часть 3),
-/// ДОБАВОЧНОЙ веткой перед их обычным содержимым:
+/// A shared "unavailable on an external site" screen — used at the start
+/// of the `body` of affected screens (Bookmarks/Reading/New, see the plan,
+/// Part 3), as an ADDITIONAL branch ahead of their normal content:
 /// ```swift
 /// var body: some View {
 ///     if let ext = ExternalSiteSession.shared.activeExternalSite {
@@ -12,14 +12,14 @@ import SwiftUI
 ///     }
 /// }
 /// ```
-/// У hitomi.la (и вообще у сайтов такого рода) нет аккаунтов — значит не
-/// может быть ни закладок, ни истории, ни уведомлений, ни комментариев в
-/// принципе, не "пока не реализовано" — текст это прямо объясняет, а не
-/// притворяется обычной пустой заглушкой.
+/// hitomi.la (and sites of this kind in general) has no accounts — meaning
+/// there can be no bookmarks, no history, no notifications, no comments in
+/// principle, this is not "not implemented yet" — the text says so
+/// explicitly, rather than pretending to be an ordinary empty placeholder.
 struct ExternalScreenContent: View {
-    /// nil — совместный режим («Все сайты», см. ExternalSiteSession.
-    /// combinedModeActive): формулировка не привязывается к одному
-    /// конкретному сайту, потому что их сразу несколько.
+    /// nil — combined mode ("All sites", see ExternalSiteSession.
+    /// combinedModeActive): the wording isn't tied to one specific site,
+    /// since several apply at once.
     let site: ExternalSite?
     let featureTitle: String
 

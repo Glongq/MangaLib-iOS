@@ -1,37 +1,37 @@
 import Foundation
 
-/// Ошибки HitomiProvider — намеренно простые (это не production-grade
-/// error-handling слой старого MangaNetworkService, а отдельный минимальный
-/// клиент, см. план про "почти не пересекаться со старым сетевым кодом").
+/// Errors for HitomiProvider — intentionally simple (this is not the
+/// production-grade error-handling layer of the old MangaNetworkService, but a
+/// separate minimal client — see the plan on "barely overlapping with the old networking code").
 enum HitomiError: Error {
     case badResponse
     case notFound
     case decodingFailed
 }
 
-/// Клиент hitomi.la — СВОЯ, полностью отдельная реализация (своя
-/// URLSession, свой парсинг, свои модели), никак не связанная с
-/// MangaNetworkService/LibSite. Все URL/форматы ниже подтверждены реальным
-/// HAR (см. /root/.claude/plans/vectorized-chasing-elephant.md — там же
-/// история разбора и то, что ЕЩЁ не подтверждено).
+/// Client for hitomi.la — its OWN, fully separate implementation (its own
+/// URLSession, its own parsing, its own models), not connected to
+/// MangaNetworkService/LibSite in any way. All URLs/formats below are confirmed by real
+/// HAR data (see /root/.claude/plans/vectorized-chasing-elephant.md — that's also where
+/// the reverse-engineering history and what's still NOT confirmed live).
 struct HitomiProvider: ExternalSiteProvider {
     let site: ExternalSite = .hitomi
     let capabilities = ExternalSiteCapabilities(
         hasCatalog: true,
         hasTagBrowser: true,
-        // Не полнотекстовый поиск в привычном смысле (тот всё ещё упирается
-        // в неразобранный бинарный B-tree индекс galleriesindex/*, см. план,
-        // "Что заблокировано") — но реальную пользу даёт: пустой запрос —
-        // «Recently», непустой — намеренная команда namespace:значение (см.
-        // fetchIdsBySearch), тот же принцип, что и у поиска на самом сайте.
+        // Not full-text search in the usual sense (that still runs into
+        // the unparsed binary B-tree index galleriesindex/*, see the plan,
+        // "What's blocked") — but it provides real value: an empty query gives
+        // "Recently", a non-empty one is treated as a deliberate namespace:value command (see
+        // fetchIdsBySearch) — the same principle the site's own search uses.
         hasSearch: true,
         hasCategoryFilter: false,
-        // Курсор — обычный byte-offset (см. fetchIdsByTag ниже), поэтому
-        // "страница N" считается точно, без сети (см. cursorForPage ниже).
+        // The cursor is a plain byte offset (see fetchIdsByTag below), so
+        // "page N" can be computed exactly, without a network call (see cursorForPage below).
         hasPageJump: true,
-        // Популярное: Сегодня/Неделя/Месяц/Год — подтверждено живым curl
-        // (30.08, третий заход) против `popular/{период}-all.nozomi` и
-        // `{кит}/popular/{период}/{значение}-all.nozomi`, см. SortOption.
+        // Popular: Today/Week/Month/Year — confirmed by a live curl test
+        // (Aug 30, third attempt) against `popular/{period}-all.nozomi` and
+        // `{kit}/popular/{period}/{value}-all.nozomi`, see SortOption.
         hasSortOptions: true,
         hasBookmarks: false,
         hasHistory: false,
@@ -39,8 +39,8 @@ struct HitomiProvider: ExternalSiteProvider {
         hasComments: false
     )
 
-    /// Отдельная сессия — не MangaNetworkService.session, заголовки/куки/
-    /// кэш не должны случайно смешаться со старым кодом.
+    /// A separate session — not MangaNetworkService.session; headers/cookies/
+    /// cache must not accidentally mix with the old code.
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.httpAdditionalHeaders = [
@@ -50,7 +50,7 @@ struct HitomiProvider: ExternalSiteProvider {
         return URLSession(configuration: config)
     }()
 
-    // MARK: Алфавитный список (Часть 4)
+    // MARK: Alphabetical List (Part 4)
 
     func fetchTagIndex(kind: ExternalTagKind, letter: Swift.Character) async throws -> [ExternalTagEntry] {
         let kindSlug: String
@@ -59,13 +59,13 @@ struct HitomiProvider: ExternalSiteProvider {
         case .series: kindSlug = "series"
         case .characters: kindSlug = "characters"
         case .artists: kindSlug = "artists"
-        // У hitomi нет справочника групп (только 4 кита в nav — tags/series/
-        // characters/artists) — добавлено вместе с 3hentai.net, у которого
-        // такой справочник реально есть (см. ThreeHentaiProvider).
+        // hitomi has no groups directory (only 4 kits in the nav — tags/series/
+        // characters/artists) — this case was added alongside 3hentai.net, which
+        // actually does have such a directory (see ThreeHentaiProvider).
         case .groups: return []
         }
-        // "123" — отдельный бакет для значений, начинающихся с цифры (см.
-        // nav hitomi.la: /alltags-123.html), а не буква как таковая.
+        // "123" is a separate bucket for values starting with a digit (see
+        // the hitomi.la nav: /alltags-123.html) — not an actual letter.
         let letterSlug = letter.isNumber ? "123" : String(letter).lowercased()
         guard let url = URL(string: "https://hitomi.la/all\(kindSlug)-\(letterSlug).html") else {
             throw HitomiError.badResponse
@@ -80,9 +80,9 @@ struct HitomiProvider: ExternalSiteProvider {
         return Self.parseTagList(html: html)
     }
 
-    /// Формат подтверждён HAR (alltags-c.html/allseries-*.html):
-    /// `<a href="/tag/SLUG-all.html">NAME</a> (COUNT)` — общий для tag/
-    /// series/character/artist (различается только первый сегмент пути).
+    /// Format confirmed by HAR (alltags-c.html/allseries-*.html):
+    /// `<a href="/tag/SLUG-all.html">NAME</a> (COUNT)` — shared across tag/
+    /// series/character/artist (only the first path segment differs).
     private static func parseTagList(html: String) -> [ExternalTagEntry] {
         guard let regex = try? NSRegularExpression(
             pattern: #"<a href="/(?:tag|series|character|artist)/([^"]+)-all\.html">([^<]+)</a>\s*\((\d+)\)"#
@@ -111,13 +111,13 @@ struct HitomiProvider: ExternalSiteProvider {
             .replacingOccurrences(of: "&#39;", with: "'")
     }
 
-    // MARK: Автокомплит (Часть 5)
+    // MARK: Autocomplete (Part 5)
 
     func fetchAutocomplete(query: String, namespace: String? = nil) async throws -> [ExternalTagSuggestion] {
         let ns = namespace ?? "global"
         let lowered = query.lowercased()
-        // Пустой запрос → корневой файл неймспейса целиком (топ по count,
-        // без фильтра по префиксу) — подтверждено HAR (global.json/tag.json).
+        // An empty query → the whole root file for the namespace (top entries by count,
+        // no prefix filter) — confirmed by HAR (global.json/tag.json).
         let path: String
         if lowered.isEmpty {
             path = "\(ns).json"
@@ -133,7 +133,7 @@ struct HitomiProvider: ExternalSiteProvider {
         }
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse else { throw HitomiError.badResponse }
-        // 404 — нормальный ответ "нет совпадений с таким префиксом", не ошибка.
+        // 404 is a normal "no matches for this prefix" response, not an error.
         if http.statusCode == 404 { return [] }
         guard http.statusCode == 200 else { throw HitomiError.badResponse }
         guard let raw = try? JSONSerialization.jsonObject(with: data) as? [[Any]] else {
@@ -148,20 +148,20 @@ struct HitomiProvider: ExternalSiteProvider {
         }
     }
 
-    // MARK: Список тайтлов по тегу (.nozomi, Часть 6)
+    // MARK: List of Titles by Tag (.nozomi, Part 6)
 
-    /// РЕАЛЬНАЯ схема (перепроверено живьём против `ltn.gold-
-    /// usergeneratedcontent.net`, плюс живой исходник `galleryblock.js`/
-    /// `galleries/{id}.js` этого же сайта — см. план, ЧАСТЬ A): у hitomi
-    /// ровно 4 "прямых" URL-кита —
-    /// `tag`/`series`/`character`/`artist` (те же 4, что в nav-баре
-    /// alltags/allseries/allcharacters/allartists), БЕЗ префикса `n/`
-    /// (мой предыдущий фикс с `n/` не был причиной бага — сервер принимает
-    /// оба варианта одинаково, но канонический — без него, как строит сам
-    /// сайт). `female`/`male`/`group` — это НЕ отдельные киты: это `tag`,
-    /// где ЗНАЧЕНИЕ само содержит префикс (см. `prefixedValue` ниже) —
-    /// подтверждено `galleries/{id}.js`: `tags[].url =
-    /// "/tag/female%3Aanal-all.html"`, НЕ `"/female/anal-all.html"`.
+    /// The REAL scheme (re-verified live against `ltn.gold-
+    /// usergeneratedcontent.net`, plus the live source of `galleryblock.js`/
+    /// `galleries/{id}.js` on the same site — see the plan, PART A): hitomi
+    /// has exactly 4 "direct" URL kits —
+    /// `tag`/`series`/`character`/`artist` (the same 4 as in the nav bar
+    /// alltags/allseries/allcharacters/allartists), WITHOUT the `n/` prefix
+    /// (my earlier fix that added `n/` was not the cause of the bug — the server accepts
+    /// both variants identically, but the canonical form is without it, matching what the
+    /// site itself builds). `female`/`male`/`group` are NOT separate kits — they're `tag`,
+    /// where the VALUE itself contains the prefix (see `prefixedValue` below) —
+    /// confirmed by `galleries/{id}.js`: `tags[].url =
+    /// "/tag/female%3Aanal-all.html"`, NOT `"/female/anal-all.html"`.
     private static func nozomiPath(for namespace: ExternalTagNamespace) -> String {
         switch namespace {
         case .tag, .female, .male, .group: return "tag"
@@ -171,27 +171,27 @@ struct HitomiProvider: ExternalSiteProvider {
         }
     }
 
-    /// `female`/`male`/`group` живут ПОД китом `tag` (см. nozomiPath выше)
-    /// — сюда добавляется намеспейс-префикс в САМО значение, ровно как
-    /// делает сам сайт (`female:anal`, не отдельный путь). `.group` — по
-    /// аналогии с female/male, живым запросом НЕ подтверждено (нет ни
-    /// одного `/group/`-примера в собранных HAR), помечено ниже.
+    /// `female`/`male`/`group` live UNDER the `tag` kit (see nozomiPath above)
+    /// — the namespace prefix is added right into the VALUE itself, exactly the way
+    /// the site itself does it (`female:anal`, not a separate path). `.group` is
+    /// modeled by analogy with female/male and is NOT confirmed by a live request (there isn't
+    /// a single `/group/` example in the collected HAR data), flagged below.
     private static func prefixedValue(for namespace: ExternalTagNamespace, value: String) -> String {
         switch namespace {
         case .female: return "female:\(value)"
         case .male: return "male:\(value)"
-        case .group: return "group:\(value)" // best-effort, не HAR-подтверждено
+        case .group: return "group:\(value)" // best-effort, not HAR-confirmed
         case .tag, .character, .artist, .series: return value
         }
     }
 
-    /// Сортировка (см. ExternalSiteCapabilities.hasSortOptions/SortOption) —
-    /// подтверждена живым curl (30.08, третий заход): `popular/{период}-
-    /// all.nozomi` (без тега) и `{кит}/popular/{период}/{значение}-
-    /// all.nozomi` (с тегом) — ОБА отдают `206` с реальным Content-Range,
-    /// без языкового суффикса (пример из живого `search.js`-комментария
-    /// содержал `-czech.nozomi`, но это оказалось НЕобязательным — путь без
-    /// языка тоже работает, см. план).
+    /// Sorting (see ExternalSiteCapabilities.hasSortOptions/SortOption) —
+    /// confirmed by a live curl test (Aug 30, third attempt): `popular/{period}-
+    /// all.nozomi` (no tag) and `{kit}/popular/{period}/{value}-
+    /// all.nozomi` (with a tag) — BOTH return `206` with a real Content-Range,
+    /// with no language suffix (an example from a live `search.js` comment
+    /// contained `-czech.nozomi`, but that turned out to be OPTIONAL — the path without
+    /// a language also works, see the plan).
     enum SortOption: String, CaseIterable, Identifiable {
         case dateAdded, popularToday, popularWeek, popularMonth, popularYear
         var id: String { rawValue }
@@ -233,23 +233,23 @@ struct HitomiProvider: ExternalSiteProvider {
         return try await fetchNozomiList(urlString: "https://\(Self.apiDomain)/\(path)", cursor: cursor, limit: limit)
     }
 
-    /// РЕАЛЬНЫЙ хост для .nozomi/galleries/{id}.js — подтверждено ЖИВЫМ
-    /// `common.js` самого сайта (скачан 30.08 через доступный из песочницы
-    /// alias): `const domain2 = 'gold-usergeneratedcontent.net'; var domain
-    /// = 'ltn.' + domain2;` — сайт САМ ходит на `ltn.gold-
-    /// usergeneratedcontent.net`, НЕ на `ltn.hitomi.la` (тот, похоже,
-    /// заблокирован у части провайдеров/РКН — ровно то, ради чего у сайта
-    /// вообще есть domain-fronting на второй домен). Раньше здесь БЫЛ
-    /// буквально `ltn.hitomi.la` — сама .nozomi-схема была верной (что и
-    /// подтверждали живые curl-тесты В ЭТОЙ СЕССИИ, они шли через .net-alias
-    /// как обход блокировки самой песочницы), но в реальном коде домен
-    /// остался старым — вот и был "0 тайтлов" уже ПОСЛЕ фикса схемы:
-    /// тестировался один домен, а в коде остался другой.
+    /// The REAL host for .nozomi/galleries/{id}.js — confirmed by the LIVE
+    /// `common.js` of the site itself (downloaded on Aug 30 through an
+    /// alias reachable from the sandbox): `const domain2 = 'gold-usergeneratedcontent.net'; var domain
+    /// = 'ltn.' + domain2;` — the site ITSELF talks to `ltn.gold-
+    /// usergeneratedcontent.net`, NOT `ltn.hitomi.la` (the latter appears to be
+    /// blocked for some providers/ISP-level censorship — exactly the reason the site
+    /// has domain-fronting to a second domain at all). This used to literally be
+    /// `ltn.hitomi.la` here — the .nozomi scheme itself was correct (as confirmed
+    /// by live curl tests IN THIS SESSION, which went through the .net alias
+    /// as a workaround for the sandbox's own blocking), but in the actual code the domain
+    /// was left as the old one — hence the "0 titles" that persisted even AFTER the scheme fix:
+    /// one domain was tested, but a different one was left in the code.
     private static let apiDomain = "ltn.gold-usergeneratedcontent.net"
 
-    /// Общий байтовый Range-запрос к .nozomi-файлу — и по тегу
-    /// (fetchIdsByTag), и по общему индексу "Recently" (fetchIdsBySearch,
-    /// пустой запрос) — один и тот же формат ответа, отличается только URL.
+    /// The shared byte-range request to a .nozomi file — used both by tag
+    /// (fetchIdsByTag) and by the general "Recently" index (fetchIdsBySearch,
+    /// empty query) — the same response format, only the URL differs.
     private func fetchNozomiList(urlString: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let offset = Int(cursor ?? "0") ?? 0
         guard let url = URL(string: urlString) else { throw HitomiError.badResponse }
@@ -264,7 +264,7 @@ struct HitomiProvider: ExternalSiteProvider {
 
         let ids = Self.parseNozomi(data)
         var total = offset + ids.count
-        // Content-Range: bytes X-Y/ИТОГО — ИТОГО уже в байтах, /4 → число тайтлов.
+        // Content-Range: bytes X-Y/TOTAL — TOTAL is already in bytes, /4 → number of titles.
         if let contentRange = http.value(forHTTPHeaderField: "Content-Range"),
            let slashIndex = contentRange.lastIndex(of: "/"),
            let totalBytes = Int(contentRange[contentRange.index(after: slashIndex)...]) {
@@ -275,16 +275,16 @@ struct HitomiProvider: ExternalSiteProvider {
         return (ids, nextCursor)
     }
 
-    /// Курсор здесь — простой offset-в-элементах (см. fetchIdsByTag выше:
-    /// `Int(cursor ?? "0") ?? 0`, дальше `* 4` в байты Range-заголовка) —
-    /// значит "страница N" считается ТОЧНО, обычной арифметикой, без сети.
+    /// The cursor here is a plain offset-in-elements (see fetchIdsByTag above:
+    /// `Int(cursor ?? "0") ?? 0`, then `* 4` to convert to bytes for the Range header) —
+    /// meaning "page N" is computed EXACTLY, with plain arithmetic, with no network call.
     func cursorForPage(_ page: Int, limit: Int) -> String? {
         guard page > 1 else { return nil }
         return String((page - 1) * limit)
     }
 
-    /// Тело .nozomi — просто массив big-endian Int32 (4 байта на ID), без
-    /// заголовка/обёртки — подтверждено побайтовым разбором HAR.
+    /// The body of .nozomi is simply an array of big-endian Int32 values (4 bytes per ID), with no
+    /// header/wrapper — confirmed by a byte-level breakdown of the HAR data.
     private static func parseNozomi(_ data: Data) -> [Int] {
         let count = data.count / 4
         var result: [Int] = []
@@ -302,15 +302,15 @@ struct HitomiProvider: ExternalSiteProvider {
         return result
     }
 
-    /// Пустой запрос — «Recently» (см. индекс `index-all.nozomi`, тот же
-    /// принцип, что и главная страница hitomi.la), непустой — распознаёт
-    /// префикс `namespace:значение` (`female:`/`male:`/`series:`/`artist:`/
-    /// `group:`/`character:`/`tag:`, по образцу того, как реально ищут на
-    /// самом сайте) и уходит в fetchIdsByTag; БЕЗ префикса (обычный ввод
-    /// "просто название тега") — АВТОПОДБОР неймспейса (см. ниже, ИСПРАВЛЕНО
-    /// 31.08). `index-all.nozomi` проверен живым curl против apiDomain
-    /// (30.08, повторная проверка) — `206`, `Content-Range .../4804324`
-    /// (~1.2M тайтлов, правдоподобно для "весь индекс").
+    /// An empty query gives "Recently" (see the `index-all.nozomi` index, the same
+    /// principle as the hitomi.la home page); a non-empty one recognizes a
+    /// `namespace:value` prefix (`female:`/`male:`/`series:`/`artist:`/
+    /// `group:`/`character:`/`tag:`, following the same pattern the site's own
+    /// search uses) and routes into fetchIdsByTag. WITHOUT a prefix (plain input
+    /// like "just a tag name") — AUTO-DETECTS the namespace (see below, FIXED
+    /// Aug 31). `index-all.nozomi` was verified with a live curl test against apiDomain
+    /// (Aug 30, re-checked) — `206`, `Content-Range .../4804324`
+    /// (~1.2M titles, plausible for "the entire index").
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: 0, cursor: cursor, limit: limit)
     }
@@ -319,47 +319,47 @@ struct HitomiProvider: ExternalSiteProvider {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: excludedCategoryBits, sortKey: nil, cursor: cursor, limit: limit)
     }
 
-    /// ИСПРАВЛЕНО (31.08) — раньше без явного `namespace:`-префикса запрос
-    /// ВСЕГДА трактовался как namespace `.tag` (бинарный поиск ровно по
-    /// `/tag/{значение}-all.nozomi`) — но на hitomi БОЛЬШИНСТВО тегов
-    /// категоризированы по полу и как "голый" тег вообще не существуют:
-    /// `/tag/anal-all.nozomi` → 404 живьём, тогда как `/tag/female%3Aanal-
-    /// all.nozomi` → 206 (проверено curl 31.08). Из-за этого обычный ввод
-    /// "anal"/"yaoi"/любого гендерного тега БЕЗ префикса всегда находил 0
-    /// тайтлов — хотя пользователь ожидает "нормальный поиск: просто
-    /// написал тег, оно должно находить" (жалоба 31.08). Теперь без явной
-    /// команды перебираются В ПОРЯДКЕ: как есть (`.tag`) → `female:` →
-    /// `male:` — первый непустой результат побеждает, тот же (kit,
-    /// значение) переиспользуется на всех следующих страницах через
-    /// `cursor` (см. ContinuationKit/encodeSearchCursor — без этого
-    /// переход на страницу 2 заново перебирал бы неймспейсы с нуля и
-    /// слетал бы обратно на бесплодный `.tag`).
+    /// FIXED (Aug 31) — previously, without an explicit `namespace:` prefix the query
+    /// was ALWAYS treated as namespace `.tag` (a lookup straight against
+    /// `/tag/{value}-all.nozomi`) — but on hitomi MOST tags are
+    /// categorized by gender and don't exist as a "bare" tag at all:
+    /// `/tag/anal-all.nozomi` → 404 live, whereas `/tag/female%3Aanal-
+    /// all.nozomi` → 206 (verified with curl on Aug 31). Because of this, a plain input like
+    /// "anal"/"yaoi"/any gender-specific tag WITHOUT a prefix always found 0
+    /// titles — even though the user expects "normal search: just type
+    /// the tag, it should find it" (complaint from Aug 31). Now, without an explicit
+    /// command, candidates are tried IN ORDER: as-is (`.tag`) → `female:` →
+    /// `male:` — the first non-empty result wins, and the same (kit,
+    /// value) is reused for every subsequent page via
+    /// `cursor` (see ContinuationKit/encodeSearchCursor — without this
+    /// moving to page 2 would re-run the namespace search from scratch and
+    /// could fall back onto the fruitless `.tag`).
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         let period = sortKey.flatMap(SortOption.init(rawValue:))?.popularPeriod
         guard !trimmed.isEmpty else {
-            // Пустой запрос + сортировка "Популярное" — глобальный
-            // popular-фид (без тега), проверено живым curl (см. SortOption).
+            // Empty query + "Popular" sort — the global
+            // popular feed (no tag), verified with a live curl test (see SortOption).
             if let period {
                 return try await fetchNozomiList(urlString: "https://\(Self.apiDomain)/popular/\(period)-all.nozomi", cursor: cursor, limit: limit)
             }
             return try await fetchNozomiList(urlString: "https://\(Self.apiDomain)/index-all.nozomi", cursor: cursor, limit: limit)
         }
 
-        // Продолжение уже разрешённого (на первой странице) автоподбора —
-        // тот же (kit, значение) переиспользуется как есть, БЕЗ повторного
-        // перебора неймспейсов.
+        // Continuing an auto-detection that was already resolved (on the first page) —
+        // the same (kit, value) is reused as-is, WITHOUT re-running
+        // the namespace search.
         if let cursor, let decoded = Self.decodeSearchCursor(cursor) {
             let result = try await fetchIdsByTag(namespace: decoded.kit.namespace, value: decoded.resolvedValue, sortKey: sortKey, cursor: decoded.offset, limit: limit)
             return (result.ids, result.nextCursor.map { Self.encodeSearchCursor(kit: decoded.kit, resolvedValue: decoded.resolvedValue, offset: $0) })
         }
 
         let (namespace, value, explicit) = Self.parseSearchCommand(trimmed)
-        // Явная команда (female:/male:/series:/artist:/group:/character:/
-        // tag:) — уважаем ровно то, что попросили, без автоподбора;
-        // legacy-курсор (например от "перейти на страницу N" — тот просто
-        // число, не наш "kit\u{1}значение\u{1}offset" формат) —
-        // используется КАК СТАРТОВЫЙ offset для этой попытки.
+        // An explicit command (female:/male:/series:/artist:/group:/character:/
+        // tag:) — honor exactly what was requested, no auto-detection;
+        // a legacy cursor (e.g. from "go to page N" — that's just a plain
+        // number, not our "kit\u{1}value\u{1}offset" format) —
+        // is used AS THE STARTING offset for this attempt.
         if explicit {
             let kit = Self.continuationKit(for: namespace)
             let resolvedValue = Self.prefixedValue(for: namespace, value: value)
@@ -390,14 +390,14 @@ struct HitomiProvider: ExternalSiteProvider {
         return (.tag, lower, false)
     }
 
-    /// РЕАЛЬНЫЙ REST-кит (nozomiPath) для продолжения пагинации —
-    /// `.tag`/`.female`/`.male`/`.group` все живут ПОД китом `tag`
-    /// (значение само несёт префикс, см. prefixedValue), поэтому для НИХ
-    /// продолжение обязано идти через `.tag` (у него prefixedValue —
-    /// no-op, повторный вызов не задвоит уже вписанный "female:"/"male:"/
-    /// "group:" префикс) — `.character`/`.artist`/`.series` живут на
-    /// СВОИХ китах, там prefixedValue и так no-op, продолжение идёт через
-    /// исходный неймспейс без изменений.
+    /// The REAL REST kit (nozomiPath) to use for continuing pagination —
+    /// `.tag`/`.female`/`.male`/`.group` all live UNDER the `tag` kit
+    /// (the value itself carries the prefix, see prefixedValue), so for THEM
+    /// continuation must go through `.tag` (where prefixedValue is a
+    /// no-op, so a repeated call won't double up an already-embedded "female:"/"male:"/
+    /// "group:" prefix) — `.character`/`.artist`/`.series` live on
+    /// THEIR OWN kits, where prefixedValue is already a no-op, so continuation goes through
+    /// the original namespace unchanged.
     private enum ContinuationKit: String {
         case tag, character, artist, series
         var namespace: ExternalTagNamespace {
@@ -419,10 +419,10 @@ struct HitomiProvider: ExternalSiteProvider {
         }
     }
 
-    /// "\u{1}" — технический разделитель между kit/значением/offset:
-    /// значение может содержать буквы/цифры/дефисы/пробелы/двоеточие (все
-    /// реально встречаются, см. prefixedValue) — control-символ
-    /// гарантированно не встретится ни в нём, ни в rawValue ContinuationKit.
+    /// "\u{1}" is a technical separator between kit/value/offset:
+    /// the value can contain letters/digits/hyphens/spaces/colons (all
+    /// actually occur, see prefixedValue) — a control character
+    /// is guaranteed not to appear in it, nor in ContinuationKit's rawValue.
     private static func encodeSearchCursor(kit: ContinuationKit, resolvedValue: String, offset: String) -> String {
         "\(kit.rawValue)\u{1}\(resolvedValue)\u{1}\(offset)"
     }
@@ -433,7 +433,7 @@ struct HitomiProvider: ExternalSiteProvider {
         return (kit, String(parts[1]), String(parts[2]))
     }
 
-    // MARK: Карточка тайтла (galleries/{id}.js, Часть 6)
+    // MARK: Title Detail Card (galleries/{id}.js, Part 6)
 
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail {
         guard let url = URL(string: "https://\(Self.apiDomain)/galleries/\(id).js") else {
@@ -444,7 +444,7 @@ struct HitomiProvider: ExternalSiteProvider {
               var text = String(data: data, encoding: .utf8) else {
             throw HitomiError.badResponse
         }
-        // Ответ — "var galleryinfo = { ... };", не чистый JSON.
+        // The response is "var galleryinfo = { ... };", not plain JSON.
         if let range = text.range(of: "var galleryinfo = ") {
             text.removeSubrange(text.startIndex..<range.upperBound)
         }
@@ -455,63 +455,63 @@ struct HitomiProvider: ExternalSiteProvider {
         return decoded.toDetail()
     }
 
-    // MARK: URL картинок
+    // MARK: Image URLs
 
-    /// Шард-путь превью — общий для webpbigtn/webpsmalltn (см. coverURL/
-    /// pageThumbnailURL ниже): каталог = ПОСЛЕДНИЙ символ хэша, подкаталог
-    /// = 2 символа ПЕРЕД ним. ИСПРАВЛЕНО (31.08) — раньше шардирование
-    /// было по ПЕРВЫМ символам (`hash.first` + `hash[1...2]`,
-    /// неподтверждённая догадка по общей конвенции, тот же класс ошибки,
-    /// что и был у pageImageURL с "w"/.webp вместо "a"/.avif) — живой curl
-    /// против `galleryblock/{id}.html` показал реальные ссылки вида
-    /// `webpbigtn/3/6c/{hash}.webp` для хэша, заканчивающегося на "...d6c3".
-    /// Из-за старой формулы ВСЕ превью hitomi (обложка карточки в каталоге,
-    /// сама карточка тайтла) 404-ились и вечно висели скелетонами — при
-    /// этом полноразмерные страницы ЧТЕНИЯ грузились нормально, т.к.
-    /// используют другую, уже исправленную ранее формулу (gg.js, см.
-    /// pageImageURL) — отсюда жалоба "превью не грузит бесконечно, а если
-    /// открыть страницу — картинки норм".
+    /// The thumbnail shard path — shared by webpbigtn/webpsmalltn (see coverURL/
+    /// pageThumbnailURL below): directory = the LAST character of the hash, subdirectory
+    /// = the 2 characters BEFORE it. FIXED (Aug 31) — the sharding used to
+    /// be based on the FIRST characters (`hash.first` + `hash[1...2]`,
+    /// an unconfirmed guess based on a general convention, the same class of bug
+    /// as pageImageURL had with "w"/.webp instead of "a"/.avif) — a live curl test
+    /// against `galleryblock/{id}.html` showed real links like
+    /// `webpbigtn/3/6c/{hash}.webp` for a hash ending in "...d6c3".
+    /// Because of the old formula ALL hitomi thumbnails (the cover in the catalog card,
+    /// the title detail card itself) 404'd and stayed stuck as skeletons forever — meanwhile
+    /// full-size READER pages loaded fine, since they
+    /// use a different formula that had already been fixed earlier (gg.js, see
+    /// pageImageURL) — hence the complaint "thumbnails never load, but opening
+    /// the page shows the images fine".
     private static func thumbnailShard(forHash hash: String) -> (dir: String, subdir: String)? {
         guard hash.count >= 3 else { return nil }
         return (String(hash.suffix(1)), String(hash.suffix(3).prefix(2)))
     }
 
-    /// Обложка тайтла (карточка в каталоге/шапка карточки тайтла) —
-    /// `webpbigtn`, живьём подтверждено ТОЛЬКО для первой страницы
-    /// (`files[0]`, та же картинка, что `galleryblock/{id}.html` использует
-    /// как обложку) — не для произвольной страницы, см. pageThumbnailURL.
+    /// The title cover (catalog card / title detail header) —
+    /// `webpbigtn`, confirmed live ONLY for the first page
+    /// (`files[0]`, the same image that `galleryblock/{id}.html` uses
+    /// as the cover) — not for an arbitrary page, see pageThumbnailURL.
     fileprivate static func coverURL(forHash hash: String) -> URL? {
         guard let shard = thumbnailShard(forHash: hash) else { return nil }
         return URL(string: "https://tn.gold-usergeneratedcontent.net/webpbigtn/\(shard.dir)/\(shard.subdir)/\(hash).webp")
     }
 
-    /// Миниатюра ЛЮБОЙ отдельной страницы (превью-грид карточки тайтла,
-    /// см. ExternalGalleryDetailView.previewGridSection) — `webpsmalltn`,
-    /// НЕ `webpbigtn`: живым curl подтверждено, что `webpbigtn` реально
-    /// сгенерирован только для обложки (см. coverURL) — для ОСТАЛЬНЫХ
-    /// страниц галереи он 404-ится, а `webpsmalltn` (то же шардирование,
-    /// просто меньший размер) существует для КАЖДОЙ страницы — проверено
-    /// на нескольких случайных хэшах одной галереи, все 200. Раньше здесь
-    /// использовалась ОДНА и та же функция coverURL для обложки И для
-    /// каждой страницы превью-грида — из-за этого весь превью-грид
-    /// карточки тайтла (кроме первой страницы) висел скелетонами.
+    /// The thumbnail for ANY individual page (the preview grid on the title detail card,
+    /// see ExternalGalleryDetailView.previewGridSection) — `webpsmalltn`,
+    /// NOT `webpbigtn`: a live curl test confirmed that `webpbigtn` is only
+    /// actually generated for the cover (see coverURL) — for the REST of a
+    /// gallery's pages it 404s, while `webpsmalltn` (the same sharding,
+    /// just a smaller size) exists for EVERY page — verified
+    /// on several random hashes from one gallery, all 200. This used to
+    /// use the SAME coverURL function both for the cover AND for
+    /// every page in the preview grid — because of that, the entire preview grid
+    /// on the title detail card (except the first page) stayed stuck as skeletons.
     fileprivate static func pageThumbnailURL(forHash hash: String) -> URL? {
         guard let shard = thumbnailShard(forHash: hash) else { return nil }
         return URL(string: "https://tn.gold-usergeneratedcontent.net/webpsmalltn/\(shard.dir)/\(shard.subdir)/\(hash).webp")
     }
 
-    /// Полноразмерная страница чтения — формула gg.js: хост = "a" (avif) +
-    /// (gg.m(Int(gg.s(hash))) + 1), путь = gg.b + gg.s(hash) + "/" + hash +
-    /// ".avif". `b`/набор case-значений `m()` — ЖИВЬЁМ через HitomiGGCache
-    /// (см. её doc-comment — оба реально меняются со временем). Хост-префикс
-    /// "a"/расширение ".avif" — ИСПРАВЛЕНО (30.08, третий заход): раньше
-    /// здесь было "w"/".webp" — предположение по общей конвенции публичных
-    /// hitomi-клиентов, НЕ подтверждённое живым трафиком; свежий HAR поймал
-    /// РЕАЛЬНЫЕ URL читалки (`a1.../*.avif`, `a2.../*.avif`, статус 200) —
-    /// формула бакета/выбора хоста (gg.s/gg.m) была верна, ошибались именно
-    /// в букве хоста и расширении. Проверено живым curl на нескольких
-    /// хэшах из свежего HAR + ещё одном тайтле отдельно — везде 200
-    /// image/avif (обязательно с Referer: hitomi.la — уже стоит в session).
+    /// The full-size reader page — the gg.js formula: host = "a" (avif) +
+    /// (gg.m(Int(gg.s(hash))) + 1), path = gg.b + gg.s(hash) + "/" + hash +
+    /// ".avif". `b`/the set of `case` values in `m()` are loaded LIVE via HitomiGGCache
+    /// (see its doc comment — both actually change over time). The host prefix
+    /// "a"/the ".avif" extension — FIXED (Aug 30, third attempt): this used to
+    /// be "w"/".webp" here — an assumption based on the general convention of public
+    /// hitomi clients, NOT confirmed by live traffic; fresh HAR data captured
+    /// REAL reader URLs (`a1.../*.avif`, `a2.../*.avif`, status 200) —
+    /// the bucket/host-selection formula (gg.s/gg.m) was correct, the mistake was specifically
+    /// in the host letter and the extension. Verified with a live curl test on several
+    /// hashes from the fresh HAR plus one more title separately — all 200
+    /// image/avif (Referer: hitomi.la is required — already set in session).
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL {
         let hash = page.key
         let (b, caseSet) = try await HitomiGGCache.shared.current(session: session)
@@ -526,7 +526,7 @@ struct HitomiProvider: ExternalSiteProvider {
     }
 }
 
-// MARK: - JSON-модель galleries/{id}.js
+// MARK: - JSON model for galleries/{id}.js
 
 private struct HitomiGalleryJSON: Decodable {
     struct TagEntry: Decodable {
@@ -544,10 +544,10 @@ private struct HitomiGalleryJSON: Decodable {
     let title: String
     let type: String
     let language: String?
-    /// Дата публикации — подтверждена живьём (`"2025-03-08 15:00:00-06"`),
-    /// см. план ЧАСТЬ A/B.2. `date`, не `datepublished` — оба поля есть в
-    /// ответе, но `date` — то, что реально показывается на самой странице
-    /// тайтла (`<span class="date">`).
+    /// Publication date — confirmed live (`"2025-03-08 15:00:00-06"`),
+    /// see the plan, PART A/B.2. `date`, not `datepublished` — both fields exist in
+    /// the response, but `date` is what is actually shown on the title's own
+    /// page (`<span class="date">`).
     let date: String?
     let tags: [TagEntry]?
     let artists: [[String: JSONAnyValue]]?
@@ -558,11 +558,11 @@ private struct HitomiGalleryJSON: Decodable {
     let files: [FileEntry]
 
     func toDetail() -> ExternalGalleryDetail {
-        // pages[].thumbnailURL — webpsmalltn (см. HitomiProvider.
-        // pageThumbnailURL, реально существует для КАЖДОЙ страницы), НЕ
-        // coverURL/webpbigtn (та сгенерирована только для обложки —
-        // страница 1 — использовать её тут означало бы, что весь
-        // превью-грид карточки, кроме первой миниатюры, 404-ится).
+        // pages[].thumbnailURL — webpsmalltn (see HitomiProvider.
+        // pageThumbnailURL, which actually exists for EVERY page), NOT
+        // coverURL/webpbigtn (that one is generated only for the cover —
+        // page 1 — using it here would mean the entire
+        // preview grid on the card, except the first thumbnail, 404s).
         let pages = files.enumerated().map { idx, file in
             ExternalGalleryPage(
                 index: idx + 1, key: file.hash, width: file.width, height: file.height,
@@ -585,14 +585,14 @@ private struct HitomiGalleryJSON: Decodable {
             series: Self.names(from: parodys, key: "parody"),
             related: related ?? [],
             pages: pages,
-            // Обложка — ОТДЕЛЬНО, webpbigtn по хэшу первой страницы (не
-            // pages.first?.thumbnailURL — то теперь webpsmalltn, меньшего
-            // размера, годится для мелких превью-грид-тайлов, но не для
-            // большой обложки карточки/каталога).
+            // The cover — SEPARATELY, webpbigtn by the first page's hash (not
+            // pages.first?.thumbnailURL — that's now webpsmalltn, a smaller
+            // size, fine for small preview-grid tiles but not for
+            // the large card/catalog cover).
             coverURL: files.first.flatMap { HitomiProvider.coverURL(forHash: $0.hash) },
             posted: date,
-            // hitomi физически не имеет этих полей — см. план ЧАСТЬ B.2,
-            // честно nil/[], не выдумываем.
+            // hitomi simply doesn't have these fields — see the plan, PART B.2,
+            // honestly nil/[], we're not making anything up.
             parentId: nil, visible: nil, fileSize: nil, favoritedCount: nil,
             ratingAverage: nil, ratingCount: nil, comments: []
         )
@@ -606,9 +606,9 @@ private struct HitomiGalleryJSON: Decodable {
     }
 }
 
-/// artists/groups/characters/parodys — массивы объектов с РАЗНЫМИ ключами
-/// (artist/group/character/parody) вперемешку с "url" — решаем через
-/// generic-обёртку, не заводя 4 почти одинаковых Decodable-структуры.
+/// artists/groups/characters/parodys — arrays of objects with DIFFERENT keys
+/// (artist/group/character/parody) mixed in with "url" — handled with a
+/// generic wrapper instead of introducing 4 nearly identical Decodable structs.
 private enum JSONAnyValue: Decodable {
     case string(String)
     case other

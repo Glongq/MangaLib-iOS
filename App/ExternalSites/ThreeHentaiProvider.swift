@@ -1,24 +1,25 @@
 import Foundation
 
-/// Ошибки ThreeHentaiProvider — та же намеренно простая схема, что у
+/// Errors for ThreeHentaiProvider — the same deliberately simple scheme as
 /// HitomiError/EHentaiError.
 enum ThreeHentaiError: Error {
     case badResponse
 }
 
-/// Расширенные поля поиска — по прямой просьбе (01.09). У 3hentai
-/// подтверждено HAR только ОДНО: запятая в `q=` — это AND нескольких
-/// тегов (`q=anal,diaper` → "Anal,diaper", оба тега учтены сразу, см.
-/// capabilities.hasSearch doc-comment) — свободного текста ВМЕСТЕ с тегами
-/// через запятую HAR не подтверждает отдельно (в живом примере были два
-/// голых тега, не текст+тег), объединяем по аналогии с той же самой
-/// запятой-AND, раз это единственный подтверждённый механизм комбинации на
-/// сайте. Никаких Parodies/Characters/Artists/Groups-полей здесь нет —
-/// честно только Tags, единственное подтверждённое измерение.
+/// Advanced search fields — added by direct request (Sep 1). For 3hentai
+/// HAR confirms exactly ONE thing: a comma in `q=` means AND of several
+/// tags (`q=anal,diaper` → "Anal,diaper", both tags counted at once, see
+/// the capabilities.hasSearch doc-comment) — HAR does NOT separately
+/// confirm free text combined with tags via a comma (the live example had
+/// two bare tags, not text+tag); we combine them by analogy with that same
+/// comma-AND, since it's the only confirmed combination mechanism on the
+/// site. There are no Parodies/Characters/Artists/Groups fields here —
+/// honestly just Tags, the only confirmed dimension.
 ///
-/// ЭКСКЛЮЗИВНАЯ схема, единая для всех сайтов с расширенными полями (см.
-/// ExternalSearchView.resolvedQuery): если поле Tags или собственный search
-/// заполнены, общее поле поиска экрана для 3hentai перестаёт участвовать.
+/// The EXCLUSIVE scheme, shared by all sites with advanced fields (see
+/// ExternalSearchView.resolvedQuery): if the Tags field or the field's own
+/// search is filled in, the screen's general search field stops
+/// participating for 3hentai.
 struct ThreeHentaiAdvancedQuery {
     var search: String = ""
     var tags: [String] = []
@@ -27,7 +28,7 @@ struct ThreeHentaiAdvancedQuery {
         search.trimmingCharacters(in: .whitespaces).isEmpty && tags.isEmpty
     }
 
-    /// Вызывается ТОЛЬКО когда !isEmpty (см. ExternalSearchView.resolvedQuery).
+    /// Called ONLY when !isEmpty (see ExternalSearchView.resolvedQuery).
     func encoded() -> String {
         var parts = [search.trimmingCharacters(in: .whitespaces)]
         parts.append(contentsOf: tags.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
@@ -35,82 +36,87 @@ struct ThreeHentaiAdvancedQuery {
     }
 }
 
-/// Клиент 3hentai.net — СВОЯ, полностью отдельная реализация, никак не
-/// связанная с MangaNetworkService/LibSite/HitomiProvider/EHentaiProvider.
-/// Все URL/форматы ниже подтверждены реальным HAR (`de8dcedb-
-/// ProxyPin830_21_46_50.har`, 30.08 вечер) — свежий разбор конкретно под
-/// эту интеграцию, живым `curl` (сайт, в отличие от hitomi.la, из этой
-/// песочницы доступен напрямую, без domain-fronting трюков).
+/// Client for 3hentai.net — its OWN, fully separate implementation, not
+/// connected in any way to MangaNetworkService/LibSite/HitomiProvider/
+/// EHentaiProvider. All URLs/formats below are confirmed by real HAR
+/// (`de8dcedb-ProxyPin830_21_46_50.har`, evening of Aug 30) — a fresh
+/// analysis done specifically for this integration, verified with a live
+/// `curl` (unlike hitomi.la, this site is reachable directly from this
+/// sandbox, with no domain-fronting tricks).
 ///
-/// Сайт устроен ПРОЩЕ обоих предыдущих: обычный серверный HTML (никакого
-/// JS-рендеринга выдачи, в отличие от hitomi.la, и никакой gg.js-формулы
-/// для полноразмерных страниц, в отличие от hitomi же) — картинки чтения
-/// вообще не требуют отдельного сетевого запроса (в отличие от e-hentai,
-/// где ссылка на H@H-узел временная и добывается только живым запросом):
-/// хост+внутренний ID картиночного CDN достаточно один раз вытащить из
-/// обложки на странице тайтла (см. extractHost(from:)), дальше и миниатюра,
-/// и полный размер строятся ЧИСТОЙ формулой (см. pageImageURL).
+/// This site is SIMPLER than both previous ones: plain server-rendered
+/// HTML (no JS rendering of the listing, unlike hitomi.la, and no gg.js
+/// formula for full-size pages, unlike hitomi as well) — reading images
+/// don't even need a separate network request (unlike e-hentai, where the
+/// H@H node link is temporary and can only be obtained with a live
+/// request): the image CDN's host + internal ID only needs to be pulled
+/// once from the cover on the title page (see extractHost(from:)), after
+/// which both the thumbnail and the full size are built by a PURE formula
+/// (see pageImageURL).
 ///
-/// `ru.` — не domain-fronting (в отличие от `ltn.gold-usergeneratedcontent.
-/// net` у hitomi), а просто языковая версия сайта (тот же контент, что и
-/// на голом `3hentai.net`, подтверждено HAR — canonical-ссылки на страницах
-/// сами указывают на `ru.3hentai.net`); используется тут только чтобы
-/// интерфейсные строки самого HTML (которые в код не идут, только
-/// структура/атрибуты) были на понятном языке при живой проверке.
+/// `ru.` is not domain-fronting (unlike `ltn.gold-usergeneratedcontent.
+/// net` for hitomi) — it's just the site's language version (the same
+/// content as on plain `3hentai.net`, confirmed by HAR — the canonical
+/// links on the pages themselves point to `ru.3hentai.net`); it's used
+/// here only so that the HTML's own interface strings (which don't go
+/// into the code, only structure/attributes) are readable during live
+/// testing.
 struct ThreeHentaiProvider: ExternalSiteProvider {
     let site: ExternalSite = .threeHentai
     let capabilities = ExternalSiteCapabilities(
         hasCatalog: true,
-        // Полноценный алфавитный справочник — tags/series/characters/
-        // artists/groups, все 5 подтверждены HAR (letter-picker + список
-        // `filter-elem`, тот же принцип разметки, что у hitomi.la, просто
-        // другие CSS-классы), см. fetchTagIndex.
+        // A full alphabetical index — tags/series/characters/
+        // artists/groups, all 5 confirmed by HAR (letter-picker + the
+        // `filter-elem` list, the same markup pattern as hitomi.la, just
+        // different CSS classes), see fetchTagIndex.
         hasTagBrowser: true,
-        // НАСТОЯЩИЙ полнотекстовый поиск (`?q=`), в отличие от hitomi
-        // (там честная заглушка-команда) — подтверждено HAR: свободный
-        // текст, запятая как AND нескольких тегов (`q=anal,diaper` →
-        // "Anal,diaper", 125 результатов — оба тега учтены сразу), команда
-        // `tag:значение`. Прогрессия ("несколько слов подряд" — насколько
-        // это AND vs OR/фраза целиком) живым HAR не подтверждена дальше
-        // одного примера — честно не берёмся утверждать точную семантику
-        // сверх того, что видно.
+        // A REAL full-text search (`?q=`), unlike hitomi
+        // (which has an honest stub command) — confirmed by HAR: free
+        // text, comma as AND of several tags (`q=anal,diaper` →
+        // "Anal,diaper", 125 results — both tags counted at once), the
+        // `tag:value` command. The progression ("several words in a row"
+        // — how much of that is AND vs OR/a whole phrase) isn't confirmed
+        // by live HAR beyond one example — we honestly won't claim the
+        // exact semantics beyond what's visible.
         hasSearch: true,
-        // Подтверждена РОВНО одна категория живьём (`doujinshi`) — сайт
-        // явно поддерживает и другие (Manga/Artist CG/... — обычная для
-        // таких сайтов таксономия), но без реального списка категорий в
-        // HAR честно не берёмся её выдумывать (см. отчёт пользователю) —
-        // поэтому переключателя КАТЕГОРИЙ здесь нет. Флаг тем не менее
-        // `true` — тот же приём, что у hentaiPill (см. его doc-comment):
-        // здесь это ворота для кнопки «Фильтры» вообще, под которой теперь
-        // ThreeHentaiAdvancedFieldsPicker (своя строка поиска + Tags, см.
-        // ThreeHentaiAdvancedQuery в этом файле).
+        // EXACTLY one category is confirmed live (`doujinshi`) — the site
+        // clearly supports others too (Manga/Artist CG/... — the usual
+        // taxonomy for such sites), but without a real category list in
+        // HAR we honestly won't make one up (see the report to the user)
+        // — so there's no CATEGORY switcher here. The flag is nonetheless
+        // `true` — the same trick as hentaiPill (see its doc-comment):
+        // here it's the gate for the "Filters" button in general, under
+        // which there's now ThreeHentaiAdvancedFieldsPicker (its own
+        // search field + Tags, see ThreeHentaiAdvancedQuery in this
+        // file).
         hasCategoryFilter: true,
-        // Номер страницы — БУКВАЛЬНО кусок пути (`/category/doujinshi/2`,
-        // `/tags/{slug}/2`, `/search?q=...&page=2`) — точный переход, тот
-        // же принцип, что у hitomi (в отличие от e-hentai — там range=
-        // приблизительный).
+        // The page number is LITERALLY a piece of the path
+        // (`/category/doujinshi/2`, `/tags/{slug}/2`,
+        // `/search?q=...&page=2`) — an exact jump, the same principle as
+        // hitomi (unlike e-hentai, where range= is approximate).
         hasPageJump: true,
-        // Популярное: 24 часа/неделя/всё время — подтверждено HAR
-        // (`?sort=popular-24h`/`popular-7d`/`popular`), см. SortOption.
-        // Только на страницах выдачи (тег/категория/поиск) — на главной
-        // ленте "Recently" сортировки НЕТ (нет `.sorts`-блока в HAR),
-        // поэтому пустой запрос честно игнорирует sortKey (см.
+        // Popular: 24 hours/week/all time — confirmed by HAR
+        // (`?sort=popular-24h`/`popular-7d`/`popular`), see SortOption.
+        // Only on listing pages (tag/category/search) — the main
+        // "Recently" feed has NO sorting (no `.sorts` block in HAR), so
+        // an empty query honestly ignores sortKey (see
         // fetchIdsBySearch).
         hasSortOptions: true,
-        // На самом сайте аккаунт/избранное/история РЕАЛЬНО есть (подтверждено
-        // HAR — `/user/panel`, `toggle-favorite`), но эта интеграция без
-        // входа в аккаунт, поэтому здесь всё равно false — тот же принцип,
-        // что и у EHentaiProvider (см. её doc-comment).
+        // The site itself REALLY does have an account/favorites/history
+        // (confirmed by HAR — `/user/panel`, `toggle-favorite`), but this
+        // integration doesn't log into an account, so it's still false
+        // here — the same principle as EHentaiProvider (see its
+        // doc-comment).
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
-        // Ни одного comment-related фрагмента разметки ни на одной
-        // сохранённой карточке тайтла в HAR — честно false, не выдумываем
-        // (тот же принцип, что у hitomi).
+        // Not a single comment-related markup fragment on any saved
+        // title card in HAR — honestly false, we don't make it up (the
+        // same principle as hitomi).
         hasComments: false
     )
 
-    /// Отдельная сессия — не пересекается ни с одним другим провайдером.
+    /// A separate session — doesn't overlap with any other provider.
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.httpAdditionalHeaders = [
@@ -122,7 +128,7 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
 
     private static let baseURL = "https://ru.3hentai.net"
 
-    // MARK: Алфавитный справочник (tags/series/characters/artists/groups)
+    // MARK: Alphabetical index (tags/series/characters/artists/groups)
 
     private static func tagKindPath(_ kind: ExternalTagKind) -> String {
         switch kind {
@@ -134,23 +140,24 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         }
     }
 
-    /// "#" — отдельный бакет символов/цифр (подтверждено HAR:
-    /// `?letter=%23`), ровно как "123" у hitomi — только там это часть
-    /// пути, здесь query-параметр. `letter.isNumber` — тот же сигнал,
-    /// который уже шлёт ExternalTagBrowserView вместо "#" (см.
-    /// HitomiProvider.fetchTagIndex — тот же приём).
+    /// "#" is a separate bucket for symbols/digits (confirmed by HAR:
+    /// `?letter=%23`), just like "123" for hitomi — except there it's
+    /// part of the path, here it's a query parameter. `letter.isNumber`
+    /// is the same signal that ExternalTagBrowserView already sends
+    /// instead of "#" (see HitomiProvider.fetchTagIndex — the same
+    /// trick).
     func fetchTagIndex(kind: ExternalTagKind, letter: Swift.Character) async throws -> [ExternalTagEntry] {
         let letterParam = letter.isNumber ? "#" : String(letter).lowercased()
         let encodedLetter = letterParam.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? letterParam
         let basePath = Self.tagKindPath(kind)
         var result: [ExternalTagEntry] = []
         var seenSlugs = Set<String>()
-        // Занятые буквы (например "y" у artists/groups) реально паджинируются
-        // (`?letter=y&page=2`, подтверждено HAR) — тянем все страницы
-        // подряд, не только первую, иначе список выглядел бы обрезанным
-        // без видимой причины. Разумный потолок (20 страниц = максимум
-        // ~500 записей) — просто чтобы не уйти в бесконечный цикл при
-        // непредвиденной разметке.
+        // Busy letters (e.g. "y" for artists/groups) really do paginate
+        // (`?letter=y&page=2`, confirmed by HAR) — we pull all pages in a
+        // row, not just the first one, otherwise the list would look
+        // truncated for no visible reason. A reasonable cap (20 pages =
+        // max ~500 entries) is just to avoid an infinite loop on
+        // unexpected markup.
         var page = 1
         while page <= 20 {
             var urlString = "\(Self.baseURL)/\(basePath)?letter=\(encodedLetter)"
@@ -180,11 +187,11 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
 
     /// `<span class="filter-elem[ ...]"><a class="name"
     /// href="https://ru.3hentai.net/{basePath}/{slug}" data-qty="N">
-    /// NAME</a></span>` — общий формат для tags/series/characters/artists/
-    /// groups (подтверждено HAR на всех пяти), различается только
-    /// `basePath` в самом href. `data-qty` — сокращённое число ("217k"),
-    /// не всегда целое — берём как есть строкой в `count`, если не
-    /// парсится как Int (см. parseCount ниже).
+    /// NAME</a></span>` — the common format for tags/series/characters/
+    /// artists/groups (confirmed by HAR on all five), differing only in
+    /// `basePath` within the href itself. `data-qty` is an abbreviated
+    /// number ("217k"), not always an integer — taken as-is into
+    /// `count` if it doesn't parse as an Int (see parseCount below).
     private static func parseFilterElemList(html: String, basePath: String) -> [ExternalTagEntry] {
         guard let regex = try? NSRegularExpression(
             pattern: #"<a class="name" href="https://ru\.3hentai\.net/\#(NSRegularExpression.escapedPattern(for: basePath))/([^"]+)" data-qty="([^"]*)">\s*([^<]+?)\s*</a>"#
@@ -204,9 +211,9 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         return result
     }
 
-    /// "217k"/"87k"/"0" → приблизительное целое (сайт сокращает крупные
-    /// числа буквой "k" = ×1000, "m" не встречалось в HAR, но на всякий
-    /// случай тоже поддержано).
+    /// "217k"/"87k"/"0" → an approximate integer (the site abbreviates
+    /// large numbers with the letter "k" = ×1000; "m" hasn't been seen
+    /// in HAR, but it's supported too just in case).
     private static func parseCount(_ raw: String) -> Int {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
         if let plain = Int(trimmed) { return plain }
@@ -224,28 +231,30 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         html.range(of: #"rel="next""#, options: .regularExpression) != nil
     }
 
-    /// Автокомплит не подтверждён HAR — ни одного JSON/XHR-эндпоинта под
-    /// поиск-по-мере-набора не встретилось (только сам HTML `/search?q=`
-    /// целиком) — честно пусто, тот же принцип, что у EHentaiProvider.
+    /// Autocomplete isn't confirmed by HAR — not a single JSON/XHR
+    /// endpoint for type-ahead search turned up (only the plain HTML
+    /// `/search?q=` page as a whole) — honestly empty, the same
+    /// principle as EHentaiProvider.
     func fetchAutocomplete(query: String, namespace: String?) async throws -> [ExternalTagSuggestion] {
         []
     }
 
-    // MARK: Сортировка
+    // MARK: Sorting
 
-    /// Переиспользует СЛОВАРЬ hitomi (`HitomiProvider.SortOption`) — не
-    /// потому что семантика идентична, а потому что общий UI сортировки
-    /// (см. ExternalCatalogGridView.sortSelection/sortMenuButton) сейчас
-    /// жёстко завязан именно на этот enum (единственный источник вариантов
-    /// на весь экран, не per-провайдерный). У 3hentai реально ТОЛЬКО 3
-    /// градации (24 часа/неделя/всё время, подтверждено HAR) — `.dateAdded`
-    /// маппится в "без сортировки" (как и у hitomi), `.popularToday`/
-    /// `.popularWeek` — в подтверждённые `popular-24h`/`popular-7d`, а
-    /// `.popularMonth`/`.popularYear` (пункты меню, которых у 3hentai в
-    /// принципе нет) — оба честно падают в `popular` (всё время), не в
-    /// ошибку и не в игнор — ближайший по смыслу реально существующий
-    /// вариант. См. отчёт пользователю — несовершенное соответствие,
-    /// отдельный per-сайт UI сортировки в это не переделывался.
+    /// Reuses hitomi's VOCABULARY (`HitomiProvider.SortOption`) — not
+    /// because the semantics are identical, but because the shared
+    /// sorting UI (see ExternalCatalogGridView.sortSelection/
+    /// sortMenuButton) is currently hard-wired to this exact enum (the
+    /// single source of options for the whole screen, not per-provider).
+    /// 3hentai really has ONLY 3 tiers (24 hours/week/all time, confirmed
+    /// by HAR) — `.dateAdded` maps to "no sorting" (same as hitomi),
+    /// `.popularToday`/`.popularWeek` map to the confirmed
+    /// `popular-24h`/`popular-7d`, and `.popularMonth`/`.popularYear`
+    /// (menu items that 3hentai doesn't have at all) both honestly fall
+    /// back to `popular` (all time), not to an error and not silently
+    /// ignored — the closest real existing option in meaning. See the
+    /// report to the user — an imperfect mapping; a separate per-site
+    /// sorting UI wasn't built for this.
     private static func sortQueryValue(for sortKey: String?) -> String? {
         guard let option = sortKey.flatMap(HitomiProvider.SortOption.init(rawValue:)) else { return nil }
         switch option {
@@ -256,14 +265,15 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         }
     }
 
-    // MARK: Список тайтлов по тегу/категории
+    // MARK: Title list by tag/category
 
     private static func tagBasePath(for namespace: ExternalTagNamespace) -> String {
         switch namespace {
-        // female/male у 3hentai — НЕ отдельный namespace: пол уже "зашит"
-        // в САМ slug (`big-breasts-female`/`big-breasts-male`, см.
-        // ExternalTagBrowserView — entry.slug для .tags уже содержит этот
-        // суффикс, ничего добавлять здесь не нужно, в отличие от hitomi).
+        // female/male on 3hentai are NOT a separate namespace: gender is
+        // already "baked into" the slug itself (`big-breasts-female`/
+        // `big-breasts-male`, see ExternalTagBrowserView — entry.slug
+        // for .tags already carries this suffix, nothing needs to be
+        // added here, unlike hitomi).
         case .tag, .female, .male: return "tags"
         case .series: return "series"
         case .character: return "characters"
@@ -276,23 +286,23 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         try await fetchIdsByTag(namespace: namespace, value: value, sortKey: nil, cursor: cursor, limit: limit)
     }
 
-    /// Нормализует ЛЮБОЙ входной текст в реальный URL-slug сайта —
-    /// lowercase, любая ПОСЛЕДОВАТЕЛЬНОСТЬ не-буквенно-цифровых символов
-    /// схлопывается в ОДИН дефис (не посимвольно), края обрезаются.
-    /// Подтверждено HAR на реальных парах имя→slug: "big breasts" →
+    /// Normalizes ANY input text into the site's real URL slug —
+    /// lowercase, any RUN of non-alphanumeric characters collapses into
+    /// ONE hyphen (not character by character), edges are trimmed.
+    /// Confirmed by HAR on real name→slug pairs: "big breasts" →
     /// "big-breasts", "focalors | lady furina" → "focalors-lady-furina"
-    /// (пробелы вокруг "|" вместе с самим "|" — ОДНА последовательность →
-    /// ОДИН дефис, не три), "y. ginjho the 3rd" → "y-ginjho-the-3rd".
-    /// ИДЕМПОТЕНТНО на уже готовом slug (те, что приходят из
-    /// ExternalTagBrowserView/entry.slug, уже в этом виде — повторная
-    /// нормализация ничего не меняет, сами дефисы — не-alphanumeric
-    /// символы, остаются одиночными) — а вот значение из ЧИПА карточки
-    /// тайтла (см. ExternalGalleryDetailView, переход по тегу/жанру,
-    /// 31.08) несёт только ЧИСТОЕ отображаемое имя, без этой нормализации
-    /// такие запросы 404-ились бы.
+    /// (the spaces around "|" together with "|" itself — ONE run →
+    /// ONE hyphen, not three), "y. ginjho the 3rd" → "y-ginjho-the-3rd".
+    /// IDEMPOTENT on an already-formed slug (the ones coming from
+    /// ExternalTagBrowserView/entry.slug are already in this shape —
+    /// re-normalizing changes nothing, since hyphens themselves are
+    /// non-alphanumeric characters and stay single) — but a value from
+    /// the title card's CHIP (see ExternalGalleryDetailView, tapping a
+    /// tag/genre, Aug 31) carries only the PLAIN display name, and
+    /// without this normalization such requests would 404.
     private static func slugify(_ text: String) -> String {
         var slug = ""
-        var lastWasSeparator = true // true — чтобы не начать с дефиса
+        var lastWasSeparator = true // true — so we don't start with a hyphen
         for scalar in text.lowercased().unicodeScalars {
             if CharacterSet.alphanumerics.contains(scalar) {
                 slug.unicodeScalars.append(scalar)
@@ -306,12 +316,13 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         return slug
     }
 
-    /// Пол — суффикс `-female`/`-male` В САМ slug (см. tagBasePath doc-
-    /// comment) — добавляется, только если его там ЕЩЁ нет (значение из
-    /// ExternalTagBrowserView/entry.slug для тегов из категории "Tags" уже
-    /// несёт его само по себе, повторное добавление задвоило бы суффикс;
-    /// значение из ЧИПА карточки тайтла — только чистое имя тега, без
-    /// суффикса, см. ExternalGalleryDetailView).
+    /// Gender — the `-female`/`-male` suffix IN the slug itself (see the
+    /// tagBasePath doc-comment) — added only if it's not ALREADY there
+    /// (a value from ExternalTagBrowserView/entry.slug for tags in the
+    /// "Tags" category already carries it by itself, adding it again
+    /// would double the suffix; a value from the title card's CHIP is
+    /// only the plain tag name, without a suffix, see
+    /// ExternalGalleryDetailView).
     private static func withGenderSuffix(_ slug: String, namespace: ExternalTagNamespace) -> String {
         switch namespace {
         case .female where !slug.hasSuffix("-female"): return slug + "-female"
@@ -331,20 +342,21 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         return try await fetchGalleryList(urlString: urlString, currentPage: page)
     }
 
-    /// Курсор — просто номер страницы (та же точная схема, что у hitomi,
-    /// см. HitomiProvider.cursorForPage) — здесь страница напрямую в пути
-    /// URL, а не байтовый offset, поэтому даже проще: строка = номер как
-    /// есть, без арифметики.
+    /// The cursor is just the page number (the exact same scheme as
+    /// hitomi, see HitomiProvider.cursorForPage) — here the page is
+    /// directly in the URL path, not a byte offset, so it's even
+    /// simpler: the string is the number as-is, no arithmetic.
     func cursorForPage(_ page: Int, limit: Int) -> String? {
         guard page > 1 else { return nil }
         return String(page)
     }
 
-    /// Пустой запрос — «Recently» (главная страница `/`, пагинация —
-    /// `/{page}`, без сортировки — на самой ленте её нет, см. capabilities.
-    /// hasSortOptions doc-comment). Непустой — обычный `?q=` (свободный
-    /// текст ИЛИ `tag:значение`-команда, как на самом сайте, см.
-    /// capabilities.hasSearch doc-comment).
+    /// An empty query is "Recently" (the home page `/`, pagination is
+    /// `/{page}`, no sorting — the feed itself doesn't have any, see
+    /// the capabilities.hasSortOptions doc-comment). A non-empty query
+    /// is the usual `?q=` (free text OR a `tag:value` command, just
+    /// like on the site itself, see the capabilities.hasSearch
+    /// doc-comment).
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: 0, sortKey: nil, cursor: cursor, limit: limit)
     }
@@ -369,10 +381,10 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         return try await fetchGalleryList(urlString: urlString, currentPage: page)
     }
 
-    /// Общий разбор страницы выдачи (главная/категория/тег/поиск — везде
-    /// одна и та же разметка `.doujin-col`/`.cover`) — 25 элементов на
-    /// страницу, число фиксировано сайтом (не `limit` из параметра — тот
-    /// же компромисс, что у EHentaiProvider.fetchGalleryList).
+    /// Shared parsing of a listing page (home/category/tag/search — the
+    /// same `.doujin-col`/`.cover` markup everywhere) — 25 items per
+    /// page, a number fixed by the site (not the `limit` parameter —
+    /// the same tradeoff as EHentaiProvider.fetchGalleryList).
     private func fetchGalleryList(urlString: String, currentPage: Int) async throws -> (ids: [Int], nextCursor: String?) {
         guard let url = URL(string: urlString) else { throw ThreeHentaiError.badResponse }
         let (data, response) = try await session.data(from: url)
@@ -398,7 +410,7 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         return result
     }
 
-    // MARK: Карточка тайтла
+    // MARK: Title card
 
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail {
         guard let url = URL(string: "\(Self.baseURL)/d/\(id)") else { throw ThreeHentaiError.badResponse }
@@ -410,32 +422,35 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         return Self.parseDetail(html: html, id: id)
     }
 
-    /// `https://{host}/d{internalId}/cover.jpg` — вытаскивает `{host}/
-    /// d{internalId}` целиком (например "s1.3hentai.net/d2441052") —
-    /// используется как есть и для миниатюр (`/{n}t.jpg`), и для
-    /// полноразмерных страниц (`/{n}.jpg`, см. pageImageURL) — оба живут
-    /// на ОДНОМ и том же хосте+ID, что и обложка, подтверждено HAR (host
-    /// иногда `.net`, иногда `.xyz` — берём буквально то, что реально
-    /// отдал сервер В ЭТОМ ответе, не хардкодим ни один вариант).
+    /// `https://{host}/d{internalId}/cover.jpg` — extracts the whole
+    /// `{host}/d{internalId}` (e.g. "s1.3hentai.net/d2441052") — used
+    /// as-is both for thumbnails (`/{n}t.jpg`) and for full-size pages
+    /// (`/{n}.jpg`, see pageImageURL) — both live on the SAME host+ID
+    /// as the cover, confirmed by HAR (the host is sometimes `.net`,
+    /// sometimes `.xyz` — we take literally whatever the server
+    /// actually returned IN THIS response, we don't hardcode either
+    /// variant).
     private static func extractStorageKey(from html: String) -> String? {
         firstMatch(in: html, pattern: #"data-src="https://(s\d+\.3hentai\.(?:net|xyz)/d\d+)/cover\.jpg""#)
     }
 
-    /// Заголовок раздела над блоком тегов/категории/языка (`Категории:`/
-    /// `Серия:`/`Персонажи:`/`Теги:`) намеренно НЕ разбирается по этому
-    /// тексту (была бы зависимость от русской локализации самого сайта,
-    /// хрупко) — вместо этого маршрутизация по ПЕРВОМУ сегменту пути в
-    /// href (`category`/`series`/`characters`/`artists`/`groups`/
-    /// `language`/`tags`) — устойчиво к языку интерфейса и к тому, в каком
-    /// именно `<div class="tag-container">` оказалась ссылка.
+    /// The section heading above the tags/category/language block
+    /// (`Категории:`/`Серия:`/`Персонажи:`/`Теги:`) is deliberately NOT
+    /// parsed by that text (it would depend on the site's own Russian
+    /// localization, which is fragile) — instead routing is done by the
+    /// FIRST path segment in the href (`category`/`series`/`characters`/
+    /// `artists`/`groups`/`language`/`tags`) — robust against the
+    /// interface language and against which exact
+    /// `<div class="tag-container">` the link ended up in.
     private static func parseDetail(html: String, id: Int) -> ExternalGalleryDetail {
-        // `.*?` (dotall) + вырезка вложенных тегов, НЕ `[^<]*` — часть
-        // заголовков сайт оборачивает серединным куском в
-        // `<span class="middle-title">...</span>` (подтверждено живым
-        // curl 30.08 на этом же самом ID — HAR того же тайтла его почему-то
-        // не содержал, а живой fetch содержит), `[^<]*` на такой разметке
-        // не матчился бы вообще (обрывался на первом `<`), из-за чего
-        // title тихо падал в "Untitled" на любом таком заголовке.
+        // `.*?` (dotall) + stripping nested tags, NOT `[^<]*` — the site
+        // wraps a middle chunk of some titles in
+        // `<span class="middle-title">...</span>` (confirmed by a live
+        // curl on Aug 30 on this very same ID — the HAR for the same
+        // title somehow didn't contain it, but the live fetch does),
+        // `[^<]*` wouldn't match at all on such markup (it would break
+        // at the first `<`), which is why the title silently fell back
+        // to "Untitled" on any such heading.
         let title = firstMatch(
             in: html, pattern: #"<h1 class="text-left font-weight-bold">(.*?)</h1>"#,
             options: [.dotMatchesLineSeparators]
@@ -471,10 +486,12 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
                 case "groups": groups.append(name)
                 case "language": languageParts.append(name)
                 case "tags":
-                    // Пол — по СУФФИКСУ slug (`-female`/`-male`), не по
-                    // display-тексту (тот содержит " (female)"/" (male)" в
-                    // скобках, см. ниже strippedTagName) — надёжнее, slug
-                    // всегда ASCII и без вариаций пробелов/регистра.
+                    // Gender — by the slug's SUFFIX (`-female`/`-male`),
+                    // not by the display text (which contains
+                    // " (female)"/" (male)" in parentheses, see
+                    // strippedTagName below) — more reliable, the slug
+                    // is always ASCII and free of whitespace/casing
+                    // variations.
                     let female = slug.hasSuffix("-female")
                     let male = slug.hasSuffix("-male")
                     let cleanName = strippedTagName(name)
@@ -484,11 +501,12 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
             }
         }
 
-        // Полноразмерные/миниатюрные страницы — см. extractStorageKey
-        // (host+внутренний ID) + максимальный номер страницы среди
-        // `{n}t.jpg`-миниатюр полосы превью (нет отдельного "related"/
-        // похожих галерей на этой же странице, которые могли бы дать
-        // ложные высокие номера — см. doc-comment типа выше).
+        // Full-size/thumbnail pages — see extractStorageKey
+        // (host+internal ID) + the highest page number among the
+        // `{n}t.jpg` thumbnails in the preview strip (there's no
+        // separate "related"/similar galleries section on this same
+        // page that could give false high numbers — see the type's
+        // doc-comment above).
         var pages: [ExternalGalleryPage] = []
         if let storageKey = extractStorageKey(from: html) {
             var maxPage = 0
@@ -524,37 +542,39 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
             groups: groups,
             characters: characters,
             series: series,
-            // Нет отдельного списка "похожих"/related ID на странице
-            // тайтла (ни одного related-фрагмента разметки в HAR, в
-            // отличие от hitomi) — честно пусто, как у e-hentai.
+            // There's no separate "similar"/related ID list on the
+            // title page (not a single related markup fragment in HAR,
+            // unlike hitomi) — honestly empty, same as e-hentai.
             related: [],
             pages: pages,
             coverURL: coverURL,
             posted: posted,
-            // 3hentai физически не имеет этих полей (e-hentai-специфичные,
-            // см. план ЧАСТЬ B.2) — честно nil/[], не выдумываем.
+            // 3hentai physically doesn't have these fields
+            // (e-hentai-specific, see the plan PART B.2) — honestly
+            // nil/[], we don't make it up.
             parentId: nil, visible: nil, fileSize: nil, favoritedCount: nil,
             ratingAverage: nil, ratingCount: nil, comments: []
         )
     }
 
-    /// "big breasts (female)" → "big breasts" — display-текст сайта сам
-    /// приписывает пол в скобках (см. `tag_display = tag.replace(...)`-
-    /// аналог у hitomi, тот же принцип); female/male уже отдельно
-    /// извлечены из slug (см. parseDetail), в `name` эта информация была
-    /// бы избыточной (UI и так подписывает блок "Женское"/"Мужское", см.
-    /// ExternalGalleryDetailView.aboutTab).
+    /// "big breasts (female)" → "big breasts" — the site's own display
+    /// text appends gender in parentheses (see the
+    /// `tag_display = tag.replace(...)` equivalent for hitomi, same
+    /// principle); female/male are already extracted separately from
+    /// the slug (see parseDetail), so in `name` this information would
+    /// be redundant (the UI already labels the block "Female"/"Male",
+    /// see ExternalGalleryDetailView.aboutTab).
     private static func strippedTagName(_ name: String) -> String {
         guard let range = name.range(of: #"\s*\((?:female|male)\)\s*$"#, options: .regularExpression) else { return name }
         return String(name[name.startIndex..<range.lowerBound])
     }
 
-    // MARK: URL картинок
+    // MARK: Image URLs
 
-    /// Чистая формула (host+internalId уже в `page.key`, см.
-    /// extractStorageKey) — без сети, как у hitomi (в отличие от
-    /// e-hentai — там реальный запрос на каждую страницу), просто
-    /// обёрнута в async ради общего протокола.
+    /// A pure formula (host+internalId already in `page.key`, see
+    /// extractStorageKey) — no network, like hitomi (unlike e-hentai,
+    /// where there's a real request per page), just wrapped in async
+    /// for the sake of the shared protocol.
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL {
         guard let url = URL(string: "https://\(page.key)/\(page.index).jpg") else {
             throw ThreeHentaiError.badResponse
@@ -562,7 +582,7 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         return url
     }
 
-    // MARK: Утилиты
+    // MARK: Utilities
 
     private static func firstMatch(in html: String, pattern: String, options: NSRegularExpression.Options = []) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return nil }
@@ -572,10 +592,10 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         return String(html[matchRange])
     }
 
-    /// Вырезает вложенные HTML-теги (например `<span class="middle-title">
-    /// ...</span>` внутри заголовка, см. parseDetail) — оставляет только
-    /// текстовое содержимое, тот же приём, что у EHentaiProvider.
-    /// parseComments для текста комментария.
+    /// Strips nested HTML tags (e.g. `<span class="middle-title">
+    /// ...</span>` inside the title, see parseDetail) — leaves only the
+    /// text content, the same trick as EHentaiProvider.parseComments
+    /// for comment text.
     private static func stripInnerTags(_ html: String) -> String {
         html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
     }

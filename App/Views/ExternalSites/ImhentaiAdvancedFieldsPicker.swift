@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// Расширенные поля поиска ImHentai — своя строка поиска + Tags/Parodies/
-/// Artists/Characters/Groups (см. /advsearch/ на самом сайте, скриншот
-/// пользователя 31.08) — КАЖДОЕ поле копит СВОЙ список значений (можно
-/// добавить сразу несколько тегов, несколько персонажей и т.д.), в отличие
-/// от обычной строки поиска (одна строка — один текст). Значения
-/// собираются в ImhentaiAdvancedQuery.clauses() — см. её doc-comment в
-/// ImhentaiProvider.swift насчёт того, что именно подтверждено HAR, а что
-/// нет (только `tag` подтверждён живьём).
+/// Advanced search fields for ImHentai — its own search box + Tags/Parodies/
+/// Artists/Characters/Groups (see /advsearch/ on the actual site, a
+/// screenshot the user shared on 08/31) — EACH field accumulates ITS OWN
+/// list of values (you can add several tags, several characters, etc. at
+/// once), unlike the regular search box (one box, one string of text).
+/// Values are assembled in ImhentaiAdvancedQuery.clauses() — see its
+/// doc-comment in ImhentaiProvider.swift regarding exactly what's confirmed
+/// by HAR and what isn't (only `tag` has been confirmed live).
 struct ImhentaiAdvancedFieldsPicker: View {
     @Binding var query: ImhentaiAdvancedQuery
 
@@ -22,10 +22,11 @@ struct ImhentaiAdvancedFieldsPicker: View {
         }
     }
 
-    /// Своя строка поиска IMHentai (по прямой просьбе 31.08) — ОТДЕЛЬНО от
-    /// Tags и от общего верхнего поиска экрана (тот у imhentai больше не
-    /// участвует в запросе вообще, см. ImhentaiAdvancedQuery.searchText
-    /// doc-comment / ExternalSearchView.resolvedQuery).
+    /// IMHentai's own search box (per a direct request on 08/31) —
+    /// SEPARATE from Tags and from the screen's shared top search field
+    /// (which for imhentai no longer participates in the query at all, see
+    /// the ImhentaiAdvancedQuery.searchText doc-comment /
+    /// ExternalSearchView.resolvedQuery).
     private var searchField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Поиск").font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
@@ -45,31 +46,32 @@ struct ImhentaiAdvancedFieldsPicker: View {
     }
 }
 
-/// Локальная таблица алфавитного справочника IMHentai (fetchTagIndex — уже
-/// подтверждён HAR, см. ImhentaiProvider) для подсказок при наборе тега
-/// (см. AdvancedFieldInput ниже) — по прямой просьбе (31.08) подсказки
-/// ищут ПОДСТРОКОЙ по ВСЕЙ таблице (под "anal" всплывёт и "Double Anal",
-/// как на скриншоте реального сайта), а не только в пределах бакета своей
-/// первой буквы, как было раньше. Раз отдельного автокомплит-эндпоинта у
-/// сайта не подтверждено (ImhentaiProvider.fetchAutocomplete честно
-/// пуст), таблица собирается САМИ — последовательным обходом всех
-/// буквенных бакетов (a...z + "num") через уже подтверждённый
-/// fetchTagIndex, один раз на инсталляцию (кэш на диск, см. cacheURL —
-/// при следующем запуске приложения читается оттуда, сеть не трогается
-/// заново). Обход идёт в фоне с небольшой паузой между буквами (см.
-/// loadFullIndex) — сайт за Cloudflare, лишний параллелизм/бёрст ближе к
-/// риску капчи/бана, чем к пользе.
+/// A local table of IMHentai's alphabetical index (fetchTagIndex — already
+/// confirmed by HAR, see ImhentaiProvider) for suggestions while typing a
+/// tag (see AdvancedFieldInput below) — per a direct request (08/31),
+/// suggestions are matched as a SUBSTRING against the WHOLE table (typing
+/// "anal" will also surface "Double Anal", as in the real site's
+/// screenshot), not only within the bucket for its own first letter as it
+/// used to. Since there's no confirmed separate autocomplete endpoint on
+/// the site (ImhentaiProvider.fetchAutocomplete is honestly empty), the
+/// table is built up OURSELVES — by sequentially walking every letter
+/// bucket (a...z + "num") via the already-confirmed fetchTagIndex, once per
+/// install (cached to disk, see cacheURL — read from there on the next app
+/// launch, no network touched again). The walk runs in the background with
+/// a small pause between letters (see loadFullIndex) — the site sits behind
+/// Cloudflare, and extra parallelism/bursts are more of a captcha/ban risk
+/// than a benefit.
 @MainActor
 private final class ImhentaiTagSuggestionCache: ObservableObject {
     static let shared = ImhentaiTagSuggestionCache()
 
     private static let allKinds: [ExternalTagKind] = [.tags, .series, .artists, .characters, .groups]
-    /// "0" — сигнал "num"-бакета (см. ImhentaiProvider.fetchTagIndex —
-    /// letter.isNumber), сама цифра значения не имеет.
-    // `Swift.Character`, НЕ голое `Character` — в модуле есть свой тип
-    // `Character` (модель персонажа тайтла, см. MangaModels.swift), он
-    // затеняет стандартный однобуквенный тип (та же гочка, что и в
-    // ExternalSiteProvider.fetchTagIndex — см. её doc-comment).
+    /// "0" — signals the "num" bucket (see ImhentaiProvider.fetchTagIndex —
+    /// letter.isNumber), the digit itself has no meaning.
+    // `Swift.Character`, NOT bare `Character` — the module has its own
+    // `Character` type (the title's character model, see MangaModels.swift),
+    // which shadows the standard single-letter type (the same gotcha as in
+    // ExternalSiteProvider.fetchTagIndex — see its doc-comment).
     private static let letters: [Swift.Character] = {
         var result: [Swift.Character] = Array("abcdefghijklmnopqrstuvwxyz")
         result.append("0")
@@ -87,10 +89,10 @@ private final class ImhentaiTagSuggestionCache: ObservableObject {
         }
     }
 
-    /// Текущее локальное состояние таблицы для kind — может быть неполным,
-    /// если обход ещё идёт (см. ensureLoading); AdvancedFieldInput читает
-    /// это через @ObservedObject, поэтому список подсказок сам дорастает
-    /// по мере обхода, без ручного перезапуска фильтра.
+    /// The current local table state for kind — may be incomplete if the
+    /// walk is still in progress (see ensureLoading); AdvancedFieldInput
+    /// reads this via @ObservedObject, so the suggestion list grows on its
+    /// own as the walk proceeds, with no manual filter restart needed.
     func entries(kind: ExternalTagKind) -> [ExternalTagEntry] {
         fullIndex[kind] ?? []
     }
@@ -112,10 +114,10 @@ private final class ImhentaiTagSuggestionCache: ObservableObject {
                 seen.insert(entry.slug)
                 merged.append(entry)
             }
-            // Промежуточное сохранение — подсказки видят частично
-            // собранную таблицу сразу, не ждут ВСЕ 27 бакетов разом
-            // (один бакет — это уже пагинация до 20 страниц, см.
-            // fetchTagIndex doc-comment насчёт "groups/a/ — 48 страниц").
+            // Intermediate save — suggestions see the partially-built
+            // table right away, they don't wait for ALL 27 buckets at once
+            // (one bucket alone can already paginate up to 20 pages, see
+            // the fetchTagIndex doc-comment about "groups/a/ — 48 pages").
             fullIndex[kind] = merged
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
@@ -123,7 +125,7 @@ private final class ImhentaiTagSuggestionCache: ObservableObject {
         loadingTasks[kind] = nil
     }
 
-    // MARK: Диск-кэш — обход не повторяется при каждом перезапуске приложения.
+    // MARK: Disk cache — the walk doesn't repeat on every app relaunch.
 
     private struct StoredEntry: Codable {
         let id: String
@@ -152,31 +154,32 @@ private final class ImhentaiTagSuggestionCache: ObservableObject {
     }
 }
 
-/// Поле ввода одной категории — текст + кнопка добавления, под ним (пока
-/// печатается ≥2 символов) выпадающий список подсказок из уже известного
-/// справочника (см. ImhentaiTagSuggestionCache) — тап по подсказке
-/// добавляет значение и сворачивает список, как и обычное добавление.
-/// Ниже — уже добавленные значения чипами (CollapsibleChips, переиспользован
-/// как есть — тап по чипу убирает значение, тот же приём, что и у
-/// onTap-чипов в ExternalGalleryDetailView, просто здесь действие —
-/// удаление, а не переход).
+/// Input field for one category — text + an add button, below it (while
+/// ≥2 characters are typed) a dropdown suggestion list from the already-
+/// known index (see ImhentaiTagSuggestionCache) — tapping a suggestion adds
+/// the value and collapses the list, same as adding normally. Below that —
+/// already-added values as chips (CollapsibleChips, reused as-is — tapping
+/// a chip removes the value, the same trick as the onTap chips in
+/// ExternalGalleryDetailView, just with a removal action here instead of
+/// navigation).
 private struct AdvancedFieldInput: View {
     let kind: ExternalTagKind
     @Binding var values: [String]
     @State private var draft = ""
-    /// @ObservedObject, не разовый снимок — пока обход таблицы идёт в
-    /// фоне (см. ImhentaiTagSuggestionCache.loadFullIndex), suggestions
-    /// ниже сам дорастает на каждое @Published-обновление, без ручного
-    /// перезапуска фильтра.
+    /// @ObservedObject, not a one-off snapshot — while the table walk runs
+    /// in the background (see ImhentaiTagSuggestionCache.loadFullIndex),
+    /// suggestions below grows on its own with every @Published update,
+    /// with no manual filter restart needed.
     @ObservedObject private var cache = ImhentaiTagSuggestionCache.shared
 
     private var trimmedDraft: String { draft.trimmingCharacters(in: .whitespaces) }
 
-    /// Подсказки — подстрокой по ВСЕЙ локальной таблице kind (см.
-    /// ImhentaiTagSuggestionCache doc-comment), топ-8 по количеству
-    /// тайтлов. Пересчитывается на каждый re-render (draft меняется — или
-    /// таблица подрастает в фоне), сама фильтрация нескольких тысяч
-    /// записей в памяти мгновенная, отдельного debounce на неё не нужно.
+    /// Suggestions — substring-matched against the WHOLE local table for
+    /// kind (see the ImhentaiTagSuggestionCache doc-comment), top 8 by
+    /// title count. Recomputed on every re-render (draft changes — or the
+    /// table grows in the background); filtering several thousand
+    /// in-memory records itself is instant, no separate debounce is needed
+    /// for it.
     private var suggestions: [ExternalTagEntry] {
         let trimmed = trimmedDraft
         guard trimmed.count >= 2 else { return [] }
@@ -214,9 +217,9 @@ private struct AdvancedFieldInput: View {
                 })
             }
         }
-        // Запускает (если ещё не запущен/загружен) полный обход таблицы
-        // kind — как только реально начали печатать; idempotent, лишние
-        // вызовы на каждую букву безвредны (см. ensureLoading guard).
+        // Kicks off (if not already running/loaded) the full walk of the
+        // table for kind — as soon as typing actually begins; idempotent,
+        // extra calls per letter are harmless (see the ensureLoading guard).
         .onChange(of: draft) { _, newValue in
             if newValue.trimmingCharacters(in: .whitespaces).count >= 2 {
                 cache.ensureLoading(kind: kind)

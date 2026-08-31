@@ -1,39 +1,41 @@
 import SwiftUI
 
-/// Мини-загрузчик картинок для внешних сайтов (hitomi.la и e-hentai.org) —
-/// специально НЕ RemoteImage (см. App/RemoteImage.swift): та шлёт заголовки
-/// MangaNetworkService.userAgent/referer, рассчитанные на apicdnlibs.org —
-/// у чужих CDN хотлинк-защита проверяет СВОЙ Referer, чужой рискует словить
-/// 403. По прямой просьбе — минимально пересекаться со старым сетевым кодом,
-/// поэтому здесь свой, отдельный, совсем простой загрузчик (только
-/// оперативный NSCache, без дискового кэша — картинки и так уже закэшированы
-/// системным URLCache сессии на уровне HTTP).
+/// Mini image loader for external sites (hitomi.la and e-hentai.org) —
+/// deliberately NOT RemoteImage (see App/RemoteImage.swift): that one sends
+/// MangaNetworkService.userAgent/referer headers, tuned for apicdnlibs.org —
+/// third-party CDNs' hotlink protection checks its OWN Referer, and a
+/// foreign one risks getting a 403. Per a direct request to minimally
+/// overlap with the old networking code, this has its own separate, very
+/// simple loader (just an in-memory NSCache, no disk cache — images are
+/// already cached at the HTTP level by the session's system URLCache).
 private enum ExternalImageCache {
     static let shared = NSCache<NSURL, UIImage>()
 }
 
-/// Referer — ПО ХОСТУ конкретной картинки, не единый на весь загрузчик:
-/// tn.gold-usergeneratedcontent.net (hitomi) хочет Referer hitomi.la, а
-/// ehgt.org/*.hath.network (e-hentai — обложки/миниатюры и сами H@H-узлы)
-/// хотят Referer e-hentai.org, ровно как у EHentaiProvider.session — раньше
-/// здесь БЫЛ единый хардкод "hitomi.la", из-за чего e-hentai-картинки в этом
-/// загрузчике (обложки в каталоге, превью-грид, Похожие тайтлы) рисковали
-/// молча падать в 403 и никогда не подгружаться. `s*.3hentai.net`/`.xyz`
-/// (3hentai) хотлинк-защиты вообще НЕ имеет (подтверждено живым curl —
-/// 200 без Referer, 200 с ЛЮБЫМ чужим Referer тоже) — Referer тут ставится
-/// не потому что без него сломается, а для единообразия с остальными двумя
-/// сайтами (тот же принцип "честный per-хостовый Referer", не угадывание).
+/// Referer — PER-HOST for the specific image, not one single value for the
+/// whole loader: tn.gold-usergeneratedcontent.net (hitomi) wants a Referer
+/// of hitomi.la, while ehgt.org/*.hath.network (e-hentai — covers/thumbnails
+/// and the H@H nodes themselves) want a Referer of e-hentai.org, exactly
+/// like EHentaiProvider.session — this used to be a single hardcoded
+/// "hitomi.la", which meant e-hentai images in this loader (catalog covers,
+/// the preview grid, Similar titles) risked silently falling into a 403 and
+/// never loading. `s*.3hentai.net`/`.xyz` (3hentai) has NO hotlink
+/// protection at all (confirmed by a live curl — 200 with no Referer, 200
+/// with ANY foreign Referer too) — the Referer is set here not because it
+/// would break without it, but for consistency with the other two sites
+/// (the same "honest per-host Referer" principle, not a guess).
 ///
-/// `m{N}.imhentai.xxx` (CDN картинок ImHentai — обложка/thumb.jpg, превью
-/// {n}t.jpg, полноразмерные {n}.webp) — та же история повторилась ЕЩЁ РАЗ:
-/// добавлен вместе с провайдером, но сюда забыли добавить ветку, из-за чего
-/// молча падал в дефолт "hitomi.la" — ЧУЖОЙ Referer для этого CDN.
-/// Обнаружено по жалобе (31.08): "обложки любые не грузятся... но при этом
-/// 1 обложка загрузилась" — несогласованность объясняется тем, что CDN за
-/// Cloudflare (см. ImhentaiProvider doc-comment), и промах кэша (см.
-/// cf-cache-status в HAR) уходит на origin, который и проверяет Referer;
-/// то единственное, что загрузилось, скорее всего уже лежало в edge-кэше
-/// Cloudflare — тогда origin/Referer вообще не участвуют.
+/// `m{N}.imhentai.xxx` (ImHentai's image CDN — cover/thumb.jpg, previews
+/// {n}t.jpg, full-size {n}.webp) — the same story repeated ONCE AGAIN: it
+/// was added along with the provider, but the branch here was forgotten,
+/// so it silently fell into the "hitomi.la" default — a FOREIGN Referer for
+/// this CDN. Found from a complaint (08/31): "no covers load at all... but
+/// still 1 cover loaded" — the inconsistency is explained by the CDN sitting
+/// behind Cloudflare (see the ImhentaiProvider doc-comment), and a cache
+/// miss (see cf-cache-status in the HAR) goes to the origin, which is what
+/// checks the Referer; the one thing that did load was most likely already
+/// sitting in Cloudflare's edge cache — in which case the origin/Referer
+/// never come into play at all.
 private func externalImageReferer(for url: URL) -> String {
     let host = url.host ?? ""
     if host.hasSuffix("e-hentai.org") || host.hasSuffix("ehgt.org") || host.hasSuffix("hath.network") {
@@ -45,15 +47,16 @@ private func externalImageReferer(for url: URL) -> String {
     if host.hasSuffix("imhentai.xxx") || host.hasSuffix("imhentai.com") {
         return "https://imhentai.xxx/"
     }
-    // b{N}.hentaipill.{com,me,...} — CDN картинок HentaiPill. Хотлинк-защиты
-    // не имеет (подтверждено живым curl — 200 без Referer, 200 с ЛЮБЫМ чужим
-    // Referer тоже, ровно как у 3hentai), но ветка добавлена сразу — тот же
-    // урок, что и с imhentai выше (забытая ветка молча падала в дефолт).
+    // b{N}.hentaipill.{com,me,...} — HentaiPill's image CDN. Has no hotlink
+    // protection (confirmed by a live curl — 200 with no Referer, 200 with
+    // ANY foreign Referer too, exactly like 3hentai), but the branch was
+    // added right away — the same lesson as with imhentai above (a forgotten
+    // branch silently falling into the default).
     if host.hasSuffix("hentaipill.com") || host.hasSuffix("hentaipill.me") {
         return "https://hentaipill.com/"
     }
-    // images.sh-cdn.com — CDN картинок Simply Hentai, подтверждено HAR
-    // (реальный браузер шлёт именно этот Referer).
+    // images.sh-cdn.com — Simply Hentai's image CDN, confirmed by HAR
+    // (a real browser sends exactly this Referer).
     if host.hasSuffix("sh-cdn.com") {
         return "https://www.simply-hentai.com/"
     }
@@ -68,8 +71,8 @@ private let externalImageSession: URLSession = {
     return URLSession(configuration: config)
 }()
 
-/// Один сетевой запрос картинки — общий для ExternalImageLoader/
-/// ExternalSpriteLoader ниже (одинаковый Referer-по-хосту/кэш/сессия).
+/// A single network request for an image — shared by ExternalImageLoader/
+/// ExternalSpriteLoader below (same per-host Referer/cache/session).
 private func fetchExternalImage(_ url: URL) async -> UIImage? {
     if let cached = ExternalImageCache.shared.object(forKey: url as NSURL) { return cached }
     var request = URLRequest(url: url)
@@ -80,25 +83,26 @@ private func fetchExternalImage(_ url: URL) async -> UIImage? {
     return decoded
 }
 
-/// Реальная предзагрузка "про запас" для внешних сайтов — используется
-/// читалкой (см. ExternalReaderView.preloadPage/preloadUpcoming/
-/// preloadVerticalWindow). НЕ RemoteImageLoader.preload (то, что было
-/// здесь раньше) — та качает через СВОЮ сессию с Referer от
-/// MangaNetworkService.referer (текущий активный сайт MangaLib —
-/// mangalib.me/etc), которая для tn.gold-usergeneratedcontent.net/ehgt.org/
-/// *.hath.network просто НЕВЕРНАЯ (см. externalImageReferer выше) — CDN с
-/// хотлинк-защитой на неё отвечает 404/403, предзагрузка молча ничего не
-/// давала, картинки реально начинали грузиться только когда попадали в
-/// кадр (жалоба "вижу стыки", 30.08). Настоящая читалка (ZoomableImageScroll
-/// View/VerticalPageImage, см. MangaReaderView.swift — переиспользуются
-/// НАПРЯМУЮ, не копируются) внутри себя дёргает именно
-/// `RemoteImageLoader.fetchImage`, а та СНАЧАЛА проверяет
-/// `RemoteImageCache.shared` (простой NSCache по URL, без привязки к
-/// конкретной сессии/заголовкам) — поэтому вместо попытки подменить сессию
-/// внутри чужого файла (не трогаем MangaReaderView.swift) сюда просто
-/// заранее кладётся УЖЕ скачанная (нашей, правильной Referer-сессией)
-/// картинка — RemoteImageLoader.fetchImage находит её в кэше и сеть больше
-/// не трогает вовсе.
+/// Real "just in case" preloading for external sites — used by the reader
+/// (see ExternalReaderView.preloadPage/preloadUpcoming/
+/// preloadVerticalWindow). NOT RemoteImageLoader.preload (what used to be
+/// here) — that one downloads through ITS OWN session with a Referer from
+/// MangaNetworkService.referer (the currently active MangaLib site —
+/// mangalib.me/etc), which is simply WRONG for
+/// tn.gold-usergeneratedcontent.net/ehgt.org/*.hath.network (see
+/// externalImageReferer above) — a CDN with hotlink protection responds
+/// with 404/403 to it, so preloading silently accomplished nothing, and
+/// images only actually started loading once they entered the viewport
+/// (complaint "I see seams", 08/30). The actual reader (ZoomableImageScroll
+/// View/VerticalPageImage, see MangaReaderView.swift — reused DIRECTLY, not
+/// copied) internally calls exactly `RemoteImageLoader.fetchImage`, which
+/// FIRST checks `RemoteImageCache.shared` (a plain NSCache keyed by URL,
+/// not tied to any particular session/headers) — so instead of trying to
+/// swap out the session inside someone else's file (we don't touch
+/// MangaReaderView.swift), this simply places the ALREADY downloaded image
+/// (via our own, correct Referer session) here ahead of time —
+/// RemoteImageLoader.fetchImage finds it in the cache and never touches the
+/// network at all.
 func preloadExternalImage(_ url: URL) async {
     guard RemoteImageCache.shared.image(for: url) == nil else { return }
     guard let image = await fetchExternalImage(url) else { return }
@@ -124,8 +128,8 @@ private final class ExternalImageLoader: ObservableObject {
     }
 }
 
-/// Замена RemoteImage для картинок с внешних сайтов — тот же принцип
-/// использования (url + placeholder), другая реализация под капотом.
+/// A replacement for RemoteImage for external-site images — the same usage
+/// pattern (url + placeholder), a different implementation underneath.
 struct ExternalImage<Placeholder: View>: View {
     let url: URL?
     @ViewBuilder let placeholder: () -> Placeholder
@@ -166,15 +170,15 @@ private final class ExternalSpriteLoader: ObservableObject {
     }
 }
 
-/// Миниатюра-"тайл", вырезанный из общего спрайта — у e-hentai полоса
-/// миниатюр отдаёт НЕ отдельную картинку на страницу, а один общий спрайт
-/// на партию страниц (~20, размер одного ?p=N-довеска) + CSS
-/// `background-position`-смещение на каждую (подтверждено побайтово реальной
-/// разметкой, см. EHentaiProvider.parsePages/ExternalGalleryPage.
-/// thumbnailSpriteOffsetX). Сам спрайт грузится и кэшируется по `url` через
-/// тот же ExternalImageCache, что и обычные картинки — несколько тайлов
-/// ОДНОГО спрайта скачивают его реально только один раз, дальше просто
-/// каждый вырезает свой кусок из уже закэшированного UIImage.
+/// A thumbnail "tile" cut out from a shared sprite — e-hentai's thumbnail
+/// strip doesn't return a separate image per page, but one shared sprite
+/// per batch of pages (~20, the size of one `?p=N` chunk) + a CSS
+/// `background-position` offset for each (confirmed byte-for-byte against
+/// the real markup, see EHentaiProvider.parsePages/ExternalGalleryPage.
+/// thumbnailSpriteOffsetX). The sprite itself is loaded and cached by `url`
+/// through the same ExternalImageCache as regular images — several tiles
+/// from ONE sprite only actually download it once, after that each one
+/// just crops its own piece out of the already-cached UIImage.
 struct ExternalSpriteThumbnail<Placeholder: View>: View {
     let url: URL
     let offsetX: Int

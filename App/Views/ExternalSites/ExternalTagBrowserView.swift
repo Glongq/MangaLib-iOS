@@ -1,16 +1,17 @@
 import SwiftUI
 
-/// Алфавитный справочник тегов/серий/персонажей/художников внешнего сайта
-/// (см. план, Часть 4) — буквы A-Z/123 сверху, переключатель раздела,
-/// список имя+число тайтлов. Тап по строке ведёт в каталог по этому
-/// значению (см. ExternalCatalogGridView, Часть 6).
+/// Alphabetical index of tags/series/characters/artists for an external
+/// site (see the plan, Part 4) — letters A-Z/123 at the top, a section
+/// picker, a list of name + title count. Tapping a row navigates to the
+/// catalog filtered by that value (see ExternalCatalogGridView, Part 6).
 struct ExternalTagBrowserView: View {
     let site: ExternalSite
 
     @State private var kind: ExternalTagKind = .tags
-    /// `Swift.Character`, не голое `Character` — см. ExternalSiteProvider.
-    /// fetchTagIndex doc-comment (свой тип `Character` в MangaModels.swift
-    /// затеняет стандартный однобуквенный тип во всём модуле).
+    /// `Swift.Character`, not bare `Character` — see the doc-comment on
+    /// ExternalSiteProvider.fetchTagIndex (our own `Character` type in
+    /// MangaModels.swift shadows the standard single-letter type across
+    /// the whole module).
     @State private var letter: Swift.Character = "a"
     @State private var entries: [ExternalTagEntry] = []
     @State private var isLoading = false
@@ -31,13 +32,13 @@ struct ExternalTagBrowserView: View {
         .task(id: "\(kind)-\(letter)") { await load() }
     }
 
-    /// «Группы» — виден только если провайдер реально что-то умеет
-    /// вернуть на этот раздел (3hentai.net и imhentai.xxx — умеют, см.
+    /// "Groups" is shown only if the provider can actually return
+    /// something for this section (3hentai.net and imhentai.xxx can, see
     /// ThreeHentaiProvider.fetchTagIndex / ImhentaiProvider.fetchTagIndex);
-    /// у hitomi/e-hentai такого справочника нет (см. HitomiProvider.
-    /// fetchTagIndex — честно [] на .groups, EHentaiProvider — [] на любой
-    /// kind), сегмент просто не показывается, чтобы не вести в заведомо
-    /// пустой список.
+    /// hitomi/e-hentai have no such index (HitomiProvider.fetchTagIndex
+    /// honestly returns [] for .groups, EHentaiProvider returns [] for
+    /// any kind) — the segment is simply not shown, so it doesn't lead
+    /// into a list that's guaranteed to be empty.
     private var showsGroups: Bool { site == .threeHentai || site == .imhentai }
 
     private var kindPicker: some View {
@@ -92,14 +93,14 @@ struct ExternalTagBrowserView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(entries) { entry in
                         NavigationLink {
-                            // entry.slug, НЕ entry.name — slug это то, что
-                            // реально идёт в URL/nozomi (у гендерных тегов
-                            // содержит префикс "female:"/"male:"), который
-                            // сайт снимает только для отображения (см.
-                            // entry.name/HitomiProvider.parseTagList и план,
-                            // ЧАСТЬ A.2) — раньше здесь было entry.name, из-за
-                            // чего каждый гендерный тег бил в несуществующий
-                            // "голый" путь и 404-ился.
+                            // entry.slug, NOT entry.name — slug is what
+                            // actually goes into the URL/nozomi (for gendered
+                            // tags it carries a "female:"/"male:" prefix)
+                            // that the site strips only for display (see
+                            // entry.name/HitomiProvider.parseTagList and the
+                            // plan, PART A.2) — this used to be entry.name,
+                            // which made every gendered tag hit a nonexistent
+                            // "bare" path and 404.
                             ExternalCatalogGridView(site: site, query: .tag(namespace: namespace(for: kind), value: entry.slug.removingPercentEncoding ?? entry.slug), title: entry.name)
                         } label: {
                             row(entry)

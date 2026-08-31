@@ -1,21 +1,21 @@
 import Foundation
 
-/// Раздел алфавитного справочника (см. hitomi.la nav: tags/series/artists/
-/// characters) — используется ExternalTagBrowserView. Не у каждого сайта
-/// вообще есть такой справочник — см. ExternalSiteCapabilities.hasTagBrowser
-/// (у e-hentai, например, его нет, см. EHentaiProvider).
-/// `.groups` — добавлено вместе с 3hentai.net (у него `/groups` — полноценный
-/// пункт nav-бара, `alle-groups-{буква}.html`-аналог, см.
-/// ThreeHentaiProvider.fetchTagIndex); у hitomi такого справочника нет
-/// (только 4 кита: tags/series/characters/artists, см.
-/// HitomiProvider.fetchTagIndex — честно возвращает [] на .groups), у
-/// e-hentai справочника нет вообще ни на что (hasTagBrowser == false).
+/// Section of the alphabetical directory (see hitomi.la nav: tags/series/artists/
+/// characters) — used by ExternalTagBrowserView. Not every site actually
+/// has such a directory — see ExternalSiteCapabilities.hasTagBrowser
+/// (e-hentai, for example, doesn't have one, see EHentaiProvider).
+/// `.groups` — added together with 3hentai.net (it has `/groups` as a full-fledged
+/// nav-bar entry, an `alle-groups-{letter}.html`-style page, see
+/// ThreeHentaiProvider.fetchTagIndex); hitomi has no such directory
+/// (only the 4 "whales": tags/series/characters/artists, see
+/// HitomiProvider.fetchTagIndex — honestly returns [] for .groups), and
+/// e-hentai has no directory at all, for anything (hasTagBrowser == false).
 enum ExternalTagKind: Hashable {
     case tags, series, characters, artists, groups
 }
 
-/// Один пункт алфавитного списка (ExternalTagBrowserView) — имя + число
-/// тайтлов + slug для дальнейшего запроса выдачи (см. fetchIdsByTag).
+/// One entry of the alphabetical list (ExternalTagBrowserView) — name + title
+/// count + slug for the follow-up listing request (see fetchIdsByTag).
 struct ExternalTagEntry: Identifiable, Hashable {
     let id: String
     let name: String
@@ -23,8 +23,8 @@ struct ExternalTagEntry: Identifiable, Hashable {
     let slug: String
 }
 
-/// Один пункт автокомплита поиска (см. HitomiProvider.fetchAutocomplete) —
-/// category — как есть от сервера ("tag"/"series"/"character"/"group"/
+/// One search-autocomplete entry (see HitomiProvider.fetchAutocomplete) —
+/// category — exactly as returned by the server ("tag"/"series"/"character"/"group"/
 /// "artist"/"language"/"female"/"male"/"type").
 struct ExternalTagSuggestion: Hashable {
     let name: String
@@ -32,63 +32,63 @@ struct ExternalTagSuggestion: Hashable {
     let category: String
 }
 
-/// Неймспейс тега/сущности для выдачи списка тайтлов (fetchIdsByTag) —
-/// ОБЩЕЕ понятие, не завязанное на конкретный сайт: каждый провайдер сам
-/// решает, во что превратить конкретный случай в СВОЙ URL/параметр (см.
-/// HitomiProvider/EHentaiProvider — маппинг разный, поэтому здесь
-/// намеренно нет .rawValue, привязанного к чьей-то одной схеме URL).
+/// Namespace of a tag/entity for a title listing (fetchIdsByTag) — a GENERAL
+/// concept, not tied to any specific site: each provider decides for itself
+/// how to turn a given case into ITS OWN URL/parameter (see
+/// HitomiProvider/EHentaiProvider — the mapping differs, which is why there's
+/// deliberately no .rawValue here tied to any one site's URL scheme).
 enum ExternalTagNamespace: Hashable {
     case tag, female, male, character, artist, group, series
 }
 
-/// Один тег в карточке тайтла (ExternalGalleryDetail.tags) — female/male
-/// одновременно false для нейтральных тегов (не привязанных к полу).
+/// One tag on a title card (ExternalGalleryDetail.tags) — female/male
+/// are both false at once for neutral tags (not tied to a gender).
 struct ExternalGalleryTag: Hashable {
     let name: String
     let female: Bool
     let male: Bool
 }
 
-/// Одна страница тайтла. `key` — идентификатор конкретно ЭТОЙ картинки:
-/// у hitomi это настоящий хэш файла (используется в формуле gg.js, см.
-/// HitomiProvider.pageImageURL), у e-hentai — imgkey (нужен, чтобы получить
-/// временную, ограниченную по времени ссылку на H@H-узел, см.
-/// EHentaiProvider.pageImageURL — там she ссылку нельзя посчитать заранее,
-/// только живым запросом). `width`/`height` — 0, если реальный размер
-/// заранее не известен (у e-hentai он выясняется только при открытии
-/// конкретной страницы — до тех пор просто нет данных).
-/// `thumbnailURL` — статическая ссылка на МИНИАТЮРУ именно этой страницы
-/// (не полноразмерная картинка) — у hitomi та же формула шардирования
-/// хэша, что и у обложки (HitomiProvider.coverURL, применима к любой
-/// странице, не только первой), у e-hentai — реальный CSS background-image
-/// URL полосы миниатюр, подтверждён HAR прямо в разметке `/g/{id}/{token}/`
-/// (`<div style="...url(https://.../{id}-{n}.webp)...">`). Используется в
-/// превью-гриде карточки тайтла (см. ExternalGalleryDetailView, план ЧАСТЬ B.3).
+/// One page of a title. `key` — the identifier of specifically THIS image:
+/// for hitomi it's the actual file hash (used in the gg.js formula, see
+/// HitomiProvider.pageImageURL); for e-hentai it's the imgkey (needed to obtain
+/// a temporary, time-limited link to an H@H node, see
+/// EHentaiProvider.pageImageURL — there the link can't be computed ahead of
+/// time, only via a live request). `width`/`height` are 0 when the real size
+/// isn't known in advance (for e-hentai it's only discovered when a
+/// specific page is opened — until then there's simply no data).
+/// `thumbnailURL` — a static link to the THUMBNAIL of specifically this page
+/// (not the full-size image) — for hitomi it's the same hash-sharding formula
+/// as the cover (HitomiProvider.coverURL, applicable to any
+/// page, not just the first); for e-hentai it's the real CSS background-image
+/// URL of the thumbnail strip, confirmed by HAR directly in the markup of `/g/{id}/{token}/`
+/// (`<div style="...url(https://.../{id}-{n}.webp)...">`). Used in the
+/// preview grid of the title card (see ExternalGalleryDetailView, plan PART B.3).
 struct ExternalGalleryPage: Hashable {
     let index: Int
     let key: String
     let width: Int
     let height: Int
     let thumbnailURL: URL?
-    /// Смещение (в пикселях, ось X) тайла-миниатюры ЭТОЙ страницы внутри
-    /// `thumbnailURL` — у e-hentai миниатюры отданы НЕ отдельной картинкой
-    /// на страницу, а общим "спрайтом" на партию страниц (~20, размер
-    /// одного ?p=N-довеска) + CSS `background-position` (подтверждено
-    /// побайтово реальной разметкой: `style="width:200px;height:278px;
+    /// Offset (in pixels, X axis) of this page's thumbnail tile within
+    /// `thumbnailURL` — for e-hentai thumbnails are NOT delivered as a separate
+    /// image per page, but as a shared "sprite" for a batch of pages (~20, the size
+    /// of one ?p=N chunk) plus CSS `background-position` (confirmed
+    /// byte-for-byte from real markup: `style="width:200px;height:278px;
     /// background:transparent url(.../{id}-{n}.webp) -200px 0 no-repeat"` —
-    /// одна и та же ссылка на N страниц подряд, различается только этот
-    /// офсет, кратный ширине тайла). Без учёта офсета все страницы одной
-    /// партии показывали бы один и тот же спрайт целиком — см.
-    /// EHentaiProvider.parsePages/ExternalSpriteThumbnail. nil — у hitomi
-    /// (там thumbnailURL уже указывает на отдельную картинку именно этой
-    /// страницы, кроп не нужен).
+    /// the same link for N consecutive pages, differing only in this
+    /// offset, a multiple of the tile width). Without accounting for the offset, all pages of one
+    /// batch would show the exact same sprite in full — see
+    /// EHentaiProvider.parsePages/ExternalSpriteThumbnail. nil for hitomi
+    /// (there thumbnailURL already points to a separate image of exactly that
+    /// page, no cropping needed).
     let thumbnailSpriteOffsetX: Int?
 }
 
-/// Один комментарий к тайтлу (см. ExternalGalleryDetail.comments) — сейчас
-/// подтверждён HAR только у e-hentai (`<div id="cdiv">`, см. план ЧАСТЬ
-/// B.5); у hitomi комментариев как концепции нет вообще (ни одного
-/// comment-related запроса ни в одном HAR), там `comments` всегда `[]`.
+/// One comment on a title (see ExternalGalleryDetail.comments) — currently
+/// confirmed by HAR only for e-hentai (`<div id="cdiv">`, see plan PART
+/// B.5); hitomi has no concept of comments at all (not a single
+/// comment-related request in any HAR) — there `comments` is always `[]`.
 struct ExternalComment: Identifiable, Hashable {
     let id: Int
     let author: String
@@ -96,22 +96,22 @@ struct ExternalComment: Identifiable, Hashable {
     let text: String
 }
 
-/// Полные метаданные тайтла (см. HitomiProvider/EHentaiProvider.
-/// fetchGalleryDetail) — и для карточки, и для построения списка страниц
-/// чтения. `coverURL` — ГОТОВАЯ ссылка на обложку/превью, которую строит
-/// сам провайдер (у hitomi — по формуле шардирования хэша, у e-hentai —
-/// просто уже готовая ссылка прямо из HTML) — раньше это была отдельная
-/// функция протокола (thumbnailURL(hash:)), но формула оказалась
-/// hitomi-специфичной (e-hentai её не использует вообще), поэтому теперь
-/// каждый провайдер решает сам, откуда взять обложку, и просто кладёт
-/// готовый URL сюда.
+/// Full title metadata (see HitomiProvider/EHentaiProvider.
+/// fetchGalleryDetail) — used both for the card and for building the reading
+/// page list. `coverURL` — the READY-MADE cover/preview link built by
+/// the provider itself (for hitomi — via the hash-sharding formula, for e-hentai —
+/// simply the ready-made link straight from the HTML) — this used to be a separate
+/// protocol function (thumbnailURL(hash:)), but the formula turned out to be
+/// hitomi-specific (e-hentai doesn't use it at all), so now
+/// each provider decides for itself where to get the cover from and just
+/// puts the finished URL here.
 struct ExternalGalleryDetail: Identifiable {
     let id: Int
-    /// Какой конкретно сайт выдал этот тайтл — нужно для совместного
-    /// каталога/выдачи (см. ExternalCombinedCatalogView, ExternalCatalogItem)
-    /// и для подписи в карточке (ExternalGalleryDetailView), где тайтл мог
-    /// прийти как с активного одиночного сайта, так и (в совместном режиме)
-    /// с любого из нескольких включённых сразу.
+    /// Which specific site returned this title — needed for the combined
+    /// catalog/listing (see ExternalCombinedCatalogView, ExternalCatalogItem)
+    /// and for the label on the card (ExternalGalleryDetailView), where the title could
+    /// have come either from the single active site, or (in combined mode)
+    /// from any one of several enabled at once.
     let site: ExternalSite
     let title: String
     let type: String
@@ -124,13 +124,13 @@ struct ExternalGalleryDetail: Identifiable {
     let related: [Int]
     let pages: [ExternalGalleryPage]
     let coverURL: URL?
-    /// Posted/Опубликовано — у hitomi `date` из galleries/{id}.js, у
-    /// e-hentai строка из `gdt1"Posted:"`/`gdt2` — оба сайта её честно
-    /// имеют, см. план ЧАСТЬ B.2.
+    /// Posted — for hitomi it's `date` from galleries/{id}.js, for
+    /// e-hentai it's the string from `gdt1"Posted:"`/`gdt2` — both sites genuinely
+    /// have it, see plan PART B.2.
     let posted: String?
-    /// Ниже — метаданные, которых у hitomi физически НЕТ (не выдумываем,
-    /// см. план ЧАСТЬ B.2) — заполняются только EHentaiProvider, у
-    /// HitomiProvider всегда nil/[].
+    /// Below — metadata that hitomi physically DOES NOT HAVE (we don't make it up,
+    /// see plan PART B.2) — filled in only by EHentaiProvider; for
+    /// HitomiProvider it's always nil/[].
     let parentId: Int?
     let visible: String?
     let fileSize: String?
@@ -140,98 +140,97 @@ struct ExternalGalleryDetail: Identifiable {
     let comments: [ExternalComment]
 }
 
-/// Общий протокол одного внешнего сайта — реализуется отдельным типом на
-/// каждый сайт (см. HitomiProvider/EHentaiProvider). Ничего общего с
-/// MangaNetworkService — собственная сессия/парсинг/модели у каждого
-/// провайдера свои.
+/// Shared protocol for one external site — implemented by a separate type for
+/// each site (see HitomiProvider/EHentaiProvider). Has nothing in common with
+/// MangaNetworkService — each provider has its own session/parsing/models.
 protocol ExternalSiteProvider {
     var site: ExternalSite { get }
     var capabilities: ExternalSiteCapabilities { get }
 
-    /// Алфавитный список (буква A-Z/123) — см. ExternalTagBrowserView.
-    /// Реализация обязана существовать (протокол этого требует), но если
-    /// у сайта такого справочника нет (capabilities.hasTagBrowser == false)
-    /// — просто возвращает [] и никогда не вызывается настоящим UI (тот
-    /// сам проверяет capabilities раньше, чем показать экран).
-    /// `Swift.Character`, не голое `Character` — этот модуль объявляет
-    /// СВОЙ тип `Character` (см. MangaModels.swift — модель персонажа
-    /// тайтла), который иначе затеняет стандартный однобуквенный тип и
-    /// ломает компиляцию (не отлавливается локальным баланс-скобок-чеком,
-    /// только реальным билдом — см. .github/workflows/ios.yml).
+    /// Alphabetical list (letter A-Z/123) — see ExternalTagBrowserView.
+    /// The implementation is required to exist (the protocol demands it), but if
+    /// the site has no such directory (capabilities.hasTagBrowser == false)
+    /// — it just returns [] and is never actually called by the real UI (which
+    /// checks capabilities itself before showing the screen).
+    /// `Swift.Character`, not bare `Character` — this module declares
+    /// ITS OWN `Character` type (see MangaModels.swift — the model of a title's
+    /// character), which otherwise shadows the standard single-character type and
+    /// breaks compilation (not caught by the local brace-balance check,
+    /// only by an actual build — see .github/workflows/ios.yml).
     func fetchTagIndex(kind: ExternalTagKind, letter: Swift.Character) async throws -> [ExternalTagEntry]
 
-    /// Автокомплит при наборе текста в поиске. Как и fetchTagIndex — можно
-    /// честно вернуть [], если у сайта такого эндпоинта нет/не подтверждён.
+    /// Autocomplete while typing in search. Like fetchTagIndex — it's fine to
+    /// honestly return [] if the site has no such endpoint / it isn't confirmed.
     func fetchAutocomplete(query: String, namespace: String?) async throws -> [ExternalTagSuggestion]
 
-    /// ID тайтлов по одному тегу/серии/персонажу/группе/автору, постранично.
-    /// `cursor` — НЕПРОЗРАЧНЫЙ токен страницы (не число!) — у hitomi это
-    /// байтовый offset в виде строки, у e-hentai — id последнего тайтла
-    /// текущей страницы (реальная схема пагинации сайта, `&next=...`) —
-    /// поэтому не единообразный "offset: Int", а просто "то, что вернул
-    /// прошлый вызов". nil — первая страница. `nextCursor == nil` в ответе
-    /// — тайтлов больше нет.
+    /// Title IDs for one tag/series/character/group/artist, paginated.
+    /// `cursor` — an OPAQUE page token (not a number!) — for hitomi it's a
+    /// byte offset as a string, for e-hentai — the id of the last title on
+    /// the current page (the site's actual real pagination scheme, `&next=...`) —
+    /// hence not a uniform "offset: Int", just "whatever the
+    /// previous call returned". nil — first page. `nextCursor == nil` in the response
+    /// means there are no more titles.
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
 
-    /// То же самое, но с сортировкой (см. ExternalSiteCapabilities.
-    /// hasSortOptions) — `sortKey` НЕПРОЗРАЧНЫЙ, специфичный для сайта
-    /// (см. HitomiProvider.SortOption.rawValue) — тот же принцип, что и
-    /// excludedCategoryBits у fetchIdsBySearch ниже (Int/String, а не общий
-    /// enum, чтобы протокол не был завязан на тип одного сайта). nil/"" —
-    /// сортировка по умолчанию. НАСТОЯЩИЙ protocol requirement по той же
-    /// причине, что и остальные необязательные параметры ниже — иначе
-    /// переопределение в HitomiProvider не подхватится через `any
-    /// ExternalSiteProvider`. Реализация по умолчанию (см. extension ниже)
-    /// просто игнорирует sortKey — так EHentaiProvider не обязан ничего
-    /// знать про сортировку (у него capabilities.hasSortOptions == false).
+    /// Same, but with sorting (see ExternalSiteCapabilities.
+    /// hasSortOptions) — `sortKey` is OPAQUE, site-specific
+    /// (see HitomiProvider.SortOption.rawValue) — the same principle as
+    /// excludedCategoryBits in fetchIdsBySearch below (Int/String, not a shared
+    /// enum, so the protocol isn't tied to one site's type). nil/"" — default
+    /// sorting. A REAL protocol requirement for the same reason as
+    /// the other optional parameters below — otherwise an
+    /// override in HitomiProvider wouldn't be picked up through `any
+    /// ExternalSiteProvider`. The default implementation (see the extension below)
+    /// simply ignores sortKey — so EHentaiProvider doesn't have to know
+    /// anything about sorting (it has capabilities.hasSortOptions == false).
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
 
-    /// Свободный текстовый поиск (см. ExternalSiteCapabilities.hasSearch) —
-    /// у hitomi формально нет (см. HitomiProvider — честная пустая
-    /// заглушка), у e-hentai — обычный `?f_search=` по всему сайту.
-    /// Та же опаque-cursor пагинация, что и у fetchIdsByTag.
+    /// Free-text search (see ExternalSiteCapabilities.hasSearch) —
+    /// hitomi formally doesn't have one (see HitomiProvider — an honest empty
+    /// stub); e-hentai has an ordinary sitewide `?f_search=`.
+    /// Same opaque-cursor pagination as fetchIdsByTag.
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
 
-    /// То же самое, но с фильтром по категориям (см.
+    /// Same, but with a category filter (see
     /// ExternalSiteCapabilities.hasCategoryFilter, EHentaiCategory) —
-    /// `excludedCategoryBits` — bitmask ИСКЛЮЧАЕМЫХ категорий (0 — без
-    /// ограничения). Настоящий protocol requirement (не просто метод
-    /// расширения) — иначе переопределение в EHentaiProvider не подхватится
-    /// при вызове через `any ExternalSiteProvider` (диспетчеризация методов
-    /// расширения, не входящих в список требований протокола, статическая,
-    /// не полиморфная). Реализация по умолчанию (см. extension ниже) просто
-    /// игнорирует bitmask и уходит в обычный fetchIdsBySearch — так
-    /// HitomiProvider не обязан ничего знать про категории.
+    /// `excludedCategoryBits` — a bitmask of EXCLUDED categories (0 — no
+    /// restriction). A real protocol requirement (not just an extension
+    /// method) — otherwise an override in EHentaiProvider wouldn't be picked up
+    /// when called through `any ExternalSiteProvider` (dispatch for extension
+    /// methods that aren't part of the protocol's requirement list is static,
+    /// not polymorphic). The default implementation (see the extension below) just
+    /// ignores the bitmask and falls back to the plain fetchIdsBySearch — so
+    /// HitomiProvider doesn't have to know anything about categories.
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
 
-    /// То же самое, но и с категориями, и с сортировкой сразу (см. sortKey
-    /// у fetchIdsByTag выше) — НАСТОЯЩИЙ protocol requirement по той же
-    /// причине.
+    /// Same, but with both categories and sorting at once (see sortKey
+    /// in fetchIdsByTag above) — a REAL protocol requirement for the same
+    /// reason.
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?)
 
-    /// Курсор, соответствующий началу СТРАНИЦЫ `page` (1-based, по `limit`
-    /// элементов на страницу) — для кнопки "Перейти на страницу" (см.
-    /// ExternalSiteCapabilities.hasPageJump, ExternalCatalogGridView). У
-    /// hitomi это ТОЧНЫЙ переход (offset — обычное число элементов, есть
-    /// всегда), у e-hentai — ПРИБЛИЗИТЕЛЬНЫЙ (см. EHentaiProvider —
-    /// `range=`, подтверждено HAR, но точная формула номер-страницы→range
-    /// сайтом не документирована). `page <= 1` — nil (первая страница и
-    /// так открывается без курсора). Синхронный — чистое вычисление, без
-    /// сети, у обоих текущих провайдеров. Реализация по умолчанию (см.
-    /// extension ниже) — nil всегда, для сайта без capabilities.
-    /// hasPageJump; НАСТОЯЩИЙ protocol requirement по той же причине, что
-    /// и fetchIdsBySearch(excludedCategoryBits:) выше — иначе переопределение
-    /// не подхватится через `any ExternalSiteProvider`.
+    /// The cursor corresponding to the start of PAGE `page` (1-based, by `limit`
+    /// items per page) — for the "Jump to page" button (see
+    /// ExternalSiteCapabilities.hasPageJump, ExternalCatalogGridView). For
+    /// hitomi this is an EXACT jump (offset is just a plain item count, always
+    /// available); for e-hentai it's an APPROXIMATE one (see EHentaiProvider —
+    /// `range=`, confirmed by HAR, but the exact page-number→range formula
+    /// isn't documented by the site). `page <= 1` — nil (the first page
+    /// opens without a cursor anyway). Synchronous — a pure computation, no
+    /// network, for both current providers. The default implementation (see the
+    /// extension below) — always nil, for a site without
+    /// capabilities.hasPageJump; a REAL protocol requirement for the same reason
+    /// as fetchIdsBySearch(excludedCategoryBits:) above — otherwise an override
+    /// wouldn't be picked up through `any ExternalSiteProvider`.
     func cursorForPage(_ page: Int, limit: Int) -> String?
 
-    /// Полные метаданные тайтла — для карточки и для чтения.
+    /// Full title metadata — for the card and for reading.
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail
 
-    /// URL полноразмерной страницы для чтения. У hitomi — чистая формула
-    /// (gg.js), без сети, просто обёрнута в async ради общего протокола; у
-    /// e-hentai — РЕАЛЬНЫЙ сетевой запрос каждый раз (ссылка на H@H-узел
-    /// временная, с истекающим keystamp — её нельзя посчитать заранее и
-    /// нельзя закэшировать надолго).
+    /// URL of the full-size page for reading. For hitomi — a pure formula
+    /// (gg.js), no network, just wrapped in async for the sake of the shared protocol; for
+    /// e-hentai — a REAL network request every time (the link to the H@H node is
+    /// temporary, with an expiring keystamp — it can't be computed ahead of time and
+    /// can't be cached for long).
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL
 }
 
@@ -251,8 +250,8 @@ extension ExternalSiteProvider {
     func cursorForPage(_ page: Int, limit: Int) -> String? { nil }
 }
 
-/// Простой статический реестр провайдеров — без DI-магии, её в проекте
-/// нигде нет (см. план).
+/// Simple static provider registry — no DI magic, there isn't any
+/// anywhere in the project (see plan).
 enum ExternalSiteRegistry {
     static let providers: [ExternalSite: any ExternalSiteProvider] = [
         .hitomi: HitomiProvider(),

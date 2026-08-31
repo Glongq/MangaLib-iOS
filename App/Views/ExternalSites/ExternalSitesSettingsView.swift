@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// «Другие сайты» — раздел настроек (Настройки → Приложение, внизу
-/// списка, по прямой просьбе). Простой список Toggle по ExternalSite.
-/// allCases — включённые сайты появляются в переключателе активного сайта
-/// (см. SideMenuView.siteRow) рядом с MangaLib/SlashLib/...
+/// "Other sites" — a settings section (Settings → App, at the bottom
+/// of the list, per a direct request). A simple list of Toggles over
+/// ExternalSite.allCases — enabled sites appear in the active-site
+/// switcher (see SideMenuView.siteRow) next to MangaLib/SlashLib/...
 ///
-/// Стиль — 1-в-1 SpecialFilterSettingsView (та же карточка-объяснение +
-/// карточка со строками-переключателями), копипастой, не общим
-/// компонентом — по прямой просьбе минимально пересекаться со старым кодом.
+/// Style is 1-to-1 with SpecialFilterSettingsView (the same explanation
+/// card + a card with toggle rows), done by copy-paste rather than a
+/// shared component — per a direct request to minimize overlap with
+/// the old code.
 struct ExternalSitesSettingsView: View {
 
     @ObservedObject private var session = ExternalSiteSession.shared
@@ -66,13 +67,13 @@ struct ExternalSitesSettingsView: View {
                 set: { isOn in
                     if isOn { session.enabledSites.insert(site) } else {
                         session.enabledSites.remove(site)
-                        // Выключили сайт, который был активным — возвращаемся
-                        // в обычный режим (тот же принцип, что и было бы,
-                        // если бы сайт вообще пропал из списка выбора).
+                        // Disabled the site that was active — fall back
+                        // to normal mode (the same principle as if the
+                        // site had disappeared from the picker entirely).
                         if session.activeExternalSite == site { session.activeExternalSite = nil }
-                        // Совместный режим («Все сайты») без включённых
-                        // сайтов вообще не имеет смысла — иначе он тихо
-                        // остался бы висеть активным, показывая пустой каталог.
+                        // Combined mode ("All sites") makes no sense with
+                        // no sites enabled — otherwise it would silently
+                        // stay active, showing an empty catalog.
                         if session.enabledSites.isEmpty { session.combinedModeActive = false }
                     }
                 }

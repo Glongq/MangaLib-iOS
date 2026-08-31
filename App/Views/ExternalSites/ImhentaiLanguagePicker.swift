@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Языки imhentai (English/Japanese/Spanish/French/Korean/German/Russian) —
-/// тот же стиль/принцип, что у ImhentaiCategoryPicker (тап ВЫКЛЮЧАЕТ язык
-/// из выдачи, пусто по умолчанию значит "без ограничений", см.
-/// ImhentaiLanguage.bit doc-comment). Флаг-эмодзи вместо цветного фона —
-/// языки не нуждаются в цветовом кодировании, флаг уже узнаваем сам по себе.
+/// imhentai languages (English/Japanese/Spanish/French/Korean/German/Russian)
+/// — the same style/principle as ImhentaiCategoryPicker (tapping DISABLES
+/// the language from results, empty by default means "no restrictions",
+/// see the ImhentaiLanguage.bit doc-comment). A flag emoji instead of a
+/// colored background — languages don't need color coding, the flag is
+/// already recognizable on its own.
 struct ImhentaiLanguagePicker: View {
     @Binding var excluded: Set<ImhentaiLanguage>
 

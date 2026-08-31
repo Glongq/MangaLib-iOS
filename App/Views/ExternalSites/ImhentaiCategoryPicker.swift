@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Кнопки категорий imhentai (Manga/Doujinshi/Western/Image Set/Artist CG/
-/// Game CG) — тот же стиль/принцип, что у EHentaiCategoryPicker (тап
-/// ВЫКЛЮЧАЕТ категорию из выдачи, пусто по умолчанию значит "без
-/// ограничений", см. ImhentaiCategory.bit doc-comment).
+/// imhentai category buttons (Manga/Doujinshi/Western/Image Set/Artist CG/
+/// Game CG) — the same style/principle as EHentaiCategoryPicker (tapping
+/// DISABLES the category from results, empty by default means "no
+/// restrictions", see the ImhentaiCategory.bit doc-comment).
 struct ImhentaiCategoryPicker: View {
     @Binding var excluded: Set<ImhentaiCategory>
 
@@ -29,8 +29,9 @@ struct ImhentaiCategoryPicker: View {
         }
     }
 
-    /// Свой набор цветов (не пересекается визуально с EHentaiCategoryPicker
-    /// — на глаз, точные hex сайта не подтверждены, как и у e-hentai).
+    /// Its own set of colors (not visually overlapping with
+    /// EHentaiCategoryPicker — eyeballed, the site's exact hex values
+    /// aren't confirmed, same as with e-hentai).
     private static func color(for category: ImhentaiCategory) -> Color {
         switch category {
         case .manga: return Color(red: 0.94, green: 0.62, blue: 0.20)

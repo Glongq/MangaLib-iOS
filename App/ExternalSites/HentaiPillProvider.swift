@@ -1,30 +1,30 @@
 import Foundation
 
-/// Ошибки HentaiPillProvider — та же намеренно простая схема, что у
-/// остальных провайдеров этой папки.
+/// Errors for HentaiPillProvider — the same deliberately simple scheme as
+/// the other providers in this folder.
 enum HentaiPillError: Error {
     case badResponse
 }
 
-/// Расширенное поле поиска — по прямой просьбе (01.09), но у hentaipill
-/// принципиально ДРУГАЯ форма, чем у остальных сайтов: здесь НЕТ единого
-/// поискового параметра, куда можно было бы приписать `tag:значение` —
-/// Tags/Parodies/Characters/Artists это ОТДЕЛЬНЫЕ несовместимые маршруты
+/// Advanced search field — added by direct request (Sep 1), but hentaipill's
+/// shape is fundamentally DIFFERENT from the other sites': there is NO single
+/// search parameter you could append `tag:value` to —
+/// Tags/Parodies/Characters/Artists are SEPARATE, incompatible routes
 /// (`/genre/{slug}`, `/parody/{slug}`, `/character/{slug}`, `/artist/
-/// {slug}` — см. HentaiPillProvider.capabilities.hasCategoryFilter
-/// doc-comment), ни одной комбинации "тег + текст" или "тег + тег" HAR не
-/// подтверждает. Честно — это НЕ список чипов, а выбор РОВНО ОДНОГО
-/// измерения (Tags/Parodies/Characters/Artists) и ОДНОГО значения к нему;
-/// собственного текстового search-поля тоже нет отдельно от общего —
-/// общее поле и так уже прямой `/search?q=` (см. ExternalSearchView —
-/// `.searchable()` у hentaipill работает как обычно).
+/// {slug}` — see the HentaiPillProvider.capabilities.hasCategoryFilter
+/// doc-comment), and HAR confirms not a single "tag + text" or "tag + tag" combination.
+/// Honestly — this isn't a list of chips, it's a choice of EXACTLY ONE
+/// dimension (Tags/Parodies/Characters/Artists) and ONE value for it;
+/// there's also no separate text search field of its own, apart from the shared one —
+/// the shared field is already a direct `/search?q=` (see ExternalSearchView —
+/// `.searchable()` on hentaipill works as usual).
 ///
-/// ЭКСКЛЮЗИВНАЯ схема, единая для всех сайтов с расширенными полями: если
-/// value не пусто, общее поле поиска экрана для hentaipill перестаёт
-/// участвовать — запрос уходит В ОБХОД fetchIdsBySearch, напрямую как
-/// fetchIdsByTag(namespace: kind, value: value, ...) (см.
-/// ExternalSearchView.resolvedQuery — там это единственный сайт, где
-/// расширенное поле даёт ExternalCatalogQuery.tag(...), а не .search(...)).
+/// EXCLUSIVE scheme, shared across all sites with advanced fields: if
+/// value is not empty, the screen's shared search field for hentaipill stops
+/// being used — the request BYPASSES fetchIdsBySearch, going directly through
+/// fetchIdsByTag(namespace: kind, value: value, ...) (see
+/// ExternalSearchView.resolvedQuery — this is the only site where
+/// the advanced field produces ExternalCatalogQuery.tag(...) rather than .search(...)).
 struct HentaiPillAdvancedQuery {
     var kind: ExternalTagNamespace = .tag
     var value: String = ""
@@ -32,77 +32,77 @@ struct HentaiPillAdvancedQuery {
     var isEmpty: Bool { value.trimmingCharacters(in: .whitespaces).isEmpty }
 }
 
-/// Клиент hentaipill.com — СВОЯ, полностью отдельная реализация. Все URL/
-/// форматы ниже подтверждены реальным HAR пользователя (31.08,
-/// `ProxyPin831_22_09_01.har`) И перепроверены живым curl из этой песочницы
-/// (сайт, в отличие от imhentai, доступен НАПРЯМУЮ — ни Cloudflare-джва-
-/// челленджа, ни доменного фронтинга, ни единого 403 на любой из проверенных
-/// путей).
+/// hentaipill.com client — its OWN, fully separate implementation. All the URLs/
+/// formats below are confirmed by the user's real HAR (Aug 31,
+/// `ProxyPin831_22_09_01.har`) AND double-checked with a live curl from this sandbox
+/// (unlike imhentai, the site is reachable DIRECTLY — no Cloudflare
+/// challenge, no domain fronting, not a single 403 on any of the checked
+/// paths).
 ///
-/// Устроен ПРОЩЕ всех остальных четырёх сайтов: у него в принципе НЕТ
-/// отдельной "читалки" — карточка тайтла (`/gallery/g{id}`) СРАЗУ рендерит
-/// ВСЕ страницы одним длинным `<img>`-списком (реальные ГОТОВЫЕ абсолютные
-/// URL прямо в разметке, с width/height), а внизу неё же — блок "You may
-/// also like" с похожими тайтлами. Ни формулы шардирования (hitomi/3hentai),
-/// ни временных подписанных ссылок (e-hentai), ни отдельного chunk-запроса
-/// на страницу — просто взять то, что уже лежит в HTML карточки.
+/// Simpler than the other four sites: it has NO separate "reader" at all —
+/// the title card (`/gallery/g{id}`) renders ALL pages
+/// right away as one long `<img>` list (real, ready-made absolute
+/// URLs right in the markup, with width/height), and at the bottom of the same page is a "You may
+/// also like" block with similar titles. No sharding formula (hitomi/3hentai),
+/// no temporary signed links (e-hentai), no separate per-page chunk request —
+/// just take what's already sitting in the card's HTML.
 ///
-/// ВАЖНО про CDN картинок (`b{N}.hentaipill.{com,me,...}`) — домен/TLD
-/// РЕАЛЬНО плавает даже между двумя последовательными живыми запросами (HAR
-/// пользователя показывал `.com`, живой curl в момент разбора — уже `.me`,
-/// один и тот же internal picture id) — поэтому здесь НЕТ формулы host+id,
-/// URL картинки берётся ЦЕЛИКОМ как есть из свежего HTML на момент запроса
-/// карточки, никогда не кэшируется/не реконструируется отдельно (см.
-/// parseDetail — `page.key` хранит уже готовый абсолютный URL).
+/// IMPORTANT regarding the image CDN (`b{N}.hentaipill.{com,me,...}`) — the domain/TLD
+/// GENUINELY drifts even between two consecutive live requests (the user's HAR
+/// showed `.com`, a live curl at the time of analysis already showed `.me`,
+/// for the same internal picture id) — so there's NO host+id formula here;
+/// the image URL is taken WHOLESALE, as-is, from fresh HTML at the time of the
+/// card request, never cached or reconstructed separately (see
+/// parseDetail — `page.key` already holds the ready-made absolute URL).
 struct HentaiPillProvider: ExternalSiteProvider {
     let site: ExternalSite = .hentaiPill
     let capabilities = ExternalSiteCapabilities(
         hasCatalog: true,
-        // Полноценный алфавитный справочник — Tags(genre)/Parodies/
-        // Characters/Artists, все 4 подтверждены HAR+живым curl (см.
-        // fetchTagIndex). Group-раздела на сайте НЕТ ВООБЩЕ (ни пункта
-        // меню, ни ссылок `/group/...` ни на одной странице) — честно [].
+        // A full alphabetical index — Tags(genre)/Parodies/
+        // Characters/Artists, all 4 confirmed by HAR+live curl (see
+        // fetchTagIndex). There is NO Group section on the site AT ALL (no
+        // menu entry, no `/group/...` links on any page) — honestly [].
         hasTagBrowser: true,
-        // НАСТОЯЩИЙ полнотекстовый поиск (`/search?q=`) — в отличие от
-        // imhentai, здесь ОДИН парсер на весь сайт, обычный текст находит
-        // именно то, что ищешь (подтверждено HAR: "genshin"/"anal" — оба
-        // дали реальные релевантные карточки). Пустой запрос → `/search?q=`
-        // отдаёт 404 (перепроверено живым curl) — поэтому пустой ввод здесь
-        // подставляет главную ленту (`/`), см. fetchIdsBySearch.
+        // A REAL full-text search (`/search?q=`) — unlike
+        // imhentai, there's ONE parser for the whole site, plain text finds
+        // exactly what you're looking for (confirmed by HAR: "genshin"/"anal" — both
+        // returned genuinely relevant cards). An empty query → `/search?q=`
+        // returns 404 (double-checked with a live curl) — so an empty input here
+        // substitutes the home feed (`/`), see fetchIdsBySearch.
         hasSearch: true,
-        // Нет EHentaiCategory-подобного bitmask-переключателя категорий
-        // (Category — `/category/{slug}`, ОТДЕЛЬНЫЙ несовместимый маршрут,
-        // ни одного примера в HAR, где комбинируется с `?q=`/тегом) — но
-        // флаг переиспользован (тот же приём, что у imhentai/simplyHentai)
-        // как общий гейт "есть лист «Фильтры»": здесь он открывает выбор
-        // ОДНОГО измерения (Tags/Parodies/Characters/Artists) + значения
-        // (см. HentaiPillAdvancedQuery doc-comment), а не категории.
+        // There's no EHentaiCategory-like bitmask category toggle
+        // (Category — `/category/{slug}` is a SEPARATE, incompatible route,
+        // not a single example in HAR combines it with `?q=`/a tag) — but
+        // the flag is repurposed (the same trick used for imhentai/simplyHentai)
+        // as a general gate for "there is a «Filters» sheet": here it opens a choice
+        // of ONE dimension (Tags/Parodies/Characters/Artists) + a value
+        // (see the HentaiPillAdvancedQuery doc-comment), not categories.
         hasCategoryFilter: true,
-        // Номер страницы — БУКВАЛЬНО путь (`/genre/{slug}/{page}`,
-        // `/category/{slug}/{page}`) или query (`/search?q=...&page=N`) —
-        // точный переход, перепроверено живым curl. ИСКЛЮЧЕНИЕ: главная
-        // лента (`/`) и `/popular` visually НЕ показывают пагинацию и
-        // `?page=2` там реально возвращает ТЕ ЖЕ ID, что и страница 1
-        // (перепроверено живым curl построчным сравнением) — честно
-        // трактуем это как единственную нерасширяемую страницу, см.
+        // The page number is LITERALLY part of the path (`/genre/{slug}/{page}`,
+        // `/category/{slug}/{page}`) or a query param (`/search?q=...&page=N`) —
+        // an exact jump, double-checked with a live curl. EXCEPTION: the home
+        // feed (`/`) and `/popular` visually show NO pagination, and
+        // `?page=2` there genuinely returns the SAME IDs as page 1
+        // (double-checked with a live curl, line-by-line comparison) — we honestly
+        // treat this as the single non-expandable page, see
         // fetchIdsBySearch(query: "").
         hasPageJump: true,
-        // Rising/Popular — ОТДЕЛЬНЫЕ фиксированные топ-N ленты (см.
-        // capabilities.hasPageJump doc-comment — `?page=` на них не
-        // работает), не сортировка поверх search/tag выдачи — на самих
-        // страницах поиска/тега/категории вообще нет `.sorts`-блока в HAR.
-        // Честно false, не выдумываем несуществующий UI сортировки.
+        // Rising/Popular — SEPARATE fixed top-N feeds (see
+        // the capabilities.hasPageJump doc-comment — `?page=` doesn't work on
+        // them), not a sort applied on top of search/tag results — the
+        // search/tag/category pages themselves have no `.sorts` block in HAR at all.
+        // Honestly false, we don't make up a sort UI that doesn't exist.
         hasSortOptions: false,
-        // На сайте РЕАЛЬНО есть Favorites/History (пункты меню, кнопка
-        // "Add to my favorites" на карточке) — но, как и у остальных
-        // внешних сайтов в этом клиенте, интеграция без входа в аккаунт,
-        // поэтому здесь всё равно false (тот же принцип, см. doc-comment
+        // The site GENUINELY has Favorites/History (menu entries, an
+        // "Add to my favorites" button on the card) — but, like the other
+        // external sites in this client, the integration doesn't sign into an account,
+        // so this stays false regardless (the same principle, see the doc-comment on
         // ImhentaiProvider.capabilities).
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
-        // Ни одного comment-related фрагмента разметки ни на одной
-        // сохранённой карточке тайтла в HAR — честно false, не выдумываем.
+        // Not a single comment-related markup fragment on any
+        // saved title card in HAR — honestly false, we don't make one up.
         hasComments: false
     )
 
@@ -117,7 +117,7 @@ struct HentaiPillProvider: ExternalSiteProvider {
 
     private static let baseURL = "https://hentaipill.com"
 
-    // MARK: Алфавитный справочник (Tags/Parodies/Characters/Artists)
+    // MARK: Alphabetical index (Tags/Parodies/Characters/Artists)
 
     private static func tagKindPath(_ kind: ExternalTagKind) -> String? {
         switch kind {
@@ -125,22 +125,22 @@ struct HentaiPillProvider: ExternalSiteProvider {
         case .series: return "parody"
         case .characters: return "character"
         case .artists: return "artist"
-        // Групп на сайте нет вообще — честно nil, а не выдуманный путь.
+        // There's no Group section on the site at all — honestly nil, not a made-up path.
         case .groups: return nil
         }
     }
 
-    /// В отличие от hitomi/3hentai/imhentai, здесь список НЕ разбит на
-    /// буквы на сервере — ОДИН запрос (`/genre`, `/parody`, `/character`,
-    /// `/artist`) отдаёт всё сразу (подтверждено живым curl: `/genre` —
-    /// 1526 тегов на одной странице, `/parody` — 3424, БЕЗ пагинации).
-    /// `Characters`/`Artists` — сайт САМ ограничивает выдачу первыми ~5000
-    /// (17110/24258 заявлено в заголовке "N elements", реально в разметке
-    /// только 5002 ссылки, дальше пагинации/ограничения по буквам тоже
-    /// нет) — честно неполный список у этих двух разделов, не наша
-    /// недоработка, а собственный потолок сайта. letter — фильтруем
-    /// ЛОКАЛЬНО из уже скачанного полного списка (namespace.isNumber →
-    /// бакет цифр, тот же сигнал, что и у остальных провайдеров).
+    /// Unlike hitomi/3hentai/imhentai, the list here is NOT split into
+    /// letters server-side — ONE request (`/genre`, `/parody`, `/character`,
+    /// `/artist`) returns everything at once (confirmed by a live curl: `/genre` —
+    /// 1526 tags on one page, `/parody` — 3424, with NO pagination).
+    /// `Characters`/`Artists` — the site ITSELF caps the results at the first ~5000
+    /// (17110/24258 claimed in the "N elements" header, but only 5002 links
+    /// actually appear in the markup; no letter-based pagination/limiting
+    /// either) — honestly an incomplete list for these two sections, not our
+    /// shortcoming but the site's own ceiling. letter — filtered
+    /// LOCALLY out of the already-downloaded full list (namespace.isNumber →
+    /// the digits bucket, the same signal used by the other providers).
     func fetchTagIndex(kind: ExternalTagKind, letter: Swift.Character) async throws -> [ExternalTagEntry] {
         guard let basePath = Self.tagKindPath(kind), let url = URL(string: "\(Self.baseURL)/\(basePath)") else { return [] }
         let data: Data
@@ -161,14 +161,14 @@ struct HentaiPillProvider: ExternalSiteProvider {
     }
 
     /// `<a href="https://hentaipill.com/{basePath}/{slug}">{name}<span>
-    /// ({count})</span>` — один и тот же формат на всех четырёх разделах
-    /// (genre/parody/character/artist), подтверждено HAR+живым curl.
-    /// Отображаемое имя тега genre МОЖЕТ нести суффикс " (female)"/
-    /// " (male)" (например "big breasts (female)") — здесь он НЕ срезается
-    /// (в отличие от карточки тайтла, см. stripGenderSuffix) — это
-    /// самостоятельный пункт алфавитного справочника, ровно как он есть на
-    /// сайте, срезка нужна только там, где female/male — отдельный булев
-    /// признак (ExternalGalleryTag).
+    /// ({count})</span>` — the same format on all four sections
+    /// (genre/parody/character/artist), confirmed by HAR+live curl.
+    /// A genre tag's display name CAN carry a " (female)"/
+    /// " (male)" suffix (e.g. "big breasts (female)") — here it is NOT stripped
+    /// (unlike on the title card, see stripGenderSuffix) — this is a
+    /// standalone entry in the alphabetical index, exactly as it appears on
+    /// the site; stripping is only needed where female/male is a separate boolean
+    /// flag (ExternalGalleryTag).
     private static func parseTagList(html: String, basePath: String) -> [ExternalTagEntry] {
         guard let regex = try? NSRegularExpression(
             pattern: #"href="https://hentaipill\.com/\#(NSRegularExpression.escapedPattern(for: basePath))/([^"]+)">([^<]+)<span>\((\d+)\)</span>"#
@@ -191,24 +191,24 @@ struct HentaiPillProvider: ExternalSiteProvider {
         return result
     }
 
-    /// РЕАЛЬНЫЙ AJAX-эндпоинт `/tag-search-ajax/{tags|characters|parodies}`
-    /// подтверждён HAR (POST `query=.../_token=...` → живые совпадения,
-    /// подстрокой, не только по префиксу). Но живой curl-тест (31.08:
-    /// честный GET → cookie jar → `_token` из скрытого поля HTML → POST с
-    /// теми же cookies) всё равно дал "CSRF token mismatch" — токен,
-    /// вшитый в ЭТОТ конкретный ответ на GET, судя по всему, не совпадает
-    /// с тем, что сервер ожидает для СОХРАНЁННОЙ сессионной куки (два
-    /// разных момента инициализации PHP-сессии, разобраться в этом дальше
-    /// можно только реальным браузером/DevTools, не curl). Не отправляем
-    /// в прод полурабочий код, который будет молча 419-ить на каждый
-    /// ввод — честно возвращаем []. fetchTagIndex (полный список одним
-    /// запросом, без единой cookie) уже покрывает основной сценарий
-    /// подсказок при наборе тега.
+    /// A REAL AJAX endpoint `/tag-search-ajax/{tags|characters|parodies}`
+    /// is confirmed by HAR (POST `query=.../_token=...` → live matches,
+    /// by substring, not just by prefix). But a live curl test (Aug 31:
+    /// a plain GET → cookie jar → `_token` from the hidden HTML field → a POST with
+    /// the same cookies) still gave "CSRF token mismatch" — the token
+    /// embedded in THAT SPECIFIC GET response apparently doesn't match
+    /// what the server expects for the SAVED session cookie (two
+    /// different points in the PHP session's initialization; digging into this further
+    /// would take a real browser/DevTools, not curl). We're not shipping
+    /// half-working code to production that would silently 419 on every
+    /// input — we honestly return []. fetchTagIndex (the full list in one
+    /// request, with no cookie at all) already covers the main use case
+    /// for suggestions while typing a tag.
     func fetchAutocomplete(query: String, namespace: String?) async throws -> [ExternalTagSuggestion] {
         []
     }
 
-    // MARK: Список тайтлов по тегу/серии/персонажу/автору
+    // MARK: List of titles by tag/series/character/artist
 
     private static func tagBasePath(for namespace: ExternalTagNamespace) -> String {
         switch namespace {
@@ -216,9 +216,9 @@ struct HentaiPillProvider: ExternalSiteProvider {
         case .series: return "parody"
         case .character: return "character"
         case .artist: return "artist"
-        // Групп на сайте нет — ExternalGalleryDetail.groups здесь ВСЕГДА
-        // [] (см. parseDetail), поэтому чип с этим namespace никогда не
-        // появится в UI и сюда не попадёт — безопасный фолбэк на "genre".
+        // There's no Group on the site — ExternalGalleryDetail.groups is ALWAYS
+        // [] here (see parseDetail), so a chip with this namespace will never
+        // show up in the UI and will never reach this — a safe fallback to "genre".
         case .group: return "genre"
         }
     }
@@ -227,13 +227,13 @@ struct HentaiPillProvider: ExternalSiteProvider {
         try await fetchIdsByTag(namespace: namespace, value: value, sortKey: nil, cursor: cursor, limit: limit)
     }
 
-    /// `value` — либо готовый slug (из ExternalTagBrowserView/entry.slug —
-    /// уже включает "-female"/"-male" суффикс сам по себе, если он там
-    /// нужен), либо чистое отображаемое имя из чипа карточки тайтла
-    /// (ExternalGalleryDetailView, namespace .female/.male — тогда суффикс
-    /// нужно добавить, см. withGenderSuffix). Формула slugify/суффикса —
-    /// та же, что и у 3hentai/imhentai (тот же реальный формат сайта,
-    /// подтверждено парами имя→slug из HAR: "dulce-q | q" →
+    /// `value` — either a ready-made slug (from ExternalTagBrowserView/
+    /// entry.slug — already includes the "-female"/"-male" suffix on its
+    /// own, if one is needed), or a plain display name from a gallery-card
+    /// chip (ExternalGalleryDetailView, namespace .female/.male — then the
+    /// suffix still needs to be added, see withGenderSuffix). The slugify/
+    /// suffix formula is the same as 3hentai/imhentai (the same real site
+    /// format, confirmed via name→slug pairs from HAR: "dulce-q | q" →
     /// "dulce-q-q", "pokemon | pocket monsters" → "pokemon-pocket-monsters").
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let basePath = Self.tagBasePath(for: namespace)
@@ -274,7 +274,7 @@ struct HentaiPillProvider: ExternalSiteProvider {
         return String(page)
     }
 
-    // MARK: Поиск
+    // MARK: Search
 
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: 0, sortKey: nil, cursor: cursor, limit: limit)
@@ -284,12 +284,13 @@ struct HentaiPillProvider: ExternalSiteProvider {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: excludedCategoryBits, sortKey: nil, cursor: cursor, limit: limit)
     }
 
-    /// Пустой запрос → главная лента `/` — НЕ реально пагинируемая (см.
-    /// capabilities.hasPageJump doc-comment, перепроверено живым curl:
-    /// `/?page=2` отдаёт ТЕ ЖЕ ID, что и `/`), поэтому здесь честно ВСЕГДА
-    /// nextCursor: nil, а запрос дальше первой страницы просто не уходит.
-    /// Непустой → `/search?q=...` (перепроверено живым curl: `/search?q=`
-    /// пустым — 404, поэтому пустая ветка обязана остаться отдельной).
+    /// Empty query → the home feed `/` — NOT actually paginated (see the
+    /// capabilities.hasPageJump doc-comment, re-checked with a live curl:
+    /// `/?page=2` returns the SAME IDs as `/`), so here nextCursor is
+    /// honestly ALWAYS nil, and no request past the first page is ever
+    /// made. Non-empty → `/search?q=...` (re-checked with a live curl:
+    /// `/search?q=` empty returns 404, so the empty branch has to stay
+    /// separate).
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         let page = Int(cursor ?? "1") ?? 1
@@ -303,9 +304,9 @@ struct HentaiPillProvider: ExternalSiteProvider {
         return try await fetchGalleryList(urlString: urlString, currentPage: page)
     }
 
-    /// Общий разбор страницы выдачи (главная/категория/тег/поиск — везде
-    /// одна и та же карточка `<a href=".../gallery/g{id}">...`).
-    /// `allowsNextPage: false` — см. fetchIdsBySearch(query: "") doc-comment.
+    /// Shared parser for a result-list page (home/category/tag/search — the
+    /// card markup `<a href=".../gallery/g{id}">...` is the same everywhere).
+    /// `allowsNextPage: false` — see the fetchIdsBySearch(query: "") doc-comment.
     private func fetchGalleryList(urlString: String, currentPage: Int, allowsNextPage: Bool = true) async throws -> (ids: [Int], nextCursor: String?) {
         guard let url = URL(string: urlString) else { throw HentaiPillError.badResponse }
         let (data, response) = try await session.data(from: url)
@@ -333,9 +334,9 @@ struct HentaiPillProvider: ExternalSiteProvider {
         return result
     }
 
-    /// `rel="next"` на кнопке «»» пагинации — подтверждено HAR+живым curl
-    /// на category/genre/parody/character/artist/search; ОТСУТСТВУЕТ на
-    /// `/`/`/popular` (у них пагинации нет вообще, см. allowsNextPage).
+    /// `rel="next"` on the "»" pagination button — confirmed by HAR + live
+    /// curl on category/genre/parody/character/artist/search; ABSENT on
+    /// `/`/`/popular` (they have no pagination at all, see allowsNextPage).
     private static func hasNextPage(html: String) -> Bool {
         html.range(of: #"rel="next""#, options: .regularExpression) != nil
     }
@@ -352,17 +353,17 @@ struct HentaiPillProvider: ExternalSiteProvider {
         return Self.parseDetail(html: html, id: id)
     }
 
-    /// Заголовки блоков метаданных (Parodies:/Characters:/Tags:/Languages:)
-    /// НЕ разбираются по тексту — маршрутизация по ПЕРВОМУ сегменту href
-    /// (genre/parody/character/artist/language), тот же устойчивый к
-    /// локализации приём, что у ImhentaiProvider/ThreeHentaiProvider.
+    /// The metadata block headers (Parodies:/Characters:/Tags:/Languages:)
+    /// are NOT parsed by their text — routing is done by the FIRST href
+    /// segment (genre/parody/character/artist/language), the same
+    /// localization-resistant approach as ImhentaiProvider/ThreeHentaiProvider.
     private static func parseDetail(html: String, id: Int) -> ExternalGalleryDetail {
         let title = firstMatch(in: html, pattern: #"<h1>(.*?)</h1>"#, options: [.dotMatchesLineSeparators])
             .map(stripInnerTags).map(decodeHTMLEntities)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Untitled"
 
-        // "2026-08-31 03:08" — сразу за иконкой-часами в шапке, до ссылки
-        // на категорию (подтверждено HAR — см. doc-comment типа).
+        // "2026-08-31 03:08" — right after the clock icon in the header,
+        // before the category link (confirmed by HAR — see the type doc-comment).
         let posted = firstMatch(
             in: html,
             pattern: #"reading-page-header-data">\s*<span>[\s\S]*?</svg>([^<]+)</span>"#
@@ -371,11 +372,12 @@ struct HentaiPillProvider: ExternalSiteProvider {
         let type = firstMatch(in: html, pattern: #"href="https://hentaipill\.com/category/[^"]+">([^<]+)</a>"#)
             .map(decodeHTMLEntities) ?? ""
 
-        // Разбор тегов/пародий/персонажей/языка — ТОЛЬКО в области ДО начала
-        // самих страниц чтения, иначе следом идущий блок "You may also like"
-        // (свой собственный tag-list с чужими похожими тайтлами, если бы он
-        // оказался ДО reading-pages-content — не тот случай здесь, но
-        // граница всё равно нужна) замешался бы в метаданные ЭТОГО тайтла.
+        // Parsing tags/parodies/characters/language — ONLY in the region
+        // BEFORE the reading pages themselves start, otherwise the later
+        // "You may also like" block (its own tag list belonging to unrelated
+        // similar titles — not the case here since it comes after
+        // reading-pages-content, but the boundary is still needed for
+        // safety) would get mixed into THIS title's metadata.
         let metaEnd = html.range(of: "reading-pages-content")?.lowerBound ?? html.endIndex
         let metaHTML = String(html[html.startIndex..<metaEnd])
 
@@ -408,10 +410,11 @@ struct HentaiPillProvider: ExternalSiteProvider {
             }
         }
 
-        // Картинки — уже ГОТОВЫЕ абсолютные URL прямо в разметке (см.
-        // doc-comment типа) — никакой формулы/CDN-шардирования не нужно, в
-        // отличие от hitomi/e-hentai/3hentai/imhentai. width/height — тоже
-        // прямо в атрибутах, полезно читалке для расчёта раскладки заранее.
+        // Images — already FULLY-FORMED absolute URLs right in the markup
+        // (see the type doc-comment) — no formula/CDN sharding needed,
+        // unlike hitomi/e-hentai/3hentai/imhentai. width/height are also
+        // right there in the attributes, useful for the reader to
+        // precompute layout.
         var pages: [ExternalGalleryPage] = []
         if let regex = try? NSRegularExpression(
             pattern: #"<img class="lazy reading-pages-single-page" data-src="([^"]+)" width="(\d+)" height="(\d+)""#
@@ -432,15 +435,17 @@ struct HentaiPillProvider: ExternalSiteProvider {
             }
         }
 
-        // `cover: "https://b1.hentaipill.me/picture/{id}-thumb.jpg"` — JS-
-        // переменная в начале страницы, тот же CDN-хост, что и у страниц
-        // чтения (см. doc-comment типа насчёт плавающего домена/TLD).
+        // `cover: "https://b1.hentaipill.me/picture/{id}-thumb.jpg"` — a JS
+        // variable near the top of the page, the same CDN host as the
+        // reading pages (see the type doc-comment about the floating
+        // domain/TLD).
         let coverURL = firstMatch(in: html, pattern: #"cover:\s*"([^"]+)""#).flatMap { URL(string: $0) }
 
-        // "You may also like" — та же карточная разметка, что у обычной
-        // сетки (см. parseGalleryIds), просто в своём блоке в конце
-        // страницы — берём всё, что нашлось ПОСЛЕ метки, без искусственного
-        // потолка (сам блок на сайте и так ограничен разумным числом карточек).
+        // "You may also like" — the same card markup as the regular grid
+        // (see parseGalleryIds), just in its own block at the end of the
+        // page — take everything found AFTER the marker, no artificial
+        // cap (the block itself is already limited to a reasonable number
+        // of cards on the site).
         var related: [Int] = []
         if let markerRange = html.range(of: "You may also like") {
             related = parseGalleryIds(html: String(html[markerRange.upperBound...]))
@@ -454,7 +459,7 @@ struct HentaiPillProvider: ExternalSiteProvider {
             language: languageParts.isEmpty ? nil : languageParts.joined(separator: ", "),
             tags: tags,
             artists: artists,
-            // Групп на сайте нет вообще — честно пусто, не выдумываем.
+            // No groups on the site at all — honestly empty, not made up.
             groups: [],
             characters: characters,
             series: series,
@@ -462,19 +467,20 @@ struct HentaiPillProvider: ExternalSiteProvider {
             pages: pages,
             coverURL: coverURL,
             posted: posted,
-            // e-hentai-специфичные поля (Parent/Visible/File Size/Rating) —
-            // у hentaipill не подтверждены, честно nil, не выдумываем.
+            // e-hentai-specific fields (Parent/Visible/File Size/Rating) —
+            // not confirmed for hentaipill, honestly nil, not made up.
             parentId: nil, visible: nil, fileSize: nil, favoritedCount: nil,
             ratingAverage: nil, ratingCount: nil, comments: []
         )
     }
 
     /// "big breasts (female)" → ("big breasts", true, false); "sole female"
-    /// → ("sole female", false, false) — суффикс срезается ТОЛЬКО когда это
-    /// уточнение в скобках, не когда "female"/"male" — часть САМОГО имени
-    /// тега без скобок (это разные, реально существующие теги сайта, см.
-    /// /genre полный список — "sole female"/"sole male" там отдельные
-    /// пункты, не female/male-варианты чего-то ещё).
+    /// → ("sole female", false, false) — the suffix is stripped ONLY when
+    /// it's a parenthesized qualifier, not when "female"/"male" is part of
+    /// the tag name itself without parentheses (those are distinct, real
+    /// tags on the site — see the full /genre list, "sole female"/"sole
+    /// male" are separate entries there, not female/male variants of
+    /// something else).
     private static func stripGenderSuffix(_ name: String) -> (name: String, female: Bool, male: Bool) {
         if let range = name.range(of: #"\s*\(female\)\s*$"#, options: .regularExpression) {
             return (String(name[name.startIndex..<range.lowerBound]), true, false)
@@ -485,12 +491,12 @@ struct HentaiPillProvider: ExternalSiteProvider {
         return (name, false, false)
     }
 
-    // MARK: URL картинок
+    // MARK: Image URLs
 
-    /// Без сети — `page.key` уже несёт ГОТОВЫЙ абсолютный URL, взятый прямо
-    /// из HTML карточки на момент fetchGalleryDetail (см. её doc-comment
-    /// насчёт плавающего CDN-домена/TLD — намеренно не пересчитывается
-    /// здесь заново).
+    /// No network call — `page.key` already carries the FULLY-FORMED
+    /// absolute URL, taken straight from the HTML at fetchGalleryDetail
+    /// time (see its doc-comment about the floating CDN domain/TLD —
+    /// deliberately not recomputed here).
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL {
         guard let url = URL(string: page.key) else { throw HentaiPillError.badResponse }
         return url

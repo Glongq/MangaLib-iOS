@@ -1,71 +1,72 @@
 import SwiftUI
 import UIKit
 
-/// Запрос выдачи — тег/серия/... (см. ExternalTagBrowserView) ИЛИ свободный
-/// текстовый поиск (см. ExternalSearchView/ExternalCombinedCatalogView,
-/// capabilities.hasSearch) — один и тот же экран сетки обслуживает оба
-/// случая, отличается только то, какой метод протокола дёргается за
-/// очередной страницей ID (см. fetchPage).
+/// The result query — tag/series/... (see ExternalTagBrowserView) OR a free
+/// text search (see ExternalSearchView/ExternalCombinedCatalogView,
+/// capabilities.hasSearch) — the same grid screen serves both
+/// cases, the only difference is which protocol method gets called for
+/// the next page of IDs (see fetchPage).
 enum ExternalCatalogQuery {
     case tag(namespace: ExternalTagNamespace, value: String)
-    /// `excludedCategoryBits` — см. EHentaiCategory/EHentaiCategoryPicker;
-    /// сайты без capabilities.hasCategoryFilter просто игнорируют его (см.
+    /// `excludedCategoryBits` — see EHentaiCategory/EHentaiCategoryPicker;
+    /// sites without capabilities.hasCategoryFilter simply ignore it (see
     /// ExternalSiteProvider.fetchIdsBySearch(excludedCategoryBits:)
-    /// default-реализация), поэтому здесь один общий случай, не отдельный
-    /// под каждый сайт. 0 — без ограничений (енум-кейсы не поддерживают
-    /// значения параметров по умолчанию, поэтому вызывающая сторона всегда
-    /// передаёт явно).
+    /// default implementation), so this is one shared case rather than a
+    /// separate one per site. 0 means no restriction (enum cases don't
+    /// support default parameter values, so the caller always passes it
+    /// explicitly).
     case search(query: String, excludedCategoryBits: Int)
 }
 
-/// Один элемент СОВМЕСТНОЙ выдачи (см. ExternalCombinedCatalogView) — ID
-/// тайтла сам по себе не уникален между сайтами (у hitomi и e-hentai свои,
-/// не связанные пространства целых чисел), поэтому идентичность элемента
-/// сетки — ВСЕГДА пара (сайт, id), не голый Int.
+/// One item of the COMBINED result set (see ExternalCombinedCatalogView) —
+/// a gallery ID alone isn't unique across sites (hitomi and e-hentai each
+/// have their own unrelated integer spaces), so a grid item's identity is
+/// ALWAYS the pair (site, id), never a bare Int.
 struct ExternalCatalogItem: Identifiable, Hashable {
     let site: ExternalSite
     let galleryId: Int
     var id: String { "\(site.rawValue)#\(galleryId)" }
 }
 
-/// Сетка тайтлов внешнего сайта (или НЕСКОЛЬКИХ сразу — см. `sites` и
-/// ExternalCombinedCatalogView) по одному тегу/серии/персонажу/группе/
-/// автору либо свободному запросу (см. план, Часть 6 + совместный каталог).
-/// Список ID — постранично (см. fetchPage), карточки — лениво по мере
-/// скролла через fetchGalleryDetail, тот же принцип "подгрузка по onAppear
-/// последних элементов", что и в старом MangaCatalogView, но написан
-/// заново, самостоятельно (см. план — минимально пересекаться со старым
-/// кодом).
+/// Grid of titles from an external site (or SEVERAL at once — see `sites`
+/// and ExternalCombinedCatalogView) for a single tag/series/character/group/
+/// artist, or a free-text query (see the plan, Part 6 + the combined catalog).
+/// The ID list is paginated (see fetchPage), cards load lazily as the user
+/// scrolls via fetchGalleryDetail — the same "load more on the last items'
+/// onAppear" principle as the old MangaCatalogView, but written fresh,
+/// independently (see the plan — keep overlap with the old code to a
+/// minimum).
 struct ExternalCatalogGridView: View {
     let sites: [ExternalSite]
-    /// Запрос — ФУНКЦИЯ от сайта, не одно общее значение. По прямой
-    /// просьбе (31.08): в совместной выдаче ("Все сайты") у каждого сайта
-    /// должен быть СВОЙ независимый запрос — тег/поиск, набранный для
-    /// imhentai в «Фильтрах», не должен утекать в запрос e-hentai/hitomi/
-    /// 3hentai, и наоборот (см. ExternalCombinedCatalogView.query(for:)).
-    /// Обычный одно-сайтовый вызов (ExternalTagBrowserView/
-    /// ExternalSearchView) просто игнорирует параметр сайта — там он и
-    /// так всегда один и тот же.
+    /// The query is a FUNCTION of the site, not one shared value. Per
+    /// direct feedback (Aug 31): in a combined result set ("All sites")
+    /// each site must have its OWN independent query — a tag/search typed
+    /// for imhentai in "Filters" must not leak into the e-hentai/hitomi/
+    /// 3hentai query, and vice versa (see ExternalCombinedCatalogView.query(for:)).
+    /// The plain single-site call (ExternalTagBrowserView/
+    /// ExternalSearchView) simply ignores the site parameter — there it's
+    /// always the same one anyway.
     let queryForSite: (ExternalSite) -> ExternalCatalogQuery
     let title: String
-    /// true — встроена ПРЯМО в экран поиска (см. ExternalSearchView/
-    /// ExternalCombinedCatalogView, по прямой просьбе "тут же появляются
-    /// тайтлы", без отдельного перехода) — без своего заголовка/фона,
-    /// родительский экран уже даёт их. false (по умолчанию) — как раньше,
-    /// самостоятельный экран, на который переходят (см. ExternalTagBrowserView).
+    /// true — embedded DIRECTLY into the search screen (see ExternalSearchView/
+    /// ExternalCombinedCatalogView, per direct feedback "titles should appear
+    /// right there", without a separate navigation) — no title/background of
+    /// its own, the parent screen already provides them. false (default) —
+    /// as before, a standalone screen you navigate to (see ExternalTagBrowserView).
     var embedded: Bool = false
 
-    /// Доп. кнопка(и) родительского экрана в общей нижней стеклянной панели
-    /// (см. controlsBar) — сейчас это «Фильтры» у ExternalSearchView/
-    /// ExternalCombinedCatalogView (капсула категорий e-hentai). `AnyView`,
-    /// не generic-параметр на весь struct — тип этой вью не должен
-    /// протекать во все места, где создаётся ExternalCatalogGridView (была
-    /// бы генерик-разводка ради одной необязательной кнопки).
+    /// Extra button(s) from the parent screen shown in the shared bottom
+    /// glass panel (see controlsBar) — currently this is "Filters" on
+    /// ExternalSearchView/ExternalCombinedCatalogView (the e-hentai category
+    /// capsule). `AnyView`, not a generic parameter on the whole struct — the
+    /// type of that view must not leak into every call site that creates
+    /// ExternalCatalogGridView (that would mean generic plumbing everywhere
+    /// just for one optional button).
     var leadingControls: AnyView?
 
-    /// Обычный (не совместный) вызов — один сайт, самый частый случай
-    /// (ExternalTagBrowserView/ExternalSearchView). Тут `query` и правда
-    /// один на весь вызов — оборачиваем в константную функцию.
+    /// Plain (non-combined) call — a single site, the most common case
+    /// (ExternalTagBrowserView/ExternalSearchView). Here `query` really is
+    /// one value for the whole call — we wrap it in a constant function.
     init(site: ExternalSite, query: ExternalCatalogQuery, title: String, embedded: Bool = false, leadingControls: AnyView? = nil) {
         self.sites = [site]
         self.queryForSite = { _ in query }
@@ -74,10 +75,10 @@ struct ExternalCatalogGridView: View {
         self.leadingControls = leadingControls
     }
 
-    /// Совместная выдача — сразу НЕСКОЛЬКО сайтов (см.
-    /// ExternalCombinedCatalogView) — каждая страница мержится по всем
-    /// переданным сайтам разом (см. loadNextBatch), но запрос у каждого
-    /// сайта СВОЙ (см. queryForSite doc-comment).
+    /// Combined result set — SEVERAL sites at once (see
+    /// ExternalCombinedCatalogView) — each page is merged across all
+    /// given sites together (see loadNextBatch), but each site has its
+    /// OWN query (see the queryForSite doc-comment).
     init(sites: [ExternalSite], queryForSite: @escaping (ExternalSite) -> ExternalCatalogQuery, title: String, embedded: Bool = false, leadingControls: AnyView? = nil) {
         self.sites = sites
         self.queryForSite = queryForSite
@@ -89,47 +90,49 @@ struct ExternalCatalogGridView: View {
     private static let pageSize = 25
 
     @State private var items: [ExternalCatalogItem] = []
-    /// Курсор следующей страницы НА КАЖДЫЙ сайт — отсутствие ключа значит
-    /// "ещё не спрашивали", nil-курсор при первом запросе (см. fetchPage).
+    /// Next-page cursor PER SITE — a missing key means "not yet queried",
+    /// a nil cursor is used for the first request (see fetchPage).
     @State private var cursors: [ExternalSite: String] = [:]
-    /// Сайты, у которых ещё МОЖЕТ быть следующая страница — как только сайт
-    /// вернул nextCursor == nil (или упал ошибкой) он отсюда убирается,
-    /// чтобы не долбить его бесконечно повторными подгрузками.
+    /// Sites that MAY still have a next page — as soon as a site returns
+    /// nextCursor == nil (or fails with an error) it's removed from here,
+    /// so we don't keep hammering it with repeated loads.
     @State private var pending: Set<ExternalSite> = []
     @State private var details: [String: ExternalGalleryDetail] = [:]
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var errorMessage: String?
     @State private var jumpPageText = ""
-    /// НЕПРОЗРАЧНЫЙ ключ сортировки (см. ExternalSiteProvider.
+    /// OPAQUE sort key (see ExternalSiteProvider.
     /// fetchIdsByTag(sortKey:), HitomiProvider.SortOption.rawValue) — nil =
-    /// сортировка по умолчанию (по дате добавления). Только у сайтов с
-    /// capabilities.hasSortOptions (сейчас только hitomi, см. showsSortMenu).
+    /// default sort order (by date added). Only for sites with
+    /// capabilities.hasSortOptions (currently only hitomi, see showsSortMenu).
     @State private var sortKey: String?
 
-    /// Число колонок — та же общая настройка Персонализации (2/3/4/Авто),
-    /// что и у обычного каталога (см. MangaCatalogView/MangaCardView,
-    /// CardsPerRow.swift) — общий тип, тот же @AppStorage-ключ, по прямой
-    /// просьбе "по аналогии с работой фн персонализация".
+    /// Column count — the same shared Personalization setting (2/3/4/Auto)
+    /// as the regular catalog (see MangaCatalogView/MangaCardView,
+    /// CardsPerRow.swift) — same shared type, same @AppStorage key, per
+    /// direct feedback "mirror how the personalization function works".
     @AppStorage("personalization_cards_per_row") private var cardsPerRow: CardsPerRow = .auto
     private var gridColumns: Int { cardsPerRow.columns }
 
     private let gridSpacing: CGFloat = 12
-    /// Бейдж с источником имеет смысл показывать ТОЛЬКО когда сайтов
-    /// несколько — в обычном одно-сайтовом режиме и так понятно, откуда
-    /// тайтл (см. ExternalTagBrowserView/ExternalSearchView, где sites — [x]).
+    /// The source badge only makes sense to show when there are MULTIPLE
+    /// sites — in the plain single-site mode it's already obvious where a
+    /// title is from (see ExternalTagBrowserView/ExternalSearchView, where
+    /// sites is [x]).
     private var showsSourceBadge: Bool { sites.count > 1 }
-    /// «Перейти на страницу» (см. ExternalSiteCapabilities.hasPageJump) —
-    /// хотя бы один из sites должен это уметь, иначе строка ни на что не
-    /// повлияет (см. jump(toPage:) — сайты без поддержки там просто
-    /// пропускаются, начинают заново с первой страницы). По прямой просьбе
-    /// — всегда СВЕРХУ, видимой строкой, не спрятана за кнопкой/алертом.
+    /// "Jump to page" (see ExternalSiteCapabilities.hasPageJump) — at
+    /// least one of `sites` must support this, otherwise the row wouldn't
+    /// do anything (see jump(toPage:) — sites without support are simply
+    /// skipped there and start over from page one). Per direct feedback —
+    /// always shown AT THE TOP, as a visible row, not tucked behind a
+    /// button/alert.
     private var showsPageJump: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasPageJump } }
-    /// Сортировка (см. ExternalSiteCapabilities.hasSortOptions) — сейчас
-    /// подтверждена живым HAR только у hitomi (см. HitomiProvider.
-    /// SortOption), кнопка видна, если ХОТЯ БЫ один из sites её понимает —
-    /// у e-hentai в совместной выдаче sortKey просто честно игнорируется
-    /// (см. ExternalSiteProvider extension-дефолт).
+    /// Sorting (see ExternalSiteCapabilities.hasSortOptions) — currently
+    /// confirmed by a live HAR capture only for hitomi (see HitomiProvider.
+    /// SortOption); the button is shown if AT LEAST ONE of `sites` supports
+    /// it — for e-hentai in a combined result set sortKey is simply and
+    /// honestly ignored (see the ExternalSiteProvider extension default).
     private var showsSortMenu: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasSortOptions } }
     private var showsControlsBar: Bool { showsPageJump || showsSortMenu || leadingControls != nil }
 
@@ -148,10 +151,11 @@ struct ExternalCatalogGridView: View {
         }
         .task { await loadFirstPage() }
         .onChange(of: sortKey) { _, _ in resetAndReload() }
-        // Панель снизу, стеклянными пилюлями — 1-в-1 MangaCatalogView.
-        // controlsBar/controlLabel (по прямой просьбе 30.08 "кнопка
-        // фильтры внизу... быстрый переход к странице тоже сделай кнопку
-        // стеклянную внизу"), а не сверху обычными плашками, как было.
+        // Bottom panel with glass pills — a 1-to-1 match for MangaCatalogView.
+        // controlsBar/controlLabel (per direct feedback on Aug 30: "put the
+        // filters button at the bottom... make the quick page-jump button a
+        // glass button at the bottom too"), rather than regular chips up top
+        // like it was before.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if showsControlsBar {
                 controlsBar
@@ -162,8 +166,8 @@ struct ExternalCatalogGridView: View {
         }
     }
 
-    /// Смена сортировки — начинаем выдачу заново с первой страницы (тот же
-    /// сброс, что и у jump(toPage:), просто без синтеза курсора страницы).
+    /// Sort order changed — restart the result set from page one (the same
+    /// reset as jump(toPage:), just without synthesizing a page cursor).
     private func resetAndReload() {
         items = []
         details = [:]
@@ -184,10 +188,11 @@ struct ExternalCatalogGridView: View {
         }
     }
 
-    /// Тот же стиль стеклянной пилюли, что и у MangaCatalogView.controlLabel
-    /// (Фильтры/Сортировка внизу обычного каталога) — переиспользуют его и
-    /// «Фильтры» родительского экрана (см. leadingControls), и «Стр.»/
-    /// «Сортировка» здесь: единый вид всех кнопок нижней панели.
+    /// The same glass-pill style as MangaCatalogView.controlLabel
+    /// (Filters/Sort at the bottom of the regular catalog) — reused by
+    /// both the parent screen's "Filters" (see leadingControls) and by
+    /// "Pg."/"Sort" here: a single consistent look for every button in the
+    /// bottom panel.
     private func controlPill(icon: String, text: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon).font(.footnote.weight(.semibold))
@@ -199,12 +204,13 @@ struct ExternalCatalogGridView: View {
         .glassEffect(.regular.interactive(), in: Capsule())
     }
 
-    /// «Стр.» — пилюля с полем ввода + стрелкой, лист снизу (см.
-    /// jumpFieldSheet) вместо строки инлайн, чтобы поле ввода не торчало
-    /// прямо в нижней панели рядом с остальными кнопками. Тап по пилюле
-    /// открывает лист; клавиатура сворачивается кнопкой "Готово" в
-    /// toolbar(.keyboard) самого листа (см. jumpFieldSheet) — по прямой
-    /// просьбе "не забудь чтобы можно было свернуть клавиатуру".
+    /// "Pg." — a pill that opens a bottom sheet with a text field + arrow
+    /// (see jumpFieldSheet) instead of an inline row, so the input field
+    /// doesn't stick out right in the bottom panel next to the other
+    /// buttons. Tapping the pill opens the sheet; the keyboard is dismissed
+    /// via a "Done" button in the sheet's own toolbar(.keyboard) (see
+    /// jumpFieldSheet) — per direct feedback "make sure the keyboard can be
+    /// dismissed".
     @State private var showJumpSheet = false
 
     private var pageJumpButton: some View {
@@ -250,12 +256,12 @@ struct ExternalCatalogGridView: View {
         .presentationDragIndicator(.visible)
         .background(Theme.background.ignoresSafeArea())
         .onAppear { isJumpFieldFocused = true }
-        // Клавиатура (numberPad) сама по себе кнопки "Готово" не даёт —
-        // по прямой просьбе "не забудь чтобы можно было свернуть
-        // клавиатуру". Тулбар вешается ЗДЕСЬ, на содержимом самого листа
-        // (не на body ExternalCatalogGridView снаружи) — у .sheet своя
-        // независимая иерархия, внешний toolbar(.keyboard) над её
-        // клавиатурой не показался бы.
+        // The (numberPad) keyboard doesn't provide a "Done" button on its
+        // own — per direct feedback "make sure the keyboard can be
+        // dismissed". The toolbar is attached HERE, on the sheet's own
+        // content (not on ExternalCatalogGridView's outer body) — a
+        // .sheet has its own independent hierarchy, an outer
+        // toolbar(.keyboard) wouldn't show above its keyboard.
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -264,10 +270,10 @@ struct ExternalCatalogGridView: View {
         }
     }
 
-    /// Ключ сортировки — `String?` (nil = по умолчанию), а не сам enum,
-    /// т.к. это ОБЩЕЕ поле для любого сайта (см. sortKey doc-comment выше);
-    /// Picker внутри работает с HitomiProvider.SortOption через
-    /// Binding(get:set:) — единственная сегодня реализация, см. showsSortMenu.
+    /// Sort key — `String?` (nil = default), not the enum itself, since
+    /// this is a SHARED field for any site (see the sortKey doc-comment
+    /// above); the Picker inside works with HitomiProvider.SortOption via
+    /// Binding(get:set:) — the only implementation today, see showsSortMenu.
     private var sortSelection: Binding<HitomiProvider.SortOption> {
         Binding(
             get: { sortKey.flatMap(HitomiProvider.SortOption.init(rawValue:)) ?? .dateAdded },
@@ -290,10 +296,10 @@ struct ExternalCatalogGridView: View {
     @ViewBuilder
     private var content: some View {
         if isLoading && items.isEmpty {
-            // Скелетон-сетка вместо голого спиннера — 1-в-1
-            // MangaCatalogView.skeletonGrid (по прямой просьбе "скелетоны в
-            // разделе каталог"), та же ширина карточки, что и у настоящей
-            // сетки (см. grid ниже).
+            // Skeleton grid instead of a bare spinner — a 1-to-1 match for
+            // MangaCatalogView.skeletonGrid (per direct feedback "skeletons
+            // in the catalog section"), the same card width as the real
+            // grid below (see grid below).
             skeletonGrid
         } else if let errorMessage, items.isEmpty {
             StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: errorMessage, retry: { Task { await loadFirstPage() } }, fillScreen: true)
@@ -304,8 +310,9 @@ struct ExternalCatalogGridView: View {
         }
     }
 
-    /// Число ячеек-заглушек не привязано к реальным данным (их ещё нет) —
-    /// просто с запасом на экран при любом gridColumns (2/3/4).
+    /// The number of placeholder cells isn't tied to real data (there is
+    /// none yet) — just enough to fill the screen for any gridColumns
+    /// value (2/3/4).
     private var skeletonGrid: some View {
         GeometryReader { proxy in
             let spacing = gridSpacing
@@ -360,19 +367,21 @@ struct ExternalCatalogGridView: View {
         }
     }
 
-    // MARK: Текст под обложкой — размеры/шрифты 1-в-1 MangaCardView
-    // (titleFont/typeFont/textBlockHeight), см. card(item:width:) ниже.
-    // ОТЛИЧИЕ от MangaCardView: та считает высоту блока ПО РЯДУ (все
-    // карточки ряда видны сразу, т.к. viewModel.results уже полностью
-    // загружен) — здесь тайтлы сетки грузятся ЛЕНИВО, по карточке
-    // (onCardAppear → loadDetail), поэтому на момент раскладки соседи по
-    // ряду ещё МОГУТ быть без загруженной детали вовсе — точный построчный
-    // расчёт ряда потребовал бы знать финальные названия ЗАРАНЕЕ. Вместо
-    // этого КАЖДАЯ карточка сама резервирует МАКСИМУМ (2 строки названия +
-    // строка типа, даже когда типа нет или деталь ещё грузится) —
-    // тот же результат (сетка не "плывёт", жалоба "съезжает изза того что
-    // одни тайтлы название название тип, а название-тип", 31.08), просто
-    // без построчной экономии места на рядах с короткими названиями.
+    // MARK: Text under the cover — sizes/fonts are a 1-to-1 match for
+    // MangaCardView (titleFont/typeFont/textBlockHeight), see
+    // card(item:width:) below.
+    // DIFFERENCE from MangaCardView: that one computes block height PER ROW
+    // (every card in the row is already visible at once, since
+    // viewModel.results is already fully loaded) — here grid titles load
+    // LAZILY, per card (onCardAppear → loadDetail), so at layout time
+    // neighbors in the same row MAY still have no loaded detail at all —
+    // an exact per-row height calculation would require knowing the final
+    // titles UP FRONT. Instead EACH card reserves the MAXIMUM on its own
+    // (2 lines of title + a type line, even when there's no type or the
+    // detail is still loading) — same end result (the grid doesn't "shift",
+    // per the complaint "it jumps around because some titles are
+    // title-title-type and others are title-type", Aug 31), just without
+    // the per-row space savings on rows with short titles.
     fileprivate static let textScale: CGFloat = 1.2
     fileprivate static var titleUIFont: UIFont {
         let base = UIFont.preferredFont(forTextStyle: .caption1)
@@ -405,14 +414,14 @@ struct ExternalCatalogGridView: View {
         details[item.id] = detail
     }
 
-    /// Один и тот же метод для любого сайта — у него нет своего "не умеет
-    /// такое" исключения: сайт без hasSearch (например hitomi) для запроса
-    /// `.search` просто трактует введённый текст КАК ТЕГ (fetchIdsByTag —
-    /// именно так на hitomi ищется что-то по имени: неизвестное имя-тег
-    /// просто вернёт пустой список/404, это нормальный ответ, не ошибка,
-    /// см. HitomiProvider.fetchIdsByTag). `static`, без захвата `self` —
-    /// вызывается из параллельных задач в loadNextBatch (см. ниже), лишний
-    /// захват целого View-структа в @Sendable-замыкании ни к чему.
+    /// The same method for any site — no per-site "doesn't support this"
+    /// exception: a site without hasSearch (e.g. hitomi) treats a `.search`
+    /// query's text simply AS A TAG (fetchIdsByTag — that's exactly how
+    /// hitomi searches by name: an unknown tag name just returns an empty
+    /// list/404, which is a normal response, not an error, see
+    /// HitomiProvider.fetchIdsByTag). `static`, without capturing `self` —
+    /// called from parallel tasks in loadNextBatch (see below), no reason
+    /// to needlessly capture the whole View struct in a @Sendable closure.
     private static func fetchPage(site: ExternalSite, cursor: String?, query: ExternalCatalogQuery, sortKey: String?) async throws -> (ids: [Int], nextCursor: String?) {
         let provider = ExternalSiteRegistry.provider(for: site)
         switch query {
@@ -433,11 +442,11 @@ struct ExternalCatalogGridView: View {
         await performInitialLoad()
     }
 
-    /// Сбрасывает выдачу и запускает её заново, начиная с курсора, который
-    /// каждый провайдер (см. cursorForPage) сам синтезирует под "страницу
-    /// N" — у сайтов без capabilities.hasPageJump курсор просто не
-    /// задаётся, они честно начинают заново с первой страницы (не ошибка,
-    /// см. showsPageJump — кнопка видна, если ХОТЯ БЫ один сайт умеет).
+    /// Resets the result set and restarts it from a cursor that each
+    /// provider (see cursorForPage) synthesizes itself for "page N" — for
+    /// sites without capabilities.hasPageJump the cursor is simply not
+    /// set, they honestly start over from page one (not a bug, see
+    /// showsPageJump — the button is shown if AT LEAST one site supports it).
     private func jump(toPage page: Int) {
         items = []
         details = [:]
@@ -453,17 +462,18 @@ struct ExternalCatalogGridView: View {
         isLoading = true
         errorMessage = nil
         pending = Set(sites)
-        // `anySucceeded` — отличает РЕАЛЬНЫЙ сбой сети (ни один сайт не
-        // ответил успешно) от честного "0 совпадений" (запрос прошёл,
-        // просто пусто — например по hitomi ищут точное имя тега, которого
-        // нет). Раньше здесь смотрели только на `items.isEmpty &&
-        // pending.isEmpty` — это условие ОДИНАКОВО истинно в обоих
-        // случаях (успешный пустой ответ тоже убирает сайт из `pending`,
-        // см. loadNextBatch), из-за чего любой пустой поиск на hitomi тут
-        // же показывал "Проверьте соединение и попробуйте ещё раз" —
-        // выглядит как сетевая ошибка с намёком нажать "Обновить", хотя
-        // сеть отработала нормально, просто совпадений нет (жалоба
-        // "фаллбек слишком быстро предлагает нажать обновить").
+        // `anySucceeded` — distinguishes a REAL network failure (no site
+        // responded successfully) from an honest "0 matches" (the request
+        // succeeded, it's just empty — e.g. searching hitomi for an exact
+        // tag name that doesn't exist). This used to only check
+        // `items.isEmpty && pending.isEmpty` — that condition is EQUALLY
+        // true in both cases (a successful empty response also removes the
+        // site from `pending`, see loadNextBatch), which meant any empty
+        // hitomi search immediately showed "Check your connection and try
+        // again" — it looks like a network error nudging you to hit
+        // "Refresh", even though the network worked fine and there just
+        // were no matches (per the complaint "the fallback suggests
+        // hitting refresh too eagerly").
         let anySucceeded = await loadNextBatch()
         if items.isEmpty && pending.isEmpty && !anySucceeded {
             errorMessage = "Проверьте соединение и попробуйте ещё раз."
@@ -478,22 +488,25 @@ struct ExternalCatalogGridView: View {
         await loadNextBatch()
     }
 
-    /// Опрашивает ПАРАЛЛЕЛЬНО все сайты из `pending` (первая страница — это
-    /// просто "все сайты из `sites`" на старте), мержит результат ЧЕРЕДУЯ по
-    /// сайтам (не "сначала все с одного, потом все с другого" — иначе
-    /// совместная сетка выглядела бы как склейка двух отдельных, а не
-    /// единая выдача). Возвращает, ответил ли хоть один сайт УСПЕШНО (даже
-    /// пустым списком) — см. performInitialLoad, где это отличает реальный
-    /// сбой сети от честного "0 совпадений". `@discardableResult` —
-    /// loadMoreIfNeeded этот флаг не нужен (там об ошибке уже сообщать
-    /// нечего, экран и так что-то показывает).
+    /// Queries all sites in `pending` IN PARALLEL (the first page is just
+    /// "all sites from `sites`" at the start), merges the result by
+    /// INTERLEAVING across sites (not "all of one site first, then all of
+    /// the other" — otherwise a combined grid would look like two separate
+    /// grids stitched together instead of one unified result). Returns
+    /// whether at least one site responded SUCCESSFULLY (even with an
+    /// empty list) — see performInitialLoad, where this distinguishes a
+    /// real network failure from an honest "0 matches". `@discardableResult`
+    /// — loadMoreIfNeeded doesn't need this flag (there's nothing left to
+    /// report about an error there, the screen is already showing
+    /// something).
     @discardableResult
     private func loadNextBatch() async -> Bool {
         let sitesToQuery = Array(pending)
         guard !sitesToQuery.isEmpty else { return true }
-        // Снимок ПО КАЖДОМУ сайту заранее (до withTaskGroup) — тот же
-        // приём, что раньше был у currentQuery, просто теперь на каждый
-        // сайт своё значение функции (см. queryForSite doc-comment).
+        // A snapshot PER SITE up front (before withTaskGroup) — the same
+        // approach that currentQuery used before, just now with a
+        // per-site value from the function (see the queryForSite
+        // doc-comment).
         let queriesBySite = Dictionary(uniqueKeysWithValues: sitesToQuery.map { ($0, queryForSite($0)) })
         let currentSortKey = sortKey
         let cursorsSnapshot = cursors
@@ -523,10 +536,10 @@ struct ExternalCatalogGridView: View {
             if succeeded, let nextCursor {
                 cursors[site] = nextCursor
             } else {
-                // Либо сайт честно сказал "дальше ничего нет", либо запрос
-                // упал — в обоих случаях не спрашиваем этот сайт снова, но
-                // то, что он УЖЕ вернул в этом батче (если succeeded),
-                // всё равно попадает в выдачу.
+                // Either the site honestly said "nothing more", or the
+                // request failed — either way we don't query this site
+                // again, but whatever it ALREADY returned in this batch
+                // (if succeeded) still makes it into the result set.
                 pending.remove(site)
             }
             idsBySite[site] = ids
@@ -547,13 +560,14 @@ struct ExternalCatalogGridView: View {
     }
 }
 
-/// Одна карточка сетки — вынесена в отдельный View-струкt (а не просто
-/// функция, как раньше), потому что ей теперь нужно СВОЁ состояние: успел
-/// ли заголовок обрезаться на 2 строках (см. updateTruncation) и открыт ли
-/// лист с полным названием (по прямой просьбе 01.09 — "добавить возможность
-/// открыть щит меню с полным названием если оно не влазит в карточке
-/// тайтла"). У функции-хелпера (как было) не может быть @State — оно
-/// привязывается к экземпляру View, а не к вызову функции внутри чужого body.
+/// A single grid card — pulled out into its own View struct (rather than
+/// just a function, as before), because it now needs its OWN state: whether
+/// the title ended up truncated at 2 lines (see updateTruncation) and
+/// whether the full-title sheet is open (per direct feedback on Sep 1 —
+/// "add the ability to open a sheet with the full title if it doesn't fit
+/// on the title's card"). A helper function (as it was) can't have @State —
+/// that binds to a View instance, not to a function call inside someone
+/// else's body.
 private struct CatalogCard: View {
     let item: ExternalCatalogItem
     let detail: ExternalGalleryDetail?
@@ -594,13 +608,14 @@ private struct CatalogCard: View {
                     .padding(6)
             }
         }
-        // Кол-во страниц — чипом справа снизу на обложке (по прямой
-        // просьбе 01.09 — "везде отдельным чипом на обложке справа снизу
-        // пишется сразу кол-во страниц"), тот же визуальный стиль, что и у
-        // бейджа источника (showsSourceBadge) выше, просто другой угол.
-        // Появляется, только когда деталь тайтла УЖЕ загружена (см.
-        // onCardAppear → loadDetail) — pages известны только оттуда, до
-        // этого момента честно ничего не показываем (не выдумываем число).
+        // Page count — as a chip at the bottom right of the cover (per
+        // direct feedback on Sep 1 — "everywhere, show the page count
+        // right away as a separate chip at the bottom right of the
+        // cover"), the same visual style as the source badge
+        // (showsSourceBadge) above, just a different corner. Appears only
+        // once the title's detail is ALREADY loaded (see onCardAppear →
+        // loadDetail) — pages are only known from there, before that we
+        // honestly show nothing (we don't make up a number).
         .overlay(alignment: .bottomTrailing) {
             if let count = detail?.pages.count, count > 0 {
                 HStack(spacing: 2) {
@@ -616,14 +631,15 @@ private struct CatalogCard: View {
         }
     }
 
-    // Название + тип — тем же приёмом, что и в обычном каталоге
-    // (MangaCardView: название, сразу под ним тип секондари-цветом),
-    // тип НА АНГЛИЙСКОМ, как есть на самом сайте (hitomi отдаёт
-    // "manga"/"doujinshi"/"misc"/... строчными, e-hentai —
-    // "Manga"/... с большой) — не переводим и не меняем регистр.
-    // Пока деталь ещё не загрузилась — SkeletonBar (та же анимация
-    // шиммера, что у обложки/skeletonGrid выше), НЕ "…" (жалоба
-    // "скелетон это три точки просто", 31.08).
+    // Title + type — the same approach as in the regular catalog
+    // (MangaCardView: title, immediately under it the type in a secondary
+    // color), the type stays IN ENGLISH, exactly as the site itself gives
+    // it (hitomi returns "manga"/"doujinshi"/"misc"/... lowercase,
+    // e-hentai — "Manga"/... capitalized) — we don't translate it or
+    // change its casing.
+    // While the detail hasn't loaded yet — a SkeletonBar (the same shimmer
+    // animation as the cover/skeletonGrid above), NOT "…" (per the
+    // complaint "the skeleton is literally just three dots", Aug 31).
     private var titleBlock: some View {
         Group {
             if let detail {
@@ -641,9 +657,9 @@ private struct CatalogCard: View {
                             .background(titleMeasurement(detail.title))
                     }
                     .buttonStyle(.plain)
-                    // Тап работает только когда заголовок ДЕЙСТВИТЕЛЬНО не
-                    // влез — иначе карточка выглядела бы кликабельной там,
-                    // где открывать нечего.
+                    // The tap only works when the title ACTUALLY didn't
+                    // fit — otherwise the card would look tappable in
+                    // places where there's nothing to open.
                     .disabled(!isTitleTruncated)
 
                     Text(detail.type.isEmpty ? " " : detail.type)
@@ -668,12 +684,13 @@ private struct CatalogCard: View {
         }
     }
 
-    /// Невидимая подложка под названием — считает, действительно ли ПОЛНЫЙ
-    /// текст (без ограничения в 2 строки) занял бы больше места, чем сама
-    /// Text (та зажата lineLimit(2), поэтому её СОБСТВЕННЫЙ рендер-размер
-    /// всегда ≤ высоты двух строк — сравнивать с ним самим бессмысленно).
-    /// Вместо этого — независимый расчёт через NSString.boundingRect на
-    /// той же ширине и том же шрифте, что и видимый Text.
+    /// An invisible backing layer under the title — determines whether the
+    /// FULL text (without the 2-line limit) would actually take up more
+    /// space than the Text itself (that one is clamped by lineLimit(2), so
+    /// its OWN rendered size is always ≤ the height of two lines —
+    /// comparing against itself would be pointless). Instead — an
+    /// independent calculation via NSString.boundingRect at the same width
+    /// and the same font as the visible Text.
     private func titleMeasurement(_ title: String) -> some View {
         GeometryReader { proxy in
             Color.clear
@@ -695,12 +712,12 @@ private struct CatalogCard: View {
     }
 }
 
-/// Полное название тайтла внешнего сайта — открывается тапом по обрезанному
-/// названию в карточке (см. CatalogCard.titleBlock). В отличие от
-/// TitleNamesSheet (несколько подписанных полей — рус/ориг/англ/
-/// альтернативные, специфично для основного каталога MangaLib) у внешних
-/// сайтов только ОДНО поле названия (см. ExternalGalleryDetail.title) —
-/// здесь просто полный текст без обрезки.
+/// Full title of an external site's gallery — opened by tapping the
+/// truncated title on a card (see CatalogCard.titleBlock). Unlike
+/// TitleNamesSheet (several labeled fields — Russian/original/English/
+/// alternative, specific to the main MangaLib catalog) external sites only
+/// have ONE title field (see ExternalGalleryDetail.title) — here it's just
+/// the full text without truncation.
 private struct ExternalGalleryTitleSheet: View {
     let title: String
     @Environment(\.dismiss) private var dismiss

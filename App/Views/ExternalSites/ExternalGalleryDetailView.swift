@@ -1,29 +1,30 @@
 import SwiftUI
 import UIKit
 
-/// Карточка тайтла внешнего сайта (см. план, ЧАСТЬ B) — визуально КОПИРУЕТ
-/// стиль текстов/чипов/вкладок обычной карточки тайтла (MangaDetailView) —
-/// по прямой просьбе ("стиль текстов всё как из обычной манги, просто
-/// адаптирован под это"): та же плашка "Тип" под названием (как в
-/// MangaCardView), тот же infoRow-ряд чипов Тип/Язык/... (см.
-/// MangaDetailView.infoRow/infoBlock), те же CollapsibleChips для тегов/
-/// персонажей/серии, тот же подчёркнутый tabBar вместо системного
-/// Picker(.segmented), тот же RatingChip-подобный бэйдж на обложке, тот же
-/// blockTitle/relatedCard стиль для "Похожих тайтлов". НЕ импортирует
-/// MangaDetailView (другая форма данных, ExternalGalleryDetail, не
-/// MangaItem/MangaDetail, см. план про изоляцию от старого сетевого кода)
-/// — стиль скопирован построчно, не переиспользован как код.
+/// Gallery detail card for an external site (see the plan, PART B) —
+/// visually COPIES the text/chip/tab style of the regular title detail card
+/// (MangaDetailView) — per direct feedback ("keep all the text style
+/// exactly like the regular manga one, just adapted for this"): the same
+/// "Type" line under the title (as in MangaCardView), the same infoRow row
+/// of Type/Language/... chips (see MangaDetailView.infoRow/infoBlock), the
+/// same CollapsibleChips for tags/characters/series, the same underlined
+/// tabBar instead of the system Picker(.segmented), the same
+/// RatingChip-like badge on the cover, the same blockTitle/relatedCard
+/// style for "Similar Titles". Does NOT import MangaDetailView (a different
+/// data shape, ExternalGalleryDetail, not MangaItem/MangaDetail, see the
+/// plan on isolation from the old networking code) — the style was copied
+/// line by line, not reused as code.
 struct ExternalGalleryDetailView: View {
     let site: ExternalSite
     let id: Int
-    /// Если карточка уже была подгружена в сетке (см. ExternalCatalogGridView),
-    /// не грузим её ещё раз — просто используем сразу.
+    /// If the detail was already loaded in the grid (see ExternalCatalogGridView),
+    /// don't load it again — just use it right away.
     var preloaded: ExternalGalleryDetail?
 
-    /// Локальные закладки (см. ExternalBookmarksStore doc-comment — у
-    /// внешних сайтов нет аккаунтов, значит нет и серверных закладок,
-    /// поэтому целиком локальный список) — кнопка "Добавить в закладки" в
-    /// actionButtons ниже.
+    /// Local bookmarks (see the ExternalBookmarksStore doc-comment — external
+    /// sites have no accounts, so there are no server-side bookmarks either,
+    /// hence a fully local list) — the "Add to bookmarks" button in
+    /// actionButtons below.
     @ObservedObject private var bookmarksStore = ExternalBookmarksStore.shared
 
     @State private var detail: ExternalGalleryDetail?
@@ -33,12 +34,12 @@ struct ExternalGalleryDetailView: View {
     @State private var previewJumpText = ""
     @Namespace private var tabIndicator
 
-    /// Читалка — ТОЛЬКО `.fullScreenCover`, не push через NavigationLink
-    /// (1-в-1 MangaDetailView.readerOpen/.fullScreenCover) — раньше была
-    /// NavigationLink, из-за чего читалка оставалась ВНУТРИ текущего таба
-    /// NavigationStack и таб-бар приложения (Закладки/Каталог/...) не
-    /// прятался, торчал поверх интерфейса читалки (по жалобе со скриншотом,
-    /// 30.08).
+    /// Reader — ONLY `.fullScreenCover`, not pushed via NavigationLink
+    /// (a 1-to-1 match for MangaDetailView.readerOpen/.fullScreenCover) —
+    /// it used to be a NavigationLink, which meant the reader stayed
+    /// INSIDE the current tab's NavigationStack and the app's tab bar
+    /// (Bookmarks/Catalog/...) wasn't hidden, it stuck out over the
+    /// reader's UI (per a complaint with a screenshot, Aug 30).
     @State private var readerOpen: ReaderOpen?
 
     private struct ReaderOpen: Identifiable {
@@ -46,18 +47,18 @@ struct ExternalGalleryDetailView: View {
         let initialPage: Int?
     }
 
-    /// Переход по чипу (Группа/Серия/Персонажи/Автор/Женское/Мужское/
-    /// Смешанное/Другое, см. aboutTab) — push (не .fullScreenCover, как у
-    /// читалки: это обычный каталог, тот же остаётся таб-бар/навигация,
-    /// что и при переходе из ExternalTagBrowserView) в
-    /// ExternalCatalogGridView, отфильтрованный по ЭТОМУ конкретному
-    /// значению НА ТОМ ЖЕ сайте, откуда открыта карточка (по прямой
-    /// просьбе 31.08 — "по сайту сразу", т.е. свой namespace/провайдер
-    /// именно этого сайта, не общий/угаданный).
-    // Hashable (не только Identifiable) — .navigationDestination(item:)
-    // требует именно Hashable (в отличие от .sheet(item:)/.fullScreenCover
-    // (item:), которым достаточно Identifiable) — без этого сборка падает
-    // ("requires that 'TagCatalogTarget' conform to 'Hashable'", CI).
+    /// Navigating via a chip (Group/Series/Characters/Artist/Female/Male/
+    /// Mixed/Other, see aboutTab) — a push (not .fullScreenCover like the
+    /// reader: this is a regular catalog, the tab bar/navigation stays the
+    /// same as when navigating from ExternalTagBrowserView) to
+    /// ExternalCatalogGridView, filtered to THIS specific value ON THE
+    /// SAME SITE the card was opened from (per direct feedback on Aug 31 —
+    /// "scoped to the site right away", i.e. that exact site's own
+    /// namespace/provider, not a shared/guessed one).
+    // Hashable (not just Identifiable) — .navigationDestination(item:)
+    // specifically requires Hashable (unlike .sheet(item:)/.fullScreenCover
+    // (item:), for which Identifiable is enough) — without this the build
+    // fails ("requires that 'TagCatalogTarget' conform to 'Hashable'", CI).
     private struct TagCatalogTarget: Identifiable, Hashable {
         let id = UUID()
         let namespace: ExternalTagNamespace
@@ -74,16 +75,17 @@ struct ExternalGalleryDetailView: View {
     private enum Tab: Hashable { case about, comments }
 
     private var provider: any ExternalSiteProvider { ExternalSiteRegistry.provider(for: site) }
-    /// ~20 страниц на "экран" пагинации превью-грида — то же число, что
-    /// у e-hentai реально отдаёт своя полоса миниатюр за раз (подтверждено
-    /// HAR, см. EHentaiProvider.fetchGalleryDetail), для hitomi точное
-    /// число не HAR-подтверждено — берём то же самое, не выдумывая новое.
+    /// ~20 pages per "screen" of the preview grid's pagination — the same
+    /// number that e-hentai's own thumbnail strip actually returns at once
+    /// (confirmed by a HAR capture, see EHentaiProvider.fetchGalleryDetail);
+    /// for hitomi the exact number isn't HAR-confirmed — we use the same
+    /// value rather than making up a new one.
     private static let previewPageSize = 21
     private static let previewColumns = 3
-    /// Высота чипа infoRow — 1-в-1 MangaDetailView.metaChipHeight (аватар/
-    /// заголовок+значение в два ряда), см. infoBlock ниже.
+    /// infoRow chip height — a 1-to-1 match for MangaDetailView.metaChipHeight
+    /// (avatar/heading+value in two rows), see infoBlock below.
     private static let metaChipHeight: CGFloat = 44
-    /// Карточка "Похожих тайтлов" — 1-в-1 MangaDetailView.similarCardHeight/
+    /// "Similar Titles" card — a 1-to-1 match for MangaDetailView.similarCardHeight/
     /// similarCoverWidth/similarCardWidthFraction.
     fileprivate static let relatedCardHeight: CGFloat = 132
     fileprivate static let relatedCoverWidth: CGFloat = relatedCardHeight * 2 / 3
@@ -117,14 +119,14 @@ struct ExternalGalleryDetailView: View {
                 titleBlock(detail)
                 actionButtons(detail)
 
-                // См. план ЧАСТЬ B.5 — у hitomi/3hentai комментариев как
-                // концепции нет вообще (ни одного comment-related запроса
-                // ни в одном HAR ни того, ни другого), вкладка там не
-                // показывается совсем, весь контент всегда "О тайтле".
-                // capabilities.hasComments, не хардкод конкретного сайта
-                // (`site == .ehentai`, как было раньше) — иначе каждый
-                // новый сайт без комментариев требовал бы правки именно
-                // этой строки.
+                // See the plan PART B.5 — hitomi/3hentai have no concept
+                // of comments at all (not a single comment-related request
+                // in either site's HAR), the tab isn't shown at all there,
+                // all content is always "About". Driven by
+                // capabilities.hasComments, not a hardcoded specific site
+                // (`site == .ehentai`, as it was before) — otherwise every
+                // new site without comments would require editing this
+                // exact line.
                 if provider.capabilities.hasComments {
                     tabBar
                 }
@@ -148,7 +150,7 @@ struct ExternalGalleryDetailView: View {
         }
     }
 
-    // MARK: Верх карточки (B.1) — 1-в-1 MangaDetailView.heroHeader/titleBlock
+    // MARK: Top of the card (B.1) — a 1-to-1 match for MangaDetailView.heroHeader/titleBlock
 
     @ViewBuilder
     private func coverSection(_ detail: ExternalGalleryDetail) -> some View {
@@ -157,9 +159,9 @@ struct ExternalGalleryDetailView: View {
                 .scaledToFit()
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                // Рейтинг — на самой обложке, снизу слева (см.
-                // MangaDetailView.coverRatingBadge) — только у e-hentai, у
-                // hitomi такого поля нет.
+                // Rating — right on the cover, bottom left (see
+                // MangaDetailView.coverRatingBadge) — only for e-hentai,
+                // hitomi has no such field.
                 .overlay(alignment: .bottomLeading) { ratingBadge(detail) }
         }
     }
@@ -187,10 +189,10 @@ struct ExternalGalleryDetailView: View {
         }
     }
 
-    /// Название + тип строкой под ним — 1-в-1 стиль карточки в каталоге
-    /// (см. MangaCardView.body: название, сразу под ним типом вторым
-    /// текстом секондари-цветом), по прямой просьбе адаптировать этот же
-    /// стиль сюда.
+    /// Title + type on a line below it — a 1-to-1 match for the catalog
+    /// card's style (see MangaCardView.body: title, immediately under it
+    /// the type as secondary-colored text), per direct feedback to adapt
+    /// this same style here.
     private func titleBlock(_ detail: ExternalGalleryDetail) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(detail.title)
@@ -207,13 +209,14 @@ struct ExternalGalleryDetailView: View {
         }
     }
 
-    /// «Добавить в закладки» + «Читать» — 1-в-1 MangaDetailView.actionButtons
-    /// (тот же 50/50 сплит, тот же .bordered/.borderedProminent приём:
-    /// серая bordered-кнопка закладки слева, акцентная заливка "Читать"
-    /// справа). В отличие от обычной карточки — без выбора ПАПКИ (см.
-    /// ExternalBookmarksStore doc-comment: локальные закладки внешних
-    /// сайтов — простой список, без папок), поэтому тап сразу переключает
-    /// (toggle), без листа выбора.
+    /// "Add to bookmarks" + "Read" — a 1-to-1 match for
+    /// MangaDetailView.actionButtons (the same 50/50 split, the same
+    /// .bordered/.borderedProminent approach: a gray bordered bookmark
+    /// button on the left, a filled accent "Read" button on the right).
+    /// Unlike the regular card — no FOLDER choice (see the
+    /// ExternalBookmarksStore doc-comment: external sites' local bookmarks
+    /// are a simple list, no folders), so tapping toggles immediately,
+    /// with no selection sheet.
     private func actionButtons(_ detail: ExternalGalleryDetail) -> some View {
         let inList = bookmarksStore.isBookmarked(site: detail.site, id: detail.id)
         return HStack(spacing: 8) {
@@ -228,10 +231,10 @@ struct ExternalGalleryDetailView: View {
             .buttonStyle(.bordered)
             .tint(inList ? Theme.accent : Theme.textSecondary)
 
-            // «Начать» — 1-в-1 MangaDetailView.readerLink (native
-            // .borderedProminent + Theme.accent, не самодельная Capsule).
-            // Кнопка, не NavigationLink — открывает `.fullScreenCover`
-            // (см. readerOpen).
+            // "Start" — a 1-to-1 match for MangaDetailView.readerLink
+            // (native .borderedProminent + Theme.accent, not a
+            // hand-rolled Capsule). A Button, not a NavigationLink — it
+            // opens a `.fullScreenCover` (see readerOpen).
             Button {
                 readerOpen = ReaderOpen(initialPage: nil)
             } label: {
@@ -245,10 +248,10 @@ struct ExternalGalleryDetailView: View {
         }
     }
 
-    // MARK: Вкладки «О тайтле»/«Комментарии» — 1-в-1 MangaDetailView.tabBar/
-    // tabButton (подчёркнутые плоские вкладки, matchedGeometryEffect), без
-    // третьей "Главы" (по прямой просьбе — "такого понятия как Главы тут
-    // не будет").
+    // MARK: "About"/"Comments" tabs — a 1-to-1 match for MangaDetailView.tabBar/
+    // tabButton (underlined flat tabs, matchedGeometryEffect), no third
+    // "Chapters" tab (per direct feedback — "there won't be a concept of
+    // Chapters here").
 
     private var tabBar: some View {
         HStack(spacing: 0) {
@@ -292,26 +295,27 @@ struct ExternalGalleryDetailView: View {
         let categories = tagsByCategory(detail)
         return VStack(alignment: .leading, spacing: 18) {
             infoRow(detail)
-            // Тап по чипу — сразу каталог ЭТОГО сайта, отфильтрованный по
-            // конкретному значению (см. TagCatalogTarget/openTagCatalog,
-            // прямая просьба 31.08 "по нажатию на чип сразу открывается
-            // этот тег/жанр, по сайту сразу"). Namespace — свой на каждую
-            // категорию (см. ExternalTagNamespace); значение — чистое
-            // отображаемое имя, КАЖДЫЙ провайдер сам приводит его к
-            // своему реальному query (у hitomi это уже готовый формат, у
-            // 3hentai — слагификация + приписывание пола, см.
+            // Tapping a chip — opens THIS site's catalog right away,
+            // filtered to that specific value (see TagCatalogTarget/
+            // openTagCatalog, per direct feedback on Aug 31 "tapping a
+            // chip should open that tag/genre right away, scoped to the
+            // site"). Namespace — its own per category (see
+            // ExternalTagNamespace); the value is the plain display name,
+            // EACH provider converts it to its own real query itself
+            // (for hitomi it's already the right format, for 3hentai —
+            // slugification + appending gender, see
             // ThreeHentaiProvider.slugify/withGenderSuffix).
             if !detail.groups.isEmpty {
                 chipsBlock("Группа", detail.groups.map { name in
                     .init(text: name, onTap: { openTagCatalog(namespace: .group, value: name, title: name) })
                 })
             }
-            // Порядок и разбивка ниже — по прямой просьбе (30.08): теги
-            // делятся ПОЛНОСТЬЮ на отдельные подкатегории со своим
-            // заголовком каждая (не одним общим блоком "Теги"), в этом же
-            // порядке — Серия(parody)/Персонажи(character)/Язык(language)/
-            // Автор(artist)/Женское(female)/Мужское(male)/Смешанное(mixed)/
-            // Другое(other), каждый тег в своей отдельной чипе.
+            // The order and split below — per direct feedback (Aug 30):
+            // tags are split ENTIRELY into separate subcategories each
+            // with its own heading (not one shared "Tags" block), in this
+            // order — Series(parody)/Characters(character)/Language(language)/
+            // Artist(artist)/Female(female)/Male(male)/Mixed(mixed)/
+            // Other(other), each tag in its own separate chip.
             if !detail.series.isEmpty {
                 chipsBlock("Серия", detail.series.map { name in
                     .init(text: name, onTap: { openTagCatalog(namespace: .series, value: name, title: name) })
@@ -322,10 +326,10 @@ struct ExternalGalleryDetailView: View {
                     .init(text: name, onTap: { openTagCatalog(namespace: .character, value: name, title: name) })
                 })
             }
-            // Язык — БЕЗ перехода: ни у одного провайдера нет
-            // подтверждённого namespace под язык как отдельный кит
-            // (ExternalTagNamespace такого не знает вовсе) — честно
-            // некликабельно, а не угаданный (наверняка неверный) переход.
+            // Language — WITHOUT navigation: no provider has a confirmed
+            // namespace for language as a distinct kind (ExternalTagNamespace
+            // doesn't know one at all) — honestly non-tappable, rather than
+            // a guessed (and likely wrong) destination.
             if let language = detail.language, !language.isEmpty { chipsBlock("Язык", [.init(text: language)]) }
             if !detail.artists.isEmpty {
                 chipsBlock("Автор", detail.artists.map { name in
@@ -342,11 +346,12 @@ struct ExternalGalleryDetailView: View {
                     .init(text: tag.name, onTap: { openTagCatalog(namespace: .male, value: tag.name, title: tag.name) })
                 })
             }
-            // "Смешанный" тег (female И male оба true) — неоднозначно, к
-            // какому из двух реальных namespace он относится (сайт не
-            // даёт отдельного "смешанного" кита) — берём .female как
-            // разумное приближение (первый из двух реально существующих
-            // вариантов), не выдумывая несуществующий третий.
+            // A "Mixed" tag (both female AND male true) — it's ambiguous
+            // which of the two real namespaces it belongs to (the site
+            // doesn't provide a separate "mixed" kind) — we use .female as
+            // a reasonable approximation (the first of the two options
+            // that actually exist), rather than inventing a nonexistent
+            // third one.
             if !categories.mixed.isEmpty {
                 chipsBlock("Смешанное", categories.mixed.map { tag in
                     .init(text: tag.name, onTap: { openTagCatalog(namespace: .female, value: tag.name, title: tag.name) })
@@ -363,12 +368,13 @@ struct ExternalGalleryDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// female/male оба true — "смешанный" тег (подтверждено реальным
-    /// `galleries/{id}.js` у hitomi: `tags[]` там имеет ОБА поля
-    /// одновременно у части тегов); ни одного — нейтральный ("Другое").
-    /// У e-hentai намеспейс тега строго один (нет одновременно "female" и
-    /// "male" на одном теге, см. EHentaiProvider.parseMetadata) — там
-    /// "Смешанное" просто никогда не наполнится, секция честно не покажется.
+    /// female/male both true — a "Mixed" tag (confirmed by hitomi's real
+    /// `galleries/{id}.js`: `tags[]` there has BOTH fields true at once for
+    /// some tags); neither one — neutral ("Other"). e-hentai's tag
+    /// namespace is strictly single-valued (never both "female" and
+    /// "male" on the same tag, see EHentaiProvider.parseMetadata) — there
+    /// "Mixed" simply never gets populated, the section honestly doesn't
+    /// show up.
     private func tagsByCategory(_ detail: ExternalGalleryDetail) -> (female: [ExternalGalleryTag], male: [ExternalGalleryTag], mixed: [ExternalGalleryTag], other: [ExternalGalleryTag]) {
         var female: [ExternalGalleryTag] = []
         var male: [ExternalGalleryTag] = []
@@ -385,12 +391,13 @@ struct ExternalGalleryDetailView: View {
         return (female, male, mixed, other)
     }
 
-    // MARK: Info row — 1-в-1 MangaDetailView.infoRow/infoBlock (Тип/Статус/
-    // Год/Просмотры/Формат) — здесь Тип/Опубликовано/Длина + то, что есть
-    // ТОЛЬКО у e-hentai (Родитель/Видимость/Размер/В избранном); Язык
-    // вынесен в свой отдельный чип-блок (см. aboutTab — часть общей
-    // разбивки по подкатегориям), не дублируется здесь. У hitomi этих
-    // e-hentai-полей физически нет, просто не добавляются в список.
+    // MARK: Info row — a 1-to-1 match for MangaDetailView.infoRow/infoBlock
+    // (Type/Status/Year/Views/Format) — here it's Type/Posted/Length + the
+    // fields that exist ONLY for e-hentai (Parent/Visibility/Size/Favorited);
+    // Language is broken out into its own separate chip block (see
+    // aboutTab — part of the general split by subcategories), not
+    // duplicated here. hitomi simply has no such e-hentai fields, they're
+    // just not added to the list.
 
     private func infoRow(_ detail: ExternalGalleryDetail) -> some View {
         let rawItems: [(heading: String, value: String?)] = [
@@ -426,11 +433,12 @@ struct ExternalGalleryDetailView: View {
         .background(Theme.surfaceElevated, in: Capsule())
     }
 
-    // MARK: Чипы (Группа/Серия/Персонажи/Теги) — 1-в-1 MangaDetailView
-    // ("Жанры и теги"/"Франшиза"): blockTitle + переиспользованный
-    // CollapsibleChips (тот же общий компонент, что и в MangaDetailView —
-    // чистый UI-виджет без зависимости от старых сетевых моделей, как и
-    // SkeletonBox/StateView, которые уже переиспользуются в этом слое).
+    // MARK: Chips (Group/Series/Characters/Tags) — a 1-to-1 match for
+    // MangaDetailView ("Genres and tags"/"Franchise"): blockTitle + the
+    // reused CollapsibleChips (the same shared component as in
+    // MangaDetailView — a plain UI widget with no dependency on the old
+    // networking models, same as SkeletonBox/StateView, which are already
+    // reused in this layer).
 
     private func blockTitle(_ text: String) -> some View {
         Text(text).font(.headline).foregroundStyle(Theme.textPrimary)
@@ -443,20 +451,23 @@ struct ExternalGalleryDetailView: View {
         }
     }
 
-    // MARK: Превью-грид страниц + пагинация + jump-to-page (B.3) — своего
-    // аналога в обычной карточке манги нет (там вместо этого список глав),
-    // заголовок/шрифты подогнаны под тот же blockTitle-стиль для консистентности.
+    // MARK: Page preview grid + pagination + jump-to-page (B.3) — there's
+    // no equivalent of this in the regular manga card (there's a chapter
+    // list instead), the heading/fonts are matched to the same
+    // blockTitle style for consistency.
 
-    /// Ширина/зазор — ФИКСИРОВАННЫЕ числа (не GeometryReader/.flexible()+
-    /// aspectRatio, как было раньше): вся секция сидит внутри одного и того
-    /// же `.padding(16)` на весь контент карточки (см. detailBody), поэтому
-    /// доступная ширина СЧИТАЕТСЯ заранее, без лишнего слоя геометрии —
-    /// тот же приём, что и у MangaReaderView.titleBadgeMaxWidth. Раньше
-    /// колонки были `.flexible()` + кропу задавался только aspectRatio БЕЗ
-    /// явного .frame() — LazyVGrid в паре мест не мог стабильно посчитать
-    /// высоту строки (гонка с асинхронной подгрузкой картинок), из-за чего
-    /// сетка "лагала"/тайлы наслаивались друг на друга (жалоба 30.08). Явный
-    /// .frame(width:height:) на каждой ячейке убирает саму возможность гонки.
+    /// Width/spacing — FIXED numbers (not GeometryReader/.flexible()+
+    /// aspectRatio like before): the whole section sits inside the same
+    /// `.padding(16)` applied to all of the card's content (see
+    /// detailBody), so the available width is COMPUTED ahead of time,
+    /// without an extra geometry layer — the same approach as
+    /// MangaReaderView.titleBadgeMaxWidth. The columns used to be
+    /// `.flexible()` with the crop given only an aspectRatio and NO
+    /// explicit .frame() — LazyVGrid couldn't reliably compute row height
+    /// in a couple of spots (a race with asynchronous image loading),
+    /// which made the grid "lag"/tiles overlap each other (complaint from
+    /// Aug 30). An explicit .frame(width:height:) on each cell removes the
+    /// possibility of that race entirely.
     private static let previewSpacing: CGFloat = 8
 
     private func previewGridSection(_ detail: ExternalGalleryDetail) -> some View {
@@ -497,18 +508,18 @@ struct ExternalGalleryDetailView: View {
         ZStack(alignment: .bottomTrailing) {
             Group {
                 if let url = page.thumbnailURL, let offsetX = page.thumbnailSpriteOffsetX {
-                    // e-hentai: url — общий спрайт на партию страниц, offsetX
-                    // выбирает нужный тайл (см. ExternalGalleryPage.
-                    // thumbnailSpriteOffsetX/ExternalSpriteThumbnail) — БЕЗ
-                    // этого кропа тут показывался бы один и тот же спрайт
-                    // целиком на КАЖДОЙ странице партии.
+                    // e-hentai: url is a shared sprite covering a batch of
+                    // pages, offsetX picks out the right tile (see
+                    // ExternalGalleryPage.thumbnailSpriteOffsetX/
+                    // ExternalSpriteThumbnail) — WITHOUT this crop we'd
+                    // show the same whole sprite on EVERY page of the batch.
                     ExternalSpriteThumbnail(
                         url: url, offsetX: offsetX, tileWidth: page.width, tileHeight: page.height
                     ) { SkeletonBox() }
                     .scaledToFill()
                 } else if let url = page.thumbnailURL {
-                    // hitomi: url уже указывает на отдельную картинку именно
-                    // этой страницы — кроп не нужен.
+                    // hitomi: the url already points to that exact page's
+                    // own image — no crop needed.
                     ExternalImage(url: url) { SkeletonBox() }
                         .scaledToFill()
                 } else {
@@ -578,11 +589,12 @@ struct ExternalGalleryDetailView: View {
         }
     }
 
-    /// "1 2 3 … 12" — обрезанная последовательность номеров страниц
-    /// пагинации превью-грида, `nil` — место "…". Чисто клиентское
-    /// вычисление (все страницы уже загружены в `detail.pages`), в отличие
-    /// от ExternalCatalogGridView.pageJumpRow (там реальный сетевой запрос
-    /// на курсор) — здесь просто листается уже готовый массив.
+    /// "1 2 3 … 12" — the truncated sequence of page numbers for the
+    /// preview grid's pagination, `nil` marks the "…" spot. A purely
+    /// client-side calculation (all pages are already loaded into
+    /// `detail.pages`), unlike ExternalCatalogGridView.pageJumpRow (that
+    /// one does a real network request for a cursor) — here we just page
+    /// through an already-ready array.
     private func paginationSequence(total: Int, current: Int) -> [Int?] {
         guard total > 7 else { return (1...total).map { $0 } }
         var keep: Set<Int> = [1, 2, total - 1, total, current - 1, current, current + 1]
@@ -598,9 +610,10 @@ struct ExternalGalleryDetailView: View {
         return result
     }
 
-    // MARK: Похожие тайтлы (B.4) — 1-в-1 MangaDetailView.relatedSection/
-    // relatedCard (широкая карточка: обложка слева на всю высоту подложки,
-    // название+тип справа, горизонтальный слайдер).
+    // MARK: Similar Titles (B.4) — a 1-to-1 match for
+    // MangaDetailView.relatedSection/relatedCard (a wide card: cover on the
+    // left spanning the full height of the backing, title+type on the
+    // right, a horizontal slider).
 
     @ViewBuilder
     private func relatedSection(_ detail: ExternalGalleryDetail) -> some View {
@@ -622,9 +635,10 @@ struct ExternalGalleryDetailView: View {
         }
     }
 
-    // MARK: Комментарии (B.5) — 1-в-1 MangaDetailView.commentRow (аватар +
-    // ник/дата, текст ниже, разделитель между соседними комментариями), без
-    // веток/голосов/спойлеров — у e-hentai комментарии плоские, без ответов.
+    // MARK: Comments (B.5) — a 1-to-1 match for MangaDetailView.commentRow
+    // (avatar + name/date, text below, a divider between adjacent
+    // comments), no threads/votes/spoilers — e-hentai's comments are flat,
+    // with no replies.
 
     @ViewBuilder
     private func commentsTab(_ detail: ExternalGalleryDetail) -> some View {
@@ -674,11 +688,12 @@ struct ExternalGalleryDetailView: View {
     }
 }
 
-/// Одна карточка в "Похожих тайтлах" (B.4) — 1-в-1 MangaDetailView.relatedCard
-/// (обложка слева во всю высоту подложки, название+тип справа), но данные
-/// свои (ExternalGalleryDetail, не MangaItem) и грузится лениво по `.task`
-/// (related — только ID, полные данные тянутся так же, как в сетке каталога,
-/// см. ExternalCatalogGridView.loadDetail).
+/// One card in "Similar Titles" (B.4) — a 1-to-1 match for
+/// MangaDetailView.relatedCard (cover on the left spanning the full height
+/// of the backing, title+type on the right), but with its own data
+/// (ExternalGalleryDetail, not MangaItem) and it loads lazily via `.task`
+/// (related is just an ID, full data is fetched the same way as in the
+/// catalog grid, see ExternalCatalogGridView.loadDetail).
 private struct RelatedGalleryCard: View {
     let site: ExternalSite
     let id: Int

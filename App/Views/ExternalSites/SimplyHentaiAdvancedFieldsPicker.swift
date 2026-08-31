@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// Расширенные поля поиска Simply Hentai — своя строка поиска + Series
-/// title (одна строка) + Tags/Parodies/Characters/Artists/Translators/
-/// Language (каждое копит СВОЙ список значений) — комбинируются между
-/// собой в одном запросе `/search/complex` (см. SimplyHentaiAdvancedQuery
-/// doc-comment в SimplyHentaiProvider.swift — комбинация `query=`+
-/// `filter[...]=` подтверждена реальным HAR пользователя), но ЭКСКЛЮЗИВНО
-/// по отношению к общему полю поиска экрана — как только хотя бы одно из
-/// них заполнено, общее поле для simplyHentai перестаёт участвовать (см.
+/// Advanced search fields for Simply Hentai — its own search box + Series
+/// title (a single line) + Tags/Parodies/Characters/Artists/Translators/
+/// Language (each accumulates ITS OWN list of values) — these combine
+/// together into one `/search/complex` request (see the
+/// SimplyHentaiAdvancedQuery doc-comment in SimplyHentaiProvider.swift —
+/// the `query=` + `filter[...]=` combination is confirmed by the user's
+/// real HAR), but EXCLUSIVELY with respect to the screen's shared search
+/// field — as soon as at least one of these is filled in, the shared field
+/// stops participating for simplyHentai (see
 /// ExternalSearchView.resolvedQuery).
 struct SimplyHentaiAdvancedFieldsPicker: View {
     @Binding var query: SimplyHentaiAdvancedQuery
@@ -36,9 +37,9 @@ struct SimplyHentaiAdvancedFieldsPicker: View {
         }
     }
 
-    /// Одиночная строка (не список чипов, как остальные) — `filter
-    /// [series_title][0]=...` в HAR встретился РОВНО одним значением, не
-    /// несколькими сразу, в отличие от Tags/Parodies/....
+    /// A single line (not a chip list like the others) — `filter
+    /// [series_title][0]=...` showed up in the HAR with EXACTLY one value,
+    /// not several at once, unlike Tags/Parodies/....
     private var seriesTitleField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Series title").font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
@@ -58,18 +59,18 @@ struct SimplyHentaiAdvancedFieldsPicker: View {
     }
 }
 
-/// Поле ввода одной категории — текст + кнопка добавления, под ним (пока
-/// печатается ≥2 символов) выпадающий список подсказок из РЕАЛЬНОГО
-/// эндпоинта `/v3/search/autocomplete?q=` (подтверждён HAR живым массивом
-/// подсказок) — в отличие от imhentai/hentaipill, здесь не нужно ничего
-/// достраивать локально, сайт сам отдаёт готовые варианты. Подсказки НЕ
-/// разделены по типу поля (сайт не принимает namespace/type-параметр на
-/// этом эндпоинте, см. doc-comment fetchAutocomplete) — один и тот же
-/// список показывается что для Tags, что для Artists; это не идеально, но
-/// честно отражает то, что реально умеет API. Тап по подсказке добавляет
-/// значение и сворачивает список, как и обычное добавление. Ниже — уже
-/// добавленные значения чипами (CollapsibleChips, тот же приём, что у
-/// ImhentaiAdvancedFieldsPicker).
+/// Input field for one category — text + an add button, below it (while
+/// ≥2 characters are typed) a dropdown suggestion list from the REAL
+/// `/v3/search/autocomplete?q=` endpoint (confirmed by HAR with a live
+/// array of suggestions) — unlike imhentai/hentaipill, nothing needs to be
+/// built up locally here, the site itself hands back ready-made options.
+/// Suggestions are NOT split by field type (the site doesn't accept a
+/// namespace/type parameter on this endpoint, see the fetchAutocomplete
+/// doc-comment) — the very same list is shown for both Tags and Artists;
+/// that's not ideal, but it honestly reflects what the API actually does.
+/// Tapping a suggestion adds the value and collapses the list, same as
+/// adding normally. Below that — already-added values as chips
+/// (CollapsibleChips, the same trick as in ImhentaiAdvancedFieldsPicker).
 private struct AdvancedFieldInput: View {
     @Binding var values: [String]
     @State private var draft = ""
@@ -102,9 +103,9 @@ private struct AdvancedFieldInput: View {
                 })
             }
         }
-        // Debounce 350мс — тот же приём, что у ExternalSearchView.query,
-        // иначе каждая буква била бы отдельным сетевым запросом. .task(id:)
-        // сам отменяет предыдущую попытку при новом вводе.
+        // Debounce of 350ms — the same trick as ExternalSearchView.query,
+        // otherwise every letter would fire off a separate network request.
+        // .task(id:) cancels the previous attempt on its own on new input.
         .task(id: draft) {
             try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled else { return }

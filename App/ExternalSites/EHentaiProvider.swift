@@ -1,31 +1,31 @@
 import Foundation
 
-/// Ошибки EHentaiProvider — та же намеренно простая схема, что у HitomiError.
+/// Errors for EHentaiProvider — the same deliberately simple scheme as HitomiError.
 enum EHentaiError: Error {
     case badResponse
     case missingToken
 }
 
-/// Расширенные поля поиска — по прямой просьбе (01.09). У e-hentai, в
-/// отличие от остальных сайтов, `namespace:value`-команда — это ПРЯМОЙ
-/// синтаксис самого f_search (подтверждено HAR: `f_search=anal+anime+
-/// series%3Agenshin` — обычный текст и тег-команда в одном запросе сразу,
-/// см. EHentaiProvider.tagPrefix doc-comment) — поэтому `encoded()` здесь
-/// НЕ нужен приватный разделитель-канал, как у SimplyHentaiAdvancedQuery:
-/// результат — это уже готовый, реальный f_search-текст, который можно
-/// слать как есть.
+/// Advanced search fields — added by direct request (Sep 1). On e-hentai, unlike
+/// the other sites, the `namespace:value` command is DIRECT
+/// syntax of f_search itself (confirmed by HAR: `f_search=anal+anime+
+/// series%3Agenshin` — plain text and a tag command in one and the same request at
+/// once, see the EHentaiProvider.tagPrefix doc-comment) — so `encoded()` here does
+/// NOT need a private separator channel like SimplyHentaiAdvancedQuery does:
+/// the result is already ready-made, real f_search text that can be
+/// sent as-is.
 ///
-/// ЭКСКЛЮЗИВНАЯ схема, единая для всех сайтов с расширенными полями (см.
-/// ExternalSearchView.resolvedQuery): если хотя бы одно поле здесь
-/// заполнено (включая собственный search), общее поле поиска экрана для
-/// e-hentai перестаёт участвовать — запрос строится ТОЛЬКО из этих полей.
+/// EXCLUSIVE scheme, shared across all sites with advanced fields (see
+/// ExternalSearchView.resolvedQuery): if at least one field here is
+/// filled in (including its own search), the screen's shared search field for
+/// e-hentai stops being used — the query is built ONLY from these fields.
 ///
-/// Многословные значения ВНУТРИ f_search-команды (`parody:"kimi no na
-/// wa$"` — так делают публичные гайды по сайту) HAR не подтверждает — по
-/// аналогии с обычным словом заменяем пробел на `+` (та же формула, что и
-/// в EHentaiProvider.formEncoded для остального f_search), это
-/// ПРЕДПОЛОЖЕНИЕ по симметрии с подтверждённым путём `/tag/other:nudity+
-/// only`, не отдельно подтверждено именно внутри f_search-команды.
+/// Multi-word values INSIDE an f_search command (`parody:"kimi no na
+/// wa$"` — this is how public guides for the site do it) are NOT confirmed by HAR — by
+/// analogy with a regular word we replace the space with `+` (the same formula as
+/// in EHentaiProvider.formEncoded for the rest of f_search); this is an
+/// ASSUMPTION made by symmetry with the confirmed path `/tag/other:nudity+
+/// only`, not separately confirmed specifically inside an f_search command.
 struct EHentaiAdvancedQuery {
     var search: String = ""
     var tags: [String] = []
@@ -39,8 +39,8 @@ struct EHentaiAdvancedQuery {
             && tags.isEmpty && series.isEmpty && characters.isEmpty && artists.isEmpty && groups.isEmpty
     }
 
-    /// Вызывается ТОЛЬКО когда !isEmpty (см. ExternalSearchView.resolvedQuery)
-    /// — собственный search заменяет общее поле экрана, а не складывается с ним.
+    /// Called ONLY when !isEmpty (see ExternalSearchView.resolvedQuery)
+    /// — its own search replaces the screen's shared field rather than being combined with it.
     func encoded() -> String {
         var parts = [search.trimmingCharacters(in: .whitespaces)]
         func append(_ namespace: String, _ values: [String]) {
@@ -59,14 +59,14 @@ struct EHentaiAdvancedQuery {
     }
 }
 
-/// Категории e-hentai (кнопки Doujinshi/Manga/Artist CG/... на главной
-/// странице сайта — см. EHentaiCategoryPicker) и их `f_cats` bitmask.
-/// Подтверждено HAR: `f_cats=1019` встречался в реальном запросе, и
-/// 1019 = сумма ВСЕХ битов ниже КРОМЕ .manga (4) — т.е. семантика bitmask
-/// это ИСКЛЮЧЕНИЕ (галочка = категория выключена из выдачи), не включение;
-/// когда ничего не исключено, сайт вообще не шлёт f_cats (см.
-/// EHentaiProvider.fetchIdsBySearch(excludedCategoryBits:) — 0 значит
-/// "без параметра").
+/// e-hentai categories (the Doujinshi/Manga/Artist CG/... buttons on the site's
+/// home page — see EHentaiCategoryPicker) and their `f_cats` bitmask.
+/// Confirmed by HAR: `f_cats=1019` was seen in a real request, and
+/// 1019 = the sum of ALL bits below EXCEPT .manga (4) — i.e. the bitmask semantics
+/// are EXCLUSION (checked = category excluded from results), not inclusion;
+/// when nothing is excluded, the site doesn't send f_cats at all (see
+/// EHentaiProvider.fetchIdsBySearch(excludedCategoryBits:) — 0 means
+/// "no parameter").
 enum EHentaiCategory: CaseIterable, Identifiable {
     case doujinshi, manga, artistCG, gameCG, western, nonH, imageSet, cosplay, asianPorn, misc
 
@@ -103,34 +103,34 @@ enum EHentaiCategory: CaseIterable, Identifiable {
     }
 }
 
-/// Клиент e-hentai.org — СВОЯ, полностью отдельная реализация, никак не
-/// связанная с MangaNetworkService/LibSite/HitomiProvider. Все URL/форматы
-/// ниже подтверждены реальным HAR (см. план — "e-hentai" блок разбора).
+/// e-hentai.org client — its OWN, fully separate implementation, not connected
+/// in any way to MangaNetworkService/LibSite/HitomiProvider. All the URLs/formats
+/// below are confirmed by real HAR (see the plan — the "e-hentai" analysis section).
 ///
-/// `actor`, не `struct` (в отличие от HitomiProvider): нужен реальный
-/// мутируемый стейт МЕЖДУ вызовами — кэш gid→token (см. tokenCache ниже),
-/// без которого fetchGalleryDetail(id:) невозможен (у e-hentai галерея
-/// адресуется ПАРОЙ (gid, token), не одним числом — токен узнаём только из
-/// ссылок на странице выдачи/поиска, откуда и кэшируем). `actor` сериализует
-/// конкурентный доступ к этому кэшу безопасно; `site`/`capabilities`
-/// объявлены `nonisolated let`, чтобы читаться синхронно из SwiftUI-кода
-/// (как у HitomiProvider), не требуя await на каждый чих.
+/// `actor`, not `struct` (unlike HitomiProvider): real
+/// mutable state is needed BETWEEN calls — a gid→token cache (see tokenCache below),
+/// without which fetchGalleryDetail(id:) is impossible (on e-hentai a gallery
+/// is addressed by a PAIR (gid, token), not a single number — the token is only learned from
+/// links on the results/search page, which is also where we cache it from). `actor` safely
+/// serializes concurrent access to this cache; `site`/`capabilities`
+/// are declared `nonisolated let` so they can be read synchronously from SwiftUI code
+/// (like HitomiProvider), without requiring an await for every little thing.
 actor EHentaiProvider: ExternalSiteProvider {
     nonisolated let site: ExternalSite = .ehentai
     nonisolated let capabilities = ExternalSiteCapabilities(
         hasCatalog: true,
-        // Алфавитного справочника тегов у e-hentai нет (в отличие от
-        // hitomi.la) — зато есть обычный полнотекстовый поиск, см. hasSearch.
+        // e-hentai has no alphabetical tag index (unlike
+        // hitomi.la) — but it does have regular full-text search, see hasSearch.
         hasTagBrowser: false,
         hasSearch: true,
         hasCategoryFilter: true,
-        // Приблизительный (не точный offset, см. cursorForPage) — но
-        // реальный, подтверждён HAR (`range=`), см. paginationQueryItem.
+        // Approximate (not an exact offset, see cursorForPage) — but
+        // real, confirmed by HAR (`range=`), see paginationQueryItem.
         hasPageJump: true,
-        // Ни в HAR, ни на самой странице поиска e-hentai нет видимого
-        // пользовательского контрола сортировки выдачи (в отличие от
-        // hitomi — см. HitomiProvider.SortOption) — честно false, не
-        // выдумываем.
+        // Neither in HAR nor on the e-hentai search page itself is there a visible
+        // user-facing sort control for results (unlike
+        // hitomi — see HitomiProvider.SortOption) — honestly false, we don't
+        // make one up.
         hasSortOptions: false,
         hasBookmarks: false,
         hasHistory: false,
@@ -138,23 +138,23 @@ actor EHentaiProvider: ExternalSiteProvider {
         hasComments: false
     )
 
-    /// Отдельная сессия — своя, не пересекается ни с HitomiProvider.session,
-    /// ни тем более с MangaNetworkService. `Cookie: nw=1` — подтверждено
-    /// живым HAR (30.08, ProxyPin830_18_35_43.har): страница тайтла
-    /// `/g/{id}/{token}/` без этой куки отдаёт НЕ реальный контент, а
-    /// промежуточную страницу "Content Warning" (для галерей, помеченных
-    /// как "Offensive For Everyone" — у e-hentai таких прилично, любой
-    /// поиск с scat/guro/т.п. категориями почти гарантированно на них
-    /// натыкается) с двумя ссылками `?nw=session`/`?nw=always` ("Never Warn
-    /// Me Again") — обе просто СТАВЯТ эту куку (`Set-Cookie: nw=1`) и
-    /// редиректят обратно на ту же страницу, уже с реальной разметкой.
-    /// Без неё parseMetadata/parsePages молча находят 0 совпадений на
-    /// странице-предупреждении (там нет ни gdt1/gdt2, ни тегов, ни ссылок
-    /// на страницы) — отсюда "не грузит тайтл"/пустая обложка-скелетон в
-    /// сетке каталога/пустой превью-грид у ЛЮБОЙ помеченной так галереи.
-    /// Ставим куку СРАЗУ на все запросы сессии — тот же эффект, что и один
-    /// клик "Never Warn Me Again", просто заранее, без отдельного разбора
-    /// warning-страницы и редиректа на каждую такую галерею.
+    /// A separate session — its own, not shared with either HitomiProvider.session
+    /// or, even less so, MangaNetworkService. `Cookie: nw=1` — confirmed by a
+    /// live HAR (Aug 30, ProxyPin830_18_35_43.har): the title page
+    /// `/g/{id}/{token}/` without this cookie returns NOT the real content but an
+    /// intermediate "Content Warning" page (for galleries marked
+    /// as "Offensive For Everyone" — e-hentai has quite a few of these; any
+    /// search with scat/guro/etc. categories is almost guaranteed to run
+    /// into them) with two links, `?nw=session`/`?nw=always` ("Never Warn
+    /// Me Again") — both simply SET this cookie (`Set-Cookie: nw=1`) and
+    /// redirect back to the same page, this time with the real markup.
+    /// Without it, parseMetadata/parsePages silently find 0 matches on
+    /// the warning page (it has neither gdt1/gdt2, nor tags, nor page
+    /// links) — hence "title won't load" / an empty skeleton cover in
+    /// the catalog grid / an empty preview grid for ANY gallery marked this way.
+    /// We set the cookie on EVERY session request up front — the same effect as one
+    /// click of "Never Warn Me Again", just done in advance, without a separate parse of the
+    /// warning page and a redirect for every such gallery.
     nonisolated private let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.httpAdditionalHeaders = [
@@ -165,40 +165,40 @@ actor EHentaiProvider: ExternalSiteProvider {
         return URLSession(configuration: config)
     }()
 
-    /// gid → token, накапливается по мере того как галереи встречаются в
-    /// выдаче (тег/поиск) — карточка тайтла адресуется ОБЕИМИ частями
-    /// (см. doc-comment типа), без токена fetchGalleryDetail не может
-    /// построить канонический URL `/g/{gid}/{token}/`.
+    /// gid → token, accumulated as galleries are encountered in the
+    /// results (tag/search) — a title card is addressed by BOTH parts
+    /// (see the type's doc-comment); without the token fetchGalleryDetail can't
+    /// build the canonical URL `/g/{gid}/{token}/`.
     private var tokenCache: [Int: String] = [:]
 
-    // MARK: Алфавитный справочник — не подтверждён у e-hentai, честно пусто.
+    // MARK: Alphabetical index — not confirmed for e-hentai, honestly empty.
 
     func fetchTagIndex(kind: ExternalTagKind, letter: Swift.Character) async throws -> [ExternalTagEntry] {
         []
     }
 
-    /// Автокомплит e-hentai не подтверждён HAR — честно пусто (как и
-    /// hasTagBrowser, см. capabilities).
+    /// e-hentai autocomplete is not confirmed by HAR — honestly empty (same as
+    /// hasTagBrowser, see capabilities).
     func fetchAutocomplete(query: String, namespace: String?) async throws -> [ExternalTagSuggestion] {
         []
     }
 
-    // MARK: Список тайтлов по тегу/поиску
+    // MARK: List of titles by tag/search
 
-    /// У e-hentai НЕТ отдельной "фичи поиска по тегам" — есть ОДНА строка
-    /// поиска (f_search), а `namespace:value` — просто КОМАНДА внутри неё
-    /// (подтверждено HAR: `f_search=anal+anime+series%3Agenshin` — обычный
-    /// текст и тег-команда в одном и том же запросе одновременно). У
-    /// `/tag/{ns}:{value}` — это просто то, что открывается по клику на
-    /// готовую тег-ссылку в разметке (тоже подтверждено HAR, отдельно от
-    /// f_search), удобный короткий путь для ОДНОГО тега без лишнего текста
-    /// — оставлен отдельным методом протокола, а не свёрнут в
-    /// fetchIdsBySearch, ТОЛЬКО потому что многословные значения тега
-    /// (`nudity only`, `textless narrative`) подтверждены именно в этой
-    /// форме (`+` вместо пробела прямо в пути); синтаксис кавычек для
-    /// многословного тега ВНУТРИ f_search (`parody:"kimi no na wa$"` и
-    /// т.п. — так делают публичные гайды по сайту) HAR не подтверждает,
-    /// поэтому не рискуем угадывать его здесь.
+    /// e-hentai has NO separate "tag search feature" — there's ONE search
+    /// field (f_search), and `namespace:value` is just a COMMAND inside it
+    /// (confirmed by HAR: `f_search=anal+anime+series%3Agenshin` — plain
+    /// text and a tag command in the very same request at the same time). As for
+    /// `/tag/{ns}:{value}` — that's simply what opens when you click a
+    /// ready-made tag link in the markup (also confirmed by HAR, separately from
+    /// f_search); a convenient shortcut for a SINGLE tag without extra text
+    /// — kept as a separate protocol method rather than folded into
+    /// fetchIdsBySearch, ONLY because multi-word tag values
+    /// (`nudity only`, `textless narrative`) are confirmed specifically in this
+    /// form (`+` instead of a space right in the path); the quoting syntax for
+    /// a multi-word tag INSIDE f_search (`parody:"kimi no na wa$"` and
+    /// similar — this is what public guides for the site do) is not confirmed by HAR,
+    /// so we don't risk guessing at it here.
     private static func tagPrefix(for namespace: ExternalTagNamespace) -> String {
         switch namespace {
         case .tag: return "other"
@@ -211,42 +211,42 @@ actor EHentaiProvider: ExternalSiteProvider {
         }
     }
 
-    /// e-hentai кодирует пробел как `+` (форма `application/x-www-form-
-    /// urlencoded`), НЕ `%20` — подтверждено HAR и в query (`f_search=anal
-    /// +anime`), и прямо в пути (`/tag/other:nudity+only`). `.urlPathAllowed`/
-    /// `.urlQueryAllowed` сами по себе дают `%20`, поэтому пробел заменяется
-    /// на `+` вручную ДО percent-encoding остального (encoding сохраняет уже
-    /// вставленный `+` как есть — он входит в `.urlQueryAllowed`).
+    /// e-hentai encodes a space as `+` (the `application/x-www-form-
+    /// urlencoded` form), NOT `%20` — confirmed by HAR both in the query (`f_search=anal
+    /// +anime`) and right in the path (`/tag/other:nudity+only`). `.urlPathAllowed`/
+    /// `.urlQueryAllowed` on their own produce `%20`, so the space is replaced
+    /// with `+` manually BEFORE percent-encoding the rest (encoding leaves an
+    /// already-inserted `+` as-is — it's part of `.urlQueryAllowed`).
     private static func formEncoded(_ text: String) -> String {
         let withPlus = text.replacingOccurrences(of: " ", with: "+")
         return withPlus.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? withPlus
     }
 
-    /// Синтезирует прыжковый курсор (см. paginationQueryItem ниже) — просто
-    /// заворачивает номер страницы как есть в будущий `range=`,
-    /// приблизительно (нет точной формулы страница→range). `nonisolated` —
-    /// протокол объявляет этот метод СИНХРОННЫМ (без async, как site/
-    /// capabilities), а актор по умолчанию изолирует даже такие методы;
-    /// чистое вычисление без обращения к tokenCache/session, изоляция не
-    /// нужна — без этого сборка падает ("crosses into actor-isolated code").
+    /// Synthesizes a jump cursor (see paginationQueryItem below) — simply
+    /// wraps the page number as-is into a future `range=`,
+    /// approximately (there's no exact page→range formula). `nonisolated` —
+    /// the protocol declares this method as SYNCHRONOUS (no async, like site/
+    /// capabilities), while an actor isolates even such methods by default;
+    /// it's a pure computation with no access to tokenCache/session, so isolation isn't
+    /// needed — without this the build fails ("crosses into actor-isolated code").
     nonisolated func cursorForPage(_ page: Int, limit: Int) -> String? {
         guard page > 1 else { return nil }
         return "page:\(page)"
     }
 
-    /// Курсор — либо ОБЫЧНЫЙ, тот, что вернул прошлый вызов (id последнего
-    /// тайтла текущей страницы, идёт в `&next=` — стандартная пагинация
-    /// сайта), либо СПЕЦИАЛЬНЫЙ, синтезированный самим клиентом для прыжка
-    /// на произвольную страницу (см. cursorForPage выше) — с префиксом
-    /// `page:`, идёт в `&range=`. `range=N` подтверждён HAR (второй HAR
-    /// про сортировку/переход): реально меняет позицию в выдаче (запрос с
-    /// `range=68` вернул совсем другой диапазон id тайтлов, чем без него) —
-    /// это и есть механизм кнопки "Jump/Seek" на самом сайте, просто
-    /// подставляет введённое число прямо в этот параметр. ТОЧНАЯ формула
-    /// перевода "номер страницы" → конкретное значение range не подтверждена
-    /// (сайт явно не считает это как offset/limit) — трактуем как
-    /// приблизительный переход, не гарантируем показ РОВНО той же страницы,
-    /// что была бы при обычной постраничной пагинации с начала.
+    /// The cursor is either the REGULAR kind, returned by the previous call (the id of the
+    /// last title on the current page, goes into `&next=` — the site's
+    /// standard pagination), or a SPECIAL one, synthesized by the client itself to jump
+    /// to an arbitrary page (see cursorForPage above) — prefixed with
+    /// `page:`, goes into `&range=`. `range=N` is confirmed by HAR (the second HAR,
+    /// about sorting/navigation): it genuinely changes the position within the results (a request with
+    /// `range=68` returned a completely different range of title ids than without it) —
+    /// this is exactly the mechanism behind the "Jump/Seek" button on the site itself, it just
+    /// plugs the entered number straight into this parameter. The EXACT formula for
+    /// converting a "page number" into a specific range value is not confirmed
+    /// (the site clearly doesn't treat it as an offset/limit) — we treat it as an
+    /// approximate jump and don't guarantee showing EXACTLY the same page
+    /// that regular page-by-page pagination from the start would show.
     private static func paginationQueryItem(for cursor: String) -> String {
         if cursor.hasPrefix("page:"), let page = Int(cursor.dropFirst(5)) {
             return "range=\(page)"
@@ -262,23 +262,23 @@ actor EHentaiProvider: ExternalSiteProvider {
         return try await fetchGalleryList(urlString: urlString)
     }
 
-    /// Обычный полнотекстовый поиск по всему сайту (`?f_search=`) — то,
-    /// чего у hitomi нет (см. HitomiProvider.fetchIdsBySearch — заглушка).
-    /// Пользователь может ввести сюда И свободный текст, И `ns:value`-
-    /// команду, хоть вперемешку (см. doc-comment tagPrefix) — здесь это
-    /// не различается, просто честно прокидывается как есть.
+    /// Regular site-wide full-text search (`?f_search=`) — something
+    /// hitomi doesn't have (see HitomiProvider.fetchIdsBySearch — a stub).
+    /// The user can type in EITHER free text OR an `ns:value`
+    /// command, even mixed together (see the tagPrefix doc-comment) — this method
+    /// doesn't distinguish between them, it just honestly passes it through as-is.
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: 0, cursor: cursor, limit: limit)
     }
 
-    /// Пустой запрос — просто главная страница (см. HAR: `GET https://
-    /// e-hentai.org/` без единого параметра — та же самая "последние
-    /// загруженные" лента, что видна в браузере) — по тому же принципу
-    /// «Recently», что и у hitomi (см. HitomiProvider.fetchIdsBySearch).
-    /// `excludedCategoryBits` — см. EHentaiCategory (bitmask ИСКЛЮЧАЕМЫХ
-    /// категорий, подтверждено HAR). 0 — параметр `f_cats` вообще не
-    /// добавляется в URL, ровно как на самом сайте, когда ни одна кнопка
-    /// категории не выключена.
+    /// An empty query — just the home page (see HAR: `GET https://
+    /// e-hentai.org/` with no parameters at all — the same "recently
+    /// uploaded" feed you see in the browser) — following the same "Recently"
+    /// principle as hitomi (see HitomiProvider.fetchIdsBySearch).
+    /// `excludedCategoryBits` — see EHentaiCategory (the bitmask of EXCLUDED
+    /// categories, confirmed by HAR). 0 means the `f_cats` parameter isn't
+    /// added to the URL at all, exactly as on the site itself when no
+    /// category button is toggled off.
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         var params: [String] = []
@@ -289,10 +289,10 @@ actor EHentaiProvider: ExternalSiteProvider {
         return try await fetchGalleryList(urlString: urlString)
     }
 
-    /// Общий разбор страницы выдачи (тег ИЛИ поиск — одна и та же разметка):
-    /// вытаскивает пары (gid, token) из ссылок на карточки, кладёт в
-    /// tokenCache (иначе fetchGalleryDetail не сможет собрать URL), и
-    /// вытаскивает курсор следующей страницы из `&next=`-ссылки пагинации.
+    /// Shared parsing for a results page (tag OR search — the same markup either way):
+    /// pulls (gid, token) pairs out of the card links, stores them in
+    /// tokenCache (otherwise fetchGalleryDetail can't assemble the URL), and
+    /// pulls the next-page cursor from the `&next=` pagination link.
     private func fetchGalleryList(urlString: String) async throws -> (ids: [Int], nextCursor: String?) {
         guard let url = URL(string: urlString) else { throw EHentaiError.badResponse }
         let (data, response) = try await session.data(from: url)
@@ -310,9 +310,9 @@ actor EHentaiProvider: ExternalSiteProvider {
                       let tokenRange = Range(match.range(at: 2), in: html),
                       let gid = Int(html[gidRange]) else { return }
                 let token = String(html[tokenRange])
-                // Дубли: карточка в выдаче содержит несколько ссылок на один
-                // и тот же gid (превью + заголовок) — берём первую, не
-                // дублируем id в результирующем списке.
+                // Duplicates: a card in the results contains several links to the
+                // same gid (thumbnail + title) — we take the first one, we don't
+                // duplicate the id in the resulting list.
                 if ids.last != gid { ids.append(gid) }
                 tokenCache[gid] = token
             }
@@ -329,7 +329,7 @@ actor EHentaiProvider: ExternalSiteProvider {
         return (ids, nextCursor)
     }
 
-    // MARK: Карточка тайтла
+    // MARK: Title card
 
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail {
         guard let token = tokenCache[id] else { throw EHentaiError.missingToken }
@@ -337,13 +337,13 @@ actor EHentaiProvider: ExternalSiteProvider {
         let metadata = Self.parseMetadata(html: html)
         var pages = Self.parsePages(from: html)
 
-        // Полоса миниатюр страниц отдаётся кусками ~20 штук за раз (см.
-        // ?p=N внизу карточки) — базовый /g/{id}/{token}/ БЕЗ ?p= отдаёт
-        // только первые ~20, подтверждено HAR (галерея на 67 страниц:
-        // "Length: 67 pages" в метаданных, но только 20 ссылок /s/... в
-        // самом ответе; ?p=1/?p=2/?p=3 добавляют следующие ~20 каждая).
-        // Без этой дотяжки чтение молча обрывалось бы на 20-й странице у
-        // любой достаточно длинной галереи.
+        // The page-thumbnail strip is served in chunks of ~20 at a time (see
+        // ?p=N at the bottom of the card) — the base /g/{id}/{token}/ WITHOUT ?p=
+        // only returns the first ~20, confirmed by HAR (a 67-page gallery:
+        // "Length: 67 pages" in the metadata, but only 20 /s/... links in
+        // the response itself; ?p=1/?p=2/?p=3 each add the next ~20).
+        // Without this follow-up fetching, reading would silently break off at page 20 for
+        // any sufficiently long gallery.
         var pageIndex = 1
         while pages.count < metadata.totalPages, pageIndex < 64 {
             guard let moreHTML = try? await fetchHTML(urlString: "https://e-hentai.org/g/\(id)/\(token)/?p=\(pageIndex)") else { break }
@@ -368,9 +368,9 @@ actor EHentaiProvider: ExternalSiteProvider {
             groups: metadata.groups,
             characters: metadata.characters,
             series: metadata.series,
-            // Похожие тайтлы на странице e-hentai — не отдельный список ID
-            // (как related у hitomi), а карточки с собственными gid/token —
-            // не подтверждено разбором, честно пусто (см. план "чего не хватает").
+            // Similar titles on the e-hentai page aren't a separate list of IDs
+            // (like related on hitomi), but cards with their own gid/token —
+            // not confirmed by the parsing, honestly empty (see the plan's "what's missing").
             related: [],
             pages: pages,
             coverURL: metadata.coverURL,
@@ -395,9 +395,9 @@ actor EHentaiProvider: ExternalSiteProvider {
         return html
     }
 
-    /// Всё, что не относится к списку страниц — то, ради чего нет смысла
-    /// заново парсить тег/автора/обложку на КАЖДОМ ?p=N-довеске (см.
-    /// fetchGalleryDetail): достаточно вызвать один раз на базовой странице.
+    /// Everything that isn't part of the page list — the reason there's no point
+    /// re-parsing tags/artist/cover on EVERY ?p=N follow-up (see
+    /// fetchGalleryDetail): calling it once on the base page is enough.
     private struct GalleryMetadata {
         let title: String
         let type: String
@@ -408,15 +408,15 @@ actor EHentaiProvider: ExternalSiteProvider {
         let groups: [String]
         let characters: [String]
         let series: [String]
-        /// Из `<td class="gdt1">Length:</td><td class="gdt2">67 pages</td>`
-        /// — сколько СТРАНИЦ ТАЙТЛА всего (не то же самое, что число ?p=N
-        /// довесок полосы миниатюр — она просто их источник).
+        /// From `<td class="gdt1">Length:</td><td class="gdt2">67 pages</td>`
+        /// — the total number of PAGES IN THE TITLE (not the same thing as the number of ?p=N
+        /// follow-ups for the thumbnail strip — that's just their source).
         let totalPages: Int
-        /// Ниже — поля из тех же `gdt1`/`gdt2` строк метатаблицы + виджета
-        /// рейтинга (`#gdr`) + блока комментариев (`#cdiv`), подтверждены
-        /// реальной разметкой (`eh_detail.html` из HAR этой сессии), см.
-        /// план ЧАСТЬ B.2/B.5. У hitomi таких полей нет вообще — это чисто
-        /// e-hentai-специфичный набор.
+        /// The fields below come from the same `gdt1`/`gdt2` rows of the metadata table + the
+        /// rating widget (`#gdr`) + the comments block (`#cdiv`), confirmed by
+        /// real markup (`eh_detail.html` from this session's HAR), see
+        /// the plan, PART B.2/B.5. hitomi has no fields like these at all — this is a purely
+        /// e-hentai-specific set.
         let posted: String?
         let parentId: Int?
         let visible: String?
@@ -482,12 +482,12 @@ actor EHentaiProvider: ExternalSiteProvider {
         )
     }
 
-    /// `<a name="c{id}"></a>...<div class="c3">Posted on {дата} by: ...
-    /// <a href=".../uploader/...">{автор}</a>...</div>...<div class="c6"
-    /// id="comment_{id}">{текст}</div>` — подтверждено реальной разметкой
-    /// (`eh_detail.html`, HAR этой сессии), см. план ЧАСТЬ B.5. `.*?`
-    /// ленивые — останавливаются на ПЕРВОМ совпадении внутри блока именно
-    /// этого комментария (по одному "by:"/`c6` на комментарий).
+    /// `<a name="c{id}"></a>...<div class="c3">Posted on {date} by: ...
+    /// <a href=".../uploader/...">{author}</a>...</div>...<div class="c6"
+    /// id="comment_{id}">{text}</div>` — confirmed by real markup
+    /// (`eh_detail.html`, this session's HAR), see the plan, PART B.5. The `.*?`
+    /// captures are lazy — they stop at the FIRST match inside the block for
+    /// this specific comment (one "by:"/`c6` per comment).
     private static func parseComments(from html: String) -> [ExternalComment] {
         guard let regex = try? NSRegularExpression(
             pattern: #"<a name="c(\d+)"></a>.*?<div class="c3">Posted on (.*?) by:.*?<a href="https://e-hentai\.org/uploader/[^"]*">([^<]+)</a>.*?<div class="c6"[^>]*>(.*?)</div>"#,
@@ -513,30 +513,30 @@ actor EHentaiProvider: ExternalSiteProvider {
         return result
     }
 
-    /// Миниатюры страниц из ОДНОГО ответа (базового /g/{id}/{token}/ ИЛИ
-    /// любого его ?p=N-довеска — разметка одинаковая, см. fetchGalleryDetail).
-    /// Заодно вытаскивает `thumbnailURL` — реальный CSS background-image
-    /// URL полосы миниатюр (`<div style="...url(https://.../{id}-{n}.webp)...">`,
-    /// (без кавычек внутри url(), подтверждено HAR), см. план ЧАСТЬ B.3.
-    /// ВАЖНО: миниатюры e-hentai — НЕ отдельная картинка на страницу. Одна
-    /// полоса (?p=N-довесок, ~20 страниц) отдаёт ОДИН общий "спрайт" +
-    /// CSS `background-position`, вырезающий нужный тайл — подтверждено
-    /// побайтово реальной разметкой:
+    /// Page thumbnails from a SINGLE response (the base /g/{id}/{token}/ OR
+    /// any of its ?p=N follow-ups — the markup is the same, see fetchGalleryDetail).
+    /// Also pulls out `thumbnailURL` — the real CSS background-image
+    /// URL of the thumbnail strip (`<div style="...url(https://.../{id}-{n}.webp)...">`,
+    /// (no quotes inside url(), confirmed by HAR), see the plan, PART B.3.
+    /// IMPORTANT: e-hentai thumbnails are NOT a separate image per page. One
+    /// strip (a ?p=N follow-up, ~20 pages) serves ONE shared "sprite" +
+    /// a CSS `background-position` that crops out the tile you need — confirmed
+    /// byte-for-byte by real markup:
     /// `<a href=".../s/{key}/{gid}-{n}"><div title="Page N: ..."
     /// style="width:200px;height:278px;background:transparent
     /// url(.../{gid}-{p}.webp) -200px 0 no-repeat"></div></a>` — 20
-    /// СОСЕДНИХ страниц ссылаются на ОДИН И ТОТ ЖЕ url(...), офсет растёт
-    /// на 200 (=ширина тайла) на каждую. Раньше офсет не учитывался вовсе
-    /// — из-за этого превью-грид карточки тайтла показывал один и тот же
-    /// (нецелевой, необрезанный) спрайт на КАЖДОЙ странице партии — то и
-    /// была жалоба "одна картинка много раз + сетка кривая" (нецелевой
-    /// широкий спрайт, натянутый на узкий тайл через scaledToFill,
-    /// выглядит перекошенным). См. ExternalSpriteThumbnail
-    /// (App/Views/ExternalSites/ExternalImage.swift) — там реальный кроп.
-    /// width/height тайла (200×278 и т.п., варьируются по странице) заодно
-    /// используются как width/height страницы — раньше здесь были 0/0
-    /// ("размер неизвестен"), а это разумное приближение реальных пропорций
-    /// (плейсхолдер в читалке/расчёт высоты при "по ширине" теперь чуть точнее).
+    /// ADJACENT pages all link to the SAME url(...), with the offset increasing
+    /// by 200 (= tile width) each time. Previously the offset wasn't accounted for at all
+    /// — because of that, the title card's preview grid showed the same
+    /// (wrong, uncropped) sprite on EVERY page of a batch — that was
+    /// the complaint "one image shown many times + the grid looks off" (the wrong
+    /// wide sprite, stretched onto a narrow tile via scaledToFill,
+    /// looks distorted). See ExternalSpriteThumbnail
+    /// (App/Views/ExternalSites/ExternalImage.swift) — that's where the actual cropping happens.
+    /// The tile's width/height (200×278 etc., varies per page) is also
+    /// used as the page's width/height — previously these were 0/0
+    /// ("size unknown"), and this is a reasonable approximation of the real proportions
+    /// (the placeholder in the reader / height calculation for "fit to width" is now a bit more accurate).
     private static func parsePages(from html: String) -> [ExternalGalleryPage] {
         guard let regex = try? NSRegularExpression(
             pattern: #"href="https://e-hentai\.org/s/([0-9a-f]+)/\d+-(\d+)"><div[^>]*style="width:(\d+)px;height:(\d+)px;background:transparent url\(([^)]+)\)\s*(-?\d+)px"#
@@ -567,7 +567,7 @@ actor EHentaiProvider: ExternalSiteProvider {
     }
 
     /// `<td class="tc">ns:</td><td><a href=...>Name</a> <a ...>Name 2</a></td>`
-    /// — вытащить тексты всех `<a>` внутри блока одного неймспейса.
+    /// — extract the text of every `<a>` inside a single namespace's block.
     private static func extractLinkTexts(from html: String) -> [String] {
         guard let regex = try? NSRegularExpression(pattern: #"<a[^>]*>([^<]+)</a>"#) else { return [] }
         let range = NSRange(html.startIndex..., in: html)
@@ -597,11 +597,11 @@ actor EHentaiProvider: ExternalSiteProvider {
             .replacingOccurrences(of: "&#39;", with: "'")
     }
 
-    // MARK: URL страницы чтения
+    // MARK: Reading page URL
 
-    /// РЕАЛЬНЫЙ сетевой запрос каждый раз (в отличие от hitomi's чистой
-    /// формулы) — H@H-ссылка на картинку временная, с истекающим keystamp,
-    /// её нельзя посчитать заранее и нельзя закэшировать надолго (см. план).
+    /// A REAL network request every time (unlike hitomi's pure
+    /// formula) — the H@H image link is temporary, with an expiring keystamp,
+    /// it can't be computed ahead of time and can't be cached for long (see the plan).
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL {
         guard let url = URL(string: "https://e-hentai.org/s/\(page.key)/\(galleryId)-\(page.index)") else {
             throw EHentaiError.badResponse

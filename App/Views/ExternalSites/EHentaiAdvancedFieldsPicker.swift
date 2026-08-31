@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// Расширенные поля поиска E-Hentai — своя строка поиска + Tags/Parodies/
-/// Characters/Artists/Groups (см. EHentaiAdvancedQuery doc-comment в
-/// EHentaiProvider.swift — `namespace:value`-команда прямо внутри f_search,
-/// подтверждено HAR). Автокомплита на сайте не подтверждено (см.
-/// EHentaiProvider.fetchAutocomplete — честно пуст) — поля здесь простые,
-/// без подсказок.
+/// Advanced search fields for E-Hentai — its own search box + Tags/Parodies/
+/// Characters/Artists/Groups (see the EHentaiAdvancedQuery doc-comment in
+/// EHentaiProvider.swift — a `namespace:value` command right inside
+/// f_search, confirmed by HAR). Autocomplete isn't confirmed on the site
+/// (see EHentaiProvider.fetchAutocomplete — honestly empty) — the fields
+/// here are plain, with no suggestions.
 struct EHentaiAdvancedFieldsPicker: View {
     @Binding var query: EHentaiAdvancedQuery
 

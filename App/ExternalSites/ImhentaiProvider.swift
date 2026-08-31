@@ -1,28 +1,28 @@
 import Foundation
 
-/// Ошибки ImhentaiProvider — та же намеренно простая схема, что у
+/// Errors for ImhentaiProvider — the same deliberately simple scheme as
 /// HitomiError/EHentaiError/ThreeHentaiError.
 enum ImhentaiError: Error {
     case badResponse
 }
 
-/// Категории imhentai.com/imhentai.xxx (Manga/Doujinshi/Western/Image Set/
-/// Artist CG/Game CG — кнопки на `/advsearch/`, подтверждено HAR: `<li
+/// Categories on imhentai.com/imhentai.xxx (Manga/Doujinshi/Western/Image Set/
+/// Artist CG/Game CG — buttons on `/advsearch/`, confirmed by HAR: `<li
 /// onclick="toggle_category('manga')"><input type="hidden" name="m" value="1"
-/// />Manga</li>` и т.д.) — та же семантика, что у EHentaiCategory: тап
-/// ВЫКЛЮЧАЕТ категорию из выдачи (по умолчанию все включены), поэтому и
-/// здесь `excluded`-набор, не `included` (см. ImhentaiCategoryPicker).
+/// />Manga</li>` etc.) — the same semantics as EHentaiCategory: tapping
+/// EXCLUDES the category from the listing (all are included by default), hence
+/// an `excluded` set here too, not `included` (see ImhentaiCategoryPicker).
 ///
-/// `.bit` — СВОЙ диапазон битов (10...15), НЕ пересекающийся с
-/// EHentaiCategory (0...9) — по прямому расчёту: `excludedCategoryBits:
-/// Int` в протоколе ОБЩИЙ на весь запрос (см. ExternalCatalogGridView.
-/// fetchPage — один и тот же bitmask уходит в fetchIdsBySearch КАЖДОГО
-/// сайта в совместной выдаче, см. ExternalCombinedCatalogView), поэтому
-/// если одновременно включены e-hentai И imhentai, один Int обязан нести
-/// ОБА набора исключений сразу, не путаясь — непересекающиеся диапазоны
-/// битов это гарантируют. Каждый провайдер сам маскирует входящий bitmask
-/// под СВОИ известные биты (см. fetchIdsBySearch ниже) — чужие биты в том
-/// же Int просто игнорируются, а не портят f_cats/m=&d=&...
+/// `.bit` — ITS OWN bit range (10...15), NOT overlapping with
+/// EHentaiCategory (0...9) — by direct design: `excludedCategoryBits:
+/// Int` in the protocol is SHARED across the whole request (see ExternalCatalogGridView.
+/// fetchPage — the same bitmask goes into fetchIdsBySearch for EVERY
+/// site in a combined listing, see ExternalCombinedCatalogView), so
+/// if e-hentai AND imhentai are enabled at the same time, one Int has to carry
+/// BOTH exclusion sets at once without colliding — non-overlapping bit
+/// ranges guarantee that. Each provider masks the incoming bitmask down to
+/// ITS OWN known bits (see fetchIdsBySearch below) — other providers' bits in the
+/// same Int are simply ignored, and don't corrupt f_cats/m=&d=&...
 enum ImhentaiCategory: CaseIterable, Identifiable {
     case manga, doujinshi, western, imageSet, artistCG, gameCG
 
@@ -39,9 +39,9 @@ enum ImhentaiCategory: CaseIterable, Identifiable {
         }
     }
 
-    /// Query-параметр на `/search/`/`/advsearch/` (подтверждено HAR —
-    /// `?...&m=1&d=1&w=1&i=1&a=1&g=1&...`) — "1" включает категорию в
-    /// выдачу, "0" исключает.
+    /// Query parameter on `/search/`/`/advsearch/` (confirmed by HAR —
+    /// `?...&m=1&d=1&w=1&i=1&a=1&g=1&...`) — "1" includes the category in
+    /// the listing, "0" excludes it.
     var queryKey: String {
         switch self {
         case .manga: return "m"
@@ -65,20 +65,20 @@ enum ImhentaiCategory: CaseIterable, Identifiable {
     }
 }
 
-/// Языки imhentai.com/imhentai.xxx (English/Japanese/Spanish/French/Korean/
-/// German/Russian — флаги-чекбоксы на `/advsearch/`) — ПОДТВЕРЖДЕНО живым
-/// HAR (31.08, третий заход): реальные последовательные запросы
+/// Languages on imhentai.com/imhentai.xxx (English/Japanese/Spanish/French/Korean/
+/// German/Russian — flag checkboxes on `/advsearch/`) — CONFIRMED by live
+/// HAR (Aug 31, third pass): real consecutive requests
 /// `/advsearch/?...&en=1&jp=1&es=1&fr=1&kr=1&de=1&ru=1&key=...` →
-/// `...&en=1&jp=1&es=0&fr=1&kr=1&de=0&ru=1&key=...` → ... — та же семантика
-/// "1" включена/"0" исключена, тот же приём тапа-выключения, что и у
-/// ImhentaiCategory (по умолчанию ВСЕ включены).
+/// `...&en=1&jp=1&es=0&fr=1&kr=1&de=0&ru=1&key=...` → ... — the same
+/// "1" included/"0" excluded semantics, the same tap-to-exclude trick as
+/// ImhentaiCategory (all are included by default).
 ///
-/// `.bit` — СВОЙ диапазон (16...22), НЕ пересекается ни с EHentaiCategory
-/// (0...9), ни с ImhentaiCategory (10...15) — тот же общий Int
-/// `excludedCategoryBits` безопасно несёт категории И языки одновременно
-/// (см. doc-comment ImhentaiCategory.bit — тот же принцип, просто ещё одно
-/// непересекающееся измерение в том же канале, без правки протокола
-/// ExternalSiteProvider).
+/// `.bit` — ITS OWN range (16...22), not overlapping with either EHentaiCategory
+/// (0...9) or ImhentaiCategory (10...15) — the same shared Int
+/// `excludedCategoryBits` safely carries categories AND languages at once
+/// (see the ImhentaiCategory.bit doc-comment — same principle, just another
+/// non-overlapping dimension in the same channel, without touching the
+/// ExternalSiteProvider protocol).
 enum ImhentaiLanguage: CaseIterable, Identifiable {
     case english, japanese, spanish, french, korean, german, russian
 
@@ -96,7 +96,7 @@ enum ImhentaiLanguage: CaseIterable, Identifiable {
         }
     }
 
-    /// Query-параметр — подтверждено HAR (en/jp/es/fr/kr/de/ru).
+    /// Query parameter — confirmed by HAR (en/jp/es/fr/kr/de/ru).
     var queryKey: String {
         switch self {
         case .english: return "en"
@@ -121,8 +121,8 @@ enum ImhentaiLanguage: CaseIterable, Identifiable {
         }
     }
 
-    /// Флаг-эмодзи — чисто для узнаваемости в ImhentaiLanguagePicker, не
-    /// подтверждено HAR (это иконки самого сайта — свои PNG, не эмодзи).
+    /// Flag emoji — purely for recognizability in ImhentaiLanguagePicker, not
+    /// confirmed by HAR (these are the site's own icons — its own PNGs, not emoji).
     var flag: String {
         switch self {
         case .english: return "🇬🇧"
@@ -136,36 +136,36 @@ enum ImhentaiLanguage: CaseIterable, Identifiable {
     }
 }
 
-/// Расширенные поля поиска — Tags/Parodies/Artists/Characters/Groups (см.
-/// `/advsearch/`, скриншот пользователя 31.08: "Tags (1/16632)"/"Parodies
-/// (0/5014)"/... — отдельное поле на КАЖДУЮ категорию, не общая строка
-/// поиска, каждое может копить НЕСКОЛЬКО значений сразу — счётчик рядом с
-/// заголовком считает уже добавленные). Собирается в спец-синтаксис
-/// `+kind:"значение"` (см. ImhentaiProvider.fetchIdsBySearch doc-comment —
-/// живым HAR ПОДТВЕРЖДЁН только `tag` — `+tag:"anal"`, ровно то, что
-/// собирает сама страница `/advsearch/` в скрытое поле `key`; `parody`/
-/// `artist`/`character`/`group` — по симметрии с реальными URL-сегментами
-/// карточки одного значения, `/parody/{slug}/`/`/artist/{slug}/`/
-/// `/character/{slug}/`/`/group/{slug}/` (см. ImhentaiProvider.
-/// tagBasePath) — тот же принцип, что и у `tag`/`/tag/{slug}/`, но НЕ
-/// подтверждено отдельным HAR именно для этих четырёх. Комбинация
-/// НЕСКОЛЬКИХ значений (несколько тегов сразу, тег+пародия одновременно) —
-/// тоже не подтверждена отдельно (в HAR встретился только ОДИН активный
-/// тег), собирается по аналогии — несколько `+kind:"..."` через пробел,
-/// как в большинстве подобных мини-языков поиска.
+/// Advanced search fields — Tags/Parodies/Artists/Characters/Groups (see
+/// `/advsearch/`, user screenshot from Aug 31: "Tags (1/16632)"/"Parodies
+/// (0/5014)"/... — a separate field per EACH category, not one shared search
+/// string; each can accumulate SEVERAL values at once — the counter next to
+/// the heading tracks the ones already added). Assembled into the special
+/// syntax `+kind:"value"` (see the ImhentaiProvider.fetchIdsBySearch doc-comment —
+/// live HAR CONFIRMS only `tag` — `+tag:"anal"`, exactly what
+/// the `/advsearch/` page itself assembles into the hidden `key` field; `parody`/
+/// `artist`/`character`/`group` — by symmetry with the real URL segments
+/// of a single value's card, `/parody/{slug}/`/`/artist/{slug}/`/
+/// `/character/{slug}/`/`/group/{slug}/` (see ImhentaiProvider.
+/// tagBasePath) — the same principle as `tag`/`/tag/{slug}/`, but NOT
+/// confirmed by a separate HAR specifically for these four. Combining
+/// SEVERAL values (several tags at once, tag+parody together) is
+/// also not confirmed separately (only ONE active tag showed up in the HAR),
+/// assembled by analogy — several `+kind:"..."` separated by a space,
+/// as in most similar little search mini-languages.
 struct ImhentaiAdvancedQuery {
-    /// Собственная строка поиска IMHentai — по прямой просьбе (31.08)
-    /// ОТДЕЛЬНАЯ от общего верхнего поля поиска: обычный текст, набранный
-    /// "как для других сайтов", у imhentai надёжно не находит ничего (см.
-    /// doc-comment fetchIdsBySearch — `/search/` и `/advsearch/` два
-    /// РАЗНЫХ парсера одного и того же `key=`). Поэтому imhentai вообще
-    /// не смотрит на общее поле — ни на экране ОДНОГО сайта
-    /// (ExternalSearchView.resolvedQuery/displayTitle), ни в совместном
-    /// каталоге "Все сайты" (ExternalCombinedCatalogView.query(for:) —
-    /// там у КАЖДОГО сайта теперь свой независимый запрос, см.
-    /// ExternalCatalogGridView.queryForSite; раньше был один общий на все
-    /// сайты разом, и тег/поиск имхентая утекал в запрос остальных —
-    /// исправлено по прямой просьбе). Живёт в тех же «Фильтрах», что и
+    /// IMHentai's own search string — per a direct request (Aug 31),
+    /// SEPARATE from the general top search field: ordinary text typed
+    /// "the same way as for other sites" reliably finds nothing on imhentai (see
+    /// the fetchIdsBySearch doc-comment — `/search/` and `/advsearch/` are two
+    /// DIFFERENT parsers for the same `key=`). So imhentai doesn't look at
+    /// the shared field at all — neither on the single-site screen
+    /// (ExternalSearchView.resolvedQuery/displayTitle), nor in the combined
+    /// "All sites" catalog (ExternalCombinedCatalogView.query(for:) —
+    /// there each site now has its own independent query, see
+    /// ExternalCatalogGridView.queryForSite; it used to be one shared query for all
+    /// sites at once, and imhentai's tag/search would leak into the other
+    /// sites' request — fixed per a direct request). Lives in the same "Filters" as
     /// Tags/Parodies/...
     var searchText: String = ""
     var tags: [String] = []
@@ -178,9 +178,9 @@ struct ImhentaiAdvancedQuery {
         searchText.isEmpty && tags.isEmpty && parodies.isEmpty && artists.isEmpty && characters.isEmpty && groups.isEmpty
     }
 
-    /// Значения — как есть, БЕЗ слагификации (не URL-путь, а значение
-    /// внутри строки `key=` в кавычках — на скриншоте пользователя чип
-    /// показывает человекочитаемое "Tag: Anal", не "anal-female"/slug).
+    /// Values — as-is, WITHOUT slugification (not a URL path, but a value
+    /// inside the quoted `key=` string — in the user's screenshot the chip
+    /// shows the human-readable "Tag: Anal", not "anal-female"/slug).
     func clauses() -> [String] {
         func kind(_ name: String, _ values: [String]) -> [String] {
             values.map { "+\(name):\"\($0)\"" }
@@ -189,61 +189,61 @@ struct ImhentaiAdvancedQuery {
     }
 }
 
-/// Клиент imhentai.xxx — СВОЯ, полностью отдельная реализация. Все URL/
-/// форматы ниже подтверждены реальным HAR (31.08, три захода — каталог/
-/// поиск, затем карточка тайтла + читалка живьём с телефона пользователя)
-/// и перепроверены живым curl перед коммитом.
+/// Client for imhentai.xxx — ITS OWN, fully separate implementation. All URLs/
+/// formats below are confirmed by real HAR (Aug 31, three passes — catalog/
+/// search, then a title card + reader captured live from the user's phone)
+/// and rechecked with a live curl before committing.
 ///
-/// ВАЖНО (см. отчёт пользователю) — сайт за Cloudflare: часть путей
-/// (`/gallery/`, `/view/`, `/groups/`, `/artist/`, `/tags/`, `/advsearch/`,
-/// сама `/`) в песочнице этой сессии отвечали 403 "Just a moment..." без
-/// `cf_clearance`-куки (та выдаётся только после прохождения JS-проверки
-/// в настоящем браузере — `URLSession` её пройти не может). С реального
-/// устройства пользователя (см. HAR 31.08, поздний заход) те же пути
-/// отдавали 200 без единой заминки — но это браузерный трафик (JS
-/// исполняется), не то же самое, что чистый `URLSession`-клиент даже с
-/// той же сети/IP: Cloudflare различает их и по TLS/HTTP-фингерпринту, не
-/// только по репутации IP. Возможно, что именно ЭТА зона Cloudflare
-/// достаточно мягкая (JS-испытание проходит незаметно для любого клиента
-/// с правдоподобным TLS-почерком) — но гарантии нет, пока не проверено
-/// живьём из самого приложения.
+/// IMPORTANT (see the report to the user) — the site sits behind Cloudflare: some
+/// paths (`/gallery/`, `/view/`, `/groups/`, `/artist/`, `/tags/`, `/advsearch/`,
+/// even `/` itself) returned 403 "Just a moment..." in this session's sandbox without
+/// a `cf_clearance` cookie (which is only issued after passing the JS check
+/// in a real browser — `URLSession` can't pass it). From the user's real
+/// device (see the HAR from Aug 31, later pass) the same paths
+/// returned 200 without a hitch — but that's browser traffic (JS
+/// executes), not the same thing as a plain `URLSession` client even on
+/// the same network/IP: Cloudflare distinguishes them by TLS/HTTP
+/// fingerprint too, not just IP reputation. It's possible this particular
+/// Cloudflare zone is lenient enough (the JS challenge passes unnoticed for any client
+/// with a plausible TLS fingerprint) — but there's no guarantee until it's checked
+/// live from the app itself.
 struct ImhentaiProvider: ExternalSiteProvider {
     let site: ExternalSite = .imhentai
     let capabilities = ExternalSiteCapabilities(
         hasCatalog: true,
-        // Алфавитный справочник — tags/parodies/artists/characters/groups,
-        // все 5 через ОДНУ и ту же схему `/{раздел}/{буква}/` (подтверждено
-        // HAR только для groups — остальные четыре по симметрии разметки
-        // nav-бара, не проверены индивидуально).
+        // Alphabetical directory — tags/parodies/artists/characters/groups,
+        // all 5 through the SAME `/{section}/{letter}/` scheme (confirmed by
+        // HAR only for groups — the other four assumed by symmetry with the
+        // nav-bar markup, not verified individually).
         hasTagBrowser: true,
-        // Настоящий полнотекстовый поиск (`/search/?key=`), подтверждено
-        // HAR (200, реальные карточки в ответе).
+        // Real full-text search (`/search/?key=`), confirmed by
+        // HAR (200, real cards in the response).
         hasSearch: true,
-        // Manga/Doujinshi/Western/Image Set/Artist CG/Game CG — все 6
-        // подтверждены HAR (`/advsearch/`), см. ImhentaiCategory.
+        // Manga/Doujinshi/Western/Image Set/Artist CG/Game CG — all 6
+        // confirmed by HAR (`/advsearch/`), see ImhentaiCategory.
         hasCategoryFilter: true,
-        // Номер страницы — обычный query-параметр `?page=N`, точный переход
-        // (подтверждено HAR — пагинация `/search/`/`/groups/{буква}/`).
+        // Page number — an ordinary `?page=N` query parameter, exact jump
+        // (confirmed by HAR — pagination on `/search/`/`/groups/{letter}/`).
         hasPageJump: true,
         // Latest/Popular/Downloaded/Top Rated (`lt`/`pp`/`dl`/`tr`,
-        // подтверждено HAR `/advsearch/`) — переиспользует общий UI/словарь
-        // HitomiProvider.SortOption (см. её маппинг ниже и тот же приём у
-        // ThreeHentaiProvider — единственный сегодня источник вариантов на
-        // экран сортировки, свой список сюда не заводим).
+        // confirmed by HAR on `/advsearch/`) — reuses the shared UI/vocabulary of
+        // HitomiProvider.SortOption (see its mapping below and the same trick used by
+        // ThreeHentaiProvider — currently the only source of options for the
+        // sort screen, we don't build a separate list here).
         hasSortOptions: true,
-        // Аккаунт/избранное/загрузки на самом сайте РЕАЛЬНО есть (кнопки
-        // Favourite/Download на карточке, подтверждено HAR), но эта
-        // интеграция без входа — тот же принцип, что у EHentaiProvider/
+        // Account/favorites/downloads REALLY do exist on the site itself
+        // (Favourite/Download buttons on the card, confirmed by HAR), but this
+        // integration is signed-out — the same principle as EHentaiProvider/
         // ThreeHentaiProvider.
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
-        // Эндпоинт `POST /inc/comments.php` реально существует
-        // (подтверждено HAR — 200 на обеих проверенных карточках), но
-        // ответ был `empty` на всех проверенных тайтлах (ни у одного не
-        // было ни одного комментария) — ни формат тела запроса, ни формат
-        // ответа С РЕАЛЬНЫМИ комментариями не подтверждены, честно false,
-        // не выдумываем.
+        // The `POST /inc/comments.php` endpoint genuinely exists
+        // (confirmed by HAR — 200 on both checked cards), but the
+        // response was `empty` on every title checked (not one of them
+        // had a single comment) — neither the request-body format nor the
+        // response format WITH ACTUAL comments is confirmed, so honestly false,
+        // we don't make it up.
         hasComments: false
     )
 
@@ -258,7 +258,7 @@ struct ImhentaiProvider: ExternalSiteProvider {
 
     private static let baseURL = "https://imhentai.xxx"
 
-    // MARK: Алфавитный справочник (Tags/Parodies/Artists/Characters/Groups)
+    // MARK: Alphabetical directory (Tags/Parodies/Artists/Characters/Groups)
 
     private static func letterIndexPath(for kind: ExternalTagKind) -> String {
         switch kind {
@@ -270,9 +270,9 @@ struct ImhentaiProvider: ExternalSiteProvider {
         }
     }
 
-    /// Единственное число того же раздела — часть URL карточки одного
-    /// конкретного значения (`/tag/{slug}/`, не `/tags/{slug}/`,
-    /// подтверждено HAR на живой карточке тайтла: href="/tag/lolicon/").
+    /// Singular form of the same section — part of the URL for a single
+    /// value's card (`/tag/{slug}/`, not `/tags/{slug}/`,
+    /// confirmed by HAR on a live title card: href="/tag/lolicon/").
     private static func singularSegment(for basePath: String) -> String {
         switch basePath {
         case "tags": return "tag"
@@ -284,19 +284,19 @@ struct ImhentaiProvider: ExternalSiteProvider {
         }
     }
 
-    /// "num" — отдельный бакет цифр/символов (подтверждено HAR:
-    /// `/groups/num/`), тот же сигнал (`letter.isNumber`), что уже шлёт
-    /// ExternalTagBrowserView вместо "#" (см. HitomiProvider/
-    /// ThreeHentaiProvider.fetchTagIndex — тот же приём).
+    /// "num" — a separate bucket for digits/symbols (confirmed by HAR:
+    /// `/groups/num/`), the same signal (`letter.isNumber`) already sent by
+    /// ExternalTagBrowserView instead of "#" (see HitomiProvider/
+    /// ThreeHentaiProvider.fetchTagIndex — the same trick).
     func fetchTagIndex(kind: ExternalTagKind, letter: Swift.Character) async throws -> [ExternalTagEntry] {
         let basePath = Self.letterIndexPath(for: kind)
         let singular = Self.singularSegment(for: basePath)
         let letterSlug = letter.isNumber ? "num" : String(letter).lowercased()
         var result: [ExternalTagEntry] = []
         var seenSlugs = Set<String>()
-        // Занятые буквы реально паджинируются (`?page=2`, подтверждено HAR
-        // на /groups/a/ — 48 страниц) — тянем все страницы подряд, тот же
-        // приём и потолок, что у ThreeHentaiProvider.fetchTagIndex.
+        // Populated letters genuinely paginate (`?page=2`, confirmed by HAR
+        // on /groups/a/ — 48 pages) — we pull all pages in sequence, the same
+        // trick and cap as ThreeHentaiProvider.fetchTagIndex.
         var page = 1
         while page <= 20 {
             var urlString = "\(Self.baseURL)/\(basePath)/\(letterSlug)/"
@@ -326,11 +326,11 @@ struct ImhentaiProvider: ExternalSiteProvider {
 
     /// `<a class="tag_btn ..." href="/{singular}/{slug}/"><h3 class=
     /// "list_tag">{name}[ <span class='split_tag'>...</span>]</h3>
-    /// <span class="badge">{count}</span>...` — подтверждено HAR
-    /// (/groups/a/). `.dotMatchesLineSeparators` — h3-содержимое может
-    /// переноситься на opcional вложенный `<span>` (split_tag/альтернативное
-    /// имя) до закрывающего `</h3>`, вырезается через stripInnerTags так
-    /// же, как e-hentai-комментарии у EHentaiProvider.
+    /// <span class="badge">{count}</span>...` — confirmed by HAR
+    /// (/groups/a/). `.dotMatchesLineSeparators` — the h3 content can
+    /// wrap onto an optional nested `<span>` (split_tag/alternate
+    /// name) before the closing `</h3>`, stripped out via stripInnerTags the
+    /// same way as e-hentai comments in EHentaiProvider.
     private static func parseLetterIndexList(html: String, singularSegment: String) -> [ExternalTagEntry] {
         guard let regex = try? NSRegularExpression(
             pattern: #"href="/\#(NSRegularExpression.escapedPattern(for: singularSegment))/([^"]+)/"><h3[^>]*>(.*?)</h3>\s*<span class="badge">(\d+)</span>"#,
@@ -355,27 +355,27 @@ struct ImhentaiProvider: ExternalSiteProvider {
         html.range(of: #"href='[^']*page=\d+[^']*'>Next"#, options: .regularExpression) != nil
     }
 
-    /// Автокомплит не подтверждён HAR — ни одного AJAX-запроса под поля
-    /// "search tags..."/"search parodies..." на `/advsearch/` не поймано
-    /// (возможно чисто клиентская фильтрация уже загруженного списка, не
-    /// сетевой автокомплит) — честно пусто, тот же принцип, что у
+    /// Autocomplete isn't confirmed by HAR — not a single AJAX request under the
+    /// "search tags..."/"search parodies..." fields on `/advsearch/` was caught
+    /// (possibly purely client-side filtering of an already-loaded list, not a
+    /// network autocomplete) — honestly empty, the same principle as
     /// EHentaiProvider/ThreeHentaiProvider.
     func fetchAutocomplete(query: String, namespace: String?) async throws -> [ExternalTagSuggestion] {
         []
     }
 
-    // MARK: Сортировка
+    // MARK: Sorting
 
-    /// Переиспользует словарь hitomi (см. её doc-comment у ThreeHentaiProvider
-    /// — тот же приём: общий UI сортировки в ExternalCatalogGridView сегодня
-    /// жёстко завязан на HitomiProvider.SortOption). У imhentai 4 РЕАЛЬНЫХ
-    /// режима — Latest/Popular/Downloaded/Top Rated (`lt`/`pp`/`dl`/`tr`,
-    /// подтверждено HAR `/advsearch/`), не времяоконные периоды, поэтому
-    /// соответствие не идеальное: `.dateAdded` → без параметров (сайт и так
-    /// сортирует по дате по умолчанию), `.popularToday` → `pp`,
-    /// `.popularWeek` → `dl` (ближайшая по смыслу метрика вовлечённости),
-    /// `.popularMonth`/`.popularYear` → `tr` (оба, третьей отдельной
-    /// метрики физически нет).
+    /// Reuses hitomi's dictionary (see its doc-comment on ThreeHentaiProvider
+    /// — the same trick: the shared sort UI in ExternalCatalogGridView is currently
+    /// hard-wired to HitomiProvider.SortOption). imhentai has 4 REAL
+    /// modes — Latest/Popular/Downloaded/Top Rated (`lt`/`pp`/`dl`/`tr`,
+    /// confirmed by HAR on `/advsearch/`), not time-window periods, so
+    /// the mapping isn't perfect: `.dateAdded` → no parameters (the site already
+    /// sorts by date by default), `.popularToday` → `pp`,
+    /// `.popularWeek` → `dl` (the closest engagement metric by meaning),
+    /// `.popularMonth`/`.popularYear` → `tr` (both — there simply isn't a
+    /// third separate metric).
     private static func sortQueryParams(for sortKey: String?) -> [String] {
         guard let option = sortKey.flatMap(HitomiProvider.SortOption.init(rawValue:)) else { return [] }
         let active: String
@@ -388,7 +388,7 @@ struct ImhentaiProvider: ExternalSiteProvider {
         return ["lt", "pp", "dl", "tr"].map { "\($0)=\($0 == active ? 1 : 0)" }
     }
 
-    // MARK: Список тайтлов по тегу/серии/автору/группе
+    // MARK: Title listing by tag/series/artist/group
 
     private static func tagBasePath(for namespace: ExternalTagNamespace) -> String {
         switch namespace {
@@ -404,13 +404,13 @@ struct ImhentaiProvider: ExternalSiteProvider {
         try await fetchIdsByTag(namespace: namespace, value: value, sortKey: nil, cursor: cursor, limit: limit)
     }
 
-    /// `value` — slug (из ExternalTagBrowserView/entry.slug — реальный,
-    /// или чистое отображаемое имя из чипа карточки тайтла, см.
-    /// ExternalGalleryDetailView) — слагифицируется так же, как у
-    /// ThreeHentaiProvider (см. её slugify doc-comment — та же формула:
-    /// нижний регистр + любая последовательность не-буквенно-цифровых
-    /// символов схлопывается в один дефис), идемпотентно на уже готовых
-    /// slug'ах.
+    /// `value` — a slug (from ExternalTagBrowserView/entry.slug — a real one,
+    /// or a plain display name from a title card's chip, see
+    /// ExternalGalleryDetailView) — slugified the same way as
+    /// ThreeHentaiProvider (see its slugify doc-comment — the same formula:
+    /// lowercase + any run of non-alphanumeric
+    /// characters collapses to a single hyphen), idempotent on slugs that are already
+    /// slug-formatted.
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let basePath = Self.tagBasePath(for: namespace)
         let slug = Self.slugify(value)
@@ -423,9 +423,9 @@ struct ImhentaiProvider: ExternalSiteProvider {
         return try await fetchGalleryList(urlString: urlString, currentPage: page)
     }
 
-    /// Слагификация — 1-в-1 ThreeHentaiProvider.slugify (та же реальная
-    /// схема сайта: нижний регистр, последовательность не-буквенно-
-    /// цифровых символов → один дефис), подтверждено HAR: "seven of seven"
+    /// Slugification — identical to ThreeHentaiProvider.slugify (the same real
+    /// site scheme: lowercase, a run of non-alphanumeric
+    /// characters → a single hyphen), confirmed by HAR: "seven of seven"
     /// → "seven-of-seven", "akumu no takuhaibin" → "akumu-no-takuhaibin".
     private static func slugify(_ text: String) -> String {
         var slug = ""
@@ -448,7 +448,7 @@ struct ImhentaiProvider: ExternalSiteProvider {
         return String(page)
     }
 
-    // MARK: Поиск
+    // MARK: Search
 
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: 0, sortKey: nil, cursor: cursor, limit: limit)
@@ -458,40 +458,40 @@ struct ImhentaiProvider: ExternalSiteProvider {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: excludedCategoryBits, sortKey: nil, cursor: cursor, limit: limit)
     }
 
-    /// Строго алфавитно-цифровой набор для percent-encoding значения `key=`
-    /// — НЕ `.urlQueryAllowed` (тот RFC3986-набор оставляет `+`/`:` как
-    /// есть, не экранирует), а вручную суженный: `+`/`:`/`"` в
-    /// ImhentaiAdvancedQuery.clauses() ОБЯЗАНЫ уйти percent-encoded (иначе
-    /// сырой "+" PHP на стороне сервера раскодирует как пробел — та же
-    /// семантика application/x-www-form-urlencoded, что и у $_GET, — и
-    /// спецсинтаксис "+tag:..." развалится на пробел+"tag:..."). Реальный
-    /// браузер (см. HAR, 31.08) кодирует ИМЕННО так — `%2Btag%3A%22anal%22`,
-    /// то есть буквально JS-эквивалент `encodeURIComponent`, не
-    /// RFC3986-safe набор.
+    /// Strictly alphanumeric set for percent-encoding the `key=` value
+    /// — NOT `.urlQueryAllowed` (that RFC3986 set leaves `+`/`:` as-
+    /// is, doesn't escape them) but a manually narrowed one: `+`/`:`/`"` in
+    /// ImhentaiAdvancedQuery.clauses() MUST come out percent-encoded (otherwise
+    /// a raw "+" gets decoded server-side by PHP as a space — the same
+    /// semantics as application/x-www-form-urlencoded, i.e. as $_GET — and
+    /// the special syntax "+tag:..." falls apart into space+"tag:..."). A real
+    /// browser (see the HAR, Aug 31) encodes it EXACTLY this way — `%2Btag%3A%22anal%22`,
+    /// i.e. literally the JS equivalent of `encodeURIComponent`, not the
+    /// RFC3986-safe set.
     private static let searchValueAllowedCharacters: CharacterSet = {
         var set = CharacterSet.alphanumerics
         set.insert(charactersIn: "-_.~")
         return set
     }()
 
-    /// `/search/?key=...` — подтверждено HAR (200, реальные карточки) для
-    /// ОБЫЧНОГО текста. Специальный синтаксис `+tag:"..."`/`+parody:"..."`/
-    /// ... (см. ImhentaiAdvancedQuery — Tags/Parodies/Artists/Characters/
-    /// Groups на `/advsearch/`, скриншот пользователя 31.08) `/search/` НЕ
-    /// понимает — перепроверено живым curl: `key=+tag:"anal"` через
-    /// `/search/` даёт "(0) results found" (буквально ищет как ТЕКСТ), тот
-    /// же запрос через `/advsearch/` в реальном HAR дал "(219,197) results
-    /// found" — эти два эндпоинта РАЗНО парсят один и тот же `key=`.
-    /// `/advsearch/` из песочницы этой сессии за Cloudflare (403, тот же
-    /// джва-челлендж, что у `/gallery/`/`/view/`) — маршрутизация ниже
-    /// (`usesAdvancedSyntax`) подтверждена только КОСВЕННО (реальным HAR +
-    /// логикой "два разных парсера"), сам финальный запрос с реального
-    /// устройства НЕ перепроверен — как и остальные HTML-страницы этого
-    /// сайта, см. doc-comment типа.
-    /// Категории/языки — только СВОИ биты (см. ImhentaiCategory/
-    /// ImhentaiLanguage.bit doc-comment — непересекающиеся диапазоны с
-    /// EHentaiCategory, маскируем на входе, чужие биты в том же Int просто
-    /// игнорируются).
+    /// `/search/?key=...` — confirmed by HAR (200, real cards) for
+    /// ORDINARY text. The special syntax `+tag:"..."`/`+parody:"..."`/
+    /// ... (see ImhentaiAdvancedQuery — Tags/Parodies/Artists/Characters/
+    /// Groups on `/advsearch/`, user screenshot from Aug 31) is NOT understood by
+    /// `/search/` — rechecked with a live curl: `key=+tag:"anal"` through
+    /// `/search/` gives "(0) results found" (it literally searches it as TEXT), the
+    /// same query through `/advsearch/` in the real HAR gave "(219,197) results
+    /// found" — these two endpoints parse the same `key=` DIFFERENTLY.
+    /// `/advsearch/` from this session's sandbox is behind Cloudflare (403, the same
+    /// JS challenge as `/gallery/`/`/view/`) — so the routing below
+    /// (`usesAdvancedSyntax`) is only confirmed INDIRECTLY (by the real HAR +
+    /// the "two different parsers" logic); the actual final request from a real
+    /// device has NOT been rechecked — same as the rest of this site's HTML
+    /// pages, see the type's doc-comment.
+    /// Categories/languages — only THEIR OWN bits (see the ImhentaiCategory/
+    /// ImhentaiLanguage.bit doc-comment — non-overlapping ranges from
+    /// EHentaiCategory, masked on input; other providers' bits in the same Int are simply
+    /// ignored).
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         let encodedQuery = trimmed.addingPercentEncoding(withAllowedCharacters: Self.searchValueAllowedCharacters) ?? trimmed
@@ -506,8 +506,8 @@ struct ImhentaiProvider: ExternalSiteProvider {
             }
         }
 
-        // Языки — тот же принцип, что и категории выше, просто своё
-        // непересекающееся подмножество битов того же Int (см.
+        // Languages — the same principle as categories above, just their own
+        // non-overlapping subset of bits within the same Int (see the
         // ImhentaiLanguage.bit doc-comment).
         let ownLanguageMask = ImhentaiLanguage.allCases.reduce(0) { $0 | $1.bit }
         let ownExcludedLanguageBits = excludedCategoryBits & ownLanguageMask
@@ -524,12 +524,12 @@ struct ImhentaiProvider: ExternalSiteProvider {
         if page > 1 { params.append("page=\(page)") }
 
         // `+tag:"..."`/`+parody:"..."`/`+artist:"..."`/`+character:"..."`/
-        // `+group:"..."` — ЕДИНСТВЕННЫЙ источник этой конструкции в
-        // приложении, см. ImhentaiAdvancedQuery.clauses() — обычный
-        // свободный текст никогда так не выглядит, ложных срабатываний не
-        // бывает. `apply=Search` — присутствует во ВСЕХ подтверждённых HAR
-        // запросах на `/advsearch/`, добавляется только тут же, вместе со
-        // сменой пути (см. doc-comment функции выше).
+        // `+group:"..."` — the ONLY source of this construction in the
+        // app, see ImhentaiAdvancedQuery.clauses() — ordinary
+        // free text never looks like this, so there are no false positives.
+        // `apply=Search` — present in ALL confirmed HAR requests to
+        // `/advsearch/`, added only here, together with the path
+        // switch (see the doc-comment on the function above).
         let usesAdvancedSyntax = trimmed.range(of: #"\+(tag|parody|artist|character|group):"#, options: .regularExpression) != nil
         let path = usesAdvancedSyntax ? "advsearch" : "search"
         if usesAdvancedSyntax { params.append("apply=Search") }
@@ -538,8 +538,8 @@ struct ImhentaiProvider: ExternalSiteProvider {
         return try await fetchGalleryList(urlString: urlString, currentPage: page)
     }
 
-    /// Общий разбор страницы выдачи (поиск/категория/тег — везде одна и та
-    /// же разметка `<div class="thumbnail"><a href="/gallery/{id}/">...`).
+    /// Shared parsing of a listing page (search/category/tag — the same markup
+    /// everywhere: `<div class="thumbnail"><a href="/gallery/{id}/">...`).
     private func fetchGalleryList(urlString: String, currentPage: Int) async throws -> (ids: [Int], nextCursor: String?) {
         guard let url = URL(string: urlString) else { throw ImhentaiError.badResponse }
         let (data, response) = try await session.data(from: url)
@@ -567,7 +567,7 @@ struct ImhentaiProvider: ExternalSiteProvider {
         return result
     }
 
-    // MARK: Карточка тайтла
+    // MARK: Title card
 
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail {
         guard let url = URL(string: "\(Self.baseURL)/gallery/\(id)/") else { throw ImhentaiError.badResponse }
@@ -579,10 +579,10 @@ struct ImhentaiProvider: ExternalSiteProvider {
         return Self.parseDetail(html: html, id: id)
     }
 
-    /// Заголовок раздела (Parodies:/Characters:/Tags:/.../Category:) НЕ
-    /// разбирается по тексту — маршрутизация по ПЕРВОМУ сегменту href
-    /// (parody/character/tag/artist/group/language/category), тот же приём,
-    /// что у ThreeHentaiProvider.parseDetail — устойчиво к локализации.
+    /// The section heading (Parodies:/Characters:/Tags:/.../Category:) is NOT
+    /// parsed by text — routing is by the FIRST href segment
+    /// (parody/character/tag/artist/group/language/category), the same trick
+    /// as ThreeHentaiProvider.parseDetail — robust against localization.
     private static func parseDetail(html: String, id: Int) -> ExternalGalleryDetail {
         let title = firstMatch(in: html, pattern: #"<h1>([^<]*)</h1>"#).map(decodeHTMLEntities) ?? "Untitled"
         let posted = firstMatch(in: html, pattern: #"class="posted">Posted: ([^<]+)</li>"#)
@@ -596,11 +596,11 @@ struct ImhentaiProvider: ExternalSiteProvider {
         var languageParts: [String] = []
         var tags: [ExternalGalleryTag] = []
 
-        // `<a class='tag[...]' href='/{раздел}/{slug}/'>{имя}[<span
+        // `<a class='tag[...]' href='/{section}/{slug}/'>{name}[<span
         // class='split_tag'>...</span>]<span class='badge'>{count}</span>`
-        // — одинарные кавычки, БЕЗ h3-обёртки (в отличие от letter-index
-        // страниц, см. parseLetterIndexList) — подтверждено HAR на живой
-        // карточке тайтла.
+        // — single quotes, WITHOUT the h3 wrapper (unlike the letter-index
+        // pages, see parseLetterIndexList) — confirmed by HAR on a live
+        // title card.
         if let regex = try? NSRegularExpression(
             pattern: #"<a class='tag[^']*' href='/([a-z]+)/([^']+)/'>([^<]+)"#
         ) {
@@ -622,23 +622,23 @@ struct ImhentaiProvider: ExternalSiteProvider {
                 case "group": groups.append(name)
                 case "language": languageParts.append(name)
                 case "tag":
-                    // Пола-намеспейса в разметке imhentai не встретилось
-                    // (в отличие от hitomi) — нейтральный тег, female/male
-                    // оба false, честно не выдумываем гендерный сплит.
+                    // No gender namespace has shown up in imhentai's markup
+                    // (unlike hitomi) — a neutral tag, female/male
+                    // both false, we honestly don't invent a gender split.
                     tags.append(ExternalGalleryTag(name: name, female: false, male: false))
                 default: break
                 }
-                _ = slug // slug самих чипов не нужен — переход по чипу
-                // слагифицирует имя заново (см. ImhentaiProvider.slugify),
-                // тот же приём, что у ThreeHentaiProvider.
+                _ = slug // the chips' own slug isn't needed — following a chip
+                // re-slugifies the name (see ImhentaiProvider.slugify),
+                // the same trick as ThreeHentaiProvider.
             }
         }
 
-        // Картинки — из скрытых полей load_server/load_dir/load_id/
-        // load_pages (подтверждено HAR на ДВУХ независимых тайтлах, живым
-        // curl НЕ перепроверялось — сайт за Cloudflare, см. doc-comment
-        // типа). Формула ПОДТВЕРЖДЕНА реальным `/view/{id}/1/`:
-        // `https://m{server}.imhentai.xxx/{dir}/{id}/{page}.webp`.
+        // Images — from the hidden fields load_server/load_dir/load_id/
+        // load_pages (confirmed by HAR on TWO independent titles, not
+        // rechecked with a live curl — the site is behind Cloudflare, see the
+        // type's doc-comment). The formula is CONFIRMED against a real
+        // `/view/{id}/1/`: `https://m{server}.imhentai.xxx/{dir}/{id}/{page}.webp`.
         let loadServer = firstMatch(in: html, pattern: #"name="load_server"[^>]*value="([^"]*)""#)
         let loadDir = firstMatch(in: html, pattern: #"name="load_dir"[^>]*value="([^"]*)""#)
         let loadId = firstMatch(in: html, pattern: #"name="load_id"[^>]*value="([^"]*)""#)
@@ -648,26 +648,26 @@ struct ImhentaiProvider: ExternalSiteProvider {
         var coverURL: URL?
         if let server = loadServer, let dir = loadDir, let galleryFolder = loadId, loadPages > 0 {
             let storageKey = "m\(server).imhentai.xxx/\(dir)/\(galleryFolder)"
-            // thumbnailURL — отдельная лёгкая миниатюра "{N}t.jpg", ТЕПЕРЬ
-            // подтверждена живым HAR (31.08, второй заход — реальные
-            // запросы на /view/{id}/{page}/): `https://m11.imhentai.xxx/
-            // 032/{galleryFolder}/6t.jpg` и `.../5t.jpg`, оба 200
-            // image/jpeg. Прошлый "фикс" (переиспользование полноразмерной
-            // ссылки на .webp вместо неё) был перестраховкой без
-            // подтверждения — теперь не нужен, откатываем на настоящую
-            // миниатюру.
+            // thumbnailURL — a separate lightweight thumbnail "{N}t.jpg", NOW
+            // confirmed by live HAR (Aug 31, second pass — real
+            // requests against /view/{id}/{page}/): `https://m11.imhentai.xxx/
+            // 032/{galleryFolder}/6t.jpg` and `.../5t.jpg`, both 200
+            // image/jpeg. The earlier "fix" (reusing the full-size
+            // .webp link instead) was a hedge without
+            // confirmation — no longer needed, reverting to the actual
+            // thumbnail.
             //
-            // ВАЖНО — перепроверено живым curl: сам CDN картинок
-            // (m11.imhentai.xxx) НЕ прикрыт Cloudflare вообще (200 без
-            // единой cf_clearance-куки, хотя HAR-запрос браузера её и
-            // нёс — просто по инерции с основного домена, не потому что
-            // требуется). Cloudflare-джва-челлендж стоит ТОЛЬКО на
-            // HTML-страницах (`/gallery/`, `/view/`, `/`, `/search/`
-            // изредка) — сама выдача картинок (обложка/миниатюры/страницы
-            // чтения) от него не зависит, значит после того как HTML
-            // карточки успешно получен (с реального устройства — сайт его
-            // отдаёт нормально, см. doc-comment типа), дальнейшая загрузка
-            // ЛЮБЫХ картинок пройдёт без проблем.
+            // IMPORTANT — rechecked with a live curl: the image CDN itself
+            // (m11.imhentai.xxx) isn't behind Cloudflare at all (200 without
+            // a single cf_clearance cookie, even though the browser's HAR request did
+            // carry one — just carried over from the main domain out of habit, not because
+            // it's required). The Cloudflare JS challenge sits ONLY on
+            // HTML pages (`/gallery/`, `/view/`, `/`, occasionally `/search/`)
+            // — the actual image delivery (cover/thumbnails/reading
+            // pages) doesn't depend on it, so once the card's HTML has
+            // been successfully fetched (from a real device — the site serves it
+            // fine, see the type's doc-comment), any further loading of
+            // images should go through without issue.
             pages = (1...loadPages).map { n in
                 ExternalGalleryPage(
                     index: n, key: storageKey, width: 0, height: 0,
@@ -675,10 +675,10 @@ struct ImhentaiProvider: ExternalSiteProvider {
                     thumbnailSpriteOffsetX: nil
                 )
             }
-            // `thumb.jpg` — подтверждено живым curl (31.08) на реальной
-            // странице /search/?key=... (не заблокирована Cloudflare, в
-            // отличие от /gallery/) — `<img src="https://m11.imhentai.xxx/
-            // 032/{id}/thumb.jpg">` на карточках в сетке каталога.
+            // `thumb.jpg` — confirmed with a live curl (Aug 31) on the real
+            // /search/?key=... page (not blocked by Cloudflare, unlike
+            // /gallery/) — `<img src="https://m11.imhentai.xxx/
+            // 032/{id}/thumb.jpg">` on the cards in the catalog grid.
             coverURL = URL(string: "https://\(storageKey)/thumb.jpg")
         }
 
@@ -693,28 +693,27 @@ struct ImhentaiProvider: ExternalSiteProvider {
             groups: groups,
             characters: characters,
             series: series,
-            // Похожих тайтлов ("Related") на карточке imhentai не
-            // встретилось ни на одной из проверенных страниц — честно
-            // пусто, как у e-hentai/3hentai.
+            // Related titles ("Related") haven't shown up on any imhentai
+            // card checked so far — honestly empty, same as for e-hentai/3hentai.
             related: [],
             pages: pages,
             coverURL: coverURL,
             posted: posted,
-            // e-hentai-специфичные поля (Parent/Visible/File Size/Rating)
-            // у imhentai не подтверждены — честно nil, не выдумываем.
-            // Favourite-счётчик кладём в favoritedCount — ближайший
-            // подходящий по смыслу существующий слот.
+            // e-hentai-specific fields (Parent/Visible/File Size/Rating)
+            // aren't confirmed for imhentai — honestly nil, we don't make them up.
+            // The Favourite count goes into favoritedCount — the closest
+            // suitable existing slot.
             parentId: nil, visible: nil, fileSize: nil, favoritedCount: favoritedCount,
             ratingAverage: nil, ratingCount: nil, comments: []
         )
     }
 
-    // MARK: URL картинок
+    // MARK: Image URLs
 
-    /// Чистая формула (host+dir+id уже в `page.key`, см. parseDetail) —
-    /// без сети, как у hitomi/3hentai (в отличие от e-hentai — там реальный
-    /// запрос на каждую страницу), просто обёрнута в async ради общего
-    /// протокола. Подтверждено живым HAR (`/view/{id}/1/` →
+    /// A pure formula (host+dir+id already in `page.key`, see parseDetail) —
+    /// no network, like hitomi/3hentai (unlike e-hentai — that makes a real
+    /// request on every page), just wrapped in async for the sake of the shared
+    /// protocol. Confirmed by live HAR (`/view/{id}/1/` →
     /// `<img id="gimg" src="https://m11.imhentai.xxx/032/{id}/1.webp">`).
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL {
         guard let url = URL(string: "https://\(page.key)/\(page.index).webp") else {
@@ -723,7 +722,7 @@ struct ImhentaiProvider: ExternalSiteProvider {
         return url
     }
 
-    // MARK: Утилиты
+    // MARK: Utilities
 
     private static func firstMatch(in html: String, pattern: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
@@ -733,9 +732,9 @@ struct ImhentaiProvider: ExternalSiteProvider {
         return String(html[matchRange])
     }
 
-    /// Вырезает вложенные HTML-теги (например `<span class='split_tag'>
-    /// ...</span>` внутри h3 на letter-index страницах) — тот же приём,
-    /// что у ThreeHentaiProvider.stripInnerTags.
+    /// Strips nested HTML tags (e.g. `<span class='split_tag'>
+    /// ...</span>` inside h3 on the letter-index pages) — the same trick
+    /// as ThreeHentaiProvider.stripInnerTags.
     private static func stripInnerTags(_ html: String) -> String {
         html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
     }

@@ -1,51 +1,51 @@
 import Foundation
 
-/// Персистентное (в памяти на время работы приложения — не UserDefaults,
-/// не обязательно переживать перезапуск) состояние фильтров каталога
-/// внешних сайтов — по прямой просьбе (30.08): "фильтры не должны
-/// сбрасываться при уходе с вкладки". Раньше query/excludedCategories были
-/// обычным `@State` на value-type View (ExternalSearchView/
-/// ExternalCombinedCatalogView) — переключение вкладок Каталог → другая →
-/// назад пересоздаёт эти вью, и весь ввод/выбранные категории терялись.
+/// Persistent (in memory for the app's runtime — not UserDefaults, does not
+/// need to survive a relaunch) state of external-site catalog filters — per
+/// a direct request (08/30): "filters should not reset when leaving the
+/// tab". Previously query/excludedCategories were plain `@State` on a
+/// value-type View (ExternalSearchView/ExternalCombinedCatalogView) —
+/// switching tabs Catalog → another → back recreates these views, and all
+/// input/selected categories were lost.
 @MainActor
 final class ExternalCatalogFilterStore: ObservableObject {
     static let shared = ExternalCatalogFilterStore()
 
-    /// Одиночный сайт (ExternalSearchView) — ключ по ExternalSite, т.к. у
-    /// разных сайтов разные текущие запросы/категории.
+    /// Single-site view (ExternalSearchView) — keyed by ExternalSite, since
+    /// different sites have different current queries/categories.
     @Published var queries: [ExternalSite: String] = [:]
     @Published var excludedCategories: [ExternalSite: Set<EHentaiCategory>] = [:]
-    /// То же самое, но для ImhentaiCategory (своя, непересекающаяся схема
-    /// категорий — см. ImhentaiCategory.bit doc-comment) — отдельный набор,
-    /// т.к. e-hentai и imhentai могут быть оба выбраны одновременно
-    /// (см. combinedExcludedImhentaiCategories) и у каждого своё множество.
+    /// Same idea, but for ImhentaiCategory (its own, non-overlapping category
+    /// scheme — see the ImhentaiCategory.bit doc-comment) — kept separate
+    /// because e-hentai and imhentai can both be selected at the same time
+    /// (see combinedExcludedImhentaiCategories) and each has its own set.
     @Published var excludedImhentaiCategories: [ExternalSite: Set<ImhentaiCategory>] = [:]
-    /// Языки imhentai (см. ImhentaiLanguage.bit doc-comment) — тот же
-    /// принцип, что и excludedImhentaiCategories, отдельное измерение
-    /// фильтра, тот же общий bitmask-канал.
+    /// imhentai languages (see the ImhentaiLanguage.bit doc-comment) — the
+    /// same principle as excludedImhentaiCategories, a separate filter
+    /// dimension over the same shared bitmask channel.
     @Published var excludedImhentaiLanguages: [ExternalSite: Set<ImhentaiLanguage>] = [:]
-    /// Расширенные поля поиска (Tags/Parodies/Artists/Characters/Groups,
-    /// см. ImhentaiAdvancedQuery/ImhentaiAdvancedFieldsPicker) — тот же
-    /// принцип персистентности, что и у остального в этом файле.
+    /// Advanced search fields (Tags/Parodies/Artists/Characters/Groups,
+    /// see ImhentaiAdvancedQuery/ImhentaiAdvancedFieldsPicker) — the same
+    /// persistence principle as everything else in this file.
     @Published var imhentaiAdvancedQueries: [ExternalSite: ImhentaiAdvancedQuery] = [:]
-    /// Расширенные поля поиска Simply Hentai (Tags/Parodies/Characters/
-    /// Artists/Translators/Language/Series title, см.
-    /// SimplyHentaiAdvancedQuery/SimplyHentaiAdvancedFieldsPicker) — тот же
-    /// принцип, что и у imhentaiAdvancedQueries.
+    /// Advanced search fields for Simply Hentai (Tags/Parodies/Characters/
+    /// Artists/Translators/Language/Series title, see
+    /// SimplyHentaiAdvancedQuery/SimplyHentaiAdvancedFieldsPicker) — the
+    /// same principle as imhentaiAdvancedQueries.
     @Published var simplyHentaiAdvancedQueries: [ExternalSite: SimplyHentaiAdvancedQuery] = [:]
-    /// Расширенные поля E-Hentai (Tags/Parodies/Characters/Artists/Groups +
-    /// собственный search, см. EHentaiAdvancedQuery/EHentaiAdvancedFieldsPicker).
+    /// Advanced fields for E-Hentai (Tags/Parodies/Characters/Artists/Groups +
+    /// its own search, see EHentaiAdvancedQuery/EHentaiAdvancedFieldsPicker).
     @Published var ehentaiAdvancedQueries: [ExternalSite: EHentaiAdvancedQuery] = [:]
-    /// Расширенное поле 3Hentai (Tags + собственный search, см.
+    /// Advanced field for 3Hentai (Tags + its own search, see
     /// ThreeHentaiAdvancedQuery/ThreeHentaiAdvancedFieldsPicker).
     @Published var threeHentaiAdvancedQueries: [ExternalSite: ThreeHentaiAdvancedQuery] = [:]
-    /// Выбор ОДНОГО измерения+значения HentaiPill (Tags/Parodies/
-    /// Characters/Artists — сайт не умеет их комбинировать, см.
+    /// Selection of ONE dimension+value for HentaiPill (Tags/Parodies/
+    /// Characters/Artists — the site can't combine them, see
     /// HentaiPillAdvancedQuery/HentaiPillAdvancedFieldsPicker).
     @Published var hentaiPillAdvancedQueries: [ExternalSite: HentaiPillAdvancedQuery] = [:]
 
-    /// Совместный каталог «Все сайты» (ExternalCombinedCatalogView) — своё
-    /// отдельное состояние, не смешивается с одиночными.
+    /// Combined "All sites" catalog (ExternalCombinedCatalogView) — its own
+    /// separate state, not mixed in with the single-site ones.
     @Published var combinedQuery: String = ""
     @Published var combinedExcludedCategories: Set<EHentaiCategory> = []
     @Published var combinedExcludedImhentaiCategories: Set<ImhentaiCategory> = []
@@ -55,12 +55,12 @@ final class ExternalCatalogFilterStore: ObservableObject {
     @Published var combinedEHentaiAdvancedQuery = EHentaiAdvancedQuery()
     @Published var combinedThreeHentaiAdvancedQuery = ThreeHentaiAdvancedQuery()
     @Published var combinedHentaiPillAdvancedQuery = HentaiPillAdvancedQuery()
-    /// Активный чип в листе «Фильтры» совместного каталога — какой раздел
-    /// сейчас показан (см. ExternalCombinedCatalogView.filtersSheet). nil =
-    /// «Все» (все секции разом, старое поведение). Персистентно — та же
-    /// причина, что и у остального состояния в этом файле: лист
-    /// пересоздаётся при каждом открытии, положение чипа не должно
-    /// сбрасываться.
+    /// Active chip in the combined catalog's "Filters" sheet — which
+    /// section is currently shown (see ExternalCombinedCatalogView.
+    /// filtersSheet). nil = "All" (all sections at once, the old behavior).
+    /// Persistent — the same reason as the rest of the state in this file:
+    /// the sheet gets recreated on every open, the chip's position should
+    /// not reset.
     @Published var combinedFiltersActiveSite: ExternalSite?
 
     private init() {}

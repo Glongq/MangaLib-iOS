@@ -1,11 +1,11 @@
 import Foundation
 
-/// «Другие сайты» — сайты с ПРИНЦИПИАЛЬНО другим API, не входящие в
-/// экосистему Lib.social (см. LibSite.swift — mangalib/slashlib/ranobelib/
-/// hentailib, один REST/JSON API на двух хостах). По прямой просьбе новый
-/// код почти не пересекается со старым сетевым слоем — см. весь этот файл
-/// и остальные в App/ExternalSites/: ничего отсюда не импортируется в
-/// MangaNetworkService.swift/LibSite.swift, и наоборот.
+/// "Other sites" — sites with a FUNDAMENTALLY different API, not part of
+/// the Lib.social ecosystem (see LibSite.swift — mangalib/slashlib/ranobelib/
+/// hentailib, a single REST/JSON API across two hosts). Per a direct
+/// request, the new code barely overlaps with the old networking layer —
+/// see this whole file and the rest of App/ExternalSites/: nothing here
+/// gets imported into MangaNetworkService.swift/LibSite.swift, and vice versa.
 enum ExternalSite: String, CaseIterable, Identifiable, Codable {
     case hitomi
     case ehentai
@@ -13,7 +13,7 @@ enum ExternalSite: String, CaseIterable, Identifiable, Codable {
     case imhentai
     case hentaiPill
     case simplyHentai
-    // Следующие сайты добавляются сюда по мере разбора их HAR (см. план).
+    // Further sites get added here as their HAR captures are analyzed (see the plan).
 
     var id: String { rawValue }
 
@@ -29,43 +29,45 @@ enum ExternalSite: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-/// Возможности конкретного внешнего сайта — экраны спрашивают ЭТО (через
-/// ExternalSiteProvider.capabilities), а не пытаются угадывать по типу
-/// сайта: каждый провайдер честно объявляет, что реально умеет, остальное
-/// экраны показывают как «Недоступно» (см. ExternalScreenContent).
+/// Capabilities of a specific external site — screens ask THIS (via
+/// ExternalSiteProvider.capabilities) instead of trying to guess from the
+/// site's type: each provider honestly declares what it can actually do,
+/// and screens show everything else as "Unavailable" (see
+/// ExternalScreenContent).
 ///
-/// У e-hentai.org, в отличие от hitomi.la, аккаунты и закладки/избранное
-/// РЕАЛЬНО есть на самом сайте — но эта интеграция их не подключает (нет
-/// логина), поэтому hasBookmarks и т.д. всё равно false здесь — это
-/// "недоступно В ЭТОМ клиенте", а не "у сайта в принципе такого нет" (как
-/// честно написано у hitomi). Если когда-нибудь добавится вход в аккаунт
-/// e-hentai — это просто поменяется на true, без переделки остального.
+/// Unlike hitomi.la, e-hentai.org DOES have accounts and bookmarks/
+/// favorites on the actual site — but this integration doesn't wire them up
+/// (no login), so hasBookmarks etc. is still false here — this means
+/// "unavailable IN THIS CLIENT", not "the site fundamentally has no such
+/// thing" (as is honestly the case for hitomi). If account login for
+/// e-hentai is ever added, this just flips to true, with no rework of
+/// anything else needed.
 struct ExternalSiteCapabilities {
     var hasCatalog: Bool
     var hasTagBrowser: Bool
-    /// Свободный текстовый поиск (см. ExternalSiteProvider.fetchIdsBySearch)
-    /// — у hitomi формально нет (упирается в неразобранный бинарный
-    /// индекс), у e-hentai есть (обычный `?f_search=`). Каталог-экран
-    /// (см. MangaCatalogView) выбирает алфавитный справочник ИЛИ поиск
-    /// по этому флагу — если нет ни того, ни другого, каталог тоже
-    /// «Недоступно», как остальные экраны без аналога.
+    /// Free-text search (see ExternalSiteProvider.fetchIdsBySearch) —
+    /// hitomi formally has none (blocked by an unparsed binary index),
+    /// e-hentai does (a plain `?f_search=`). The catalog screen
+    /// (see MangaCatalogView) picks the alphabetical browser OR search
+    /// based on this flag — if neither is available, the catalog is also
+    /// "Unavailable", like the other screens with no equivalent.
     var hasSearch: Bool
-    /// Фильтр по категориям (Doujinshi/Manga/Artist CG/... — см.
-    /// EHentaiCategory) поверх hasSearch — есть только у e-hentai (кнопки
-    /// прямо на главной странице сайта). false для сайтов без своей
-    /// категоризации в этом смысле (у hitomi есть похожее понятие "type" в
-    /// тегах, но отдельного UI-фильтра под него в этом клиенте нет).
+    /// Category filter (Doujinshi/Manga/Artist CG/... — see
+    /// EHentaiCategory) on top of hasSearch — only e-hentai has it (buttons
+    /// right on the site's home page). false for sites with no such
+    /// categorization in this sense (hitomi has a similar "type" concept in
+    /// its tags, but there's no dedicated UI filter for it in this client).
     var hasCategoryFilter: Bool
-    /// "Перейти на страницу N" (см. ExternalSiteProvider.cursorForPage,
-    /// ExternalCatalogGridView) — у hitomi точный (offset — обычное число),
-    /// у e-hentai приблизительный (см. EHentaiProvider — `range=`,
-    /// подтверждено HAR как реальный переход, но без точной формулы).
+    /// "Jump to page N" (see ExternalSiteProvider.cursorForPage,
+    /// ExternalCatalogGridView) — exact for hitomi (offset is a plain
+    /// number), approximate for e-hentai (see EHentaiProvider — `range=`,
+    /// confirmed by HAR as a real jump, but without an exact formula).
     var hasPageJump: Bool
-    /// Сортировка выдачи (см. ExternalSiteProvider.fetchIdsByTag(sortKey:)/
-    /// fetchIdsBySearch(sortKey:), ExternalCatalogGridView) — подтверждено
-    /// живым HAR ТОЛЬКО у hitomi (`popular/{период}[-{...}]-all.nozomi`,
-    /// см. HitomiProvider.SortOption) — у e-hentai подтверждения нет,
-    /// честно false, кнопка сортировки там не показывается.
+    /// Sorting of results (see ExternalSiteProvider.fetchIdsByTag(sortKey:)/
+    /// fetchIdsBySearch(sortKey:), ExternalCatalogGridView) — confirmed by
+    /// live HAR ONLY for hitomi (`popular/{period}[-{...}]-all.nozomi`,
+    /// see HitomiProvider.SortOption) — no confirmation for e-hentai,
+    /// honestly false, the sort button isn't shown there.
     var hasSortOptions: Bool
     var hasBookmarks: Bool
     var hasHistory: Bool

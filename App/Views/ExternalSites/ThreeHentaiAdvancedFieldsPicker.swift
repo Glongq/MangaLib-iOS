@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// Расширенное поле поиска 3Hentai — своя строка поиска + Tags (см.
-/// ThreeHentaiAdvancedQuery doc-comment — запятая в `q=` подтверждена HAR
-/// как AND нескольких тегов; никаких других измерений на сайте не
-/// подтверждено). Без подсказок — автокомплит на сайте не подтверждён
-/// (см. ThreeHentaiProvider.fetchAutocomplete).
+/// Advanced search field for 3Hentai — its own search box + Tags (see the
+/// ThreeHentaiAdvancedQuery doc-comment — a comma in `q=` is confirmed by
+/// HAR to AND together several tags; no other dimensions are confirmed on
+/// the site). No suggestions — autocomplete isn't confirmed on the site
+/// (see ThreeHentaiProvider.fetchAutocomplete).
 struct ThreeHentaiAdvancedFieldsPicker: View {
     @Binding var query: ThreeHentaiAdvancedQuery
 

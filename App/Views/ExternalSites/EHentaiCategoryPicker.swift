@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Кнопки категорий e-hentai (Doujinshi/Manga/Artist CG/...) — визуально
-/// повторяют сами кнопки на главной странице сайта (см. скриншот, которым
-/// поделился пользователь). На сайте нажатие ВЫКЛЮЧАЕТ категорию из выдачи
-/// (кнопка гаснет) — та же логика здесь: `excluded`, не `included`, пусто
-/// по умолчанию значит "без ограничений" (см. EHentaiProvider.
-/// fetchIdsBySearch(excludedCategoryBits:) — 0 вообще не добавляет f_cats
-/// в URL, как и на самом сайте).
+/// e-hentai category buttons (Doujinshi/Manga/Artist CG/...) — visually
+/// mirror the actual buttons on the site's home page (see the screenshot
+/// the user shared). On the site, tapping DISABLES the category from
+/// results (the button dims) — the same logic here: `excluded`, not
+/// `included`, empty by default means "no restrictions" (see EHentaiProvider.
+/// fetchIdsBySearch(excludedCategoryBits:) — 0 doesn't add f_cats to the URL
+/// at all, just like on the actual site).
 struct EHentaiCategoryPicker: View {
     @Binding var excluded: Set<EHentaiCategory>
 
@@ -32,9 +32,9 @@ struct EHentaiCategoryPicker: View {
         }
     }
 
-    /// Приблизительно повторяют цвета кнопок на самой странице e-hentai.org
-    /// — для узнаваемости, не подтверждены точными hex-кодами сайта, взяты
-    /// на глаз со скриншота.
+    /// Approximately match the button colors on the actual e-hentai.org
+    /// page — for recognizability, not confirmed against the site's exact
+    /// hex codes, eyeballed from a screenshot.
     private static func color(for category: EHentaiCategory) -> Color {
         switch category {
         case .doujinshi: return Color(red: 0.90, green: 0.47, blue: 0.47)

@@ -1,33 +1,36 @@
 import Foundation
 
-/// Ошибки SimplyHentaiProvider.
+/// Errors for SimplyHentaiProvider.
 enum SimplyHentaiError: Error {
     case badResponse
-    /// fetchGalleryDetail(id:) вызван с id, который эта сессия ЕЩЁ ни разу
-    /// не видела ни в одном листинге/выдаче (см. doc-comment типа насчёт
-    /// slug-адресации) — без пары id→slug карточку открыть нельзя.
+    /// fetchGalleryDetail(id:) was called with an id that this session
+    /// has NEVER yet seen in any listing/search result (see the type's
+    /// doc-comment about slug addressing) — without an id→slug pair the
+    /// card can't be opened.
     case unknownSlug
 }
 
-/// Расширенные поля поиска — по прямой просьбе (31.08, затем уточнено
-/// 01.09): у simply-hentai `/search/complex` реально принимает `query=` И
-/// `filter[tags][N]=`/`filter[parodies][N]=`/`filter[characters][N]=`/
-/// `filter[artists][N]=`/`filter[translators][N]=`/`filter[language][N]=`/
-/// `filter[series_title][N]=` В ОДНОМ запросе (подтверждено HAR — реальная
-/// цепочка из HAR буквально несёт все сразу: `filter[series_title][0]=
+/// Advanced search fields — added by direct request (Aug 31, then refined
+/// Sep 1): for simply-hentai, `/search/complex` really does accept
+/// `query=` AND `filter[tags][N]=`/`filter[parodies][N]=`/
+/// `filter[characters][N]=`/`filter[artists][N]=`/`filter[translators][N]=`/
+/// `filter[language][N]=`/`filter[series_title][N]=` all IN ONE request
+/// (confirmed by HAR — a real chain from the HAR literally carries all of
+/// them at once: `filter[series_title][0]=
 /// Danganronpa&filter[tags][0]=Bondage&filter[tags][1]=Ahegao&filter[tags]
 /// [2]=Anal&filter[artists][0]=matou&query=scat&page=1`).
 ///
-/// ЭКСКЛЮЗИВНАЯ схема (по прямой просьбе, единая для всех сайтов с
-/// расширенными полями — см. ExternalSearchView.resolvedQuery): если хотя
-/// бы одно из этих полей заполнено (включая собственное search — оно
-/// заменяет общее поле экрана, НЕ складывается с ним), общее поле поиска
-/// экрана для этого сайта перестаёт участвовать вообще — запрос строится
-/// ТОЛЬКО из этих полей. Если все они пусты — как раньше, обычное общее
-/// поле.
+/// The EXCLUSIVE scheme (by direct request, shared by all sites with
+/// advanced fields — see ExternalSearchView.resolvedQuery): if at least
+/// one of these fields is filled in (including the field's own search —
+/// it REPLACES the screen's general field, it does NOT combine with it),
+/// the screen's general search field stops participating for this site at
+/// all — the request is built ONLY from these fields. If they're all
+/// empty — same as before, the usual general field.
 struct SimplyHentaiAdvancedQuery {
-    /// Собственная строка поиска — используется ВМЕСТО общего поля экрана,
-    /// когда хотя бы одно поле этой структуры заполнено (см. isEmpty).
+    /// The field's own search string — used INSTEAD OF the screen's
+    /// general field when at least one field of this struct is filled in
+    /// (see isEmpty).
     var search: String = ""
     var tags: [String] = []
     var parodies: [String] = []
@@ -44,21 +47,24 @@ struct SimplyHentaiAdvancedQuery {
             && seriesTitle.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    /// Разделитель — управляющий символ U+0001, который ни один пользователь
-    /// не наберёт руками в строке поиска — НЕ синтаксис самого сайта (как
-    /// `+tag:"..."` у imhentai), это ЧИСТО внутренний канал между
-    /// ExternalSearchView/ExternalCombinedCatalogView.resolvedQuery и
-    /// SimplyHentaiProvider.fetchIdsBySearch: протокол ExternalSiteProvider
-    /// несёт запрос ОДНОЙ строкой (см. ExternalCatalogQuery.search), поэтому
-    /// сюда "впаиваются" доп. поля, а провайдер их же и распаковывает
-    /// обратно в отдельные `filter[...]=` параметры перед реальным запросом
-    /// — наружу (в URL) эти управляющие символы никогда не попадают.
+    /// The delimiter — the U+0001 control character, which no user will
+    /// ever type by hand into a search string — is NOT the site's own
+    /// syntax (unlike `+tag:"..."` for imhentai); it's a PURELY internal
+    /// channel between ExternalSearchView/
+    /// ExternalCombinedCatalogView.resolvedQuery and
+    /// SimplyHentaiProvider.fetchIdsBySearch: the ExternalSiteProvider
+    /// protocol carries the query as ONE string (see
+    /// ExternalCatalogQuery.search), so this is how the extra fields get
+    /// "soldered in" here, and the provider unpacks them right back into
+    /// separate `filter[...]=` parameters before the actual request — these
+    /// control characters never make it out into the URL.
     fileprivate static let fieldDelimiter = "\u{1}"
 
-    /// Кодирует себя целиком в одну строку для ExternalCatalogQuery.
-    /// search(query:) — см. fieldDelimiter doc-comment. Вызывается ТОЛЬКО
-    /// когда !isEmpty (см. ExternalSearchView.resolvedQuery) — собственный
-    /// search заменяет общее поле экрана, а не складывается с ним.
+    /// Encodes itself entirely into one string for
+    /// ExternalCatalogQuery.search(query:) — see the fieldDelimiter
+    /// doc-comment. Called ONLY when !isEmpty (see
+    /// ExternalSearchView.resolvedQuery) — the field's own search replaces
+    /// the screen's general field, it doesn't combine with it.
     func encoded() -> String {
         var parts = [search.trimmingCharacters(in: .whitespaces)]
         func append(_ key: String, _ values: [String]) {
@@ -82,82 +88,84 @@ struct SimplyHentaiAdvancedQuery {
     }
 }
 
-/// Клиент simply-hentai.com — СВОЯ, полностью отдельная реализация. Все
-/// эндпоинты ниже подтверждены реальным HAR пользователя (31.08 вечер,
-/// `ProxyPin8-31_22_33_54.har`) — живым curl НЕ перепроверено: `api-v3.
-/// simply-hentai.com` из этой песочницы отвечает Cloudflare-джва-
-/// челленджем ("Just a moment...", 403) на любой путь, ровно та же
-/// картина, что и у ImhentaiProvider (см. её doc-comment насчёт разницы
-/// между чистым `URLSession` и настоящим браузером — тот же принцип
-/// применим и здесь, отдельно не повторяем).
+/// Client for simply-hentai.com — its OWN, fully separate implementation.
+/// All endpoints below are confirmed by the user's real HAR (evening of
+/// Aug 31, `ProxyPin8-31_22_33_54.har`) — NOT double-checked with a live
+/// curl: `api-v3.simply-hentai.com` responds from this sandbox with a
+/// Cloudflare-JS challenge ("Just a moment...", 403) on any path, exactly
+/// the same picture as ImhentaiProvider (see its doc-comment about the
+/// difference between a plain `URLSession` and a real browser — the same
+/// principle applies here too, not repeated separately).
 ///
-/// В отличие от всех остальных четырёх сайтов, здесь НАСТОЯЩИЙ версионный
-/// JSON REST API (`/v3/...`, Next.js-фронтенд на www поверх него), а не
-/// HTML-страницы под разбор регулярками — структура ответов взята из
-/// декодированных Codable-моделей ниже, один в один под реальные поля из
-/// HAR.
+/// Unlike all four other sites, this one has a REAL versioned JSON REST
+/// API (`/v3/...`, a Next.js frontend on www on top of it), not HTML pages
+/// to parse with regexes — the response structure was taken from the
+/// decoded Codable models below, matching the real fields from HAR one to
+/// one.
 ///
-/// ВАЖНО про адресацию: у альбома есть И числовой `id`, И `slug`, но
-/// `/v3/manga/{slug}` (карточка) и `/v3/manga/{slug}/pages` (страницы)
-/// адресуются ТОЛЬКО по slug — НИ ОДНОГО запроса по числовому id в HAR не
-/// встретилось, живьём не перепроверено, поэтому честно не рискуем
-/// предполагать, что `/v3/manga/{id}` тоже сработает. `fetchIdsByTag`/
-/// `fetchIdsBySearch` по контракту протокола обязаны возвращать `[Int]`
-/// (см. ExternalSiteProvider) — поэтому SimplyHentaiSlugCache запоминает
-/// пару id→slug при КАЖДОМ разборе альбома из любого ответа (листинг/
-/// поиск/тег/похожие), и fetchGalleryDetail(id:) берёт slug оттуда.
-/// Работает надёжно, если карточка открывается из листинга/похожих (как
-/// оно всегда и происходит в этом приложении) — единственный случай,
-/// когда это не сработает, это id, полученный ИЗВНЕ приложения (сюда
-/// такое не поступает).
+/// IMPORTANT about addressing: an album has BOTH a numeric `id` AND a
+/// `slug`, but `/v3/manga/{slug}` (the card) and `/v3/manga/{slug}/pages`
+/// (the pages) are addressed ONLY by slug — NOT A SINGLE request by
+/// numeric id turned up in HAR, and it wasn't double-checked live, so we
+/// honestly don't risk assuming that `/v3/manga/{id}` would work too.
+/// `fetchIdsByTag`/`fetchIdsBySearch` are required by the protocol
+/// contract to return `[Int]` (see ExternalSiteProvider) — so
+/// SimplyHentaiSlugCache remembers the id→slug pair on EVERY album parse
+/// from any response (listing/search/tag/similar), and
+/// fetchGalleryDetail(id:) takes the slug from there. This works reliably
+/// as long as the card is opened from a listing/similar-titles list (as it
+/// always is in this app) — the only case where this wouldn't work is an
+/// id obtained from OUTSIDE the app (that doesn't happen here).
 struct SimplyHentaiProvider: ExternalSiteProvider {
     let site: ExternalSite = .simplyHentai
     let capabilities = ExternalSiteCapabilities(
         hasCatalog: true,
-        // Алфавитный справочник — Tags/Parodies/Characters подтверждены
-        // HAR (`/v3/tags?type={tags|parodies|characters}&letter=...`,
-        // буквы `a`...`z` реально перебирались). Artists/Translators —
-        // сайт ЗНАЕТ такие сущности (поля `artists`/`translators` в
-        // карточке альбома, и `filter[artists][]`/`filter[translators][]`
-        // в /search/complex подтверждены), но алфавитного списка под них
-        // ни разу не запрошено — честно [] в fetchTagIndex, не выдумываем
-        // несуществующий в HAR letter-запрос.
+        // The alphabetical index — Tags/Parodies/Characters are confirmed
+        // by HAR (`/v3/tags?type={tags|parodies|characters}&letter=...`,
+        // letters `a`...`z` were really enumerated). Artists/Translators —
+        // the site DOES KNOW such entities (the `artists`/`translators`
+        // fields in the album card, and `filter[artists][]`/
+        // `filter[translators][]` in /search/complex are confirmed), but
+        // an alphabetical list for them was never requested — honestly []
+        // in fetchTagIndex, we don't make up a letter request that
+        // doesn't exist in HAR.
         hasTagBrowser: true,
-        // /v3/search/complex?query=... — подтверждено HAR (обычный текст,
-        // реальные релевантные результаты на "scat"/"genshin"-подобные
-        // запросы). Отдельно подтверждён и мульти-фильтр (filter[tags][]/
+        // /v3/search/complex?query=... — confirmed by HAR (plain text,
+        // real relevant results on "scat"/"genshin"-like queries).
+        // The multi-filter is separately confirmed too (filter[tags][]/
         // filter[parodies][]/filter[characters][]/filter[artists][]/
         // filter[translators][]/filter[language][]/filter[series_title][]
-        // — все встретились в HAR как реальные комбинации ВМЕСТЕ с query=,
-        // см. SimplyHentaiAdvancedQuery/SimplyHentaiAdvancedFieldsPicker).
+        // — all of them showed up in HAR as real combinations TOGETHER
+        // with query=, see SimplyHentaiAdvancedQuery/
+        // SimplyHentaiAdvancedFieldsPicker).
         hasSearch: true,
-        // Нет EHentaiCategory-подобного bitmask-переключателя категорий —
-        // но флаг переиспользован (тот же приём, что и у imhentai) как
-        // общий гейт "есть лист «Фильтры»" в ExternalSearchView/
-        // ExternalCombinedCatalogView: здесь он открывает
+        // There's no EHentaiCategory-like bitmask category switcher —
+        // but the flag is reused (the same trick as imhentai) as the
+        // general "there's a Filters sheet" gate in ExternalSearchView/
+        // ExternalCombinedCatalogView: here it opens
         // SimplyHentaiAdvancedFieldsPicker (Tags/Parodies/Characters/
-        // Artists/Translators/Language/Series title), а не категории.
+        // Artists/Translators/Language/Series title), not categories.
         hasCategoryFilter: true,
-        // Пагинация — ЧЕСТНАЯ, с сервера: `pagination.current/next/pages/
-        // count` в каждом ответе (не наше предположение по наличию кнопки
-        // "next", как у HTML-сайтов) — подтверждено на /tags, /tag/{slug},
-        // /search/complex, /mangas.
+        // Pagination is HONEST, server-driven: `pagination.current/next/
+        // pages/count` in every response (not our guess based on the
+        // presence of a "next" button, like the HTML sites) — confirmed
+        // on /tags, /tag/{slug}, /search/complex, /mangas.
         hasPageJump: true,
-        // Ни на /search/complex, ни на /tag/{slug} НИ РАЗУ не встретился
-        // параметр `sort=` в HAR (только у отдельных, несвязанных с
-        // поиском/тегом эндпоинтов — /mangas?sort=spotlight,
-        // /tags?sort=popularity — это сортировка САМОГО списка тегов, не
-        // выдачи альбомов) — честно false, не выдумываем несуществующую
-        // комбинацию.
+        // Not once did a `sort=` parameter show up in HAR either on
+        // /search/complex or on /tag/{slug} (only on separate endpoints
+        // unrelated to search/tag — /mangas?sort=spotlight,
+        // /tags?sort=popularity — that sorts the tag list ITSELF, not an
+        // album listing) — honestly false, we don't make up a
+        // combination that doesn't exist.
         hasSortOptions: false,
-        // Как и у остальных внешних сайтов в этом клиенте — без входа в
-        // аккаунт (см. doc-comment ImhentaiProvider.capabilities).
+        // Same as the other external sites in this client — no account
+        // login (see the doc-comment on ImhentaiProvider.capabilities).
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
-        // `comment_count` — просто число прямо на альбоме, ни одного
-        // отдельного эндпоинта со СПИСКОМ комментариев в HAR не
-        // встретилось — честно false, не выдумываем.
+        // `comment_count` is just a number right on the album, not a
+        // single separate endpoint with a LIST of comments turned up in
+        // HAR — honestly false, we don't make it up.
         hasComments: false
     )
 
@@ -180,7 +188,7 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         return decoder
     }()
 
-    // MARK: Кэш id→slug (см. doc-comment типа)
+    // MARK: id→slug cache (see the type's doc-comment)
 
     private actor SlugCache {
         static let shared = SlugCache()
@@ -189,7 +197,7 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         func slug(for id: Int) -> String? { map[id] }
     }
 
-    // MARK: Codable-модели — один в один под реальные ответы `/v3/...` из HAR.
+    // MARK: Codable models — matching the real `/v3/...` responses from HAR one to one.
 
     private struct SizesDTO: Decodable {
         let full: String
@@ -210,9 +218,9 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         let flagCode: String?
     }
 
-    /// Один элемент Tags/Parodies/Characters/Artists/Series-тега — та же
-    /// форма, что и вложенные `tags`/`parodies`/`characters`/`artists`/
-    /// `series` в карточке альбома, см. TagRefDTO.
+    /// A single Tags/Parodies/Characters/Artists/Series tag element — the
+    /// same shape as the nested `tags`/`parodies`/`characters`/`artists`/
+    /// `series` in the album card, see TagRefDTO.
     private struct TagRefDTO: Decodable {
         let id: Int
         let slug: String
@@ -228,11 +236,11 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         let favorites: Int?
     }
 
-    /// Общая модель альбома — используется и в листингах (там `related`/
-    /// `pages`/полный `tags` обычно отсутствуют, просто nil), и в детальном
-    /// ответе `/v3/manga/{slug}` (там уже всё заполнено, кроме `pages` —
-    /// та живёт в ОТДЕЛЬНОМ ответе `/v3/manga/{slug}/pages`, см.
-    /// fetchGalleryDetail).
+    /// The shared album model — used both in listings (where `related`/
+    /// `pages`/the full `tags` are usually absent, just nil) and in the
+    /// detailed `/v3/manga/{slug}` response (where everything is already
+    /// filled in, except `pages` — which lives in a SEPARATE
+    /// `/v3/manga/{slug}/pages` response, see fetchGalleryDetail).
     private struct AlbumDTO: Decodable {
         let id: Int
         let slug: String
@@ -247,9 +255,10 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         let parodies: [TagRefDTO]?
         let characters: [TagRefDTO]?
         let artists: [TagRefDTO]?
-        // На сайте нет отдельного понятия "групп" (сканлейт-групп) — есть
-        // переводчики (translators), см. doc-comment ExternalGalleryDetail
-        // насчёт того, куда они кладутся в общей модели приложения.
+        // The site has no separate notion of "groups" (scanlation
+        // groups) — it has translators instead, see the doc-comment on
+        // ExternalGalleryDetail about where they land in the app's
+        // shared model.
         let translators: [TagRefDTO]?
         let related: [AlbumDTO]?
         let createdAt: String?
@@ -287,25 +296,25 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         let pages: [PageDTO]
     }
 
-    // MARK: Алфавитный справочник (Tags/Parodies/Characters)
+    // MARK: Alphabetical index (Tags/Parodies/Characters)
 
     private static func tagsListType(for kind: ExternalTagKind) -> String? {
         switch kind {
         case .tags: return "tags"
         case .series: return "parodies"
         case .characters: return "characters"
-        // Не подтверждено HAR — сайт ни разу не запросил алфавитный
-        // список артистов/переводчиков, см. capabilities.hasTagBrowser
-        // doc-comment.
+        // Not confirmed by HAR — the site never requested an
+        // alphabetical list of artists/translators, see the
+        // capabilities.hasTagBrowser doc-comment.
         case .artists: return nil
         case .groups: return nil
         }
     }
 
-    /// Буква — только a...z (подтверждено HAR); отдельного бакета для
-    /// цифр/символов не встретилось ни разу — честно [] на letter.isNumber,
-    /// не гадаем сигнал. Пагинация — реальная, с сервера
-    /// (`pagination.next`), не догадка по наличию контента.
+    /// The letter — only a...z (confirmed by HAR); a separate bucket for
+    /// digits/symbols never turned up — honestly [] on letter.isNumber,
+    /// we don't guess the signal. Pagination is real, server-driven
+    /// (`pagination.next`), not a guess based on the presence of content.
     func fetchTagIndex(kind: ExternalTagKind, letter: Swift.Character) async throws -> [ExternalTagEntry] {
         guard !letter.isNumber, let typeValue = Self.tagsListType(for: kind) else { return [] }
         let letterParam = String(letter).lowercased()
@@ -331,11 +340,11 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         return result
     }
 
-    /// Автокомплит — РЕАЛЬНЫЙ, подтверждён HAR (`/v3/search/autocomplete?
-    /// q=scat` → живой массив релевантных строк-подсказок). Отдаёт просто
-    /// текст (заголовки/теги вперемешку), без числа тайтлов/категории —
-    /// честно `count: 0`/`category: "search"`, не выдумываем то, чего сайт
-    /// не прислал.
+    /// Autocomplete is REAL, confirmed by HAR (`/v3/search/autocomplete?
+    /// q=scat` → a live array of relevant suggestion strings). It returns
+    /// plain text (titles/tags mixed together), with no title count/
+    /// category — honestly `count: 0`/`category: "search"`, we don't make
+    /// up what the site didn't send.
     func fetchAutocomplete(query: String, namespace: String?) async throws -> [ExternalTagSuggestion] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
@@ -350,13 +359,13 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         }
     }
 
-    // MARK: Список тайтлов по тегу/пародии/персонажу/автору
+    // MARK: Title list by tag/parody/character/artist
 
-    /// `type=tag` подтверждён HAR живьём (`/v3/tag/females-only?type=tag`).
-    /// `parody`/`character`/`artist`/`translator` — ПО СИММЕТРИИ с тем же
-    /// самым эндпоинтом (та же форма URL, тот же параметр `type`, что и у
-    /// `/v3/tags?type={tags|parodies|characters}` листинга) — не
-    /// перепроверено отдельно живым запросом под каждый вариант.
+    /// `type=tag` is confirmed live by HAR (`/v3/tag/females-only?type=tag`).
+    /// `parody`/`character`/`artist`/`translator` — BY SYMMETRY with that
+    /// same endpoint (the same URL shape, the same `type` parameter as
+    /// the `/v3/tags?type={tags|parodies|characters}` listing) — not
+    /// separately double-checked with a live request for each variant.
     private static func tagDetailType(for namespace: ExternalTagNamespace) -> String {
         switch namespace {
         case .tag, .female, .male: return "tag"
@@ -371,17 +380,20 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         try await fetchIdsByTag(namespace: namespace, value: value, sortKey: nil, cursor: cursor, limit: limit)
     }
 
-    /// `value` — либо готовый slug (из ExternalTagBrowserView/entry.slug —
-    /// используется КАК ЕСТЬ, надёжно), либо чистое отображаемое имя из
-    /// чипа карточки тайтла (ExternalGalleryDetailView) — тогда слагифицируем
-    /// сами по общей формуле (см. slugify). ВАЖНО: у части тегов сайта
-    /// slug несёт непредсказуемый числовой префикс-дизамбигуатор (реальный
-    /// пример из HAR: тег "Ahegao" → slug "1-ahegao", не просто "ahegao") —
-    /// это НЕ восстановить из одного отображаемого имени. Тот же класс
-    /// несовершенства, что уже принят у остальных провайдеров для чип-тапа
-    /// (см. doc-comment ThreeHentaiProvider.slugify) — переход из
-    /// алфавитного справочника (там slug настоящий) всегда надёжен, переход
-    /// по чипу карточки — лучшее возможное приближение, изредка промахнётся.
+    /// `value` is either a ready-made slug (from
+    /// ExternalTagBrowserView/entry.slug — used AS-IS, reliably), or a
+    /// plain display name from a chip on the title card
+    /// (ExternalGalleryDetailView) — in which case we slugify it ourselves
+    /// with the shared formula (see slugify). IMPORTANT: for some of the
+    /// site's tags the slug carries an unpredictable numeric
+    /// disambiguating prefix (a real example from HAR: the tag "Ahegao" →
+    /// slug "1-ahegao", not just "ahegao") — this CANNOT be recovered from
+    /// the display name alone. The same class of imperfection already
+    /// accepted for the other providers' chip-tap flow (see the
+    /// doc-comment on ThreeHentaiProvider.slugify) — navigating from the
+    /// alphabetical index (where the slug is real) is always reliable,
+    /// navigating via a chip on the card is the best possible
+    /// approximation, and will occasionally miss.
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let type = Self.tagDetailType(for: namespace)
         let slug = Self.slugify(value)
@@ -421,7 +433,7 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         return String(page)
     }
 
-    // MARK: Поиск
+    // MARK: Search
 
     func fetchIdsBySearch(query: String, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: 0, sortKey: nil, cursor: cursor, limit: limit)
@@ -431,18 +443,19 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: excludedCategoryBits, sortKey: nil, cursor: cursor, limit: limit)
     }
 
-    /// `query` может нести встроенные `filter[...]`-токены поверх
-    /// свободного текста (см. SimplyHentaiAdvancedQuery.encoded/
-    /// fieldDelimiter doc-comment — ExternalSearchView/
-    /// ExternalCombinedCatalogView впаивают их туда) — здесь распаковываются
-    /// обратно в реальные `filter[key][N]=value` параметры `/search/complex`.
-    /// Полностью пустой запрос (ни текста, ни фильтров) → `/v3/mangas?
-    /// sort=spotlight` (единственная подтверждённая HAR "лента по умолчанию";
-    /// сайт честно её пагинирует — 415 страниц в ответе, реальная
-    /// пагинация, не заглушка одной страницей, как у HentaiPill). Иначе →
-    /// `/v3/search/complex?query=...&filter[...]=...` — сама комбинация
-    /// query+filter подтверждена HAR (см. doc-comment SimplyHentaiAdvancedQuery
-    /// с точной цепочкой параметров из живого запроса пользователя).
+    /// `query` may carry embedded `filter[...]` tokens on top of the free
+    /// text (see SimplyHentaiAdvancedQuery.encoded/fieldDelimiter
+    /// doc-comment — ExternalSearchView/ExternalCombinedCatalogView solder
+    /// them in there) — here they're unpacked back into real
+    /// `filter[key][N]=value` parameters for `/search/complex`.
+    /// A fully empty query (no text, no filters) → `/v3/mangas?
+    /// sort=spotlight` (the only confirmed HAR "default feed"; the site
+    /// honestly paginates it — 415 pages in the response, real
+    /// pagination, not a one-page stub like HentaiPill). Otherwise →
+    /// `/v3/search/complex?query=...&filter[...]=...` — the query+filter
+    /// combination itself is confirmed by HAR (see the doc-comment on
+    /// SimplyHentaiAdvancedQuery with the exact parameter chain from a
+    /// live user request).
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let (freeText, filters) = Self.decodeQuery(query)
         let trimmedFreeText = freeText.trimmingCharacters(in: .whitespaces)
@@ -489,11 +502,12 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         return (ids, nextCursor)
     }
 
-    /// Распаковывает embedded-токены SimplyHentaiAdvancedQuery.encoded()
-    /// обратно в (свободный текст, [ключ фильтра: значения]) — см. её
-    /// fieldDelimiter doc-comment. Порядок ключей словаря непредсказуем —
-    /// это ОК, `/search/complex` не документирует порядок filter-полей,
-    /// каждый ключ идёт своим отдельным набором `[N]`-индексов.
+    /// Unpacks the embedded tokens from SimplyHentaiAdvancedQuery.encoded()
+    /// back into (free text, [filter key: values]) — see its
+    /// fieldDelimiter doc-comment. The dictionary's key order is
+    /// unpredictable — that's OK, `/search/complex` doesn't document the
+    /// order of filter fields, each key goes with its own separate set of
+    /// `[N]` indices.
     private static func decodeQuery(_ raw: String) -> (freeText: String, filters: [String: [String]]) {
         let pieces = raw.components(separatedBy: SimplyHentaiAdvancedQuery.fieldDelimiter)
         let freeText = pieces.first ?? ""
@@ -508,13 +522,13 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         return (freeText, filters)
     }
 
-    // MARK: Карточка тайтла
+    // MARK: Title card
 
-    /// Два отдельных запроса — `/v3/manga/{slug}` (метаданные + превью
-    /// первых страниц + похожие) и `/v3/manga/{slug}/pages` (ПОЛНЫЙ список
-    /// страниц, подтверждено HAR: у detail-ответа `images` — только 12 из
-    /// заявленных 173, полный список — только в отдельном /pages) — гоняем
-    /// параллельно (async let), не последовательно.
+    /// Two separate requests — `/v3/manga/{slug}` (metadata + a preview of
+    /// the first pages + similar titles) and `/v3/manga/{slug}/pages` (the
+    /// FULL page list, confirmed by HAR: the detail response's `images`
+    /// only has 12 out of the stated 173 — the full list is only in the
+    /// separate /pages) — run in parallel (async let), not sequentially.
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail {
         guard let slug = await SlugCache.shared.slug(for: id) else { throw SimplyHentaiError.unknownSlug }
         async let detailTask = Self.fetchAlbum(slug: slug, session: session)
@@ -542,11 +556,12 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         return try decoder.decode(DetailResponseDTO<PagesDataDTO>.self, from: data).data.pages
     }
 
-    /// `width`/`height` — сайт их для страниц НЕ отдаёт (в отличие от
-    /// HentaiPill) — честно 0 (см. doc-comment ExternalGalleryPage — это
-    /// штатное значение "не знаем заранее"). `key` — сразу готовый
-    /// абсолютный URL полноразмерной картинки (`sizes.full`), без всякой
-    /// формулы/CDN-шардирования, см. pageImageURL.
+    /// `width`/`height` — the site doesn't provide these for pages
+    /// (unlike HentaiPill) — honestly 0 (see the doc-comment on
+    /// ExternalGalleryPage — this is the standard "not known in advance"
+    /// value). `key` is already a ready-made absolute URL of the
+    /// full-size image (`sizes.full`), with no formula/CDN sharding at
+    /// all, see pageImageURL.
     private static func buildGalleryDetail(id: Int, detail: AlbumDTO, pages: [PageDTO]) -> ExternalGalleryDetail {
         let tags = (detail.tags ?? []).map { ExternalGalleryTag(name: $0.title, female: false, male: false) }
         let pageModels = pages.enumerated().map { offset, page in
@@ -562,16 +577,18 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
             id: id,
             site: .simplyHentai,
             title: detail.title,
-            // На сайте нет подтверждённого понятия "категория тайтла"
-            // (Manga/Doujinshi/...) — `type` в JSON всегда буквально
-            // "Album", не полезная категория — честно пусто, не выдумываем.
+            // The site has no confirmed notion of a "title category"
+            // (Manga/Doujinshi/...) — `type` in the JSON is always
+            // literally "Album", not a useful category — honestly
+            // empty, we don't make it up.
             type: "",
             language: detail.language?.name,
             tags: tags,
             artists: (detail.artists ?? []).map(\.title),
-            // Переводчики (translators) — ближайший смысловой аналог
-            // "групп" в общей модели приложения (см. doc-comment AlbumDTO.
-            // translators), сайт своего понятия "группа" не имеет.
+            // Translators are the closest semantic equivalent to
+            // "groups" in the app's shared model (see the doc-comment
+            // on AlbumDTO.translators) — the site has no concept of a
+            // "group" of its own.
             groups: (detail.translators ?? []).map(\.title),
             characters: (detail.characters ?? []).map(\.title),
             series: (detail.parodies ?? []).map(\.title),
@@ -585,10 +602,11 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         )
     }
 
-    // MARK: URL картинок
+    // MARK: Image URLs
 
-    /// Без сети — `page.key` уже несёт готовый абсолютный URL `sizes.full`
-    /// прямо из ответа `/manga/{slug}/pages` (см. buildGalleryDetail).
+    /// No network — `page.key` already carries a ready-made absolute
+    /// `sizes.full` URL straight from the `/manga/{slug}/pages` response
+    /// (see buildGalleryDetail).
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL {
         guard let url = URL(string: page.key) else { throw SimplyHentaiError.badResponse }
         return url

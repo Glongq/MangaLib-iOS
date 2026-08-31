@@ -1,31 +1,32 @@
 import SwiftUI
 import UIKit
 
-/// Полноэкранная читалка внешнего сайта — по прямой просьбе (30.08) ПОРТ
-/// РЕАЛЬНОЙ читалки MangaReaderView, 1-в-1 по ощущениям: тот же
-/// горизонтальный пейджер с настоящим UIKit-зумом (ZoomableImageScrollView),
-/// тот же непрерывный вертикальный режим (VerticalPageImage + пинч-зум всей
-/// ленты), те же тап-зоны (края листают, центр показывает/прячет интерфейс),
-/// та же палитра/стекло/настройки — и даже те же ключи `@AppStorage`
-/// ("reader_theme"/"reader_page_mode"/... ), чтобы выбор пользователя в
-/// обычной читалке МангаЛиба переносился сюда без отдельной настройки.
+/// Full-screen reader for an external site — per a direct request
+/// (08/30), a PORT of the REAL MangaReaderView reader, 1-to-1 in feel:
+/// the same horizontal pager with genuine UIKit zoom
+/// (ZoomableImageScrollView), the same continuous vertical mode
+/// (VerticalPageImage + pinch-zoom of the whole feed), the same tap
+/// zones (edges page through, center shows/hides the UI), the same
+/// palette/glass/settings — and even the same `@AppStorage` keys
+/// ("reader_theme"/"reader_page_mode"/...), so the user's choices in
+/// MangaLib's regular reader carry over here with no separate setting.
 ///
 /// `ZoomableImageScrollView`/`VerticalPageImage`/`RemoteImageLoader`/
-/// `ReaderPalette` — переиспользуются НАПРЯМУЮ из MangaReaderView.swift, не
-/// копируются: это чистые UI/сетевые примитивы без зависимости от LibSite-
-/// моделей (принимают `candidates: [URL]`, не `PageItem`), тот же принцип,
-/// что уже применён к SkeletonBox/StateView/CollapsibleChips/RatingChip в
-/// этом слое.
+/// `ReaderPalette` are reused DIRECTLY from MangaReaderView.swift, not
+/// copied: they're pure UI/networking primitives with no dependency on
+/// LibSite models (they take `candidates: [URL]`, not `PageItem`), the
+/// same principle already applied to
+/// SkeletonBox/StateView/CollapsibleChips/RatingChip in this layer.
 ///
-/// Что НЕ портировано (сознательно, у hitomi/e-hentai просто нет этих
-/// понятий, см. ExternalSiteCapabilities): список глав/переводчиков (галерея
-/// — ОДНА непрерывная выдача страниц, не набор глав), лайк/оценка перевода,
-/// закладка (hasBookmarks: false), инлайн-комментарии по странице (у
-/// hitomi комментариев нет вообще, у e-hentai они привязаны к ТАЙТЛУ
-/// целиком — уже показаны во вкладке «Комментарии» карточки, см.
-/// ExternalGalleryDetailView), «Сервер картинок» в настройках (у обоих
-/// сайтов ровно один реальный источник страницы, нет альтернативных
-/// зеркал/CDN на выбор).
+/// What was NOT ported (deliberately — hitomi/e-hentai simply don't
+/// have these concepts, see ExternalSiteCapabilities): chapter/translator
+/// list (a gallery is ONE continuous run of pages, not a set of
+/// chapters), translation like/rating, bookmarking (hasBookmarks:
+/// false), inline per-page comments (hitomi has no comments at all;
+/// e-hentai's are attached to the TITLE as a whole — already shown in
+/// the card's "Комментарии" tab, see ExternalGalleryDetailView), an
+/// "image server" setting (both sites have exactly one real page
+/// source, no alternate mirrors/CDNs to choose from).
 struct ExternalReaderView: View {
     let site: ExternalSite
     let detail: ExternalGalleryDetail
@@ -37,29 +38,31 @@ struct ExternalReaderView: View {
     @State private var verticalPage: Int
     @State private var showUI = true
     @State private var showSettings = false
-    /// Быстрый переход к странице (см. ExternalReaderPageJumpSheet) — по
-    /// прямой просьбе (31.08), тем же местом/иконкой, что у "Список глав"
-    /// в оригинальной читалке (line.3.horizontal, см. bottomBar), но
-    /// открывает превью-сетку страниц + пейджер номеров вместо списка глав
-    /// (у hitomi/e-hentai/3hentai глав как понятия нет вообще).
+    /// Quick page jump (see ExternalReaderPageJumpSheet) — per a direct
+    /// request (08/31), in the same spot/with the same icon as "Chapter
+    /// list" in the original reader (line.3.horizontal, see bottomBar),
+    /// but opens a page-thumbnail grid + page-number pager instead of a
+    /// chapter list (hitomi/e-hentai/3hentai have no concept of chapters
+    /// at all).
     @State private var showPageJump = false
-    /// Страница, к которой нужно проскроллить вертикальную читалку (см.
-    /// verticalReader.onChange) — ПОСЛЕ выбора в ExternalReaderPageJumpSheet
-    /// (в горизонтальном режиме проще: там достаточно goToPage, TabView
-    /// сам переключается на нужный tag).
+    /// The page the vertical reader needs to scroll to (see
+    /// verticalReader.onChange) — AFTER a selection in
+    /// ExternalReaderPageJumpSheet (simpler in horizontal mode: goToPage
+    /// is enough there, TabView switches to the target tag on its own).
     @State private var pendingJumpPage: Int?
     @State private var isCurrentPageZoomed = false
-    /// Индексы страниц, для которых предзагрузка УЖЕ запущена (см.
-    /// preloadPage) — без этого при каждом чуть-чуть прокрученном
-    /// verticalPage окно (см. preloadVerticalWindow) пересчитывалось бы и
-    /// заново дёргало те же самые уже запрошенные страницы.
+    /// Indices of pages for which preloading has ALREADY been started
+    /// (see preloadPage) — without this, on every slight verticalPage
+    /// scroll the window (see preloadVerticalWindow) would get
+    /// recalculated and re-trigger the very same already-requested
+    /// pages.
     @State private var preloadedIndices: Set<Int> = []
     @State private var vScale: CGFloat = 1
     @State private var vScaleBase: CGFloat = 1
     @State private var didScrollToInitial = false
 
-    /// 0 — влево, 1 — вверх (непрерывный), 2 — вправо; те же значения/ключ,
-    /// что и у MangaReaderView.pageMode.
+    /// 0 — left, 1 — up (continuous), 2 — right; the same values/key as
+    /// MangaReaderView.pageMode.
     @AppStorage("reader_page_mode") private var pageMode = 0
     @AppStorage("reader_theme") private var readerTheme = 0
     @AppStorage("reader_double_tap_zoom") private var doubleTapZoom = true
@@ -68,8 +71,9 @@ struct ExternalReaderView: View {
     @AppStorage("reader_smooth_paging") private var smoothPaging = true
     @AppStorage("reader_vertical_gap") private var verticalGap: Double = 0
     @AppStorage("reader_preload_count") private var preloadCount = 3
-    /// Свой ключ (не общий "reader_fit_width_{type}" MangaReaderView) — у
-    /// hitomi/e-hentai нет понятия "Манга"/"Манхва" с разными дефолтами.
+    /// Its own key (not the shared "reader_fit_width_{type}" from
+    /// MangaReaderView) — hitomi/e-hentai have no notion of
+    /// "Манга"/"Манхва" with different defaults.
     @AppStorage("external_reader_fit_width") private var fitWidth = false
 
     private var provider: any ExternalSiteProvider { ExternalSiteRegistry.provider(for: site) }
@@ -77,9 +81,10 @@ struct ExternalReaderView: View {
     private var fg: Color { palette.foreground }
     private var readerBackground: Color { palette.pageBackground }
 
-    /// `initialPage` — открыть сразу на этой странице (1-based,
-    /// `ExternalGalleryPage.index`) — тап по миниатюре в превью-гриде
-    /// карточки тайтла (см. ExternalGalleryDetailView.previewGridSection).
+    /// `initialPage` — open directly on this page (1-based,
+    /// `ExternalGalleryPage.index`) — a tap on a thumbnail in the title
+    /// card's preview grid (see
+    /// ExternalGalleryDetailView.previewGridSection).
     init(site: ExternalSite, detail: ExternalGalleryDetail, initialPage: Int? = nil) {
         self.site = site
         self.detail = detail
@@ -149,12 +154,13 @@ struct ExternalReaderView: View {
         .preferredColorScheme(readerTheme == 2 ? nil : (palette.isLight ? .light : .dark))
     }
 
-    /// Переход к конкретной странице (см. ExternalReaderPageJumpSheet) —
-    /// горизонтальные режимы просто переиспользуют goToPage (TabView сам
-    /// переключается на нужный tag, без пролистывания промежуточных),
-    /// вертикальный — через pendingJumpPage (см. verticalReader.onChange,
-    /// ScrollViewReader.scrollTo не вызвать отсюда напрямую — proxy
-    /// живёт внутри самого verticalReader).
+    /// Jumps to a specific page (see ExternalReaderPageJumpSheet) —
+    /// horizontal modes just reuse goToPage (TabView switches to the
+    /// target tag on its own, without paging through the ones in
+    /// between), the vertical one goes through pendingJumpPage (see
+    /// verticalReader.onChange — ScrollViewReader.scrollTo can't be
+    /// called directly from here, the proxy lives inside verticalReader
+    /// itself).
     private func performPageJump(to page: Int) {
         let clamped = min(max(page, 1), detail.pages.count)
         if pageMode == 1 {
@@ -165,7 +171,7 @@ struct ExternalReaderView: View {
         }
     }
 
-    // MARK: Контент (страницы)
+    // MARK: Content (pages)
 
     @ViewBuilder
     private var content: some View {
@@ -215,16 +221,17 @@ struct ExternalReaderView: View {
         .ignoresSafeArea()
     }
 
-    /// Та же логика, что и у MangaReaderView.horizontalPageHeight — при
-    /// "по ширине" на известных размерах страница может быть выше экрана
-    /// (докручивается тем же внешним ScrollView, что и здесь).
+    /// Same logic as MangaReaderView.horizontalPageHeight — in "fit
+    /// width" mode, with known dimensions, a page can be taller than the
+    /// screen (scrolled the rest of the way by the same outer ScrollView
+    /// as here).
     private func horizontalPageHeight(geo: GeometryProxy, page: ExternalGalleryPage) -> CGFloat {
         guard fitWidth, page.width > 0, page.height > 0 else { return geo.size.height }
         let scaled = geo.size.width * CGFloat(page.height) / CGFloat(page.width)
         return max(scaled, geo.size.height)
     }
 
-    /// Тап по левой/правой части листает, по центру — показывает/прячет интерфейс.
+    /// Tapping the left/right side pages through; tapping the center shows/hides the UI.
     private func handleReaderTap(_ xFraction: CGFloat) {
         if xFraction < 0.2 {
             goToPage(currentPage - 1)
@@ -247,7 +254,7 @@ struct ExternalReaderView: View {
         }
     }
 
-    // MARK: Вертикальный (непрерывный) режим
+    // MARK: Vertical (continuous) mode
 
     private var verticalReader: some View {
         GeometryReader { geo in
@@ -286,10 +293,10 @@ struct ExternalReaderView: View {
                         proxy.scrollTo(currentPage, anchor: .top)
                     }
                 }
-                // Прыжок из ExternalReaderPageJumpSheet (см. performPageJump)
-                // — proxy живёт только здесь, внутри ScrollViewReader,
-                // поэтому реагируем на pendingJumpPage тут, а не в
-                // performPageJump напрямую.
+                // A jump from ExternalReaderPageJumpSheet (see
+                // performPageJump) — the proxy only lives here, inside
+                // ScrollViewReader, so we react to pendingJumpPage here
+                // rather than directly in performPageJump.
                 .onChange(of: pendingJumpPage) { _, target in
                     guard let target else { return }
                     proxy.scrollTo(target, anchor: .top)
@@ -320,12 +327,13 @@ struct ExternalReaderView: View {
         .ignoresSafeArea()
     }
 
-    // MARK: Предзагрузка
+    // MARK: Preloading
 
-    /// Разрешение URL страницы — асинхронное (у e-hentai реальный сетевой
-    /// запрос за H@H-ссылкой, см. EHentaiProvider.pageImageURL), поэтому в
-    /// отличие от MangaReaderView.preloadUpcoming (готовая формула,
-    /// синхронно) здесь на каждую страницу — своя лёгкая задача.
+    /// Resolving a page URL is asynchronous (for e-hentai it's a real
+    /// network request for the H@H link, see
+    /// EHentaiProvider.pageImageURL), so unlike
+    /// MangaReaderView.preloadUpcoming (a ready-made formula, synchronous)
+    /// here each page gets its own lightweight task.
     private func preloadUpcoming(from page: Int) {
         guard preloadCount > 0 else { return }
         let start = page + 1
@@ -336,9 +344,9 @@ struct ExternalReaderView: View {
         }
     }
 
-    /// Вертикальный режим — окно вперёд от текущей страницы (по прямой
-    /// просьбе — не ВСЁ сразу, а следующие 50), пересчитывается по мере
-    /// прокрутки (см. .onChange(of: verticalPage)).
+    /// Vertical mode — a window ahead of the current page (per a direct
+    /// request — not ALL at once, but the next 50), recalculated as the
+    /// user scrolls (see .onChange(of: verticalPage)).
     private static let verticalPreloadWindow = 50
 
     private func preloadVerticalWindow(from page: Int) {
@@ -350,15 +358,17 @@ struct ExternalReaderView: View {
         }
     }
 
-    /// `preloadExternalImage` (ExternalImage.swift), НЕ RemoteImageLoader.
-    /// preload — та использует Referer от MangaNetworkService (текущий
-    /// активный сайт MangaLib), неверный для tn.gold-usergeneratedcontent.
-    /// net/ehgt.org/*.hath.network — CDN отвечал 404/403, предзагрузка
-    /// молча ничего не давала (жалоба "вижу стыки", 30.08). См. её
-    /// doc-comment — картинка кладётся в тот же RemoteImageCache.shared,
-    /// который проверяет ZoomableImageScrollView/VerticalPageImage, так что
-    /// сами эти (переиспользуемые из MangaReaderView.swift) вью просто
-    /// находят её уже готовой.
+    /// `preloadExternalImage` (ExternalImage.swift), NOT
+    /// RemoteImageLoader.preload — that one uses the Referer from
+    /// MangaNetworkService (the currently active MangaLib site), which
+    /// is wrong for
+    /// tn.gold-usergeneratedcontent.net/ehgt.org/*.hath.network — the CDN
+    /// responded with 404/403, and preloading silently did nothing
+    /// (complaint "I see seams", 08/30). See its doc-comment — the
+    /// image is stored in the same RemoteImageCache.shared that
+    /// ZoomableImageScrollView/VerticalPageImage check, so those
+    /// (reused from MangaReaderView.swift) views simply find it already
+    /// there.
     private func preloadPage(_ page: ExternalGalleryPage) {
         guard !preloadedIndices.contains(page.index) else { return }
         preloadedIndices.insert(page.index)
@@ -369,9 +379,10 @@ struct ExternalReaderView: View {
         }
     }
 
-    // MARK: Интерфейс (топ/бабл/низ) — 1-в-1 стиль MangaReaderView.overlayUI/
-    // topBar/pageBubble/bottomBar, без глав/закладки/комментариев-в-ридере
-    // (у внешних сайтов этих понятий нет, см. doc-comment типа).
+    // MARK: UI (top bar/bubble/bottom bar) — 1-to-1 style with
+    // MangaReaderView.overlayUI/topBar/pageBubble/bottomBar, without
+    // chapters/bookmarking/in-reader comments (external sites have no
+    // such concepts, see the type's doc-comment).
 
     private var overlayUI: some View {
         GlassEffectContainer(spacing: 16) {
@@ -437,10 +448,11 @@ struct ExternalReaderView: View {
 
     private var bottomBar: some View {
         HStack {
-            // line.3.horizontal — то же место/иконка, что и у "Список
-            // глав" в оригинальной читалке (см. MangaReaderView.bottomBar
-            // — там слева же), просто открывает не список глав (тут этого
-            // понятия нет вообще), а быстрый переход к странице.
+            // line.3.horizontal — the same spot/icon as "Список глав" in
+            // the original reader (see MangaReaderView.bottomBar — same
+            // left position there), it just opens not a chapter list
+            // (that concept doesn't exist here at all) but a quick page
+            // jump.
             readerButton(icon: "line.3.horizontal") { showPageJump = true }
             Spacer()
             readerButton(icon: "gearshape") { showSettings = true }
@@ -461,12 +473,12 @@ struct ExternalReaderView: View {
     }
 }
 
-// MARK: - Страница горизонтального режима (асинхронное разрешение URL + ZoomableImageScrollView)
+// MARK: - Horizontal-mode page (asynchronous URL resolution + ZoomableImageScrollView)
 
-/// Оборачивает `ZoomableImageScrollView` (см. MangaReaderView.swift —
-/// переиспользуется НАПРЯМУЮ, тот же UIKit-зум/пан/двойной тап) —
-/// `candidates` там синхронный `[URL]`, а у внешних провайдеров URL
-/// страницы разрешается асинхронно (см. ExternalSiteProvider.pageImageURL).
+/// Wraps `ZoomableImageScrollView` (see MangaReaderView.swift — reused
+/// DIRECTLY, the same UIKit zoom/pan/double-tap) — there `candidates` is
+/// a synchronous `[URL]`, while external providers resolve a page URL
+/// asynchronously (see ExternalSiteProvider.pageImageURL).
 private struct ExternalHorizontalPageImage: View {
     let provider: any ExternalSiteProvider
     let galleryId: Int
@@ -493,26 +505,27 @@ private struct ExternalHorizontalPageImage: View {
         }
         .task {
             guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
-            // Прогреваем RemoteImageCache ПРАВИЛЬНОЙ (по хосту) Referer-
-            // сессией ДО того, как отдать url в ZoomableImageScrollView —
-            // без этого у ТЕКУЩЕЙ (видимой прямо сейчас) страницы, в
-            // отличие от предзагружаемых вперёд (см. preloadPage), не было
-            // ни единого шанса оказаться в кэше заранее: страница 1 вообще
-            // никогда не предзагружается (окно предзагрузки стартует со
-            // следующей), поэтому ZoomableImageScrollView/RemoteImageLoader
-            // внутри неё ВСЕГДА пытались бы взять её сами — чужой сессией
-            // с неверным Referer (см. preloadExternalImage doc-comment) —
-            // 404, картинка не декодируется, и первая (иногда и вторая,
-            // если TabView успевает отрисовать её раньше предзагрузки)
-            // страница читалки оставались просто чёрным фоном (жалоба 31.08).
+            // Warm RemoteImageCache with the CORRECT (per-host) Referer
+            // session BEFORE handing the url to ZoomableImageScrollView —
+            // without this, the CURRENT (visible right now) page, unlike
+            // the ones preloaded ahead of time (see preloadPage), had no
+            // chance of ending up in the cache beforehand: page 1 is
+            // never preloaded at all (the preload window starts from the
+            // next one), so ZoomableImageScrollView/RemoteImageLoader
+            // inside it would ALWAYS try to fetch it themselves — with
+            // the wrong session's Referer (see preloadExternalImage
+            // doc-comment) — 404, the image fails to decode, and the
+            // first (sometimes the second too, if TabView renders it
+            // before preloading catches up) page of the reader just
+            // stayed a black background (complaint on 08/31).
             await preloadExternalImage(url)
             resolvedURL = url
         }
     }
 }
 
-/// Та же обёртка для вертикального режима — `VerticalPageImage`
-/// (MangaReaderView.swift, переиспользуется напрямую).
+/// The same wrapper for vertical mode — `VerticalPageImage`
+/// (MangaReaderView.swift, reused directly).
 private struct ExternalVerticalPageImage: View {
     let provider: any ExternalSiteProvider
     let galleryId: Int
@@ -528,10 +541,11 @@ private struct ExternalVerticalPageImage: View {
         )
         .task {
             guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
-            // См. ExternalHorizontalPageImage.task — та же гонка с
-            // неверным Referer у ТЕКУЩЕ видимой (не предзагруженной
-            // заранее) страницы, тот же фикс: прогреть кэш ПРАВИЛЬНОЙ
-            // сессией до того, как отдать url в VerticalPageImage.
+            // See ExternalHorizontalPageImage.task — the same race with
+            // the wrong Referer for the CURRENTLY visible (not
+            // preloaded ahead of time) page, the same fix: warm the
+            // cache with the CORRECT session before handing the url to
+            // VerticalPageImage.
             await preloadExternalImage(url)
             resolvedURL = url
         }
@@ -550,8 +564,9 @@ private struct ExternalVerticalPagePositionKey: PreferenceKey {
     }
 }
 
-// MARK: - Настройки читалки (1-в-1 стиль MangaReaderView.ReaderSettingsSheet,
-// без «Сервера картинок» — у hitomi/e-hentai нет альтернативных зеркал)
+// MARK: - Reader settings (1-to-1 style with
+// MangaReaderView.ReaderSettingsSheet, without "Image server" — hitomi/e-hentai
+// have no alternate mirrors)
 
 private struct ExternalReaderSettingsSheet: View {
     @Binding var fitWidth: Bool
@@ -721,17 +736,17 @@ private struct ExternalReaderSettingsSheet: View {
     }
 }
 
-// MARK: - Быстрый переход к странице (bottomBar.line.3.horizontal, 31.08)
+// MARK: - Quick page jump (bottomBar.line.3.horizontal, 08/31)
 
-/// Превью-сетка ВСЕХ страниц (3 колонки, тап — сразу переход и закрытие
-/// листа) + фиксированный (не скроллящийся вместе с сеткой) пейджер
-/// номеров страниц внизу ("1 2 3 … 67 69", та же truncated-логика, что и
-/// у ExternalGalleryDetailView.paginationSequence — 1-в-1 приём, тут
-/// просто по РЕАЛЬНЫМ страницам чтения, не по батчам превью-грида
-/// карточки тайтла, т.к. читалка и так уже открыта — дублировать ту
-/// пагинацию незачем). Сетка — внутри `ScrollView`, лист —
-/// `.presentationDetents([.large])`, чтобы не расти бесконечно вниз при
-/// большом числе страниц (по прямой просьбе).
+/// A preview grid of ALL pages (3 columns, tap jumps immediately and
+/// closes the sheet) + a fixed (not scrolling with the grid) page-number
+/// pager at the bottom ("1 2 3 … 67 69", the same truncated logic as
+/// ExternalGalleryDetailView.paginationSequence — a 1-to-1 approach,
+/// just over the ACTUAL reading pages here, not over the title card's
+/// preview-grid batches, since the reader is already open — no need to
+/// duplicate that pagination). The grid sits inside a `ScrollView`, and
+/// the sheet uses `.presentationDetents([.large])` so it doesn't grow
+/// endlessly downward with a large page count (per a direct request).
 private struct ExternalReaderPageJumpSheet: View {
     let pages: [ExternalGalleryPage]
     let currentPage: Int
@@ -768,7 +783,7 @@ private struct ExternalReaderPageJumpSheet: View {
         .presentationDragIndicator(.visible)
     }
 
-    // MARK: Сетка миниатюр
+    // MARK: Thumbnail grid
 
     private var grid: some View {
         let availableWidth = UIScreen.main.bounds.width - 32
@@ -793,9 +808,10 @@ private struct ExternalReaderPageJumpSheet: View {
         ZStack(alignment: .bottomTrailing) {
             Group {
                 if let url = page.thumbnailURL, let offsetX = page.thumbnailSpriteOffsetX {
-                    // e-hentai: спрайт на партию страниц, offsetX — нужный
-                    // тайл (см. ExternalGalleryDetailView.previewThumb —
-                    // тот же приём).
+                    // e-hentai: a sprite covering a batch of pages,
+                    // offsetX is the tile we need (see
+                    // ExternalGalleryDetailView.previewThumb — same
+                    // approach).
                     ExternalSpriteThumbnail(url: url, offsetX: offsetX, tileWidth: page.width, tileHeight: page.height) { SkeletonBox() }
                         .scaledToFill()
                 } else if let url = page.thumbnailURL {
@@ -825,7 +841,7 @@ private struct ExternalReaderPageJumpSheet: View {
         }
     }
 
-    // MARK: Пейджер номеров + поле "перейти на страницу"
+    // MARK: Number pager + "jump to page" field
 
     private var paginationRow: some View {
         HStack(spacing: 8) {
@@ -884,9 +900,9 @@ private struct ExternalReaderPageJumpSheet: View {
         }
     }
 
-    /// "1 2 3 … 67 69" — 1-в-1 truncated-логика
-    /// ExternalGalleryDetailView.paginationSequence (см. её doc-comment),
-    /// только тут по РЕАЛЬНЫМ страницам чтения.
+    /// "1 2 3 … 67 69" — 1-to-1 truncated logic with
+    /// ExternalGalleryDetailView.paginationSequence (see its
+    /// doc-comment), just over ACTUAL reading pages here.
     private var paginationSequence: [Int?] {
         let total = pages.count
         guard total > 7 else { return (1...max(total, 1)).map { $0 } }

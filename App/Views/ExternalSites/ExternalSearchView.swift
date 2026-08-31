@@ -1,37 +1,40 @@
 import SwiftUI
 
-/// Каталог-экран для внешних сайтов со свободным текстовым поиском вместо
-/// алфавитного справочника (capabilities.hasSearch && !hasTagBrowser — см.
-/// EHentaiProvider; у hitomi наоборот, см. ExternalTagBrowserView).
+/// Catalog screen for external sites with free-text search instead of
+/// an alphabetical index (capabilities.hasSearch && !hasTagBrowser — see
+/// EHentaiProvider; hitomi is the opposite case, see ExternalTagBrowserView).
 ///
-/// Визуально — ПОЛНОСТЬЮ 1-в-1 MangaCatalogView (по прямой просьбе 30.08):
-/// заголовок "Каталог" крупным .large (не "Поиск"/.inline, как было),
-/// родной `.searchable()` вместо самодельного TextField+HStack-бокса
-/// (тот же приём, что и в самом MangaCatalogView — не отдельная позиция
-/// поля, а системная строка поиска под навбаром), «Фильтры» — стеклянная
-/// пилюля в общей нижней панели (см. ExternalCatalogGridView.controlsBar,
-/// куда передаётся через leadingControls) вместо того, чтобы категории
-/// всегда торчали на экране. Без отдельного перехода: тайтлы появляются
-/// сразу под полем (см. ExternalCatalogGridView(embedded: true)), с
-/// небольшой задержкой после последнего нажатия клавиши (debounce).
+/// Visually — COMPLETELY 1-to-1 with MangaCatalogView (per a direct
+/// request on 08/30): the "Каталог" title is large .large (not
+/// "Поиск"/.inline as it used to be), the native `.searchable()` instead
+/// of a hand-rolled TextField+HStack box (the same trick as in
+/// MangaCatalogView itself — not a separate field position, but the
+/// system search bar under the nav bar), "Фильтры" is a glass pill in
+/// the shared bottom bar (see ExternalCatalogGridView.controlsBar, passed
+/// in via leadingControls) instead of categories always sticking out on
+/// screen. No separate navigation: titles appear right below the field
+/// (see ExternalCatalogGridView(embedded: true)), with a short delay
+/// after the last keypress (debounce).
 struct ExternalSearchView: View {
     let site: ExternalSite
 
     @ObservedObject private var filterStore = ExternalCatalogFilterStore.shared
     @State private var query = ""
-    /// Запрос, который реально сейчас ищется — отдельно от `query` (что
-    /// набрано в поле прямо сейчас), чтобы не дёргать сеть на КАЖДОЕ
-    /// нажатие клавиши (см. .task(id: query) ниже — debounce).
+    /// The query that is actually being searched right now — kept
+    /// separate from `query` (what's currently typed in the field) so we
+    /// don't hit the network on EVERY keypress (see .task(id: query)
+    /// below — debounce).
     @State private var committedQuery = ""
     @State private var showFilters = false
 
     private var capabilities: ExternalSiteCapabilities { ExternalSiteRegistry.provider(for: site).capabilities }
-    /// Два РАЗНЫХ набора категорий (e-hentai — EHentaiCategory, imhentai —
-    /// ImhentaiCategory, свои значения/количество у каждого сайта, см.
-    /// ImhentaiProvider.swift) — храним отдельно в ExternalCatalogFilterStore,
-    /// переключаемся по `site` (см. excludedCategoryBits/filtersSheet ниже).
-    /// hitomi/3hentai сюда не попадают вообще — hasCategoryFilter у них
-    /// false, filtersButton не показывается.
+    /// Two DIFFERENT category sets (e-hentai — EHentaiCategory, imhentai —
+    /// ImhentaiCategory, each site has its own values/count, see
+    /// ImhentaiProvider.swift) — stored separately in
+    /// ExternalCatalogFilterStore, switched on `site` (see
+    /// excludedCategoryBits/filtersSheet below). hitomi/3hentai never
+    /// reach this at all — hasCategoryFilter is false for them, so
+    /// filtersButton is not shown.
     private var excludedCategoriesEH: Set<EHentaiCategory> {
         get { filterStore.excludedCategories[site] ?? [] }
         nonmutating set { filterStore.excludedCategories[site] = newValue }
@@ -40,8 +43,9 @@ struct ExternalSearchView: View {
         get { filterStore.excludedImhentaiCategories[site] ?? [] }
         nonmutating set { filterStore.excludedImhentaiCategories[site] = newValue }
     }
-    /// Языки imhentai (см. ImhentaiLanguage.bit doc-comment) — отдельное
-    /// измерение фильтра, тот же общий bitmask-канал, что и категории.
+    /// imhentai languages (see ImhentaiLanguage.bit doc-comment) — a
+    /// separate filter dimension, using the same shared bitmask channel
+    /// as categories.
     private var excludedLanguagesIH: Set<ImhentaiLanguage> {
         get { filterStore.excludedImhentaiLanguages[site] ?? [] }
         nonmutating set { filterStore.excludedImhentaiLanguages[site] = newValue }
@@ -54,37 +58,39 @@ struct ExternalSearchView: View {
         default: return 0
         }
     }
-    /// Расширенные поля (Tags/Parodies/Artists/Characters/Groups, см.
-    /// ImhentaiAdvancedQuery) — только у imhentai, только внутри «Фильтры».
+    /// Advanced fields (Tags/Parodies/Artists/Characters/Groups, see
+    /// ImhentaiAdvancedQuery) — imhentai only, only inside "Фильтры".
     private var advancedQueryIH: ImhentaiAdvancedQuery {
         get { filterStore.imhentaiAdvancedQueries[site] ?? ImhentaiAdvancedQuery() }
         nonmutating set { filterStore.imhentaiAdvancedQueries[site] = newValue }
     }
-    /// Расширенные поля Simply Hentai (Поиск/Tags/Parodies/Characters/
-    /// Artists/Translators/Language/Series title, см.
-    /// SimplyHentaiAdvancedQuery) — ЭКСКЛЮЗИВНО по отношению к общему
-    /// committedQuery (см. resolvedQuery doc-comment: правило одно для
-    /// всех сайтов с расширенными полями, кроме imhentai/hentaiPill).
+    /// Simply Hentai advanced fields (Поиск/Tags/Parodies/Characters/
+    /// Artists/Translators/Language/Series title, see
+    /// SimplyHentaiAdvancedQuery) — EXCLUSIVE with respect to the shared
+    /// committedQuery (see the resolvedQuery doc-comment: one rule
+    /// applies to all sites with advanced fields, except
+    /// imhentai/hentaiPill).
     private var advancedQuerySH: SimplyHentaiAdvancedQuery {
         get { filterStore.simplyHentaiAdvancedQueries[site] ?? SimplyHentaiAdvancedQuery() }
         nonmutating set { filterStore.simplyHentaiAdvancedQueries[site] = newValue }
     }
-    /// Расширенные поля E-Hentai (Поиск/Tags/Parodies/Characters/Artists/
-    /// Groups, см. EHentaiAdvancedQuery) — работают ВМЕСТЕ с bitmask-
-    /// категориями (excludedCategoriesEH, отдельный канал), но эксклюзивно
-    /// по отношению к committedQuery.
+    /// E-Hentai advanced fields (Поиск/Tags/Parodies/Characters/Artists/
+    /// Groups, see EHentaiAdvancedQuery) — work TOGETHER with the
+    /// bitmask categories (excludedCategoriesEH, a separate channel), but
+    /// are exclusive with respect to committedQuery.
     private var advancedQueryEH: EHentaiAdvancedQuery {
         get { filterStore.ehentaiAdvancedQueries[site] ?? EHentaiAdvancedQuery() }
         nonmutating set { filterStore.ehentaiAdvancedQueries[site] = newValue }
     }
-    /// Расширенные поля 3Hentai (Поиск/Tags, см. ThreeHentaiAdvancedQuery).
+    /// 3Hentai advanced fields (Поиск/Tags, see ThreeHentaiAdvancedQuery).
     private var advancedQuery3H: ThreeHentaiAdvancedQuery {
         get { filterStore.threeHentaiAdvancedQueries[site] ?? ThreeHentaiAdvancedQuery() }
         nonmutating set { filterStore.threeHentaiAdvancedQueries[site] = newValue }
     }
-    /// Одно измерение + значение HentaiPill (см. HentaiPillAdvancedQuery —
-    /// сайт не комбинирует измерения между собой и не сочетается с общим
-    /// текстовым поиском ни при каких условиях, см. resolvedQuery).
+    /// A single dimension + value for HentaiPill (see
+    /// HentaiPillAdvancedQuery — this site never combines dimensions with
+    /// each other and never combines with the shared text search under
+    /// any condition, see resolvedQuery).
     private var advancedQueryHP: HentaiPillAdvancedQuery {
         get { filterStore.hentaiPillAdvancedQueries[site] ?? HentaiPillAdvancedQuery() }
         nonmutating set { filterStore.hentaiPillAdvancedQueries[site] = newValue }
@@ -111,24 +117,24 @@ struct ExternalSearchView: View {
         default: return 0
         }
     }
-    /// Итоговый запрос, реально уходящий в ExternalCatalogGridView.
+    /// The final query that actually goes to ExternalCatalogGridView.
     ///
-    /// Правило — ЭКСКЛЮЗИВНОЕ (по прямой просьбе 01.09): если у сайта
-    /// заполнено хоть одно расширенное поле («Фильтры»), общее верхнее
-    /// поле `.searchable()` (committedQuery) для этого сайта перестаёт
-    /// участвовать вообще — ищем строго по тому, что набрано в самих
-    /// полях. Если расширенные поля пусты — как раньше, обычный
-    /// committedQuery.
+    /// The rule is EXCLUSIVE (per a direct request on 09/01): if a site
+    /// has even one advanced field filled in ("Фильтры"), the shared top
+    /// `.searchable()` field (committedQuery) stops applying to that site
+    /// entirely — search is done strictly on what's typed into the
+    /// advanced fields themselves. If the advanced fields are empty —
+    /// same as before, plain committedQuery.
     ///
-    /// imhentai — частный случай этого же правила: своя строка
-    /// (advancedQueryIH.searchText) заменяет committedQuery БЕЗУСЛОВНО
-    /// (committedQuery у него даже не показывается, см. body), поэтому
-    /// отдельная ветка, как и раньше.
+    /// imhentai is a special case of this same rule: its own field
+    /// (advancedQueryIH.searchText) replaces committedQuery
+    /// UNCONDITIONALLY (committedQuery isn't even shown for it, see
+    /// body), hence the separate branch, same as before.
     ///
-    /// hentaiPill — тоже частный случай: сайт не умеет комбинировать
-    /// измерения, поэтому при непустом advancedQueryHP запрос — не
-    /// `.search(...)`, а `.tag(namespace:value:)` напрямую; при пустом —
-    /// обычный `.search(committedQuery, ...)`, как у всех.
+    /// hentaiPill is also a special case: this site can't combine
+    /// dimensions, so when advancedQueryHP is non-empty the query is not
+    /// `.search(...)` but `.tag(namespace:value:)` directly; when empty —
+    /// plain `.search(committedQuery, ...)`, like everyone else.
     private var resolvedQuery: ExternalCatalogQuery {
         if site == .imhentai {
             let advanced = advancedQueryIH
@@ -162,9 +168,10 @@ struct ExternalSearchView: View {
         }
         return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
     }
-    /// Строковая часть resolvedQuery — только для `.id(...)` (принудительный
-    /// сброс @State сетки, см. content) и displayTitle; в саму сеть уходит
-    /// resolvedQuery целиком (в т.ч. .tag-случай hentaiPill).
+    /// The string portion of resolvedQuery — used only for `.id(...)`
+    /// (forced @State reset of the grid, see content) and displayTitle;
+    /// the network call gets resolvedQuery in full (including
+    /// hentaiPill's .tag case).
     private var resolvedQueryIdentity: String {
         switch resolvedQuery {
         case .tag(let namespace, let value): return "tag:\(namespace)/\(value)"
@@ -172,9 +179,9 @@ struct ExternalSearchView: View {
         }
     }
 
-    /// Заголовок ленты результатов — у сайтов с активными расширенными
-    /// полями отражает ИХ (общее committedQuery для этого сайта уже ни на
-    /// что не влияет, см. resolvedQuery).
+    /// The title above the results feed — for sites with active advanced
+    /// fields it reflects THEM (the shared committedQuery no longer
+    /// affects anything for that site, see resolvedQuery).
     private var displayTitle: String {
         if site == .imhentai {
             let text = advancedQueryIH.searchText.trimmingCharacters(in: .whitespaces)
@@ -199,12 +206,12 @@ struct ExternalSearchView: View {
     }
 
     var body: some View {
-        // Верхнее общее .searchable() — только у сайтов, которые реально
-        // его слушают (см. resolvedQuery); у imhentai оно бы просто ничего
-        // не делало (искало бы в никуда), путая пользователя тем самым
-        // багом, из-за которого его вообще убрали — поэтому для imhentai
-        // не показываем совсем, вместо него — своя строка в «Фильтрах»
-        // (ImhentaiAdvancedFieldsPicker).
+        // The shared top .searchable() — only for sites that actually
+        // listen to it (see resolvedQuery); for imhentai it would just do
+        // nothing (search into the void), confusing the user with the
+        // exact same bug that got it removed in the first place — so for
+        // imhentai we don't show it at all, and instead there's its own
+        // field inside "Фильтры" (ImhentaiAdvancedFieldsPicker).
         if site == .imhentai {
             content
         } else {
@@ -213,14 +220,15 @@ struct ExternalSearchView: View {
     }
 
     private var content: some View {
-        // Пустой запрос — не "Введите запрос", а лента "Recently" (см.
-        // HitomiProvider/EHentaiProvider.fetchIdsBySearch с пустым query)
-        // — тайтлы видны сразу, без необходимости сначала что-то ввести.
-        // .id — принудительно НОВЫЙ экземпляр вью на каждое изменение
-        // запроса/категорий, чтобы @State сетки (items/cursors/...)
-        // сбрасывался и .task заново запускал загрузку — простая смена
-        // параметра `query:` этого не делает, SwiftUI считает это ТЕМ ЖЕ
-        // вью на том же месте дерева.
+        // An empty query is not "Enter a query" but a "Recently" feed
+        // (see HitomiProvider/EHentaiProvider.fetchIdsBySearch with an
+        // empty query) — titles are visible right away, with no need to
+        // type anything first.
+        // .id — forces a NEW view instance on every change to the
+        // query/categories, so the grid's @State (items/cursors/...) gets
+        // reset and .task restarts loading — simply changing the
+        // `query:` parameter doesn't do this, SwiftUI treats it as the
+        // SAME view at the same place in the tree.
         ExternalCatalogGridView(
             site: site,
             query: resolvedQuery,
@@ -236,20 +244,21 @@ struct ExternalSearchView: View {
             filtersSheet
         }
         .onAppear {
-            // Восстанавливаем то, что реально набрано/выбрано в прошлый раз
-            // (см. ExternalCatalogFilterStore) — экран пересоздаётся при
-            // уходе/возврате на вкладку Каталог, query/committedQuery как
-            // обычный @State иначе сбрасывались бы каждый раз. У imhentai
-            // это всё равно ни на что не влияет (нет .searchable()), но
-            // безобидно оставить как есть — проще, чем городить ветвление.
+            // Restore what was actually typed/selected last time (see
+            // ExternalCatalogFilterStore) — the screen is recreated when
+            // leaving/returning to the Catalog tab, and query/committedQuery
+            // as plain @State would otherwise reset every time. For
+            // imhentai this doesn't affect anything anyway (no
+            // .searchable()), but it's harmless to leave it as-is —
+            // simpler than adding a branch for it.
             query = filterStore.queries[site] ?? ""
             committedQuery = query
         }
         .task(id: query) {
-            // Debounce — 400мс тишины после последнего нажатия, иначе
-            // каждая буква била бы отдельным сетевым запросом. .task(id:)
-            // сам отменяет предыдущую попытку, когда query меняется снова
-            // раньше, чем истекли эти 400мс.
+            // Debounce — 400ms of silence after the last keypress,
+            // otherwise every letter would trigger a separate network
+            // request. .task(id:) itself cancels the previous attempt
+            // when query changes again before these 400ms have elapsed.
             try? await Task.sleep(nanoseconds: 400_000_000)
             guard !Task.isCancelled else { return }
             committedQuery = query.trimmingCharacters(in: .whitespaces)
@@ -257,8 +266,8 @@ struct ExternalSearchView: View {
         }
     }
 
-    // MARK: Фильтры — стеклянная пилюля (см. ExternalCatalogGridView.
-    // controlPill), тап открывает лист с переключателями (EHentaiCategoryPicker).
+    // MARK: Filters — a glass pill (see ExternalCatalogGridView.
+    // controlPill); a tap opens a sheet with toggles (EHentaiCategoryPicker).
 
     private var filtersButton: some View {
         Button {
@@ -305,9 +314,9 @@ struct ExternalSearchView: View {
         .presentationDragIndicator(.visible)
     }
 
-    /// Сброс фильтров ТЕКУЩЕГО сайта (этот экран всегда про один сайт, в
-    /// отличие от ExternalCombinedCatalogView — там сброс ограничен
-    /// активной вкладкой чипа).
+    /// Resets the filters for the CURRENT site (this screen is always
+    /// about a single site, unlike ExternalCombinedCatalogView — there
+    /// reset is scoped to the active chip tab).
     private func resetFilters() {
         switch site {
         case .ehentai:

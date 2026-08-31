@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Меню каталога ОДНОГО внешнего сайта (см. MangaCatalogView) — раньше
-/// вкладка «Каталог» сразу прыгала в конкретный экран (список тегов ИЛИ
-/// поиск), по прямой просьбе теперь это отдельная менюшка с пунктами:
-/// «Список тегов» появляется только если у сайта реально есть алфавитный
-/// справочник (capabilities.hasTagBrowser), «Поиск» — если есть свободный
-/// поиск (capabilities.hasSearch). Ни один пункт не ведёт ни во что
-/// связанное с MangaLib.
+/// Catalog menu for ONE external site (see MangaCatalogView) — the
+/// "Catalog" tab used to jump straight into a specific screen (either the
+/// tag list OR search); per a direct request this is now a separate little
+/// menu with entries: "Tag list" shows up only if the site actually has an
+/// alphabetical index (capabilities.hasTagBrowser), "Search" — if it has
+/// free-text search (capabilities.hasSearch). Neither entry leads to
+/// anything related to MangaLib.
 struct ExternalCatalogMenuView: View {
     let site: ExternalSite
 

@@ -1,17 +1,17 @@
 import Foundation
 
-/// Общий ранжированный поиск по нескольким тегам внешнего сайта (см. план,
-/// Часть 5) — ТА ЖЕ ИДЕЯ алгоритма, что у App/SpecialFilterEngine.swift
-/// (перебор подмножеств выбранных тегов от большего к меньшему, ранжирование
-/// по числу совпадений), но ПРОДУБЛИРОВАНА здесь целиком, по прямому
-/// решению — не трогаем/не переиспользуем SpecialFilterEngine.swift.
+/// Generic ranked search over several tags on an external site (see the plan,
+/// Part 5) — the SAME algorithm idea as App/SpecialFilterEngine.swift
+/// (iterating over subsets of the selected tags from largest to smallest, ranking
+/// by match count), but DUPLICATED here in full, by deliberate decision — we do not
+/// touch/reuse SpecialFilterEngine.swift.
 ///
-/// Отличие от LibSite-версии: там подмножество проверяется ОДНИМ сетевым
-/// запросом (сервер сам умеет AND по genres[]/tags[]). У hitomi.la такого
-/// запроса нет — вместо этого каждый ВЫБРАННЫЙ тег запрашивается ОТДЕЛЬНО
-/// (один .nozomi-запрос на тег, не на подмножество), а совпадение по
-/// подмножеству считается ПЕРЕСЕЧЕНИЕМ уже полученных множеств ID —
-/// локально, без лишних сетевых запросов.
+/// Difference from the LibSite version: there, a subset is checked with ONE network
+/// request (the server itself can AND over genres[]/tags[]). hitomi.la has no such
+/// request — instead, each SELECTED tag is queried SEPARATELY
+/// (one .nozomi request per tag, not per subset), and a subset match
+/// is computed as the INTERSECTION of the already-fetched ID sets —
+/// locally, with no extra network requests.
 @MainActor
 enum RankedTagSearch {
     struct Choice: Hashable {
@@ -24,17 +24,17 @@ enum RankedTagSearch {
         let matchCount: Int
     }
 
-    /// Не больше 6 выбранных тегов сразу — иначе полный перебор подмножеств
-    /// (2^n - 1) взрывается (см. тот же лимит и ту же причину в
+    /// No more than 6 selected tags at once — otherwise the full subset
+    /// enumeration (2^n - 1) blows up (see the same limit for the same reason in
     /// SpecialFilterEngine.maxItems).
     static let maxItems = 6
     private static let targetResultCount = 90
-    /// Сколько ID тянуть на КАЖДЫЙ отдельный тег перед пересечением — у
-    /// hitomi популярные теги (например "japanese") могут насчитывать
-    /// сотни тысяч тайтлов; тянуть их все ради пересечения нецелесообразно
-    /// (трафик/время). Пересечение считается в пределах первых
-    /// perTagLimit ID каждого тега — ИЗВЕСТНОЕ упрощение (может пропустить
-    /// совпадения за пределами этого окна), нормально для MVP.
+    /// How many IDs to fetch for EACH individual tag before intersecting — on
+    /// hitomi, popular tags (e.g. "japanese") can have hundreds of thousands
+    /// of titles; fetching all of them just for an intersection isn't practical
+    /// (traffic/time). The intersection is computed within the first
+    /// perTagLimit IDs of each tag — a KNOWN simplification (it can miss
+    /// matches outside this window), acceptable for an MVP.
     private static let perTagLimit = 400
 
     static func search(provider: any ExternalSiteProvider, choices: [Choice]) async -> [Result] {
@@ -68,8 +68,8 @@ enum RankedTagSearch {
             .sorted { $0.matchCount != $1.matchCount ? $0.matchCount > $1.matchCount : $0.id > $1.id }
     }
 
-    /// Копия SpecialFilterEngine.combinations — все подмножества `items`
-    /// размера `size`, без повторов.
+    /// A copy of SpecialFilterEngine.combinations — all subsets of `items`
+    /// of size `size`, without duplicates.
     private static func combinations<T>(of items: [T], size: Int) -> [[T]] {
         guard size > 0, size <= items.count else { return [] }
         guard size < items.count else { return [items] }

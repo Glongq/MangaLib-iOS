@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// Выбор ОДНОГО измерения + значения для HentaiPill (см.
-/// HentaiPillAdvancedQuery doc-comment — сайт не умеет комбинировать
-/// Tags/Parodies/Characters/Artists между собой, ни с текстом поиска, это
-/// честно РАЗНЫЕ несовместимые маршруты). Общее поле поиска экрана
-/// (`.searchable()`) при этом продолжает работать как обычный `/search?q=`
-/// — тут нет ни отдельного поля "Поиск", ни подсказок (для подсказок
-/// понадобился бы отдельный сетевой запрос под каждую букву, который
-/// сайт честно не подтверждает, см. capabilities.hasTagBrowser
-/// doc-comment у Characters/Artists).
+/// Selection of ONE dimension + value for HentaiPill (see the
+/// HentaiPillAdvancedQuery doc-comment — the site can't combine
+/// Tags/Parodies/Characters/Artists with each other, nor with the search
+/// text, these are honestly DIFFERENT, incompatible routes). The screen's
+/// shared search field (`.searchable()`) meanwhile keeps working as a
+/// plain `/search?q=` — there's no separate "Search" field here, nor
+/// suggestions (suggestions would need a separate network request per
+/// letter, which the site honestly doesn't confirm, see the
+/// capabilities.hasTagBrowser doc-comment on Characters/Artists).
 struct HentaiPillAdvancedFieldsPicker: View {
     @Binding var query: HentaiPillAdvancedQuery
 
