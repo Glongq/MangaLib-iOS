@@ -23,6 +23,17 @@ private enum ExternalImageCache {
 /// 200 без Referer, 200 с ЛЮБЫМ чужим Referer тоже) — Referer тут ставится
 /// не потому что без него сломается, а для единообразия с остальными двумя
 /// сайтами (тот же принцип "честный per-хостовый Referer", не угадывание).
+///
+/// `m{N}.imhentai.xxx` (CDN картинок ImHentai — обложка/thumb.jpg, превью
+/// {n}t.jpg, полноразмерные {n}.webp) — та же история повторилась ЕЩЁ РАЗ:
+/// добавлен вместе с провайдером, но сюда забыли добавить ветку, из-за чего
+/// молча падал в дефолт "hitomi.la" — ЧУЖОЙ Referer для этого CDN.
+/// Обнаружено по жалобе (31.08): "обложки любые не грузятся... но при этом
+/// 1 обложка загрузилась" — несогласованность объясняется тем, что CDN за
+/// Cloudflare (см. ImhentaiProvider doc-comment), и промах кэша (см.
+/// cf-cache-status в HAR) уходит на origin, который и проверяет Referer;
+/// то единственное, что загрузилось, скорее всего уже лежало в edge-кэше
+/// Cloudflare — тогда origin/Referer вообще не участвуют.
 private func externalImageReferer(for url: URL) -> String {
     let host = url.host ?? ""
     if host.hasSuffix("e-hentai.org") || host.hasSuffix("ehgt.org") || host.hasSuffix("hath.network") {
@@ -30,6 +41,9 @@ private func externalImageReferer(for url: URL) -> String {
     }
     if host.hasSuffix("3hentai.net") || host.hasSuffix("3hentai.xyz") {
         return "https://ru.3hentai.net/"
+    }
+    if host.hasSuffix("imhentai.xxx") || host.hasSuffix("imhentai.com") {
+        return "https://imhentai.xxx/"
     }
     return "https://hitomi.la/"
 }
