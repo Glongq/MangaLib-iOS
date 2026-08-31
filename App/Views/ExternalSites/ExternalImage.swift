@@ -52,6 +52,11 @@ private func externalImageReferer(for url: URL) -> String {
     if host.hasSuffix("hentaipill.com") || host.hasSuffix("hentaipill.me") {
         return "https://hentaipill.com/"
     }
+    // images.sh-cdn.com — CDN картинок Simply Hentai, подтверждено HAR
+    // (реальный браузер шлёт именно этот Referer).
+    if host.hasSuffix("sh-cdn.com") {
+        return "https://www.simply-hentai.com/"
+    }
     return "https://hitomi.la/"
 }
 

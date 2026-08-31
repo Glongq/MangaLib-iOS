@@ -12,6 +12,7 @@ enum ExternalSite: String, CaseIterable, Identifiable, Codable {
     case threeHentai
     case imhentai
     case hentaiPill
+    case simplyHentai
     // Следующие сайты добавляются сюда по мере разбора их HAR (см. план).
 
     var id: String { rawValue }
@@ -23,6 +24,7 @@ enum ExternalSite: String, CaseIterable, Identifiable, Codable {
         case .threeHentai: return "3Hentai"
         case .imhentai: return "IMHentai"
         case .hentaiPill: return "HentaiPill"
+        case .simplyHentai: return "Simply Hentai"
         }
     }
 }
