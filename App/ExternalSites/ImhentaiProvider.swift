@@ -471,14 +471,33 @@ struct ImhentaiProvider: ExternalSiteProvider {
         var coverURL: URL?
         if let server = loadServer, let dir = loadDir, let galleryFolder = loadId, loadPages > 0 {
             let storageKey = "m\(server).imhentai.xxx/\(dir)/\(galleryFolder)"
+            // thumbnailURL — та же ссылка, что и полноразмерная страница
+            // (см. pageImageURL ниже), а не отдельный "N t.jpg" — тот
+            // вариант был угадан без подтверждения и оказался неверным
+            // (пользователь сообщил: обложка и превью-сетка не грузятся,
+            // хотя читалка полноразмерными webp работает нормально).
+            // Живым curl по актуальной странице поиска (не заблокирована
+            // Cloudflare, в отличие от /gallery/) подтверждено ТОЛЬКО имя
+            // файла обложки карточки в сетке — `thumb.jpg` (не `cover.jpg`,
+            // как было раньше); отдельная миниатюра НА КАЖДУЮ страницу
+            // тайтла (не карточки, а именно превью-грида внутри карточки)
+            // с `/gallery/{id}/` не подтверждена вообще — сама страница
+            // отдаёт 403 без cf_clearance-куки из песочницы. Поэтому вместо
+            // догадки берём заведомо рабочую полноразмерную ссылку — грид
+            // покажет её уменьшенной (UI сам масштабирует), это дороже по
+            // трафику, но гарантированно грузится.
             pages = (1...loadPages).map { n in
                 ExternalGalleryPage(
                     index: n, key: storageKey, width: 0, height: 0,
-                    thumbnailURL: URL(string: "https://\(storageKey)/\(n)t.jpg"),
+                    thumbnailURL: URL(string: "https://\(storageKey)/\(n).webp"),
                     thumbnailSpriteOffsetX: nil
                 )
             }
-            coverURL = URL(string: "https://\(storageKey)/cover.jpg")
+            // `thumb.jpg` — подтверждено живым curl (31.08) на реальной
+            // странице /search/?key=... (не заблокирована Cloudflare, в
+            // отличие от /gallery/) — `<img src="https://m11.imhentai.xxx/
+            // 032/{id}/thumb.jpg">` на карточках в сетке каталога.
+            coverURL = URL(string: "https://\(storageKey)/thumb.jpg")
         }
 
         return ExternalGalleryDetail(
