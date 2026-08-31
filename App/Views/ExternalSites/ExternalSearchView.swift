@@ -70,23 +70,52 @@ struct ExternalSearchView: View {
         default: return 0
         }
     }
-    /// Итоговая строка, реально уходящая в `key=` — свободный текст из
-    /// строки поиска + расширенные поля (см. ImhentaiAdvancedQuery.
-    /// clauses() doc-comment насчёт того, что комбинация нескольких значений
-    /// не подтверждена отдельным HAR, собрана по аналогии). У сайтов без
+    /// Итоговая строка, реально уходящая в `key=`. У imhentai — по прямой
+    /// просьбе (31.08) — общее поле (`committedQuery`, то самое верхнее
+    /// `.searchable()`) больше НЕ участвует вообще: свободный текст,
+    /// набранный туда "как для других сайтов", у imhentai надёжно не
+    /// находит ничего (см. doc-comment ImhentaiProvider.fetchIdsBySearch —
+    /// `/search/`/`/advsearch/` два разных парсера одного `key=`). Вместо
+    /// этого — своя строка (ImhentaiAdvancedQuery.searchText, поле «Поиск»
+    /// в «Фильтрах») + расширенные поля (Tags/Parodies/...). У сайтов без
     /// расширенных полей (всё, кроме imhentai) — просто committedQuery как
     /// есть, поведение не меняется.
     private var composedQuery: String {
         guard site == .imhentai else { return committedQuery }
-        let clauses = advancedQueryIH.clauses()
-        guard !clauses.isEmpty else { return committedQuery }
+        let advanced = advancedQueryIH
         var parts: [String] = []
-        if !committedQuery.isEmpty { parts.append(committedQuery) }
-        parts.append(contentsOf: clauses)
+        let trimmedSearch = advanced.searchText.trimmingCharacters(in: .whitespaces)
+        if !trimmedSearch.isEmpty { parts.append(trimmedSearch) }
+        parts.append(contentsOf: advanced.clauses())
         return parts.joined(separator: " ")
     }
 
+    /// Заголовок ленты результатов — у imhentai отражает СВОЮ строку
+    /// поиска (см. composedQuery), не committedQuery (та у него больше ни
+    /// на что не влияет).
+    private var displayTitle: String {
+        if site == .imhentai {
+            let text = advancedQueryIH.searchText.trimmingCharacters(in: .whitespaces)
+            return text.isEmpty ? "Recently" : text
+        }
+        return committedQuery.isEmpty ? "Recently" : committedQuery
+    }
+
     var body: some View {
+        // Верхнее общее .searchable() — только у сайтов, которые реально
+        // его слушают (см. composedQuery); у imhentai оно бы просто ничего
+        // не делало (искало бы в никуда), путая пользователя тем самым
+        // багом, из-за которого его вообще убрали — поэтому для imhentai
+        // не показываем совсем, вместо него — своя строка в «Фильтрах»
+        // (ImhentaiAdvancedFieldsPicker).
+        if site == .imhentai {
+            content
+        } else {
+            content.searchable(text: $query, prompt: "Название, тег, автор…")
+        }
+    }
+
+    private var content: some View {
         // Пустой запрос — не "Введите запрос", а лента "Recently" (см.
         // HitomiProvider/EHentaiProvider.fetchIdsBySearch с пустым query)
         // — тайтлы видны сразу, без необходимости сначала что-то ввести.
@@ -98,14 +127,13 @@ struct ExternalSearchView: View {
         ExternalCatalogGridView(
             site: site,
             query: .search(query: composedQuery, excludedCategoryBits: excludedCategoryBits),
-            title: committedQuery.isEmpty ? "Recently" : committedQuery,
+            title: displayTitle,
             embedded: true,
             leadingControls: capabilities.hasCategoryFilter ? AnyView(filtersButton) : nil
         )
         .id("\(composedQuery)#\(excludedCategoryBits)")
         .navigationTitle("Каталог")
         .navigationBarTitleDisplayMode(.large)
-        .searchable(text: $query, prompt: "Название, тег, автор…")
         .background(Theme.background.ignoresSafeArea())
         .sheet(isPresented: $showFilters) {
             filtersSheet
@@ -114,7 +142,9 @@ struct ExternalSearchView: View {
             // Восстанавливаем то, что реально набрано/выбрано в прошлый раз
             // (см. ExternalCatalogFilterStore) — экран пересоздаётся при
             // уходе/возврате на вкладку Каталог, query/committedQuery как
-            // обычный @State иначе сбрасывались бы каждый раз.
+            // обычный @State иначе сбрасывались бы каждый раз. У imhentai
+            // это всё равно ни на что не влияет (нет .searchable()), но
+            // безобидно оставить как есть — проще, чем городить ветвление.
             query = filterStore.queries[site] ?? ""
             committedQuery = query
         }

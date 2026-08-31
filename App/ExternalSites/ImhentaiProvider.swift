@@ -154,13 +154,30 @@ enum ImhentaiLanguage: CaseIterable, Identifiable {
 /// тег), собирается по аналогии — несколько `+kind:"..."` через пробел,
 /// как в большинстве подобных мини-языков поиска.
 struct ImhentaiAdvancedQuery {
+    /// Собственная строка поиска IMHentai — по прямой просьбе (31.08)
+    /// ОТДЕЛЬНАЯ от общего верхнего поля поиска ExternalSearchView: обычный
+    /// текст, набранный "как для других сайтов", у imhentai надёжно не
+    /// находит ничего (см. doc-comment fetchIdsBySearch — `/search/` и
+    /// `/advsearch/` два РАЗНЫХ парсера одного и того же `key=`). Поэтому
+    /// на экране ОДНОГО сайта (ExternalSearchView.composedQuery/
+    /// displayTitle) imhentai вообще не смотрит на общее поле — только на
+    /// это, живёт в тех же «Фильтрах», что и Tags/Parodies/...
+    /// ВАЖНО: в совместном каталоге "Все сайты" (ExternalCombinedCatalogView)
+    /// это поле пока НЕ подключено — там один общий `key=` уходит сразу во
+    /// все включённые сайты (см. её composedQuery), и imhentai там всё ещё
+    /// получает общий текст вместе с остальными; тронуть это отдельно не
+    /// просили, threshold другой (пришлось бы городить свой запрос на
+    /// сайт вместо одного общего).
+    var searchText: String = ""
     var tags: [String] = []
     var parodies: [String] = []
     var artists: [String] = []
     var characters: [String] = []
     var groups: [String] = []
 
-    var isEmpty: Bool { tags.isEmpty && parodies.isEmpty && artists.isEmpty && characters.isEmpty && groups.isEmpty }
+    var isEmpty: Bool {
+        searchText.isEmpty && tags.isEmpty && parodies.isEmpty && artists.isEmpty && characters.isEmpty && groups.isEmpty
+    }
 
     /// Значения — как есть, БЕЗ слагификации (не URL-путь, а значение
     /// внутри строки `key=` в кавычках — на скриншоте пользователя чип

@@ -10,7 +10,7 @@ import Foundation
 /// (только 4 кита: tags/series/characters/artists, см.
 /// HitomiProvider.fetchTagIndex — честно возвращает [] на .groups), у
 /// e-hentai справочника нет вообще ни на что (hasTagBrowser == false).
-enum ExternalTagKind {
+enum ExternalTagKind: Hashable {
     case tags, series, characters, artists, groups
 }
 
