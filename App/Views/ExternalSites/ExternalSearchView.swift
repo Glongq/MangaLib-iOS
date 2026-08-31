@@ -26,11 +26,34 @@ struct ExternalSearchView: View {
     @State private var showFilters = false
 
     private var capabilities: ExternalSiteCapabilities { ExternalSiteRegistry.provider(for: site).capabilities }
-    private var excludedCategories: Set<EHentaiCategory> {
+    /// Два РАЗНЫХ набора категорий (e-hentai — EHentaiCategory, imhentai —
+    /// ImhentaiCategory, свои значения/количество у каждого сайта, см.
+    /// ImhentaiProvider.swift) — храним отдельно в ExternalCatalogFilterStore,
+    /// переключаемся по `site` (см. excludedCategoryBits/filtersSheet ниже).
+    /// hitomi/3hentai сюда не попадают вообще — hasCategoryFilter у них
+    /// false, filtersButton не показывается.
+    private var excludedCategoriesEH: Set<EHentaiCategory> {
         get { filterStore.excludedCategories[site] ?? [] }
         nonmutating set { filterStore.excludedCategories[site] = newValue }
     }
-    private var excludedCategoryBits: Int { excludedCategories.reduce(0) { $0 | $1.bit } }
+    private var excludedCategoriesIH: Set<ImhentaiCategory> {
+        get { filterStore.excludedImhentaiCategories[site] ?? [] }
+        nonmutating set { filterStore.excludedImhentaiCategories[site] = newValue }
+    }
+    private var excludedCategoryBits: Int {
+        switch site {
+        case .ehentai: return excludedCategoriesEH.reduce(0) { $0 | $1.bit }
+        case .imhentai: return excludedCategoriesIH.reduce(0) { $0 | $1.bit }
+        default: return 0
+        }
+    }
+    private var excludedCategoryCount: Int {
+        switch site {
+        case .ehentai: return excludedCategoriesEH.count
+        case .imhentai: return excludedCategoriesIH.count
+        default: return 0
+        }
+    }
 
     var body: some View {
         // Пустой запрос — не "Введите запрос", а лента "Recently" (см.
@@ -86,8 +109,8 @@ struct ExternalSearchView: View {
             HStack(spacing: 6) {
                 Image(systemName: "slider.horizontal.3").font(.footnote.weight(.semibold))
                 Text("Фильтры").font(.footnote.weight(.medium)).lineLimit(1)
-                if excludedCategories.count > 0 {
-                    Text("\(excludedCategories.count)")
+                if excludedCategoryCount > 0 {
+                    Text("\(excludedCategoryCount)")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(Theme.background)
                         .frame(minWidth: 18, minHeight: 18)
@@ -104,11 +127,8 @@ struct ExternalSearchView: View {
     private var filtersSheet: some View {
         NavigationStack {
             ScrollView {
-                EHentaiCategoryPicker(excluded: Binding(
-                    get: { excludedCategories },
-                    set: { excludedCategories = $0 }
-                ))
-                .padding(16)
+                categoryPicker
+                    .padding(16)
             }
             .background(Theme.background.ignoresSafeArea())
             .navigationTitle("Фильтры")
@@ -121,6 +141,24 @@ struct ExternalSearchView: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder
+    private var categoryPicker: some View {
+        switch site {
+        case .ehentai:
+            EHentaiCategoryPicker(excluded: Binding(
+                get: { excludedCategoriesEH },
+                set: { excludedCategoriesEH = $0 }
+            ))
+        case .imhentai:
+            ImhentaiCategoryPicker(excluded: Binding(
+                get: { excludedCategoriesIH },
+                set: { excludedCategoriesIH = $0 }
+            ))
+        case .hitomi, .threeHentai:
+            EmptyView()
+        }
     }
 }
 

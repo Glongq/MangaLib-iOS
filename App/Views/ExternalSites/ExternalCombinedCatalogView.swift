@@ -25,12 +25,25 @@ struct ExternalCombinedCatalogView: View {
     @State private var showFilters = false
 
     private var sites: [ExternalSite] { ExternalSite.allCases.filter { session.enabledSites.contains($0) } }
-    private var showsCategoryFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter } }
-    private var excludedCategories: Set<EHentaiCategory> {
+    /// В отличие от ExternalSearchView (там всегда РОВНО один сайт — можно
+    /// switch по `site`), здесь одновременно может быть включено несколько
+    /// сайтов сразу — поэтому ОБА набора категорий (e-hentai/imhentai)
+    /// суммируются, а не выбираются по одному активному сайту.
+    private var showsEHentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .ehentai } }
+    private var showsImhentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .imhentai } }
+    private var showsCategoryFilter: Bool { showsEHentaiFilter || showsImhentaiFilter }
+    private var excludedCategoriesEH: Set<EHentaiCategory> {
         get { filterStore.combinedExcludedCategories }
         nonmutating set { filterStore.combinedExcludedCategories = newValue }
     }
-    private var excludedCategoryBits: Int { excludedCategories.reduce(0) { $0 | $1.bit } }
+    private var excludedCategoriesIH: Set<ImhentaiCategory> {
+        get { filterStore.combinedExcludedImhentaiCategories }
+        nonmutating set { filterStore.combinedExcludedImhentaiCategories = newValue }
+    }
+    private var excludedCategoryBits: Int {
+        excludedCategoriesEH.reduce(0) { $0 | $1.bit } | excludedCategoriesIH.reduce(0) { $0 | $1.bit }
+    }
+    private var excludedCategoryCount: Int { excludedCategoriesEH.count + excludedCategoriesIH.count }
 
     var body: some View {
         // Пустой запрос — лента "Recently" сразу по всем включённым
@@ -74,8 +87,8 @@ struct ExternalCombinedCatalogView: View {
             HStack(spacing: 6) {
                 Image(systemName: "slider.horizontal.3").font(.footnote.weight(.semibold))
                 Text("Фильтры").font(.footnote.weight(.medium)).lineLimit(1)
-                if excludedCategories.count > 0 {
-                    Text("\(excludedCategories.count)")
+                if excludedCategoryCount > 0 {
+                    Text("\(excludedCategoryCount)")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(Theme.background)
                         .frame(minWidth: 18, minHeight: 18)
@@ -92,10 +105,26 @@ struct ExternalCombinedCatalogView: View {
     private var filtersSheet: some View {
         NavigationStack {
             ScrollView {
-                EHentaiCategoryPicker(excluded: Binding(
-                    get: { excludedCategories },
-                    set: { excludedCategories = $0 }
-                ))
+                VStack(alignment: .leading, spacing: 20) {
+                    if showsEHentaiFilter {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("E-Hentai").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                            EHentaiCategoryPicker(excluded: Binding(
+                                get: { excludedCategoriesEH },
+                                set: { excludedCategoriesEH = $0 }
+                            ))
+                        }
+                    }
+                    if showsImhentaiFilter {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("IMHentai").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                            ImhentaiCategoryPicker(excluded: Binding(
+                                get: { excludedCategoriesIH },
+                                set: { excludedCategoriesIH = $0 }
+                            ))
+                        }
+                    }
+                }
                 .padding(16)
             }
             .background(Theme.background.ignoresSafeArea())

@@ -257,7 +257,8 @@ enum ExternalSiteRegistry {
     static let providers: [ExternalSite: any ExternalSiteProvider] = [
         .hitomi: HitomiProvider(),
         .ehentai: EHentaiProvider(),
-        .threeHentai: ThreeHentaiProvider()
+        .threeHentai: ThreeHentaiProvider(),
+        .imhentai: ImhentaiProvider()
     ]
 
     static func provider(for site: ExternalSite) -> any ExternalSiteProvider {

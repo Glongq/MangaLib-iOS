@@ -32,12 +32,13 @@ struct ExternalTagBrowserView: View {
     }
 
     /// «Группы» — виден только если провайдер реально что-то умеет
-    /// вернуть на этот раздел (3hentai.net — умеет, см.
-    /// ThreeHentaiProvider.fetchTagIndex); у hitomi/e-hentai такого
-    /// справочника нет (см. HitomiProvider.fetchTagIndex — честно [] на
-    /// .groups, EHentaiProvider — [] на любой kind), сегмент просто не
-    /// показывается, чтобы не вести в заведомо пустой список.
-    private var showsGroups: Bool { site == .threeHentai }
+    /// вернуть на этот раздел (3hentai.net и imhentai.xxx — умеют, см.
+    /// ThreeHentaiProvider.fetchTagIndex / ImhentaiProvider.fetchTagIndex);
+    /// у hitomi/e-hentai такого справочника нет (см. HitomiProvider.
+    /// fetchTagIndex — честно [] на .groups, EHentaiProvider — [] на любой
+    /// kind), сегмент просто не показывается, чтобы не вести в заведомо
+    /// пустой список.
+    private var showsGroups: Bool { site == .threeHentai || site == .imhentai }
 
     private var kindPicker: some View {
         Picker("", selection: $kind) {
