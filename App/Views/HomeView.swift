@@ -170,6 +170,10 @@ struct HomeView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
+                    Text("Глок Адун")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, 16)
                     ForEach(sectionsStore.order.filter(sectionsStore.isVisible)) { kind in
                         section(for: kind).id(kind.id)
                     }
