@@ -38,6 +38,26 @@ struct ConstantEntity: Decodable {
     func asOption() -> FilterOption { FilterOption(id: id, title: name) }
 }
 
+/// Один сервер картинок из /api/constants?fields[]=imageServers —
+/// ПОДТВЕРЖДЕНО реальным перехватом (proxypin, 2026-08-26, отдельный
+/// прицельный запрос именно с этим полем): `{id,label,url,site_ids}`, id —
+/// "main"/"secondary"/"compress"/"download"/"crop" (совпадает по смыслу с
+/// ImageServerChoice: Первый/Второй/Сжатия), url — свой РАЗНЫЙ для КАЖДОГО
+/// сайта экосистемы (не общий): у MangaLib/RanobeLib (site_ids:[1,3]) это
+/// img2.hentaicdn.org/img3.hentaicdn.org, у SlashLib ([2]) —
+/// img3.hentaicdn.org/img2.hentaicdn.org, у HentaiLib ([4]) — СОВСЕМ другие
+/// поддомены, img2h.hentaicdn.org/img3h.hentaicdn.org. url может быть
+/// пустой строкой (у SlashLib нет отдельного crop-сервера) — такие
+/// отфильтровываются при использовании.
+struct ConstantImageServer: Decodable, Hashable {
+    let id: String
+    let label: String?
+    let url: String
+    let siteIds: [Int]
+
+    enum CodingKeys: String, CodingKey { case id, label, url, siteIds = "site_ids" }
+}
+
 /// Ответ `/api/constants` с нужными нам справочниками.
 struct ConstantsResponse: Decodable {
     let data: Payload
@@ -50,14 +70,7 @@ struct ConstantsResponse: Decodable {
         let status: [ConstantEntity]?
         let scanlateStatus: [ConstantEntity]?
         let ageRestriction: [ConstantEntity]?
-        /// Серверы картинок — точная форма поля НЕ подтверждена перехватом
-        /// реального запроса (в отличие от genres/tags/etc, которые видим в
-        /// работе годами), поэтому декодируется максимально защитно: сервер
-        /// может отдать как простой массив строк-URL, так и массив объектов
-        /// с полем url/link. Если формат не совпал ни с одним вариантом —
-        /// просто nil, и приложение продолжает работать на захардкоженном
-        /// списке (см. MangaImageURL.imageServers).
-        let imageServers: [String]?
+        let imageServers: [ConstantImageServer]?
 
         enum CodingKeys: String, CodingKey {
             case genres, tags, types, format, status, scanlateStatus, ageRestriction, imageServers
@@ -72,25 +85,7 @@ struct ConstantsResponse: Decodable {
             status = try? c.decodeIfPresent([ConstantEntity].self, forKey: .status)
             scanlateStatus = try? c.decodeIfPresent([ConstantEntity].self, forKey: .scanlateStatus)
             ageRestriction = try? c.decodeIfPresent([ConstantEntity].self, forKey: .ageRestriction)
-
-            let rawStrings = try? c.decodeIfPresent([String].self, forKey: .imageServers)
-            if let rawStrings, !rawStrings.isEmpty {
-                imageServers = rawStrings
-            } else {
-                let rawObjects = try? c.decodeIfPresent([ImageServerObject].self, forKey: .imageServers)
-                imageServers = rawObjects?.compactMap { $0.url }
-            }
-        }
-
-        /// Запасной вариант формы поля — объект вместо голой строки.
-        private struct ImageServerObject: Decodable {
-            let url: String?
-            enum CodingKeys: String, CodingKey { case url, link }
-            init(from decoder: Decoder) throws {
-                let c = try decoder.container(keyedBy: CodingKeys.self)
-                url = (try? c.decodeIfPresent(String.self, forKey: .url))
-                    ?? (try? c.decodeIfPresent(String.self, forKey: .link))
-            }
+            imageServers = try? c.decodeIfPresent([ConstantImageServer].self, forKey: .imageServers)
         }
     }
 }
@@ -143,9 +138,11 @@ final class ConstantsStore: ObservableObject {
             let payload = try await service.fetchConstants()
             lastPayload = payload
             reapply()
-            // Не подтверждено перехватом реального запроса — но безопасно:
-            // если payload.imageServers пуст/nil, updateServers ничего не
-            // меняет и остаётся захардкоженный список.
+            // ПОДТВЕРЖДЕНО перехватом (proxypin, 2026-08-26): реальные
+            // сервера картинок, отдельные для каждого сайта экосистемы (см.
+            // ConstantImageServer). Если поле вдруг пусто/nil — ничего не
+            // меняем, MangaImageURL.pageURLs останется на захардкоженном
+            // резервном списке.
             if let servers = payload.imageServers {
                 MangaImageURL.updateServers(fromAccount: servers)
             }
@@ -196,7 +193,18 @@ final class ConstantsStore: ObservableObject {
         case .serverOrder:
             return base
         case .alphabetical:
-            return base.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+            // Часть тегов в справочнике вообще без русского названия (только
+            // английское, см. /api/constants — например "Acrobatics",
+            // "Ancient China" и т.п. вперемешку с русскими). По просьбе:
+            // сначала единым блоком все англоязычные (латиница), по
+            // алфавиту, затем — все русские (кириллица/остальное), тоже по
+            // алфавиту — а не как раньше, где localizedCompare перемешивал
+            // их в одну ленту по locale-зависимым правилам сортировки.
+            let latin = base.filter { Self.isLatinTitle($0.title) }
+                .sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+            let rest = base.filter { !Self.isLatinTitle($0.title) }
+                .sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+            return latin + rest
         case .ageDescending:
             return base.sorted { numericPrefix($0.title) > numericPrefix($1.title) }
         case .priority(let names):
@@ -211,5 +219,14 @@ final class ConstantsStore: ObservableObject {
     private func numericPrefix(_ s: String) -> Int {
         let digits = s.prefix { $0.isNumber }
         return Int(digits) ?? -1
+    }
+
+    /// Название начинается с латинской буквы («Acrobatics») — а не с
+    /// кириллицы/цифры/спецсимвола. Первый буквенный символ определяет
+    /// принадлежность — этого достаточно, у названий из /api/constants не
+    /// встречается смешение алфавитов внутри одного title.
+    private static func isLatinTitle(_ title: String) -> Bool {
+        guard let first = title.first(where: { $0.isLetter }) else { return false }
+        return first.isASCII
     }
 }

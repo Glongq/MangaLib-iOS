@@ -5,14 +5,17 @@ struct MangaCatalogView: View {
 
     @StateObject private var viewModel = CatalogViewModel()
     @ObservedObject private var themeManager = ThemeManager.shared
+    /// «Другие сайты» (hitomi.la и далее) — см. App/ExternalSites/.
+    @ObservedObject private var externalSiteSession = ExternalSiteSession.shared
     @State private var showFilters = false
-    @FocusState private var searchFocused: Bool
     /// Путь навигации — нужен, чтобы при тапе по жанру/тегу в уже открытой
     /// карточке вернуться к корню каталога (см. onReceive switchRequest).
     @State private var navPath = NavigationPath()
 
-    // Схлопывание шапки при скролле: вниз — заголовок и Фильтры/Сортировка
-    // прячутся, поиск занимает их место; вверх (хоть чуть-чуть) — всё возвращается.
+    // Схлопывание Фильтры/Сортировка при скролле вниз (вверх — хоть чуть-чуть
+    // — возвращается). Поиск и заголовок теперь родной .searchable()/
+    // .navigationTitle (см. body) — как в Персонажи/Франшизы/Пользователи —
+    // их системная анимация/сворачивание этой логики не касается.
     @State private var headerCollapsed = false
     @State private var lastScrollOffset: CGFloat = 0
     // Пока идёт анимация схлопывания, само изменение высоты шапки на мгновение
@@ -21,43 +24,75 @@ struct MangaCatalogView: View {
     // назад, из-за чего заголовок дёргался. См. тот же фикс в BookmarksView.
     @State private var isHeaderAnimating = false
 
-    // Сетка: ровно 3 колонки одинаковой ширины — строгое выравнивание карточек.
+    /// Для сворачивания клавиатуры первым тапом ГДЕ УГОДНО по сетке, даже
+    /// по карточке тайтла — см. KeyboardDismissOnTap.dismissKeyboardOnFirstTap
+    /// (тот же приём, что и в DirectoryListView/FranchiseListView — родной
+    /// .searchable() без своего @FocusState, isSearching/dismissSearch из
+    /// окружения).
+    @Environment(\.isSearching) private var isSearching
+    @Environment(\.dismissSearch) private var dismissSearch
+
+    // Сетка: N колонок одинаковой ширины — строгое выравнивание карточек.
     // Ширину меряем один раз через GeometryReader (см. grid) и кормим ЕЮ ЖЕ
     // и GridItem(.fixed), и саму MangaCardView — см. комментарий у
     // MangaCardView.width про то, почему раньше .flexible()+.aspectRatio
     // иногда расходились на пиксель ("поплывшие" обложки).
-    private let gridColumnsCount = 3
+    // Число колонок — из Персонализации (см. CardsPerRow), 2/3/4/Авто(=3).
+    @AppStorage("personalization_cards_per_row") private var cardsPerRow: CardsPerRow = .auto
+    private var gridColumnsCount: Int { cardsPerRow.columns }
     private let gridSpacing: CGFloat = 12
     private let gridHorizontalPadding: CGFloat = 12
 
     var body: some View {
-        NavigationStack(path: $navPath) {
-            ZStack {
-                Theme.background.ignoresSafeArea()
-
-                // Никакой общей подложки под шапкой — заголовок голый текст,
-                // а у поиска остаётся ЕГО СОБСТВЕННЫЙ материал (как был),
-                // просто без общей панели позади всех.
-                content
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        header
-                    }
-                    .overlay {
-                        // Пока активна клавиатура поиска, первый тап по чему угодно
-                        // в сетке (например по манге) должен ТОЛЬКО закрыть клавиатуру,
-                        // а не сразу переходить в тайтл. Прозрачный, но кликабельный
-                        // слой поверх сетки перехватывает этот первый тап; как только
-                        // фокус снят, слой исчезает и тапы снова доходят до карточек.
-                        if searchFocused {
-                            Color.black.opacity(0.0001)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    searchFocused = false
-                                }
-                        }
-                    }
+        // Добавочная ветка (см. план внешних сайтов) — в отличие от
+        // Закладок/Читают/Новое, у внешнего сайта каталог РЕАЛЬНО есть
+        // (список тегов/серий → выдача, см. ExternalTagBrowserView/
+        // ExternalCatalogGridView), просто устроен иначе, чем у MangaLib —
+        // отдельный, более простой экран вместо всей этой шапки/фильтров/
+        // поиска. Ветка else — буквально то, что уже было, без изменений.
+        if let ext = externalSiteSession.activeExternalSite {
+            // По прямой просьбе — вкладка не прыгает сразу в список тегов/
+            // поиск, а показывает отдельную менюшку (см. ExternalCatalogMenuView).
+            NavigationStack {
+                ExternalCatalogMenuView(site: ext)
             }
-            .toolbar(.hidden, for: .navigationBar)
+            .tint(Theme.accent)
+        } else if externalSiteSession.combinedModeActive {
+            // «Все сайты» (см. ExternalSiteSession.combinedModeActive) —
+            // совместный каталог/выдача сразу по всем включённым внешним
+            // сайтам, см. ExternalCombinedCatalogView.
+            NavigationStack {
+                ExternalCombinedCatalogView()
+            }
+            .tint(Theme.accent)
+        } else {
+        NavigationStack(path: $navPath) {
+            // ЭКСПЕРИМЕНТ против раздутого отступа под .large: раньше фон
+            // и контент были двумя РАВНОПРАВНЫМИ слоями в общем ZStack —
+            // возможно, из-за этого система не может однозначно опознать
+            // ScrollView внутри content как "главный" скролл экрана, на
+            // который вешается большой заголовок (в iOS 26 заголовок
+            // технически привязывается именно к скроллящемуся контенту, см.
+            // предыдущие комментарии в этом файле). Теперь content —
+            // единственный/безусловный корень, фон — просто модификатор.
+            content
+                .background { Theme.background.ignoresSafeArea() }
+                // Потянуть вниз — реальная перезагрузка первой страницы с
+                // сервера (см. CatalogViewModel.refreshPulled), тот же
+                // принцип, что и в Читают/Уведомлениях: каталог и так не
+                // кэширует список постранично, так что смысл здесь именно в
+                // повторном сетевом запросе, а не в "разморозке" кэша.
+                .refreshable { await viewModel.refreshPulled() }
+            // .inline + displayMode: .always (прошлый эксперимент) убрал
+            // нужное схлопывание/исчезновение заголовка и поиска при
+            // скролле совсем — это оказалось лишним: схлопывание — как раз
+            // то, что нужно, проблема ТОЛЬКО в стартовой (нескроленной)
+            // позиции. Возвращено на .large + обычный .searchable() без
+            // явного placement — как было до серии экспериментов с
+            // отступом. Сам раздутый отступ в покое ещё не решён.
+            .navigationTitle("Каталог")
+            .navigationBarTitleDisplayMode(.large)
+            .searchable(text: $viewModel.query, prompt: "Поиск по названию")
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(
                     slug: item.apiSlug,
@@ -80,8 +115,8 @@ struct MangaCatalogView: View {
             // экране ПОВЕРХ любого пуша (карточки тайтла и т.д.), потому что
             // технически была соседом стека, а не частью его корневого
             // экрана — отсюда баг "Фильтры/Сортировка не пропадают на
-            // карточке тайтла". Прячутся при скролле вниз — тот же
-            // headerCollapsed, что и у заголовка "Каталог".
+            // карточке тайтла". Прячутся при скролле вниз (см. headerCollapsed/
+            // onScrollGeometryChange у content ниже).
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !headerCollapsed {
                     controlsBar
@@ -116,6 +151,7 @@ struct MangaCatalogView: View {
         .onReceive(CatalogNavigator.shared.$switchRequest) { _ in
             _ = applyPendingFilter(popToRoot: true)
         }
+        }
     }
 
     /// Применяет отложенный фильтр из CatalogNavigator (жанр/тег из карточки),
@@ -131,47 +167,6 @@ struct MangaCatalogView: View {
         return true
     }
 
-    // MARK: Шапка (без общей подложки)
-
-    private var header: some View {
-        VStack(spacing: 10) {
-            if !headerCollapsed {
-                Text("Каталог")
-                    .font(.system(size: 29, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.blurFade)
-            }
-
-            searchField
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 2)
-        .padding(.bottom, 10)
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
-            TextField("", text: $viewModel.query,
-                      prompt: Text("Поиск по названию").foregroundColor(Theme.textSecondary))
-                .foregroundStyle(Theme.textPrimary)
-                .focused($searchFocused)
-                .submitLabel(.search)
-            if !viewModel.query.isEmpty {
-                Button {
-                    viewModel.query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        // Собственное стекло поля — не трогаю, как просили.
-        .glassEffect(.regular.interactive(), in: Capsule())
-    }
-
     // MARK: Фильтры / Сортировка
 
     private var controlsBar: some View {
@@ -179,7 +174,14 @@ struct MangaCatalogView: View {
             Button {
                 showFilters = true
             } label: {
-                controlLabel(icon: "slider.horizontal.3", text: "Фильтры", badge: viewModel.filter.activeCount)
+                // Иконка меняется на "wand.and.stars", когда «Спец фильтр»
+                // (см. AppSettingsView/SpecialFilterStore) реально сработал
+                // на текущей выборке жанров/тегов — иначе неочевидно, что
+                // каталог сейчас не строго AND, а ранжированный поиск.
+                controlLabel(
+                    icon: viewModel.isSpecialFilterActive ? "wand.and.stars" : "slider.horizontal.3",
+                    text: "Фильтры", badge: viewModel.filter.activeCount
+                )
             }
 
             Menu {
@@ -235,8 +237,56 @@ struct MangaCatalogView: View {
             errorState(error)
         } else if viewModel.results.isEmpty && viewModel.didLoadOnce && !viewModel.isLoading {
             ContentUnavailableView.search(text: viewModel.query)
+        } else if viewModel.results.isEmpty && viewModel.isLoading {
+            // Первая загрузка (ещё ни одной карточки) — скелетон-сетка под
+            // текущее число колонок (см. CardsPerRow), а не голый спиннер:
+            // сразу видно примерную форму будущего контента.
+            skeletonGrid
         } else {
             grid
+                .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
+        }
+    }
+
+    /// Скелетон-сетка на время первой загрузки — та же ширина карточки, что
+    /// и у настоящей сетки (см. gridCardWidth), просто вместо MangaCardView —
+    /// шиммер-плейсхолдеры (SkeletonBox/SkeletonBar). Число ячеек (12) не
+    /// привязано к реальным данным (их ещё нет) — просто с запасом на экран
+    /// при любом gridColumnsCount (2/3/4 → 6/4/3 ряда).
+    private var skeletonGrid: some View {
+        GeometryReader { proxy in
+            let cardWidth = MangaCardView.gridCardWidth(
+                totalWidth: proxy.size.width,
+                columns: gridColumnsCount,
+                spacing: gridSpacing,
+                containerPadding: gridHorizontalPadding
+            )
+            let placeholderCount = 12
+            let rows = stride(from: 0, to: placeholderCount, by: gridColumnsCount).map { start in
+                Array(start..<min(start + gridColumnsCount, placeholderCount))
+            }
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, rowIndices in
+                        HStack(alignment: .top, spacing: gridSpacing) {
+                            ForEach(rowIndices, id: \.self) { _ in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    SkeletonBox()
+                                        .frame(width: cardWidth, height: (cardWidth * 3 / 2).rounded())
+                                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    SkeletonBar(width: cardWidth * 0.85, height: 12)
+                                    SkeletonBar(width: cardWidth * 0.5, height: 10)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, gridHorizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 90)
+            }
+            .scrollIndicators(.hidden)
         }
     }
 
@@ -275,7 +325,7 @@ struct MangaCatalogView: View {
 
                         HStack(alignment: .top, spacing: gridSpacing) {
                             ForEach(rowItems) { item in
-                                NavigationLink(value: item) {
+                                SearchDismissibleNavigationLink(value: item, isSearching: isSearching, dismiss: { dismissSearch() }) {
                                     MangaCardView(item: item, width: cardWidth, rowNeedsTwoLines: rowNeedsTwoLines)
                                 }
                                 .buttonStyle(.plain)
@@ -322,11 +372,14 @@ struct MangaCatalogView: View {
                 }
             }
             .scrollIndicators(.hidden)
-            .overlay {
-                if viewModel.isLoading && viewModel.results.isEmpty {
-                    ProgressView().tint(Theme.accent)
-                }
-            }
+            // Пробовали .ignoresSafeArea(edges: .top) здесь как эксперимент
+            // против раздутого отступа под .large — не помогло, контент
+            // просто уехал под шапку/поиск (они остались на месте, т.к. это
+            // системный navigationTitle/.searchable, не завязаны на верстку
+            // ScrollView). Откачено.
+            // Спиннер на первую загрузку убран — теперь это состояние
+            // (results.isEmpty && isLoading) перехватывает skeletonGrid
+            // ДО того, как content вообще доходит до этого grid (см. content).
         }
     }
 
@@ -338,15 +391,7 @@ struct MangaCatalogView: View {
     }
 
     private func errorState(_ message: String) -> some View {
-        ContentUnavailableView {
-            Label("Не удалось загрузить", systemImage: "wifi.exclamationmark")
-        } description: {
-            Text(message).foregroundStyle(Theme.textSecondary)
-        } actions: {
-            Button("Повторить") { viewModel.retry() }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-        }
+        StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: message, retry: { viewModel.retry() }, fillScreen: true)
     }
 }
 

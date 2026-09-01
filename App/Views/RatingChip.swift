@@ -28,6 +28,10 @@ struct RatingChip: View {
     var fontSize: CGFloat? = nil
     var horizontalPadding: CGFloat = 7
     var verticalPadding: CGFloat = 3
+    /// Отступ чипа от края обложки — по умолчанию 6, как и раньше везде;
+    /// параметризован отдельно для MangaCardView.chipScale (масштаб чипов
+    /// каталога под выбранную в Персонализации сетку 2/3/4).
+    var outerPadding: CGFloat = 6
 
     private func color(for value: Double) -> Color {
         switch value {
@@ -48,9 +52,21 @@ struct RatingChip: View {
                 .padding(.horizontal, horizontalPadding)
                 .padding(.vertical, verticalPadding)
                 .background(color(for: rating), in: Capsule())
-                .padding(6)
+                .padding(outerPadding)
         }
     }
+}
+
+/// Цвет ТВОЕЙ личной оценки (1-10, см. BookmarkedTitle.myRating/MangaRating.user)
+/// — непрерывный градиент красный→зелёный по значению, общий для
+/// BookmarksView.myRatingChip (чип в плитке закладок) и MangaDetailView
+/// (звёздочка твоей оценки рядом с общей в ratingStatsBlock), по прямой
+/// просьбе "цвет тоже красишь в зелёный красный... под цвет в чипе". Не
+/// путать с RatingChip.color(for:) выше — та красит ОЦЕНКУ САЙТА тремя
+/// фиксированными зонами (зелёный/жёлтый/красный), это разные шкалы.
+func personalRatingColor(_ value: Int) -> Color {
+    let t = max(0, min(1, Double(value) / 10))
+    return Color(hue: t * 0.33, saturation: 0.85, brightness: 0.8)
 }
 
 #Preview {

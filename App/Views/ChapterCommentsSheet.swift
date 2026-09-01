@@ -8,6 +8,8 @@ import SwiftUI
 struct ChapterCommentsSheet: View {
     let chapterId: Int
     let postPage: Int
+    /// Сайт тайтла этой главы — см. ChapterCommentsViewModel.configure(siteId:).
+    var siteId: Int? = nil
     /// Номер главы для заголовка «Комментарии к главе N · Страница M» —
     /// показывается только в неинлайн-панели (вертикальный режим, кнопка
     /// "text.bubble" в bottomBar). В embedded-режиме заголовок не нужен —
@@ -78,7 +80,7 @@ struct ChapterCommentsSheet: View {
         }
         .tint(Theme.accent)
         .task(id: postPage) {
-            vm.configure(chapterId: chapterId, postPage: postPage)
+            vm.configure(chapterId: chapterId, postPage: postPage, siteId: siteId)
             if !disabledInReader { await vm.loadIfNeeded() }
         }
         .sheet(isPresented: $showSettings) {
@@ -212,19 +214,9 @@ struct ChapterCommentsSheet: View {
                 if vm.isLoading && vm.comments.isEmpty {
                     ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, minHeight: 140)
                 } else if let error = vm.error, vm.comments.isEmpty {
-                    VStack(spacing: 10) {
-                        Text(error).font(.footnote).foregroundStyle(palette.secondary)
-                        Button("Повторить") { Task { await vm.load() } }
-                            .font(.subheadline.weight(.medium)).foregroundStyle(Theme.accent)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 140)
+                    StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: { Task { await vm.load() } }, minHeight: 140, foreground: palette.foreground, secondary: palette.secondary)
                 } else if vm.comments.isEmpty && vm.hasLoaded {
-                    VStack(spacing: 8) {
-                        Image(systemName: "text.bubble").font(.largeTitle).foregroundStyle(palette.secondary)
-                        Text("Пока нет комментариев к этой странице")
-                            .font(.subheadline).foregroundStyle(palette.secondary)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 160)
+                    StateView(icon: "text.bubble", title: "Комментариев пока нет", description: "Будьте первым, кто оставит комментарий к этой странице.", minHeight: 160, foreground: palette.foreground, secondary: palette.secondary)
                 } else {
                     list
                 }
@@ -245,19 +237,9 @@ struct ChapterCommentsSheet: View {
             if vm.isLoading && vm.comments.isEmpty {
                 ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, minHeight: 140)
             } else if let error = vm.error, vm.comments.isEmpty {
-                VStack(spacing: 10) {
-                    Text(error).font(.footnote).foregroundStyle(palette.secondary)
-                    Button("Повторить") { Task { await vm.load() } }
-                        .font(.subheadline.weight(.medium)).foregroundStyle(Theme.accent)
-                }
-                .frame(maxWidth: .infinity, minHeight: 140)
+                StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: { Task { await vm.load() } }, minHeight: 140, foreground: palette.foreground, secondary: palette.secondary)
             } else if vm.comments.isEmpty && vm.hasLoaded {
-                VStack(spacing: 8) {
-                    Image(systemName: "text.bubble").font(.largeTitle).foregroundStyle(palette.secondary)
-                    Text("Пока нет комментариев к этой странице")
-                        .font(.subheadline).foregroundStyle(palette.secondary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 160)
+                StateView(icon: "text.bubble", title: "Комментариев пока нет", description: "Будьте первым, кто оставит комментарий к этой странице.", minHeight: 160, foreground: palette.foreground, secondary: palette.secondary)
             } else {
                 list
             }

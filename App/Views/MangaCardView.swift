@@ -31,20 +31,52 @@ struct MangaCardView: View {
     /// пустым местом НИЖЕ жанра. Если у ВСЕХ карточек ряда название в 1
     /// строку — минимальная высота блока под 1 строку, пустого места нет.
     let rowNeedsTwoLines: Bool
+    /// Явный override URL обложки — по умолчанию nil, тогда используется
+    /// item.cover?.bestURL (полноразмерная), как и раньше везде. Передаётся
+    /// отдельно (например item.cover?.thumbnailURL из HomeView), чтобы
+    /// мелкие превью в лентах главной грузили сжатую версию, не трогая
+    /// остальные места (Каталог, Закладки, Персонаж и т.д.), где карточка
+    /// крупнее и полноразмерная обложка оправдана.
+    let coverURLOverride: URL?
     /// Дефолт true — прежнее поведение для мест, которым не важна ужимка
     /// ряда по факту (см. CharacterView.grid: там сетка маленькая, отдельная
     /// row-логика ей не нужна). Каталог (MangaCatalogView) передаёт значение
     /// явно, посчитанное на весь ряд.
-    init(item: MangaItem, width: CGFloat, rowNeedsTwoLines: Bool = true) {
+    init(item: MangaItem, width: CGFloat, rowNeedsTwoLines: Bool = true, coverURLOverride: URL? = nil) {
         self.item = item
         self.width = width
         self.rowNeedsTwoLines = rowNeedsTwoLines
+        self.coverURLOverride = coverURLOverride
     }
 
     // Для бэйджа статуса закладки (см. statusBadge) — реактивно, чтобы
     // бэйдж сразу появлялся/менялся при добавлении/перемещении в закладках,
     // не только при следующей перезагрузке экрана.
     @ObservedObject private var bookmarks = BookmarksStore.shared
+
+    /// Та же настройка, что и в MangaCatalogView/BookmarksView/DirectoryDetailView/
+    /// CharacterView/TeamView (см. CardsPerRow) — читается напрямую, а не
+    /// прокидывается параметром, чтобы не менять сигнатуру во всех местах,
+    /// где уже используется MangaCardView.
+    @AppStorage("personalization_cards_per_row") private var cardsPerRow: CardsPerRow = .auto
+
+    /// Масштаб чипов на обложке (statusBadge/ratingBadge) под выбранную
+    /// сетку — по прямой просьбе: на 3 колонки (и "Авто", тоже 3) НЕ трогаем,
+    /// это исходный размер; при 2 колонках карточки крупнее — чипы чуть
+    /// шире, при 4 — уже. Применяется ТОЛЬКО к горизонтальным/внешним
+    /// паддингам, НЕ к шрифту и вертикальному паддингу — те держим строго
+    /// фиксированными (9pt / 3pt), иначе высота капсулы плывёт вместе с
+    /// сеткой и перестаёт совпадать с фиксированной высотой чипов в
+    /// Закладках (см. BookmarksView.myRatingChip/chapterChip — те в высоту
+    /// вообще не масштабируются), по прямой просьбе "чипы на обложке должны
+    /// быть равны по высоте" везде, а не только при 3 колонках.
+    private var chipScale: CGFloat {
+        switch cardsPerRow.columns {
+        case ..<3: return 1.15
+        case 3: return 1.0
+        default: return 0.85
+        }
+    }
 
     /// Текст под обложкой в каталоге увеличен в 1.2х от стандартного
     /// caption — коэффициент общий для titleFont/typeFont И их UIFont-
@@ -174,7 +206,7 @@ struct MangaCardView: View {
     // MARK: Обложка (object-fit: cover + скелетон + fallback)
 
     private var cover: some View {
-        RemoteImage(url: item.cover?.bestURL) { image in
+        RemoteImage(url: coverURLOverride ?? item.cover?.bestURL) { image in
             image
                 .resizable()
                 .scaledToFill()          // аналог object-fit: cover
@@ -200,10 +232,10 @@ struct MangaCardView: View {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 6 * chipScale)
                 .padding(.vertical, 3)
                 .background(folder.badgeColor, in: Capsule())
-                .padding(6)
+                .padding(6 * chipScale)
         }
     }
 
@@ -221,7 +253,17 @@ struct MangaCardView: View {
     /// ВСЕГДА, даже без оценки (RatingChip сам красит nil/0.0 серым — как
     /// явно попросили, "если 0.0 то серым", а не скрывает бэйдж вовсе).
     private var ratingBadge: some View {
-        RatingChip(rating: item.rating?.value)
+        // fontSize/verticalPadding — ФИКСИРОВАНЫ (9pt/3pt), как и у
+        // statusBadge и у чипов в Закладках (myRatingChip/chapterChip) — это
+        // и есть общая высота чипа на обложке везде в приложении. chipScale
+        // здесь влияет только на ширину (horizontalPadding/outerPadding).
+        RatingChip(
+            rating: item.rating?.value,
+            fontSize: 9,
+            horizontalPadding: 6 * chipScale,
+            verticalPadding: 3,
+            outerPadding: 6 * chipScale
+        )
     }
 }
 
@@ -246,5 +288,20 @@ struct SkeletonBox: View {
                     animate = true
                 }
             }
+    }
+}
+
+/// Та же анимация шиммера, что и у SkeletonBox, но в виде узкой закруглённой
+/// полоски — плейсхолдер под строку текста в скелетон-строках списков (см.
+/// напр. MyCommentsView/FriendsView/UserCollectionsView/UserBookmarksView —
+/// плейсхолдер на первую загрузку вкладок профиля, по прямой просьбе).
+struct SkeletonBar: View {
+    var width: CGFloat? = nil
+    var height: CGFloat = 12
+
+    var body: some View {
+        SkeletonBox()
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: height / 2.5, style: .continuous))
     }
 }

@@ -31,11 +31,7 @@ struct DownloadsView: View {
             Theme.background.ignoresSafeArea()
 
             if downloads.titles.isEmpty {
-                ContentUnavailableView(
-                    "Нет загрузок",
-                    systemImage: "arrow.down.circle",
-                    description: Text("Скачанные тайтлы появятся здесь. Открой карточку тайтла → «...» → «Скачать тайтл».")
-                )
+                StateView(icon: "arrow.down.circle", title: "Нет загрузок", description: "Скачанные тайтлы появятся здесь. Открой карточку тайтла → «...» → «Скачать тайтл».", fillScreen: true)
             } else {
                 List {
                     ForEach(downloads.titles) { title in
@@ -65,10 +61,15 @@ struct DownloadsView: View {
             )
         }
         .toolbar {
+            // Крестик вместо текста "Готово" — тот же размер/цвет, что и у
+            // CreditsSheet/TeamMembersSheet, по прямой просьбе выровнять.
             if !embedded {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Готово") { dismiss() }
-                        .foregroundStyle(Theme.accent)
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
                 }
             }
         }

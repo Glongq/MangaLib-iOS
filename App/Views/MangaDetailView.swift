@@ -1,6 +1,30 @@
 import SwiftUI
 import UIKit
 
+/// Плавное появление кнопок шапки карточки тайтла (opacity+масштаб при
+/// первом рендере) — раньше был общий FadeInAppear.swift, использовавшийся
+/// ещё на нескольких экранах; убрали его совсем ради единообразия с
+/// Команда/Персонаж/Directory-деталь (там анимации появления никогда не
+/// было), но по прямой просьбе на самой карточке тайтла плавность нужна —
+/// возвращена здесь локально, не общим файлом (больше нигде не используется).
+private struct FadeInOnAppearModifier: ViewModifier {
+    @State private var appeared = false
+    func body(content: Content) -> some View {
+        content
+            .opacity(appeared ? 1 : 0)
+            .scaleEffect(appeared ? 1 : 0.7)
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    withAnimation(.easeOut(duration: 0.28)) { appeared = true }
+                }
+            }
+    }
+}
+
+private extension View {
+    func fadeInOnAppear() -> some View { modifier(FadeInOnAppearModifier()) }
+}
+
 /// Экран тайтла: шапка, инфо-строка, кнопки, вкладки (О тайтле / Главы / Комментарии).
 struct MangaDetailView: View {
 
@@ -8,7 +32,6 @@ struct MangaDetailView: View {
     @ObservedObject private var bookmarks = BookmarksStore.shared
     @ObservedObject private var downloads = DownloadsManager.shared
     @ObservedObject private var themeManager = ThemeManager.shared
-    @Environment(\.dismiss) private var dismiss
 
     private let fallbackTitle: String
     private let coverURL: URL?
@@ -20,6 +43,49 @@ struct MangaDetailView: View {
     @State private var showTitleNames = false
     /// Sheet «Скачать тайтл» — см. DownloadTitleSheet.
     @State private var showDownloadSheet = false
+    /// Полноэкранная листалка доп. обложек (тап по обложке в шапке) — см.
+    /// CoverGalleryView/coverGalleryBadge. ОДИН Identifiable-item вместо
+    /// прежней пары раздельных @State (showCoverGallery: Bool +
+    /// coverGalleryBackgroundSnapshot: UIImage?, выставлявшихся ДВУМЯ
+    /// отдельными присваиваниями подряд) — та пара гонялась с
+    /// .fullScreenCover(isPresented:): при первом открытии контент листалки
+    /// иногда успевал отрендериться ПЕРВЫМ кадром до того, как снимок
+    /// экрана долетал до @State (см. баг-репорт "в начале блюра нет, фон
+    /// чёрный") — снимок тогда ещё nil → чёрный фон вместо блюра. Заодно
+    /// свежий UUID на каждое открытие (тот же приём, что и у ReaderOpen
+    /// выше) гарантирует НОВЫЙ инстанс CoverGalleryView при каждом тапе —
+    /// без него identity листалки могла сохраняться между закрытием и
+    /// повторным открытием, из-за чего кнопка закрытия "улетала выше
+    /// нужного" (застревала на геометрии/анимации предыдущего показа).
+    private struct CoverGalleryPresentation: Identifiable {
+        let id = UUID()
+        let images: [URL]
+        let backgroundSnapshot: UIImage?
+    }
+    @State private var coverGalleryPresentation: CoverGalleryPresentation?
+    /// Namespace для .matchedTransitionSource/.navigationTransition(.zoom) —
+    /// листалка "вырастает" из этой самой обложки при открытии, а не выезжает
+    /// отдельным чёрным экраном (по прямой просьбе).
+    @Namespace private var coverGalleryNamespace
+    /// URL'ы для листалки — реальная галерея (GET /manga/{slug}/covers), а
+    /// если она пустая (у большинства тайтлов доп. обложек вообще нет) —
+    /// один-единственный URL основной обложки: тап должен открывать
+    /// полноэкранный вид ВСЕГДА, вне зависимости от того, есть ли доп.
+    /// обложки (по прямой просьбе), просто без пролистывания в этом случае.
+    private var coverGalleryImageURLs: [URL] {
+        // bestURL (md), не fullResURL (orig) — в листалке нет зума, orig
+        // ничего не даёт визуально (экран телефона всё равно меньше), а
+        // декодировать/рендерить полноразмерный оригинал на лету во время
+        // интерактивного свайпа заметно тяжелее — вероятная причина
+        // "резко перепрыгивает" при пролистывании (просадка кадров).
+        if !viewModel.coverGallery.isEmpty {
+            return viewModel.coverGallery.compactMap { $0.cover.bestURL }
+        }
+        if let url = viewModel.detail?.cover?.bestURL ?? coverURL ?? listItem?.cover?.bestURL {
+            return [url]
+        }
+        return []
+    }
     /// URL тайтла для «Поделиться» (см. actionMenu) — обычная ссылка на
     /// страницу тайтла на активном сайте.
     private var shareURL: URL? {
@@ -41,7 +107,18 @@ struct MangaDetailView: View {
     }
     @State private var readerOpen: ReaderOpen?
     @State private var commentDraft = ""
+    /// Режим "весь комментарий — спойлер" (см. composeBar) — ПОДТВЕРЖДЕНО
+    /// реальным перехватом отправки, см. MangaNetworkService.postComment
+    /// (spoilerLabel:). Подпись по умолчанию — как в примере из перехвата.
+    @State private var spoilerMode = false
+    @State private var spoilerLabelDraft = "спойлер"
     @State private var showLoginForComment = false
+    /// Фокус полей ввода комментария (сам текст ИЛИ подпись спойлера, см.
+    /// composeBar) — общий Bool на оба поля, нужен только чтобы понять, что
+    /// клавиатура сейчас открыта, и свернуть её тапом по любому "пустому"
+    /// месту вкладки «Комментарии» (см. commentsTab.onTapGesture), а не
+    /// только системным свайпом/кнопкой "Done".
+    @FocusState private var commentFieldFocused: Bool
 
     // MARK: Комментарии — доп. состояние UI (не сетевое, живёт только в этом View)
 
@@ -58,13 +135,26 @@ struct MangaDetailView: View {
     /// поэтому просто честно говорим, что функция скоро появится, а не
     /// притворяемся, что жалоба ушла.
     @State private var showReportComingSoon = false
+    /// Меню "•••" у комментария (см. commentMenu): "Ссылка на комментарий"
+    /// копирует ссылку вида .../manga/{slug}?section=comments&comment_id={id}
+    /// (формат подтверждён примером пользователя), "Добавить в игнор лист"
+    /// шлёт MangaNetworkService.addToIgnoreList (эндпоинт НЕ подтверждён
+    /// перехватом — см. комментарий там). showCommentLinkCopied/
+    /// showIgnoreResult — короткая обратная связь после действия.
+    @State private var showCommentLinkCopied = false
+    @State private var showIgnoreResult: String?
 
     /// Голос "+"/"-" за "Похожее" (см. similarSection/similarVoteColumn) —
     /// требует авторизации так же, как и комментарии; отдельный флаг вместо
     /// переиспользования showLoginForComment, т.к. источник действия другой.
     @State private var showLoginForSimilarVote = false
+    @State private var showRatingSheet = false
     /// Открытый профиль автора комментария (тап по нику/аватарке).
     @State private var profileUser: ProfileUserId?
+    /// Открытая франшиза (тап по чипу-подкатегории, см. franchiseChip) —
+    /// FranchiseRef уже Identifiable (id франшизы), отдельный обёрточный
+    /// тип не нужен.
+    @State private var franchiseTarget: FranchiseRef?
 
     /// Отключить комментарии в читалке — ПОКА ЗАГЛУШКА, как явно попросили:
     /// переключатель есть и сохраняется, но ридер комментарии не показывает
@@ -158,10 +248,29 @@ struct MangaDetailView: View {
         // баннер под этот отступ вместо того, чтобы показывать пустой зазор.
         .coordinateSpace(name: "detailScroll")
         .background(Theme.background)
-        // Свой back-button поверх hero (см. heroHeader) вместо системной
-        // navigation bar — баннер уходит под статус-бар, как в референсе.
-        .toolbar(.hidden, for: .navigationBar)
+        // Баннер уходит под статус-бар, как в референсе.
         .ignoresSafeArea(edges: .top)
+        // ПРОСТАЯ схема вместо кастомной кнопки поверх баннера (см. историю в
+        // App/InteractivePopGesture.swift): обычный системный navigation bar,
+        // просто с прозрачным фоном (баннер бесшовно уходит под статус-бар,
+        // как и раньше) — БЕЗ единой попытки скрыть/заменить автоматическую
+        // системную кнопку "назад". Именно попытки её скрыть/подменить
+        // (кастомной кнопкой в overlay ИЛИ в toolbar) четыре раза подряд
+        // давали разные баги — задвоение, просвечивание поиска при pop,
+        // "улетевшие" кнопки. Тот же принцип уже работает без единого
+        // инцидента в AppSettingsView/HistoryView/DownloadsView/FranchiseView
+        // — нигде из них нет своей кнопки "назад", только настоящая системная.
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    actionMenuItems
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
         .task { if viewModel.detail == nil { await viewModel.load() } }
         // Показ hero-картинки (см. heroHeader/updateHero): как только карточка
         // загрузилась — если у неё есть настоящий background (или хотя бы
@@ -170,6 +279,13 @@ struct MangaDetailView: View {
             guard let detail = viewModel.detail else { return }
             let realBG = detail.background?.bestURL
             updateHero(to: realBG ?? detail.cover?.bestURL ?? coverURL, isReal: realBG != nil)
+        }
+        // Кэшируем твою личную оценку тайтла в закладки (см.
+        // BookmarksStore.setMyRating) при каждой загрузке/обновлении
+        // карточки — no-op, если тайтла нет в закладках. initial: true —
+        // подхватывает значение и на первой загрузке, не только при смене.
+        .onChange(of: viewModel.detail?.rating?.myScore, initial: true) { _, newValue in
+            bookmarks.setMyRating(newValue, forSlug: viewModel.slug)
         }
         // "Около 0.5 сек ничего не используется, а если за это время ничего
         // не подгрузилось — ставим обложку с плавным появлением" (как
@@ -193,9 +309,23 @@ struct MangaDetailView: View {
         .fullScreenCover(item: $readerOpen) { open in
             readerView(for: open.chapter, branchId: open.branchId)
         }
+        .fullScreenCover(item: $coverGalleryPresentation) { presentation in
+            CoverGalleryView(
+                images: presentation.images,
+                backgroundSnapshot: presentation.backgroundSnapshot,
+                transitionSourceID: "titleCover",
+                transitionNamespace: coverGalleryNamespace
+            )
+        }
         .sheet(isPresented: $showLoginForComment) { LoginView() }
         .sheet(isPresented: $showLoginForSimilarVote) { LoginView() }
         .sheet(item: $profileUser) { pu in ProfileView(userId: pu.id) }
+        .sheet(isPresented: $showRatingSheet) {
+            RatingSheet(viewModel: viewModel)
+        }
+        .navigationDestination(item: $franchiseTarget) { ref in
+            FranchiseView(slugURL: ref.slugURL, fallbackName: ref.name)
+        }
         .sheet(isPresented: $showTitleNames) {
             TitleNamesSheet(
                 rusName: viewModel.detail?.rusName ?? listItem?.rusName,
@@ -218,9 +348,9 @@ struct MangaDetailView: View {
             // Открывается сразу до верха.
             .presentationDetents([.large])
         }
-        // Жест «назад» свайпом из левой половины экрана (системный интерактивный
-        // переход — во время свайпа виден предыдущий экран). См.
-        // InteractivePopGesture. Только на карточке тайтла.
+        // Жест «назад» свайпом из левой половины экрана (системный
+        // интерактивный переход — во время свайпа виден предыдущий экран).
+        // См. InteractivePopGesture. Только на карточке тайтла.
         .background(InteractivePopGesture())
     }
 
@@ -244,8 +374,8 @@ struct MangaDetailView: View {
     /// Фиксированное расстояние от верха баннера до верха обложки. Раньше
     /// считалось как heroBaseHeight-высота_обложки-spacing (=167) — из-за чего
     /// обложка «приколачивалась» к самому низу баннера и выглядела съехавшей
-    /// вниз. Теперь это НЕЗАВИСИМАЯ фиксированная величина: кнопка «назад»
-    /// занимает 54...102 сверху, поэтому 120 = гарантированный зазор под ней.
+    /// вниз. Теперь это НЕЗАВИСИМАЯ фиксированная величина: гарантированный
+    /// зазор под системным navigation bar сверху (см. body).
     /// Обложка стоит СТРОГО на этой высоте независимо от длины названия (оно
     /// ниже обложки и на неё не наезжает), баннер естественно растёт под
     /// название — один проход, без @State/PreferenceKey.
@@ -281,8 +411,8 @@ struct MangaDetailView: View {
     /// Полноширинный баннер + название тайтла поверх него + сама обложка,
     /// выступающая ниже его нижнего края — тот же приём, что и в реальных
     /// читалках (обложка не теряется в мелком размере рядом с текстом, а
-    /// становится акцентом шапки). Своя круглая стеклянная кнопка "назад"
-    /// вместо системной — см. .toolbar(.hidden...) в body.
+    /// становится акцентом шапки). Кнопка "назад" — обычная системная,
+    /// "..." — настоящий ToolbarItem (см. body), не часть этого view.
     ///
     /// ВАЖНО (архитектура после двух багов подряд): раньше картинка-фон была
     /// ГЛАВНЫМ элементом с явным .frame(height: heroBaseHeight+titleBlockHeight),
@@ -310,7 +440,10 @@ struct MangaDetailView: View {
 
             VStack(alignment: .leading, spacing: Self.heroCoverTitleSpacing) {
                 // Обложка увеличена ещё на 30% сверх прошлого 1.3х (88×132 → ~149×223).
-                RemoteImage(url: viewModel.detail?.cover?.bestURL ?? coverURL) { image in
+                // .highPriority — экран может открыться сразу после ленты «Читают»,
+                // где в очереди URLSession ещё висят незавершённые запросы её
+                // карточек (см. RemoteImageLoader.load(candidates:priority:)).
+                RemoteImage(url: viewModel.detail?.cover?.bestURL ?? coverURL, priority: URLSessionTask.highPriority) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
                     SkeletonBox()
@@ -323,6 +456,27 @@ struct MangaDetailView: View {
                 .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
                 .overlay(alignment: .topLeading) { bookmarkStatusBadge }
                 .overlay(alignment: .bottomLeading) { coverRatingBadge }
+                .overlay(alignment: .topTrailing) { coverGalleryBadge }
+                // Источник для .navigationTransition(.zoom(...)) в
+                // CoverGalleryView — листалка "вырастает" из ЭТОЙ обложки.
+                .matchedTransitionSource(id: "titleCover", in: coverGalleryNamespace)
+                // Тап в любое место обложки — полноэкранный вид ВСЕГДА (см.
+                // coverGalleryImageURLs — если доп. обложек нет, там всё
+                // равно будет один URL основной обложки, просто без
+                // пролистывания). Снимок экрана — прямо перед открытием, для
+                // блюр-фона листалки (см. CoverGalleryPresentation выше).
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    let urls = coverGalleryImageURLs
+                    guard !urls.isEmpty else { return }
+                    // ОДНО присваивание — снимок экрана и флаг показа больше
+                    // не два раздельных @State, гонки быть не может (см.
+                    // комментарий у CoverGalleryPresentation выше).
+                    coverGalleryPresentation = CoverGalleryPresentation(
+                        images: urls,
+                        backgroundSnapshot: UIApplication.shared.activeKeyWindow?.renderedSnapshot()
+                    )
+                }
 
                 titleBlockOverlay
             }
@@ -352,7 +506,7 @@ struct MangaDetailView: View {
                         // параметра существующей), поэтому .transition(.opacity)
                         // ниже реально проигрывает плавный кросс-фейд между
                         // старой и новой картинкой, а не мгновенную подмену.
-                        RemoteImage(url: heroURL) { image in
+                        RemoteImage(url: heroURL, priority: URLSessionTask.highPriority) { image in
                             image.resizable().scaledToFill()
                         } placeholder: {
                             SkeletonBox()
@@ -405,44 +559,21 @@ struct MangaDetailView: View {
                 .offset(y: -stretch)
             }
         }
-        .overlay(alignment: .topLeading) {
-            // Стрелка вместо крестика + стеклянный фон (как в остальном
-            // приложении), вместо .ultraThinMaterial. Добавлена ПОСЛЕДНЕЙ
-            // среди overlay-ев — поэтому всегда поверх названия/обложки.
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 48, height: 48)
-                    .glassEffect(.regular, in: Circle())
+    }
+
+    /// Пункты меню "..." шапки тайтла — общий источник для настоящего
+    /// toolbar-меню (см. .toolbar в body).
+    @ViewBuilder
+    private var actionMenuItems: some View {
+        if let shareURL {
+            ShareLink(item: shareURL) {
+                Label("Поделиться", systemImage: "square.and.arrow.up")
             }
-            .padding(.leading, 16)
-            .padding(.top, 54) // ниже статус-бара, баннер уходит под него целиком
         }
-        .overlay(alignment: .topTrailing) {
-            // Кнопка "..." — стандартное системное Menu (стеклянный список iOS
-            // по умолчанию), как попросили. Стеклянный круг вокруг иконки — как
-            // у кнопки "назад" слева.
-            Menu {
-                if let shareURL {
-                    ShareLink(item: shareURL) {
-                        Label("Поделиться", systemImage: "square.and.arrow.up")
-                    }
-                }
-                Button { /* ЗАГЛУШКА */ } label: { Label("Редактирование глав", systemImage: "square.and.pencil") }
-                Button { /* ЗАГЛУШКА */ } label: { Label("Добавить главы", systemImage: "plus") }
-                Button { /* ЗАГЛУШКА */ } label: { Label("Редактирование тайтла", systemImage: "pencil") }
-                Button { showDownloadSheet = true } label: { Label("Скачать тайтл", systemImage: "arrow.down.circle") }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 48, height: 48)
-                    .glassEffect(.regular, in: Circle())
-            }
-            .padding(.trailing, 16)
-            .padding(.top, 54)
-        }
+        Button { /* ЗАГЛУШКА */ } label: { Label("Редактирование глав", systemImage: "square.and.pencil") }
+        Button { /* ЗАГЛУШКА */ } label: { Label("Добавить главы", systemImage: "plus") }
+        Button { /* ЗАГЛУШКА */ } label: { Label("Редактирование тайтла", systemImage: "pencil") }
+        Button { showDownloadSheet = true } label: { Label("Скачать тайтл", systemImage: "arrow.down.circle") }
     }
 
     /// titleBlock с отступом справа — вынесено отдельно от heroHeader просто
@@ -476,44 +607,81 @@ struct MangaDetailView: View {
         }
     }
 
-    /// Рейтинг поверх обложки тайтла — единый бэйдж (см. RatingChip), тот же
-    /// стиль/цвет, что и на карточках каталога и в закладках. Сверху справа
-    /// (было снизу справа) — как явно попросили.
-    /// Верхний правый бейдж обложки: ★ + оценка + просмотры (коротко, K/M).
-    /// Звёздочка перед оценкой, просмотры перенесены сюда (нижний-левый бейдж
-    /// удалён) — как попросили.
+    /// Рейтинг поверх обложки тайтла — снизу слева, ДВА отдельных чипа (по
+    /// прямой просьбе): [1] твоя личная оценка (★ под цвет, см.
+    /// personalRatingColor — тот же непрерывный градиент, что и везде в
+    /// приложении), только если она есть; [2] средняя оценка сайта (★
+    /// жёлтая) + кол-во проголосовавших цифрами. Просмотры с обложки убраны
+    /// — теперь только в info row (см. "MARK: Info row" ниже,
+    /// viewModel.detail?.viewsString), это и есть "метаданные".
     @ViewBuilder
     private var coverRatingBadge: some View {
         let ratingObj = viewModel.detail?.rating ?? listItem?.rating
         let rating = ratingObj?.value
         let votes = ratingObj?.votes
-        let views = viewModel.detail?.views
+        let myScore = viewModel.detail?.rating?.myScore
         let hasRating = (rating ?? 0) > 0
-        let hasVotes = (votes ?? 0) > 0
-        let hasViews = (views ?? 0) > 0
-        if hasRating || hasViews {
-            HStack(spacing: 4) {
-                if hasRating, let rating {
+        // Чуть уже (ширина/отступы/звёздочка/цифры) — по прямой просьбе:
+        // при двузначной личной оценке (10) вместе со средней + длинным
+        // коротким форматом голосов (197.85k) чипы почти впритык не влезали
+        // в ширину обложки.
+        HStack(spacing: 5) {
+            if let myScore {
+                // Заливка под цвет оценки (не чёрная полупрозрачная, как у
+                // средней ниже) — тот же стиль чипа, что и у ratingStatsBlock.
+                HStack(spacing: 3) {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 9))
+                        .font(.system(size: 8))
+                        .foregroundStyle(.white)
+                    Text("\(myScore)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(personalRatingColor(myScore), in: Capsule())
+            }
+            if hasRating, let rating {
+                HStack(spacing: 3) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 8))
                         .foregroundStyle(.yellow)
                     Text(String(format: "%.1f", rating))
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.white)
                     // Сколько людей поставило оценку — в коротком формате (762k).
-                    if hasVotes, let votes {
+                    if let votes, votes > 0 {
                         Text(Self.shortCount(votes).lowercased())
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.85))
                     }
                 }
-                if hasViews, let views {
-                    Text(Self.shortCount(views))
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
-                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.black.opacity(0.55), in: Capsule())
             }
-            .lineLimit(1)
+        }
+        .lineLimit(1)
+        .padding(6)
+    }
+
+    /// Чип "иконка изображения + кол-во доп. обложек" — сверху справа на
+    /// обложке (см. GET /manga/{slug}/covers, MangaDetailViewModel.coverGallery).
+    /// Показывается только если обложек БОЛЬШЕ ОДНОЙ (при ровно одной чип не
+    /// нужен — по прямой просьбе, хотя тап всё равно открывает её на весь
+    /// экран, см. coverGalleryImageURLs). Тап по всей обложке (не только по
+    /// чипу) открывает полноэкранную листалку — см. heroHeader.
+    @ViewBuilder
+    private var coverGalleryBadge: some View {
+        if viewModel.coverGallery.count > 1 {
+            HStack(spacing: 4) {
+                Image(systemName: "photo.on.rectangle")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white)
+                Text("\(viewModel.coverGallery.count)")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+            }
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(.black.opacity(0.55), in: Capsule())
@@ -579,7 +747,7 @@ struct MangaDetailView: View {
     private var infoRow: some View {
         let rawItems: [(heading: String, value: String?)] = [
             (heading: "Тип", value: (viewModel.detail?.type ?? listItem?.type)?.label),
-            (heading: "Статус", value: (viewModel.detail?.status ?? listItem?.status)?.label),
+            (heading: "Статус / Перевод", value: (viewModel.detail?.status ?? listItem?.status)?.label),
             (heading: "Год выпуска", value: viewModel.detail?.yearString),
             // Просмотры — 4-е место (сразу после года), как попросили.
             (heading: "Просмотры", value: viewModel.detail?.viewsString),
@@ -608,8 +776,9 @@ struct MangaDetailView: View {
     // Высота чипа teamChip (см. ниже, раздел "Главы") — аватар 28pt +
     // вертикальный паддинг 8×2 = 44. Общая константа, чтобы чипы метаданных
     // и переводчиков совпадали по высоте пиксель в пиксель, а не примерно —
-    // как попросили выровнять.
-    private static let metaChipHeight: CGFloat = 44
+    // как попросили выровнять. fileprivate (не private) — нужна и в
+    // TeamChipView ниже (отдельная struct в этом же файле, см. её объявление).
+    fileprivate static let metaChipHeight: CGFloat = 44
 
     @ViewBuilder
     private func infoBlock(_ heading: String, value: String) -> some View {
@@ -685,34 +854,87 @@ struct MangaDetailView: View {
         }
     }
 
+    /// Отзывы — ПОДТВЕРЖДЕНО перехватом `GET /reviews?reviewable_type=manga&
+    /// reviewable_id=`, см. MangaReviewsView. Отдельным пушнутым экраном (не
+    /// ещё одной вкладкой внутри и так большого MangaDetailView), тот же
+    /// подход, что уже применён для Друзей/Коллекций/Списков в профиле.
+    @ViewBuilder
+    private var reviewsEntryRow: some View {
+        if let mangaId = viewModel.detail?.id {
+            NavigationLink {
+                MangaReviewsView(mangaId: mangaId, mangaTitle: title, siteId: viewModel.resolvedSiteId)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "text.bubble").font(.subheadline).foregroundStyle(Theme.accent)
+                    Text("Отзывы").font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textSecondary)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// Тап по всему виджету открывает RatingSheet (оценка 1-10 звёзд, см.
+    /// showRatingSheet) — по прямой просьбе.
     @ViewBuilder
     private func ratingStatsBlock(_ group: StatGroup?) -> some View {
         if let entries = group?.stats, !entries.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    blockTitle("Оценки пользователей")
-                    Spacer(minLength: 0)
-                    if let r = viewModel.detail?.rating {
-                        HStack(spacing: 6) {
-                            Image(systemName: "star.fill").font(.subheadline).foregroundStyle(Theme.accent)
-                            Text(r.average ?? r.averageFormated ?? "—")
-                                .font(.headline).foregroundStyle(Theme.textPrimary)
-                            if let v = r.votes {
-                                Text(Self.shortCount(v)).font(.footnote).foregroundStyle(Theme.textSecondary)
+            Button {
+                showRatingSheet = true
+            } label: {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        blockTitle("Оценки пользователей")
+                        Spacer(minLength: 0)
+                        // Твоя личная оценка — слева от общей (сайтовой), в
+                        // виде ЗАЛИТОГО чипа (не просто цветной текст, как
+                        // раньше) — фон под цвет оценки (personalRatingColor,
+                        // тот же непрерывный градиент красный→зелёный, что и
+                        // чип личной оценки в плитке закладок и на обложке
+                        // тайтла, см. coverRatingBadge), звезда+число белые
+                        // для контраста. Средняя оценка сайта РЯДОМ — по
+                        // прямой просьбе БЕЗ чипа, как и была.
+                        if let myScore = viewModel.detail?.rating?.myScore {
+                            HStack(spacing: 5) {
+                                Image(systemName: "star.fill")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white)
+                                Text("\(myScore)")
+                                    .font(.headline)
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(personalRatingColor(myScore), in: Capsule())
+                        }
+                        if let r = viewModel.detail?.rating {
+                            HStack(spacing: 6) {
+                                Image(systemName: "star.fill").font(.subheadline).foregroundStyle(Theme.accent)
+                                Text(r.average ?? r.averageFormated ?? "—")
+                                    .font(.headline).foregroundStyle(Theme.textPrimary)
+                                if let v = r.votes {
+                                    Text(Self.shortCount(v)).font(.footnote).foregroundStyle(Theme.textSecondary)
+                                }
                             }
                         }
                     }
-                }
-                VStack(spacing: 9) {
-                    ForEach(entries) { e in
-                        statRow(leading: { ratingLeading(e.label) },
-                                leadingWidth: 40,
-                                percent: e.percent,
-                                color: Self.ratingColor(for: e.label),
-                                value: e.value)
+                    VStack(spacing: 9) {
+                        ForEach(entries) { e in
+                            statRow(leading: { ratingLeading(e.label) },
+                                    leadingWidth: 40,
+                                    percent: e.percent,
+                                    color: Self.ratingColor(for: e.label),
+                                    value: e.value)
+                        }
                     }
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
     }
 
@@ -790,7 +1012,9 @@ struct MangaDetailView: View {
         return percent > 0 ? max(w, 5) : 0
     }
 
-    private static func ratingColor(for label: String) -> Color {
+    /// Не private — тот же цвет распределения переиспользует RatingSheet
+    /// (см. её большой кружок с выбранной оценкой), единый источник правды.
+    static func ratingColor(for label: String) -> Color {
         guard let score = Int(label) else { return Theme.accent }
         // 1 → оранжевый, 10 → зелёный (плавный переход по hue).
         let t = Double(min(max(score, 1), 10) - 1) / 9.0
@@ -1192,15 +1416,25 @@ struct MangaDetailView: View {
     // стеклянных капсул — как просили.
 
     private var tabBar: some View {
-        // Три вкладки поровну делят ширину (было: HStack по естественной
-        // ширине текста + Spacer по краям) — при большом числе глав подпись
-        // "Главы 1234" раньше расширяла свою вкладку и весь центрированный
-        // блок съезжал в сторону; теперь у каждой вкладки фиксированная 1/3
-        // ширины, поэтому позиции вкладок не зависят от длины текста.
+        // Было: три вкладки поровну делят ширину (1/3 каждая) — из-за этого
+        // "О тайтле" (короче) и "Комментарии" (длиннее) оказывались на
+        // РАЗНОМ расстоянии от краёв экрана, хотя обе вкладки крайние (по
+        // прямой жалобе — "разный зазор у О тайтлы и комментарии от углов").
+        // Теперь вкладки — по естественной ширине текста, с фиксированным
+        // зазором МЕЖДУ ними, а весь ряд центрируется целиком как один блок
+        // (Spacer с обеих сторон снаружи) — "Главы NNNN" всегда в середине
+        // этого блока, а расстояние от "О тайтле"/"Комментарии" до краёв
+        // экрана теперь буквально одинаковое (не по совпадению, а потому что
+        // Spacer слева и справа делят оставшееся место поровну), плюс сами
+        // вкладки визуально ближе друг к другу, как и просили ("сблизить").
         HStack(spacing: 0) {
-            tabButton("О тайтле", .about)
-            tabButton(displayChapters.isEmpty ? "Главы" : "Главы \(max(viewModel.totalChapters, displayChapters.count))", .chapters)
-            tabButton("Комментарии", .comments)
+            Spacer(minLength: 0)
+            HStack(spacing: 28) {
+                tabButton("О тайтле", .about)
+                tabButton(displayChapters.isEmpty ? "Главы" : "Главы \(max(viewModel.totalChapters, displayChapters.count))", .chapters)
+                tabButton("Комментарии", .comments)
+            }
+            Spacer(minLength: 0)
         }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.separator).frame(height: 1)
@@ -1215,7 +1449,6 @@ struct MangaDetailView: View {
                 .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-                .frame(maxWidth: .infinity)
                 .padding(.bottom, 13)
                 .overlay(alignment: .bottom) {
                     // Подчёркивание рисуется ТОЛЬКО у активной вкладки, но с
@@ -1259,6 +1492,10 @@ struct MangaDetailView: View {
             if viewModel.detail == nil && viewModel.isLoading {
                 ProgressView().tint(Theme.accent).frame(maxWidth: .infinity)
             }
+
+            // Автор/Художник(и)/Издатель(и) — ОДНА строка чипов НАД описанием
+            // (по прямой просьбе). См. creditsRow.
+            creditsRow
 
             if isBlockedByLicenseOrModeration {
                 // "Нет глав" + подтверждённые маркеры (is_licensed/moderated,
@@ -1323,6 +1560,16 @@ struct MangaDetailView: View {
                 }
             }
 
+            // Франшиза — ОТДЕЛЬНАЯ подкатегория ПОД "Жанры и теги" (по прямой
+            // просьбе — раньше была вмешана первым чипом в тот же ряд, теперь
+            // свой заголовок и свой блок), см. franchiseChip.
+            if let franchiseChip {
+                VStack(alignment: .leading, spacing: 10) {
+                    blockTitle("Франшиза")
+                    CollapsibleChips(items: [franchiseChip])
+                }
+            }
+
             // Порядок ниже — как явно попросили: Связанное ВСЕГДА выше
             // Похожего, оба опциональны и просто скрываются (см.
             // relatedSection/similarSection), если списки пустые.
@@ -1330,27 +1577,23 @@ struct MangaDetailView: View {
             similarSection
             charactersSection
             statsSection
+            reviewsEntryRow
 
             if viewModel.detail == nil && !viewModel.isLoading {
-                VStack(alignment: .leading, spacing: 10) {
-                    // ВРЕМЕННО: показываем РЕАЛЬНЫЙ текст ошибки вместо
-                    // захардкоженного "Не удалось загрузить описание." —
-                    // используем detailErrorMessage (а не errorMessage,
-                    // который пуст, если главы всё же загрузились) — чтобы
-                    // наконец увидеть, что именно отвечает сервер (404 / 401 /
-                    // таймаут / ошибка разбора JSON), а не гадать вслепую в
-                    // очередной раз. Уберём после того, как найдём и починим
-                    // настоящую причину.
-                    Text(viewModel.detailErrorMessage ?? "Не удалось загрузить описание (причина неизвестна).")
-                        .font(.footnote).foregroundStyle(Theme.textSecondary)
-                    Button {
-                        Task { await viewModel.load() }
-                    } label: {
-                        Label("Обновить", systemImage: "arrow.clockwise")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Theme.accent)
-                    }
-                }
+                // ВРЕМЕННО: показываем РЕАЛЬНЫЙ текст ошибки вместо
+                // захардкоженного "Не удалось загрузить описание." —
+                // используем detailErrorMessage (а не errorMessage, который
+                // пуст, если главы всё же загрузились) — чтобы наконец
+                // увидеть, что именно отвечает сервер (404 / 401 / таймаут /
+                // ошибка разбора JSON), а не гадать вслепую в очередной раз.
+                // Уберём после того, как найдём и починим настоящую причину.
+                StateView(
+                    icon: "wifi.exclamationmark",
+                    title: "Не удалось загрузить",
+                    description: viewModel.detailErrorMessage ?? "Причина неизвестна.",
+                    retry: { Task { await viewModel.load(force: true) } },
+                    minHeight: 140
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1369,15 +1612,27 @@ struct MangaDetailView: View {
                     .font(.subheadline).foregroundStyle(Theme.textSecondary)
             }
             .frame(maxWidth: .infinity, minHeight: 120)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         } else {
             VStack(alignment: .leading, spacing: 12) {
-                // Команды перевода тайтла — чипы сверху (аватар + имя + колокол).
+                // Команды перевода тайтла — чипы сверху (аватар + имя + колокол),
+                // тап открывает страницу переводчика (см. TeamView).
                 let teams = allTeams
                 if !teams.isEmpty {
                     ScrollView(.horizontal) {
                         HStack(spacing: 10) {
-                            ForEach(teams) { teamChip($0) }
+                            ForEach(teams) { team in
+                                if let slugURL = team.slugURL {
+                                    NavigationLink {
+                                        TeamView(slugURL: slugURL, fallbackName: team.name, coverURL: team.avatarURL)
+                                    } label: {
+                                        teamChip(team)
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    teamChip(team)
+                                }
+                            }
                         }
                     }
                     .scrollIndicators(.hidden)
@@ -1403,7 +1658,7 @@ struct MangaDetailView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                 }
 
                 // Порядок: по умолчанию новые сверху; «Сортировать» переключает.
@@ -1423,7 +1678,7 @@ struct MangaDetailView: View {
                         }
                     }
                 }
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             }
         }
     }
@@ -1519,28 +1774,7 @@ struct MangaDetailView: View {
     }
 
     private func teamChip(_ team: ChapterTeam) -> some View {
-        HStack(spacing: 8) {
-            RemoteImage(url: team.avatarURL) { img in
-                img.resizable().scaledToFill()
-            } placeholder: {
-                Circle().fill(Theme.surface)
-            }
-            .frame(width: 28, height: 28)
-            .clipShape(Circle())
-
-            Text(team.name)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
-
-            // Колокольчик — подписка на уведомления команды (ЗАГЛУШКА, API позже).
-            Image(systemName: "bell")
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-        }
-        .padding(.horizontal, 10)
-        .frame(height: Self.metaChipHeight)
-        .background(Theme.surfaceElevated, in: Capsule())
+        TeamChipView(team: team)
     }
 
     /// Блок одной главы: если у неё ≥2 веток (команд) — заголовок + под-строки
@@ -1756,7 +1990,7 @@ struct MangaDetailView: View {
         if let mangaId = viewModel.detail?.id {
             Task {
                 do {
-                    try await MangaNetworkService.shared.markChapterViewed(mangaId: mangaId, chapterId: chapter.id)
+                    try await MangaNetworkService.shared.markChapterViewed(mangaId: mangaId, chapterId: chapter.id, siteId: viewModel.resolvedSiteId)
                 } catch {
                     print("[MangaDetailView] не удалось отметить главу просмотренной на сервере: \(error)")
                 }
@@ -1864,6 +2098,7 @@ struct MangaDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 24)
             } else {
+                stickyCommentCard
                 commentsHeader
                 composeBar
 
@@ -1872,17 +2107,22 @@ struct MangaDetailView: View {
                 } else if let error = viewModel.commentsError, viewModel.comments.isEmpty {
                     commentsErrorState(error)
                 } else if viewModel.comments.isEmpty && viewModel.hasLoadedComments {
-                    VStack(spacing: 8) {
-                        Image(systemName: "text.bubble").font(.largeTitle).foregroundStyle(Theme.textSecondary)
-                        Text("Пока нет комментариев").font(.subheadline).foregroundStyle(Theme.textSecondary)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 120)
+                    StateView(icon: "text.bubble", title: "Комментариев пока нет", minHeight: 120)
                 } else {
                     commentsList
                 }
             }
         }
         .task { if !commentsDisabledOnCard { await viewModel.loadCommentsIfNeeded() } }
+        // Тап по любому "пустому" месту вкладки — свернуть клавиатуру, если
+        // сейчас пишем комментарий/подпись спойлера (см. composeBar). Кнопки/
+        // текстфилды сами уже занимают приоритет (это ловит только тапы МИМО
+        // них — обычное поведение вложенных SwiftUI-жестов), заново открыть
+        // клавиатуру можно тапом по самому полю ввода.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if commentFieldFocused { commentFieldFocused = false }
+        }
         .sheet(isPresented: $showCommentSettings) {
             CommentSettingsSheet(
                 disabledInReader: $commentsDisabledInReader,
@@ -1896,6 +2136,66 @@ struct MangaDetailView: View {
             Button("Понятно", role: .cancel) {}
         } message: {
             Text("Отправка жалоб на комментарии пока не реализована.")
+        }
+        .alert("Ссылка скопирована", isPresented: $showCommentLinkCopied) {
+            Button("Понятно", role: .cancel) {}
+        }
+        .alert("Игнор-лист", isPresented: Binding(
+            get: { showIgnoreResult != nil },
+            set: { if !$0 { showIgnoreResult = nil } }
+        )) {
+            Button("Понятно", role: .cancel) {}
+        } message: {
+            Text(showIgnoreResult ?? "")
+        }
+    }
+
+    /// Ссылка на конкретный комментарий — вида .../manga/{slug}?section=
+    /// comments&comment_id={id} (формат из примера пользователя). Хост берём
+    /// по фактическому сайту тайтла (resolvedSiteId), а не активному в меню —
+    /// комментарий мог быть открыт на карточке с другого сайта, чем выбран
+    /// сейчас глобально.
+    private func commentLink(_ comment: Comment) -> String {
+        let host = LibSite(rawValue: viewModel.resolvedSiteId ?? 0)?.host ?? SiteSession.shared.activeSite.host
+        return "https://\(host)/ru/manga/\(viewModel.slug)?section=comments&comment_id=\(comment.id)"
+    }
+
+    /// "•••" рядом с "Ответить"/"Жалоба" — "Ссылка на комментарий" (копирует
+    /// commentLink в буфер) и "Добавить в игнор лист" (см.
+    /// MangaNetworkService.addToIgnoreList — эндпоинт не подтверждён
+    /// перехватом, поэтому честно показываем ошибку, если сервер её вернёт).
+    @ViewBuilder
+    private func commentMenu(_ comment: Comment) -> some View {
+        Menu {
+            Button {
+                UIPasteboard.general.string = commentLink(comment)
+                showCommentLinkCopied = true
+            } label: {
+                Label("Ссылка на комментарий", systemImage: "link")
+            }
+
+            if let authorId = comment.author?.id, authorId > 0, authorId != AuthSession.shared.userId {
+                Button {
+                    guard AuthSession.shared.isLoggedIn else { showLoginForComment = true; return }
+                    Task { await addToIgnoreList(userId: authorId) }
+                } label: {
+                    Label("Добавить в игнор лист", systemImage: "eye.slash")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 20, height: 20)
+        }
+    }
+
+    private func addToIgnoreList(userId: Int) async {
+        do {
+            try await MangaNetworkService.shared.addToIgnoreList(userId: userId)
+            showIgnoreResult = "Пользователь добавлен в игнор-лист."
+        } catch {
+            showIgnoreResult = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
@@ -1961,21 +2261,26 @@ struct MangaDetailView: View {
                 // вкладке глав того же тайтла: центр по HStack + стрелка
                 // зажата в те же 34pt, а не «плавает» по своей intrinsic-высоте.
                 HStack(alignment: .center, spacing: 8) {
-                    TextField("Написать комментарий...", text: $commentDraft, axis: .vertical)
+                    TextField(spoilerMode ? "Скрытый текст спойлера..." : "Написать комментарий...",
+                              text: $commentDraft, axis: .vertical)
                         .lineLimit(1...4)
                         .foregroundStyle(Theme.textPrimary)
                         .padding(.horizontal, 14)
                         .frame(minHeight: 34)
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .focused($commentFieldFocused)
 
                     let trimmed = commentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                     Button {
                         let text = commentDraft
+                        let label = spoilerMode ? spoilerLabelDraft.trimmingCharacters(in: .whitespacesAndNewlines) : nil
                         let parent = replyingTo
                         commentDraft = ""
                         replyingTo = nil
+                        spoilerMode = false
+                        commentFieldFocused = false
                         Task {
-                            let ok = await viewModel.postComment(text: text, replyingTo: parent)
+                            let ok = await viewModel.postComment(text: text, spoilerLabel: label, replyingTo: parent)
                             if !ok { commentDraft = text }
                         }
                     } label: {
@@ -1986,15 +2291,64 @@ struct MangaDetailView: View {
                     .frame(width: 34, height: 34)
                     .disabled(trimmed.isEmpty || viewModel.isPostingComment)
                 }
+
+                // Панель форматирования — пока только спойлер (см.
+                // MangaNetworkService.postComment(spoilerLabel:)). Тап по
+                // иконке "разворачивает вниз" поле подписи спойлера (по
+                // прямой просьбе), сам комментарий целиком уходит спойлером.
+                HStack(spacing: 10) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { spoilerMode.toggle() }
+                    } label: {
+                        Image(systemName: spoilerMode ? "eye.slash.fill" : "eye.slash")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(spoilerMode ? Theme.accent : Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 4)
+
+                if spoilerMode {
+                    TextField("Подпись спойлера", text: $spoilerLabelDraft)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 30)
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .focused($commentFieldFocused)
+                }
             }
         } else {
             Button { showLoginForComment = true } label: {
                 Label("Войдите, чтобы оставить комментарий", systemImage: "person.crop.circle.badge.plus")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, minHeight: 34)
+                    .frame(maxWidth: .infinity, minHeight: Theme.pillControlHeight)
                     .background(Theme.surfaceElevated, in: Capsule())
             }
+        }
+    }
+
+    /// Закреплённый командой перевода/модератором комментарий (см.
+    /// MangaNetworkService.fetchStickyComment) — своя карточка НАД обычной
+    /// лентой, только булавка сверху-справа (по прямой просьбе убрали
+    /// подпись "Закреплённый комментарий" — .overlay, а не отдельный ряд в
+    /// layout, чтобы не оставалось пустой строки над комментарием).
+    @ViewBuilder
+    private var stickyCommentCard: some View {
+        if let sticky = viewModel.stickyComment {
+            commentRow(sticky)
+                .padding(12)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: "pin.fill")
+                        .font(.caption2)
+                        .rotationEffect(.degrees(45))
+                        .foregroundStyle(Theme.accent)
+                        .padding(10)
+                }
         }
     }
 
@@ -2019,7 +2373,7 @@ struct MangaDetailView: View {
                 // независимых карточек.
                 commentNode(root, grouped: grouped)
                     .padding(12)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .onAppear {
                         guard root.id == roots.last?.id else { return }
                         Task { await viewModel.loadMoreCommentsIfNeeded(currentComment: root) }
@@ -2044,7 +2398,14 @@ struct MangaDetailView: View {
     /// местах выше по цепочке: commentsList → commentsTab → body).
     /// AnyView стирает конкретный тип, разрывая эту рекурсию — стандартный,
     /// единственный способ сделать рекурсивную SwiftUI-вью.
-    private func commentNode(_ comment: Comment, grouped: [Int: [Comment]]) -> AnyView {
+    /// `forceExpanded` — унаследовано от родителя: если ХОТЬ ОДИН предок по
+    /// цепочке уже был явно развёрнут (см. кнопку "Ещё комментарии" ниже),
+    /// весь поддерево под ним считается развёрнутым СРАЗУ на всю глубину, а
+    /// не только на один уровень — раньше при глубокой вложенности каждый
+    /// следующий уровень заново упирался в collapseFromLevel и показывал
+    /// СВОЮ кнопку "Ещё комментарии", так что до конца ветки приходилось
+    /// нажимать её по одному разу на каждый уровень (по прямой жалобе).
+    private func commentNode(_ comment: Comment, grouped: [Int: [Comment]], forceExpanded: Bool = false) -> AnyView {
         // Было children.sort{...} (мутирующий вызов, возвращает Void) — внутри
         // @ViewBuilder-контекста это ломало компиляцию отдельно от проблемы
         // выше; заменено на .sorted (не мутирует, обычное присваивание).
@@ -2052,6 +2413,7 @@ struct MangaDetailView: View {
             let arr = grouped[comment.id] ?? []
             return viewModel.commentSort == .popular ? arr.sorted { $0.score > $1.score } : arr
         }()
+        let expandedHere = forceExpanded || expandedThreads.contains(comment.id)
 
         return AnyView(
             VStack(alignment: .leading, spacing: 10) {
@@ -2060,18 +2422,29 @@ struct MangaDetailView: View {
                 if !children.isEmpty {
                     // Сворачиваем ответы по умолчанию, если их СОБСТВЕННЫЙ уровень
                     // вложенности достиг порога из настроек (см. collapseFromLevel) —
-                    // если пользователь уже разворачивал ЭТУ ветку вручную, не
-                    // сворачиваем снова (см. expandedThreads).
+                    // если пользователь уже разворачивал ЭТУ ветку (или любого её
+                    // предка) вручную, не сворачиваем снова (см. expandedHere).
                     if let firstLevel = children.first?.commentLevel,
-                       Double(firstLevel) >= collapseFromLevel, !expandedThreads.contains(comment.id) {
-                        Button {
-                            expandedThreads.insert(comment.id)
-                        } label: {
-                            Label("Показать ответы (\(children.count))", systemImage: "chevron.down")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(Theme.accent)
+                       Double(firstLevel) >= collapseFromLevel, !expandedHere {
+                        // Показывает ВСЕ уже загруженные ответы этой ветки разом,
+                        // причём СРАЗУ на всю глубину (см. forceExpanded выше) —
+                        // без парной кнопки "Скрыть" после (по прямой просьбе,
+                        // однонаправленно, как и было).
+                        // Тот же HStack(threadBars + spacing 8), что и в
+                        // commentRow — гарантирует, что подпись встанет РОВНО
+                        // под тем же левым краем, что и "Показать полностью"
+                        // внутри самого комментария (а не под threadBars, как
+                        // было раньше с произвольным padding 28).
+                        HStack(spacing: 8) {
+                            threadBars(comment.commentLevel)
+                            Button {
+                                expandedThreads.insert(comment.id)
+                            } label: {
+                                Text("Ещё комментарии (\(children.count))")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Theme.accent)
+                            }
                         }
-                        .padding(.leading, 28)
                     } else {
                         VStack(alignment: .leading, spacing: 10) {
                             ForEach(children) { child in
@@ -2083,7 +2456,7 @@ struct MangaDetailView: View {
                                 // визуальная граница между "текст родителя" и
                                 // "текст ответа", раз они в одном фоне.
                                 Divider().overlay(Theme.separator)
-                                commentNode(child, grouped: grouped)
+                                commentNode(child, grouped: grouped, forceExpanded: expandedHere)
                             }
                         }
                     }
@@ -2157,24 +2530,30 @@ struct MangaDetailView: View {
                 }
                 .buttonStyle(.plain)
 
-                if !comment.text.isEmpty {
-                    Text(comment.text).font(.subheadline).foregroundStyle(Theme.textPrimary)
-                }
+                // Спойлеры (см. Comment.segments) — свои чипы вместо
+                // обычного текста; без них — старое поведение целиком
+                // ("Показать полностью" НАД рядом Ответить/Жалоба/голоса).
+                CommentBodyView(comment: comment)
 
-                // Низ сообщения: "Ответить" слева, "Жалоба" + счётчик
-                // голосов (▲ число ▼) справа — как попросили.
+                // Низ сообщения: "Ответить"/"Жалоба"/"•••" вместе слева,
+                // счётчик голосов (▲ число ▼) справа — по прямой просьбе
+                // выровнять первые три рядом друг с другом (раньше "Жалоба"
+                // с "•••" были прижаты к голосам справа, а "Ответить" —
+                // отдельно слева).
                 HStack(spacing: 16) {
                     Button { replyingTo = comment } label: {
                         Text("Ответить").font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
                     }
                     .buttonStyle(.plain)
 
-                    Spacer(minLength: 0)
-
                     Button { showReportComingSoon = true } label: {
                         Text("Жалоба").font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
                     }
                     .buttonStyle(.plain)
+
+                    commentMenu(comment)
+
+                    Spacer(minLength: 0)
 
                     // Реальное голосование (эндпоинт подтверждён). Плюс/минус —
                     // кнопки; активный голос подсвечивается; без входа — предложить войти.
@@ -2222,17 +2601,7 @@ struct MangaDetailView: View {
     }
 
     private func commentsErrorState(_ message: String) -> some View {
-        VStack(spacing: 10) {
-            Text(message).font(.footnote).foregroundStyle(Theme.textSecondary)
-            Button {
-                Task { await viewModel.loadComments() }
-            } label: {
-                Label("Повторить", systemImage: "arrow.clockwise")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 100)
+        StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: message, retry: { Task { await viewModel.loadComments() } }, minHeight: 100)
     }
 
     // MARK: Helpers
@@ -2254,11 +2623,60 @@ struct MangaDetailView: View {
         return detail.isBlockedByLicenseOrModeration
     }
 
+    /// Чип франшизы — своя ОТДЕЛЬНАЯ подкатегория под "Жанры и теги" (см. её
+    /// использование в aboutTab), не вмешан в общий ряд чипов жанров/тегов.
+    /// Акцентный цвет (не как обычный жанр и не как тег с "#"), тап пушит
+    /// FranchiseView (см. franchiseTarget/navigationDestination в body).
+    /// Требует fields[]=franchise (см. MangaDetail.franchise).
+    private var franchiseChip: CollapsibleChips.Item? {
+        guard let ref = viewModel.detail?.franchise else { return nil }
+        return .init(text: ref.name, tint: Theme.accent, onTap: { franchiseTarget = ref })
+    }
+
+    /// Один общий ряд Автор/Художник(и)/Издатель(и) НАД описанием (по прямой
+    /// просьбе). Если автор и художник — ОДИН И ТОТ ЖЕ человек (совпадающий
+    /// набор id, обычно один автор-иллюстратор), показываем ОДИН
+    /// объединённый чип "Автор и Художник" без листа выбора — тап сразу
+    /// пушит его карточку (см. MergedCreditsChip). Иначе — отдельные группы
+    /// (см. CreditsChip): у каждой всегда есть лист выбора (даже если внутри
+    /// один человек — для единообразия поведения), у издательства — своя,
+    /// никогда не объединяется с автором/художником.
+    @ViewBuilder
+    private var creditsRow: some View {
+        let authors = viewModel.detail?.authors ?? []
+        let artists = viewModel.detail?.artists ?? []
+        let publishers = viewModel.detail?.publisher ?? []
+        let authorIds = Set(authors.map(\.id))
+        let artistIds = Set(artists.map(\.id))
+        let sameSinglePerson = authors.count == 1 && authorIds == artistIds
+
+        if !authors.isEmpty || !artists.isEmpty || !publishers.isEmpty {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    if sameSinglePerson, let person = authors.first {
+                        MergedCreditsChip(person: person)
+                    } else {
+                        if !authors.isEmpty {
+                            CreditsChip(people: authors, kind: .people, sheetTitle: authors.count == 1 ? "Автор" : "Авторы")
+                        }
+                        if !artists.isEmpty {
+                            CreditsChip(people: artists, kind: .people, sheetTitle: artists.count == 1 ? "Художник" : "Художники")
+                        }
+                    }
+                    if !publishers.isEmpty {
+                        CreditsChip(people: publishers, kind: .publisher, sheetTitle: publishers.count == 1 ? "Издательство" : "Издатели")
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
     /// Чип возрастного рейтинга для блока "Жанры и теги" — как попросили:
     /// 18+ красным (текст + обводка), 16+ таким же образом оранжевым, а
     /// 12+/6+/"Нет"/отсутствие рейтинга вообще не показываются (nil).
-    /// Показывается ПЕРВЫМ в списке — см. aboutTab, где он идёт перед
-    /// genres+tags.
+    /// Показывается сразу после чипа франшизы (см. franchiseChip выше) — см.
+    /// aboutTab, где он идёт перед genres+tags.
     private var ageRatingChip: CollapsibleChips.Item? {
         guard let label = viewModel.detail?.ageRestriction?.label else { return nil }
         let digits = label.prefix { $0.isNumber }
@@ -2267,6 +2685,291 @@ struct MangaDetailView: View {
         case "16": return .init(text: label, tint: .orange)
         default: return nil // 12+, 6+, "Нет" и т.п. — не показываем.
         }
+    }
+}
+
+/// Чип команды перевода в списке глав — аватар + имя + колокольчик подписки.
+/// Отдельная struct (не просто @ViewBuilder-функция, как раньше) — колокольчику
+/// нужно своё локальное состояние (подписан/грузится).
+///
+/// Колокольчик — РЕАЛЬНАЯ подписка, не заглушка: `POST /favorites
+/// {source_id, source_type:"team"}` — ПОДТВЕРЖДЕНО перехватом, toggle
+/// работает в обе стороны (повторным перехватом подтверждена и отписка).
+/// Стартовое состояние при появлении чипа подтягивается реальным
+/// `GET /favorites/team/{id}` (см. .task ниже) — тоже ПОДТВЕРЖДЕНО
+/// перехватом, больше не "всегда стартует не подписан".
+struct TeamChipView: View {
+    let team: ChapterTeam
+
+    @State private var isSubscribed = false
+    @State private var isToggling = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            RemoteImage(url: team.avatarURL) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                Circle().fill(Theme.surface)
+            }
+            .frame(width: 28, height: 28)
+            .clipShape(Circle())
+
+            Text(team.name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+
+            Button { toggle() } label: {
+                Group {
+                    if isToggling {
+                        ProgressView().scaleEffect(0.6)
+                    } else {
+                        Image(systemName: isSubscribed ? "bell.fill" : "bell")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(isSubscribed ? Theme.accent : Theme.textSecondary)
+                .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .disabled(isToggling)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: MangaDetailView.metaChipHeight)
+        .background(Theme.surfaceElevated, in: Capsule())
+        .task {
+            // Реальный стартовый статус — ПОДТВЕРЖДЕНО перехватом
+            // GET /favorites/team/{id} (см. MangaNetworkService.fetchFavoriteStatus).
+            guard let result = try? await MangaNetworkService.shared.fetchFavoriteStatus(sourceId: team.id, sourceType: "team") else { return }
+            isSubscribed = result.isSubscribed
+        }
+    }
+
+    private func toggle() {
+        guard !isToggling else { return }
+        isToggling = true
+        Task {
+            do {
+                let result = try await MangaNetworkService.shared.toggleFavorite(sourceId: team.id, sourceType: "team")
+                isSubscribed = result.isSubscribed
+            } catch {
+                // Тихо игнорируем — колокольчик просто останется в прежнем состоянии.
+            }
+            isToggling = false
+        }
+    }
+}
+
+/// Круглый аватар для чипов Автор/Художник/Издатель (см. MergedCreditsChip/
+/// CreditsChip/CreditsSheet ниже) — реальная обложка человека/издательства
+/// (DirectoryEntity.coverURL), тот же RemoteImage, что и везде.
+private func creditsAvatar(_ url: URL?, size: CGFloat) -> some View {
+    RemoteImage(url: url) { image in
+        image.resizable().scaledToFill()
+    } placeholder: {
+        Circle().fill(Theme.surface)
+    } failure: {
+        Circle().fill(Theme.surface).overlay(
+            Image(systemName: "person.fill").font(.caption2).foregroundStyle(Theme.textSecondary)
+        )
+    }
+    .frame(width: size, height: size)
+    .clipShape(Circle())
+}
+
+/// Автор и художник — ОДИН И ТОТ ЖЕ человек (см. MangaDetailView.creditsRow) —
+/// один чип БЕЗ листа выбора, тап сразу пушит его карточку.
+private struct MergedCreditsChip: View {
+    let person: DirectoryEntity
+
+    var body: some View {
+        NavigationLink {
+            DirectoryDetailView(kind: .people, slugURL: person.slugURL, fallbackName: person.displayName, coverURL: person.coverURL)
+        } label: {
+            HStack(spacing: 8) {
+                creditsAvatar(person.coverURL, size: 32)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(person.displayName)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    Text("Автор и художник")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 44)
+            .background(Theme.surfaceElevated, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Группа (Авторы/Художники/Издатели) — до двух аватарок внахлёст + имена
+/// через "&", "+N" если людей больше двух ("если 2 всего — без +1", по
+/// прямой просьбе), а под именами — подпись роли (sheetTitle: "Автор"/
+/// "Авторы"/"Художник"/"Художники"/"Издательство"/"Издатели"), по аналогии
+/// с "Автор и художник" у MergedCreditsChip (раньше была только ник/имя без
+/// подписи роли).
+///
+/// Один человек в группе — сразу полноценная карточка (NavigationLink, как
+/// у MergedCreditsChip), БЕЗ промежуточного листа выбора: раньше лист
+/// открывался всегда "для единообразия", даже на одного человека — по
+/// прямой просьбе убрано, лист нужен только когда реально есть из чего
+/// выбирать (2+ человека).
+private struct CreditsChip: View {
+    let people: [DirectoryEntity]
+    let kind: DirectoryKind
+    let sheetTitle: String
+
+    @State private var showSheet = false
+    /// Кого выбрали в CreditsSheet — пушится ОТДЕЛЬНЫМ обычным экраном через
+    /// navigationDestination(item:) в основном NavigationStack, ПОСЛЕ того как
+    /// щит выбора закрылся (см. CreditsSheet.body: сначала selectedPerson =
+    /// person, потом dismiss()), а не ещё одним щитом поверх щита выбора —
+    /// по прямой просьбе ("пусть открывает отдельно меню а не щит поверх него").
+    @State private var selectedPerson: DirectoryEntity?
+
+    private var shown: [DirectoryEntity] { Array(people.prefix(2)) }
+    private var remaining: Int { people.count - shown.count }
+
+    var body: some View {
+        Group {
+            if people.count == 1, let person = people.first {
+                NavigationLink {
+                    DirectoryDetailView(kind: kind, slugURL: person.slugURL, fallbackName: person.displayName, coverURL: person.coverURL)
+                } label: {
+                    chipLabel
+                }
+            } else {
+                Button { showSheet = true } label: {
+                    chipLabel
+                }
+                .sheet(isPresented: $showSheet) {
+                    CreditsSheet(title: sheetTitle, people: people, kind: kind, selectedPerson: $selectedPerson)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .navigationDestination(item: $selectedPerson) { person in
+            DirectoryDetailView(kind: kind, slugURL: person.slugURL, fallbackName: person.displayName, coverURL: person.coverURL)
+        }
+    }
+
+    private var chipLabel: some View {
+        HStack(spacing: 8) {
+            avatarsStack
+            VStack(alignment: .leading, spacing: 0) {
+                Text(namesLabel)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                Text(sheetTitle)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 44)
+        .background(Theme.surfaceElevated, in: Capsule())
+    }
+
+    private var avatarsStack: some View {
+        HStack(spacing: -10) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { idx, person in
+                creditsAvatar(person.coverURL, size: 28)
+                    .overlay(Circle().stroke(Theme.surfaceElevated, lineWidth: 2))
+                    .zIndex(Double(shown.count - idx))
+            }
+        }
+    }
+
+    private var namesLabel: String {
+        let names = shown.map(\.displayName).joined(separator: " & ")
+        return remaining > 0 ? "\(names) +\(remaining)" : names
+    }
+}
+
+/// Лист выбора одного из группы (Авторы/Художники/Издатели) — та же сетка в
+/// 2 колонки, что и TeamMembersSheet (участники команды). Тап по человеку —
+/// НЕ NavigationLink-пуш (это протолкнуло бы полноценную DirectoryDetailView
+/// внутрь ЭТОГО ЖЕ маленького, подогнанного по контенту листа — см.
+/// sheetHeight), и НЕ ещё один .sheet(item:) поверх этого щита (была жалоба
+/// "открывается в щит поверх щита"): вместо этого щит выбора закрывается
+/// (dismiss()), а карточка человека пушится ОБЫЧНЫМ экраном в родительском
+/// NavigationStack — см. CreditsChip.selectedPerson/navigationDestination.
+private struct CreditsSheet: View {
+    let title: String
+    let people: [DirectoryEntity]
+    let kind: DirectoryKind
+    @Binding var selectedPerson: DirectoryEntity?
+
+    @Environment(\.dismiss) private var dismiss
+
+    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+
+    /// Высота листа — по содержимому (сетка людей), а не системный .large на
+    /// весь экран, как было. Считается АНАЛИТИЧЕСКИ из people.count (число
+    /// строк сетки × высота ячейки), а не измерением через GeometryReader —
+    /// такой пересчёт `.presentationDetents` УЖЕ ПОСЛЕ показа листа хрупкий в
+    /// SwiftUI (см. тот же баг и фикс в RatingSheet: лист переставал
+    /// открываться нормально, оказывался на пару пикселей ниже экрана).
+    /// Здесь всё известно заранее (people.count), так что нужды в измерении
+    /// вообще нет — высота фиксируется один раз, до показа листа.
+    private var sheetHeight: CGFloat {
+        let rows = max(1, Int(ceil(Double(people.count) / 2.0)))
+        let gridHeight = CGFloat(rows) * 44 + CGFloat(max(0, rows - 1)) * 12
+        // 50 — inline navigation bar листа, 32 — .padding(16) сетки сверху/
+        // снизу, 20 — запас под safe area/жест закрытия снизу.
+        return 50 + 32 + gridHeight + 20
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(people) { person in
+                        Button {
+                            selectedPerson = person
+                            dismiss()
+                        } label: {
+                            personCell(person)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(16)
+            }
+            .background(Theme.background.ignoresSafeArea())
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+        }
+        .presentationDetents([.height(sheetHeight)])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func personCell(_ person: DirectoryEntity) -> some View {
+        HStack(spacing: 8) {
+            creditsAvatar(person.coverURL, size: 28)
+            Text(person.displayName)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 44)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surfaceElevated, in: Capsule())
     }
 }
 

@@ -27,3 +27,6 @@ Package.resolved
 *.mobileprovision
 .env
 .env.*
+
+# Scratch/debug files (не должны попадать в коммиты)
+.tmp_*
