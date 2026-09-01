@@ -43,6 +43,11 @@ final class ExternalCatalogFilterStore: ObservableObject {
     /// Characters/Artists — the site can't combine them, see
     /// HentaiPillAdvancedQuery/HentaiPillAdvancedFieldsPicker).
     @Published var hentaiPillAdvancedQueries: [ExternalSite: HentaiPillAdvancedQuery] = [:]
+    /// hitomi's own Search field (see HitomiAdvancedQuery/
+    /// HitomiAdvancedFieldsPicker) — a single free-text field using the
+    /// site's own female:/male:/type:/tag:/... prefix syntax directly,
+    /// unlike every other site's structured chip fields.
+    @Published var hitomiAdvancedQueries: [ExternalSite: HitomiAdvancedQuery] = [:]
 
     /// Combined "All sites" catalog (ExternalCombinedCatalogView) — its own
     /// separate state, not mixed in with the single-site ones.
@@ -55,6 +60,7 @@ final class ExternalCatalogFilterStore: ObservableObject {
     @Published var combinedEHentaiAdvancedQuery = EHentaiAdvancedQuery()
     @Published var combinedThreeHentaiAdvancedQuery = ThreeHentaiAdvancedQuery()
     @Published var combinedHentaiPillAdvancedQuery = HentaiPillAdvancedQuery()
+    @Published var combinedHitomiAdvancedQuery = HitomiAdvancedQuery()
     /// Active chip in the combined catalog's "Filters" sheet — which
     /// section is currently shown (see ExternalCombinedCatalogView.
     /// filtersSheet). nil = "All" (all sections at once, the old behavior).

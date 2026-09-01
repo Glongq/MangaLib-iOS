@@ -9,6 +9,25 @@ enum HitomiError: Error {
     case decodingFailed
 }
 
+/// Hitomi's "Filters" field (see HitomiAdvancedFieldsPicker) — unlike
+/// every other site's advanced query, this is NOT a set of structured
+/// chip fields, it's a single free-text field using the site's OWN
+/// prefix syntax directly (space-separated terms, each optionally
+/// carrying `female:`/`male:`/`type:`/`tag:`/`artist:`/`group:`/
+/// `character:`/`series:` — see HitomiProvider.fetchIdsBySearch), because
+/// that IS how hitomi's own search bar works — there's nothing to
+/// structure into separate chip fields.
+struct HitomiAdvancedQuery {
+    var search: String = ""
+
+    var isEmpty: Bool { search.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// Called ONLY when !isEmpty (see ExternalSearchView.resolvedQuery) —
+    /// no transformation needed, the field's own text IS the query
+    /// (fetchIdsBySearch parses the prefix/AND syntax itself).
+    func encoded() -> String { search.trimmingCharacters(in: .whitespaces) }
+}
+
 /// Client for hitomi.la — its OWN, fully separate implementation (its own
 /// URLSession, its own parsing, its own models), not connected to
 /// MangaNetworkService/LibSite in any way. All URLs/formats below are confirmed by real
@@ -24,8 +43,17 @@ struct HitomiProvider: ExternalSiteProvider {
         // "What's blocked") — but it provides real value: an empty query gives
         // "Recently", a non-empty one is treated as a deliberate namespace:value command (see
         // fetchIdsBySearch) — the same principle the site's own search uses.
+        // Space-separated terms are ANDed together (see
+        // fetchIdsBySearch/computeMultiTermIntersection), each optionally
+        // carrying its own female:/male:/type:/tag:/artist:/group:/
+        // character:/series: prefix.
         hasSearch: true,
-        hasCategoryFilter: false,
+        // true — opens the "Filters" button/tab (see
+        // HitomiAdvancedFieldsPicker): a dedicated Search field using the
+        // same prefix syntax as the shared field, per direct request,
+        // matching the pattern already used for 3Hentai (see
+        // ThreeHentaiProvider.hasCategoryFilter).
+        hasCategoryFilter: true,
         // The cursor is a plain byte offset (see fetchIdsByTag below), so
         // "page N" can be computed exactly, without a network call (see cursorForPage below).
         hasPageJump: true,
@@ -221,14 +249,27 @@ struct HitomiProvider: ExternalSiteProvider {
 
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         let prefixed = Self.prefixedValue(for: namespace, value: value)
-        let encodedValue = prefixed.lowercased()
-            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? prefixed.lowercased()
+        return try await fetchIdsByRawKit(kitPath: Self.nozomiPath(for: namespace), value: prefixed, sortKey: sortKey, cursor: cursor, limit: limit)
+    }
+
+    /// Same as fetchIdsByTag, but takes the raw nozomi path segment
+    /// directly instead of ExternalTagNamespace — needed for `type`
+    /// (browsing/searching by type: doujinshi/manga/artistcg/... — a real
+    /// hitomi kit, per direct instruction describing the site's own
+    /// search-field syntax) which has no ExternalTagNamespace counterpart.
+    /// That enum is shared across every provider — adding a `.type` case
+    /// there would force an unrelated exhaustive-switch update in every
+    /// OTHER provider file for a concept only hitomi has, so it stays
+    /// local to this file (see ContinuationKit.type/fetchFullIdsForTerm).
+    private func fetchIdsByRawKit(kitPath: String, value: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
+        let encodedValue = value.lowercased()
+            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value.lowercased()
         let period = sortKey.flatMap(SortOption.init(rawValue:))?.popularPeriod
         let path: String
         if let period {
-            path = "\(Self.nozomiPath(for: namespace))/popular/\(period)/\(encodedValue)-all.nozomi"
+            path = "\(kitPath)/popular/\(period)/\(encodedValue)-all.nozomi"
         } else {
-            path = "\(Self.nozomiPath(for: namespace))/\(encodedValue)-all.nozomi"
+            path = "\(kitPath)/\(encodedValue)-all.nozomi"
         }
         return try await fetchNozomiList(urlString: "https://\(Self.apiDomain)/\(path)", cursor: cursor, limit: limit)
     }
@@ -319,23 +360,31 @@ struct HitomiProvider: ExternalSiteProvider {
         try await fetchIdsBySearch(query: query, excludedCategoryBits: excludedCategoryBits, sortKey: nil, cursor: cursor, limit: limit)
     }
 
-    /// FIXED (Aug 31) — previously, without an explicit `namespace:` prefix the query
-    /// was ALWAYS treated as namespace `.tag` (a lookup straight against
-    /// `/tag/{value}-all.nozomi`) — but on hitomi MOST tags are
-    /// categorized by gender and don't exist as a "bare" tag at all:
-    /// `/tag/anal-all.nozomi` → 404 live, whereas `/tag/female%3Aanal-
-    /// all.nozomi` → 206 (verified with curl on Aug 31). Because of this, a plain input like
-    /// "anal"/"yaoi"/any gender-specific tag WITHOUT a prefix always found 0
-    /// titles — even though the user expects "normal search: just type
-    /// the tag, it should find it" (complaint from Aug 31). Now, without an explicit
-    /// command, candidates are tried IN ORDER: as-is (`.tag`) → `female:` →
-    /// `male:` — the first non-empty result wins, and the same (kit,
-    /// value) is reused for every subsequent page via
-    /// `cursor` (see ContinuationKit/encodeSearchCursor — without this
-    /// moving to page 2 would re-run the namespace search from scratch and
-    /// could fall back onto the fruitless `.tag`).
+    /// FIXED (Sep 1) — a multi-word query (e.g. "anal horse", neither word
+    /// prefixed) used to be sent to the tag lookup as ONE LITERAL VALUE
+    /// WITH A SPACE IN IT ("anal horse") — hitomi tag values never
+    /// contain a literal space (a multi-word tag uses an underscore, e.g.
+    /// "big_breasts"), so every candidate (.tag/.female/.male) 404'd and
+    /// the search silently came back with 0 results — the "поиск выпадает
+    /// при 2+ словах" complaint. The REAL hitomi.la search field
+    /// (confirmed live: `search.html?anal%20horse` in a fresh HAR capture,
+    /// which triggers the site's own `/galleriesindex/` B-tree lookups)
+    /// treats a space as a separator between INDEPENDENT terms and ANDs
+    /// them together — each term can carry its own explicit
+    /// `female:`/`male:`/`type:`/`tag:`/`artist:`/`group:`/`character:`/
+    /// `series:` prefix (this exact vocabulary — including `type:` — is
+    /// how the site's single search field itself works, per direct
+    /// instruction), or be a bare word (same auto-detect as a single-term
+    /// query, see fetchIdsBySingleTerm). The actual binary
+    /// `/galleriesindex/` B-tree format is NOT reimplemented here — its
+    /// node layout isn't confirmed by any captured JS source, only opaque
+    /// byte ranges — instead every term is resolved through the
+    /// already-confirmed `.nozomi` per-kit lists (the same mechanism a
+    /// single-term query already used), and the result is a set
+    /// INTERSECTION across every term's full id list — functionally
+    /// equivalent AND semantics, built entirely from confirmed endpoints.
     func fetchIdsBySearch(query: String, excludedCategoryBits: Int, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let period = sortKey.flatMap(SortOption.init(rawValue:))?.popularPeriod
         guard !trimmed.isEmpty else {
             // Empty query + "Popular" sort — the global
@@ -346,48 +395,171 @@ struct HitomiProvider: ExternalSiteProvider {
             return try await fetchNozomiList(urlString: "https://\(Self.apiDomain)/index-all.nozomi", cursor: cursor, limit: limit)
         }
 
+        let terms = trimmed.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard terms.count > 1 else {
+            return try await fetchIdsBySingleTerm(trimmed, sortKey: sortKey, cursor: cursor, limit: limit)
+        }
+
+        // Multi-term AND (see HitomiSearchCache doc-comment) — the full,
+        // intersected id list is computed once (page 1) and cached under
+        // the exact query text, so scrolling to page 2/3/... pages
+        // through the cached array instead of redoing the network work.
+        if let cursor, let decoded = Self.decodeMultiSearchCursor(cursor) {
+            let ids = try await HitomiSearchCache.shared.intersection(for: decoded.queryText) {
+                try await self.computeMultiTermIntersection(decoded.queryText, sortKey: sortKey)
+            }
+            return Self.page(ids: ids, offset: decoded.offset, limit: limit, queryText: decoded.queryText)
+        }
+        let ids = try await HitomiSearchCache.shared.intersection(for: trimmed) {
+            try await self.computeMultiTermIntersection(trimmed, sortKey: sortKey)
+        }
+        return Self.page(ids: ids, offset: 0, limit: limit, queryText: trimmed)
+    }
+
+    /// The original single-term algorithm (FIXED Aug 31, see below): a
+    /// continuing cursor → an explicit `namespace:` prefix → auto-detected
+    /// `.tag`/`.female`/`.male`, in that order.
+    ///
+    /// (Aug 31 fix) — previously, without an explicit `namespace:` prefix
+    /// the query was ALWAYS treated as namespace `.tag` (a lookup straight
+    /// against `/tag/{value}-all.nozomi`) — but on hitomi MOST tags are
+    /// categorized by gender and don't exist as a "bare" tag at all:
+    /// `/tag/anal-all.nozomi` → 404 live, whereas `/tag/female%3Aanal-
+    /// all.nozomi` → 206 (verified with curl on Aug 31). Now, without an
+    /// explicit command, candidates are tried IN ORDER: as-is (`.tag`) →
+    /// `female:` → `male:` — the first non-empty result wins, and the
+    /// same (kit, value) is reused for every subsequent page via `cursor`
+    /// (see ContinuationKit/encodeSearchCursor).
+    private func fetchIdsBySingleTerm(_ trimmed: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         // Continuing an auto-detection that was already resolved (on the first page) —
         // the same (kit, value) is reused as-is, WITHOUT re-running
         // the namespace search.
         if let cursor, let decoded = Self.decodeSearchCursor(cursor) {
-            let result = try await fetchIdsByTag(namespace: decoded.kit.namespace, value: decoded.resolvedValue, sortKey: sortKey, cursor: decoded.offset, limit: limit)
+            let result = try await fetchIdsByRawKit(kitPath: decoded.kit.kitPath, value: decoded.resolvedValue, sortKey: sortKey, cursor: decoded.offset, limit: limit)
             return (result.ids, result.nextCursor.map { Self.encodeSearchCursor(kit: decoded.kit, resolvedValue: decoded.resolvedValue, offset: $0) })
         }
 
-        let (namespace, value, explicit) = Self.parseSearchCommand(trimmed)
-        // An explicit command (female:/male:/series:/artist:/group:/character:/
-        // tag:) — honor exactly what was requested, no auto-detection;
-        // a legacy cursor (e.g. from "go to page N" — that's just a plain
-        // number, not our "kit\u{1}value\u{1}offset" format) —
-        // is used AS THE STARTING offset for this attempt.
+        let (kind, value, explicit) = Self.parseSearchCommand(trimmed)
+        // An explicit command (female:/male:/type:/series:/artist:/group:/
+        // character:/tag:) — honor exactly what was requested, no
+        // auto-detection; a legacy cursor (e.g. from "go to page N" —
+        // that's just a plain number, not our "kit\u{1}value\u{1}offset"
+        // format) — is used AS THE STARTING offset for this attempt.
         if explicit {
-            let kit = Self.continuationKit(for: namespace)
-            let resolvedValue = Self.prefixedValue(for: namespace, value: value)
-            let result = try await fetchIdsByTag(namespace: kit.namespace, value: resolvedValue, sortKey: sortKey, cursor: cursor, limit: limit)
+            let (kit, resolvedValue) = Self.resolveExplicit(kind, value: value)
+            let result = try await fetchIdsByRawKit(kitPath: kit.kitPath, value: resolvedValue, sortKey: sortKey, cursor: cursor, limit: limit)
             return (result.ids, result.nextCursor.map { Self.encodeSearchCursor(kit: kit, resolvedValue: resolvedValue, offset: $0) })
         }
 
         for candidate: ExternalTagNamespace in [.tag, .female, .male] {
             let kit = Self.continuationKit(for: candidate)
             let resolvedValue = Self.prefixedValue(for: candidate, value: value)
-            let result = try await fetchIdsByTag(namespace: kit.namespace, value: resolvedValue, sortKey: sortKey, cursor: cursor, limit: limit)
+            let result = try await fetchIdsByRawKit(kitPath: kit.kitPath, value: resolvedValue, sortKey: sortKey, cursor: cursor, limit: limit)
             guard !result.ids.isEmpty else { continue }
             return (result.ids, result.nextCursor.map { Self.encodeSearchCursor(kit: kit, resolvedValue: resolvedValue, offset: $0) })
         }
         return ([], nil)
     }
 
+    /// One term's FULLY materialized id list, for the AND intersection
+    /// (see computeMultiTermIntersection below) — same explicit/
+    /// auto-detect resolution as a single term, but instead of one page
+    /// it downloads the whole list in one shot (capped, see
+    /// maxFullFetchIDs) via a single Range request — fetchNozomiList
+    /// already tolerates a file smaller than the requested range.
+    private func fetchFullIdsForTerm(_ rawTerm: String, sortKey: String?) async throws -> [Int] {
+        let (kind, value, explicit) = Self.parseSearchCommand(rawTerm)
+        if explicit {
+            let (kit, resolvedValue) = Self.resolveExplicit(kind, value: value)
+            return try await fetchIdsByRawKit(kitPath: kit.kitPath, value: resolvedValue, sortKey: sortKey, cursor: "0", limit: Self.maxFullFetchIDs).ids
+        }
+        for candidate: ExternalTagNamespace in [.tag, .female, .male] {
+            let kit = Self.continuationKit(for: candidate)
+            let resolvedValue = Self.prefixedValue(for: candidate, value: value)
+            let result = try await fetchIdsByRawKit(kitPath: kit.kitPath, value: resolvedValue, sortKey: sortKey, cursor: "0", limit: Self.maxFullFetchIDs)
+            guard !result.ids.isEmpty else { continue }
+            return result.ids
+        }
+        return []
+    }
+
+    /// Space-separated terms are ANDed (see the fetchIdsBySearch doc
+    /// comment) — a term whose own list comes back empty makes the whole
+    /// query empty (short-circuit, no point downloading the rest). The
+    /// SMALLEST list becomes the "anchor" (its own relative order —
+    /// hitomi's `.nozomi` lists are newest-first — is preserved in the
+    /// final result), the others are only turned into membership Sets —
+    /// minimizes CPU (Set.contains is O(1), no need to sort/merge the big
+    /// lists directly).
+    private func computeMultiTermIntersection(_ text: String, sortKey: String?) async throws -> [Int] {
+        let terms = text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        var perTerm: [[Int]] = []
+        for term in terms {
+            let ids = try await fetchFullIdsForTerm(term, sortKey: sortKey)
+            guard !ids.isEmpty else { return [] }
+            perTerm.append(ids)
+        }
+        guard let anchorIndex = perTerm.indices.min(by: { perTerm[$0].count < perTerm[$1].count }) else { return [] }
+        let anchor = perTerm[anchorIndex]
+        let otherSets = perTerm.enumerated().compactMap { idx, arr -> Set<Int>? in idx == anchorIndex ? nil : Set(arr) }
+        return anchor.filter { id in otherSets.allSatisfy { $0.contains(id) } }
+    }
+
+    /// Cap on how many ids a single term's list is fully materialized to
+    /// for an AND-intersection (see fetchFullIdsForTerm) — a deliberate
+    /// practical safety bound against downloading a multi-megabyte list
+    /// for a very common bare word (each id is 4 bytes, so 200k ids ≈
+    /// 800KB), not an API constraint.
+    private static let maxFullFetchIDs = 200_000
+
+    /// One page out of an already-materialized/intersected id list (see
+    /// computeMultiTermIntersection) — pagination here is purely local
+    /// (array slicing, no network) since the full list is already in hand
+    /// (cached by HitomiSearchCache).
+    private static func page(ids: [Int], offset: Int, limit: Int, queryText: String) -> (ids: [Int], nextCursor: String?) {
+        guard offset < ids.count else { return ([], nil) }
+        let end = min(offset + limit, ids.count)
+        let nextCursor = end < ids.count ? Self.encodeMultiSearchCursor(queryText: queryText, offset: end) : nil
+        return (Array(ids[offset..<end]), nextCursor)
+    }
+
+    /// female:/male:/series:/artist:/group:/character:/tag: — the
+    /// hitomi.la search-syntax vocabulary (see the Aug 31 fix doc comment
+    /// above for female/male). `type:` is a hitomi-only concept
+    /// (doujinshi/manga/artistcg/gamecg/anime/imageset) — modeled as its
+    /// own ContinuationKit case rather than added to ExternalTagNamespace
+    /// (see fetchIdsByRawKit doc comment on why it stays local here).
     private static let searchPrefixes: [(String, ExternalTagNamespace)] = [
         ("female:", .female), ("male:", .male), ("series:", .series),
         ("artist:", .artist), ("group:", .group), ("character:", .character), ("tag:", .tag)
     ]
 
-    private static func parseSearchCommand(_ text: String) -> (namespace: ExternalTagNamespace, value: String, explicit: Bool) {
+    private enum ExplicitKind {
+        case namespace(ExternalTagNamespace)
+        case type
+    }
+
+    private static func parseSearchCommand(_ text: String) -> (kind: ExplicitKind, value: String, explicit: Bool) {
         let lower = text.lowercased()
-        for (prefix, ns) in searchPrefixes where lower.hasPrefix(prefix) {
-            return (ns, lower.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces), true)
+        if lower.hasPrefix("type:") {
+            return (.type, String(lower.dropFirst("type:".count)).trimmingCharacters(in: .whitespaces), true)
         }
-        return (.tag, lower, false)
+        for (prefix, ns) in searchPrefixes where lower.hasPrefix(prefix) {
+            return (.namespace(ns), String(lower.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces), true)
+        }
+        return (.namespace(.tag), lower, false)
+    }
+
+    /// Turns an explicit command's parsed (kind, value) into the (kit,
+    /// resolvedValue) pair fetchIdsByRawKit needs — `.type` maps straight
+    /// onto its own kit with the value untouched (no embedded-prefix
+    /// trick, unlike female/male, see prefixedValue); everything else
+    /// reuses the existing namespace machinery unchanged.
+    private static func resolveExplicit(_ kind: ExplicitKind, value: String) -> (kit: ContinuationKit, resolvedValue: String) {
+        switch kind {
+        case .type: return (.type, value)
+        case .namespace(let ns): return (continuationKit(for: ns), prefixedValue(for: ns, value: value))
+        }
     }
 
     /// The REAL REST kit (nozomiPath) to use for continuing pagination —
@@ -397,15 +569,21 @@ struct HitomiProvider: ExternalSiteProvider {
     /// no-op, so a repeated call won't double up an already-embedded "female:"/"male:"/
     /// "group:" prefix) — `.character`/`.artist`/`.series` live on
     /// THEIR OWN kits, where prefixedValue is already a no-op, so continuation goes through
-    /// the original namespace unchanged.
+    /// the original namespace unchanged. `.type` has no ExternalTagNamespace
+    /// counterpart at all (see resolveExplicit) — it never goes through
+    /// this function, only through its own ContinuationKit case directly.
     private enum ContinuationKit: String {
-        case tag, character, artist, series
-        var namespace: ExternalTagNamespace {
+        case tag, character, artist, series, type
+        /// The raw nozomi path segment for this kit — `type` has no
+        /// ExternalTagNamespace counterpart (see fetchIdsByRawKit), hence
+        /// a plain string property instead of routing through `.namespace`.
+        var kitPath: String {
             switch self {
-            case .tag: return .tag
-            case .character: return .character
-            case .artist: return .artist
-            case .series: return .series
+            case .tag: return "tag"
+            case .character: return "character"
+            case .artist: return "artist"
+            case .series: return "series"
+            case .type: return "type"
             }
         }
     }
@@ -431,6 +609,23 @@ struct HitomiProvider: ExternalSiteProvider {
         let parts = cursor.split(separator: "\u{1}", maxSplits: 2, omittingEmptySubsequences: false)
         guard parts.count == 3, let kit = ContinuationKit(rawValue: String(parts[0])) else { return nil }
         return (kit, String(parts[1]), String(parts[2]))
+    }
+
+    /// Same idea as encodeSearchCursor/decodeSearchCursor above, but for a
+    /// multi-term AND search (see computeMultiTermIntersection) — the
+    /// leading "multi" tag keeps it from ever being mistaken for a
+    /// single-term cursor (ContinuationKit has no "multi" case, so
+    /// decodeSearchCursor safely returns nil for one of these, and vice
+    /// versa) — the payload is the ORIGINAL query text (not a resolved
+    /// kit/value), since the whole point is to re-key HitomiSearchCache.
+    private static func encodeMultiSearchCursor(queryText: String, offset: Int) -> String {
+        "multi\u{1}\(queryText)\u{1}\(offset)"
+    }
+
+    private static func decodeMultiSearchCursor(_ cursor: String) -> (queryText: String, offset: Int)? {
+        let parts = cursor.split(separator: "\u{1}", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0] == "multi", let offset = Int(parts[2]) else { return nil }
+        return (String(parts[1]), offset)
     }
 
     // MARK: Title Detail Card (galleries/{id}.js, Part 6)
@@ -603,6 +798,25 @@ private struct HitomiGalleryJSON: Decodable {
             if case let .string(value)? = entry[key] { return value }
             return nil
         }
+    }
+}
+
+/// In-memory cache of a multi-term AND search's fully materialized/
+/// intersected id list, keyed by the exact query text — computed ONCE on
+/// page 1 (see HitomiProvider.computeMultiTermIntersection), reused for
+/// every following page via the "multi\u{1}..." cursor (see
+/// decodeMultiSearchCursor) so scrolling doesn't repeat the network work.
+/// A plain in-memory actor (not persisted across app launches) — same
+/// pattern as the gg.js cache used elsewhere in this module.
+actor HitomiSearchCache {
+    static let shared = HitomiSearchCache()
+    private var cache: [String: [Int]] = [:]
+
+    func intersection(for key: String, compute: () async throws -> [Int]) async throws -> [Int] {
+        if let cached = cache[key] { return cached }
+        let result = try await compute()
+        cache[key] = result
+        return result
     }
 }
 

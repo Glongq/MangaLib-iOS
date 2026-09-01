@@ -32,9 +32,10 @@ struct ExternalSearchView: View {
     /// ImhentaiCategory, each site has its own values/count, see
     /// ImhentaiProvider.swift) — stored separately in
     /// ExternalCatalogFilterStore, switched on `site` (see
-    /// excludedCategoryBits/filtersSheet below). hitomi/3hentai never
-    /// reach this at all — hasCategoryFilter is false for them, so
-    /// filtersButton is not shown.
+    /// excludedCategoryBits/filtersSheet below). hitomi/3hentai don't use
+    /// this bitmask channel at all (they have hasCategoryFilter == true
+    /// only for their own advanced/search fields, see advancedQueryHT/
+    /// advancedQuery3H below — no category bitmask on either site).
     private var excludedCategoriesEH: Set<EHentaiCategory> {
         get { filterStore.excludedCategories[site] ?? [] }
         nonmutating set { filterStore.excludedCategories[site] = newValue }
@@ -95,6 +96,13 @@ struct ExternalSearchView: View {
         get { filterStore.hentaiPillAdvancedQueries[site] ?? HentaiPillAdvancedQuery() }
         nonmutating set { filterStore.hentaiPillAdvancedQueries[site] = newValue }
     }
+    /// hitomi's own Search field (see HitomiAdvancedQuery) — a single
+    /// free-text field, exclusive with committedQuery like every other
+    /// site's advanced fields (see resolvedQuery).
+    private var advancedQueryHT: HitomiAdvancedQuery {
+        get { filterStore.hitomiAdvancedQueries[site] ?? HitomiAdvancedQuery() }
+        nonmutating set { filterStore.hitomiAdvancedQueries[site] = newValue }
+    }
     private var excludedCategoryCount: Int {
         switch site {
         case .ehentai:
@@ -114,6 +122,8 @@ struct ExternalSearchView: View {
             return advancedQuery3H.tags.count
         case .hentaiPill:
             return advancedQueryHP.isEmpty ? 0 : 1
+        case .hitomi:
+            return advancedQueryHT.isEmpty ? 0 : 1
         default: return 0
         }
     }
@@ -166,6 +176,11 @@ struct ExternalSearchView: View {
             let text = advanced.isEmpty ? committedQuery : advanced.encoded()
             return .search(query: text, excludedCategoryBits: excludedCategoryBits)
         }
+        if site == .hitomi {
+            let advanced = advancedQueryHT
+            let text = advanced.isEmpty ? committedQuery : advanced.encoded()
+            return .search(query: text, excludedCategoryBits: excludedCategoryBits)
+        }
         return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
     }
     /// The string portion of resolvedQuery — used only for `.id(...)`
@@ -200,6 +215,10 @@ struct ExternalSearchView: View {
         }
         if site == .threeHentai, !advancedQuery3H.isEmpty {
             let text = advancedQuery3H.search.trimmingCharacters(in: .whitespaces)
+            return text.isEmpty ? "Recently" : text
+        }
+        if site == .hitomi, !advancedQueryHT.isEmpty {
+            let text = advancedQueryHT.search.trimmingCharacters(in: .whitespaces)
             return text.isEmpty ? "Recently" : text
         }
         return committedQuery.isEmpty ? "Recently" : committedQuery
@@ -333,7 +352,7 @@ struct ExternalSearchView: View {
         case .hentaiPill:
             advancedQueryHP = HentaiPillAdvancedQuery()
         case .hitomi:
-            break
+            advancedQueryHT = HitomiAdvancedQuery()
         }
     }
 
@@ -391,7 +410,10 @@ struct ExternalSearchView: View {
                 set: { advancedQueryHP = $0 }
             ))
         case .hitomi:
-            EmptyView()
+            HitomiAdvancedFieldsPicker(query: Binding(
+                get: { advancedQueryHT },
+                set: { advancedQueryHT = $0 }
+            ))
         }
     }
 }

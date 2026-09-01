@@ -40,8 +40,9 @@ struct ExternalCombinedCatalogView: View {
     private var showsSimplyHentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .simplyHentai } }
     private var showsThreeHentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .threeHentai } }
     private var showsHentaiPillFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .hentaiPill } }
+    private var showsHitomiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .hitomi } }
     private var showsCategoryFilter: Bool {
-        showsEHentaiFilter || showsImhentaiFilter || showsSimplyHentaiFilter || showsThreeHentaiFilter || showsHentaiPillFilter
+        showsEHentaiFilter || showsImhentaiFilter || showsSimplyHentaiFilter || showsThreeHentaiFilter || showsHentaiPillFilter || showsHitomiFilter
     }
     /// Sites that currently have something to show in the "Filters" tab —
     /// the source of the switcher chips (see filtersSheet).
@@ -80,6 +81,10 @@ struct ExternalCombinedCatalogView: View {
         get { filterStore.combinedHentaiPillAdvancedQuery }
         nonmutating set { filterStore.combinedHentaiPillAdvancedQuery = newValue }
     }
+    private var advancedQueryHT: HitomiAdvancedQuery {
+        get { filterStore.combinedHitomiAdvancedQuery }
+        nonmutating set { filterStore.combinedHitomiAdvancedQuery = newValue }
+    }
     /// The active chip tab in "Filters" — nil means "All" (all sections
     /// stacked, as before). See filtersSheet.
     private var activeFiltersSite: ExternalSite? {
@@ -103,6 +108,7 @@ struct ExternalCombinedCatalogView: View {
             + eh.tags.count + eh.series.count + eh.characters.count + eh.artists.count + eh.groups.count
             + th.tags.count
             + (advancedQueryHP.isEmpty ? 0 : 1)
+            + (advancedQueryHT.isEmpty ? 0 : 1)
     }
     /// Active filter count for ONE site — used only by the switcher chips
     /// (see filtersSheet), to show a per-section badge instead of the
@@ -125,7 +131,7 @@ struct ExternalCombinedCatalogView: View {
         case .hentaiPill:
             return advancedQueryHP.isEmpty ? 0 : 1
         case .hitomi:
-            return 0
+            return advancedQueryHT.isEmpty ? 0 : 1
         }
     }
     /// A separate query PER SITE — per direct feedback (Aug 31): imhentai
@@ -172,6 +178,11 @@ struct ExternalCombinedCatalogView: View {
         }
         if site == .threeHentai {
             let advanced = advancedQuery3H
+            let text = advanced.isEmpty ? committedQuery : advanced.encoded()
+            return .search(query: text, excludedCategoryBits: excludedCategoryBits)
+        }
+        if site == .hitomi {
+            let advanced = advancedQueryHT
             let text = advanced.isEmpty ? committedQuery : advanced.encoded()
             return .search(query: text, excludedCategoryBits: excludedCategoryBits)
         }
@@ -343,6 +354,7 @@ struct ExternalCombinedCatalogView: View {
                 if showsSimplyHentaiFilter { filterSection(for: .simplyHentai) }
                 if showsThreeHentaiFilter { filterSection(for: .threeHentai) }
                 if showsHentaiPillFilter { filterSection(for: .hentaiPill) }
+                if showsHitomiFilter { filterSection(for: .hitomi) }
             }
         }
     }
@@ -416,7 +428,13 @@ struct ExternalCombinedCatalogView: View {
                 ))
             }
         case .hitomi:
-            EmptyView()
+            VStack(alignment: .leading, spacing: 8) {
+                Text("hitomi.la").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                HitomiAdvancedFieldsPicker(query: Binding(
+                    get: { advancedQueryHT },
+                    set: { advancedQueryHT = $0 }
+                ))
+            }
         }
     }
 
@@ -453,7 +471,7 @@ struct ExternalCombinedCatalogView: View {
         case .hentaiPill:
             advancedQueryHP = HentaiPillAdvancedQuery()
         case .hitomi:
-            break
+            advancedQueryHT = HitomiAdvancedQuery()
         }
     }
 }
