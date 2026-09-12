@@ -28,6 +28,25 @@ struct ExternalCatalogItem: Identifiable, Hashable {
     var id: String { "\(site.rawValue)#\(galleryId)" }
 }
 
+/// Passed to ExternalCatalogGridView.onResultsCount after every loaded
+/// page — see its doc-comment.
+struct ExternalCatalogItemsSummary {
+    /// Items on the CURRENT page (after the pageSize cap, see loadNextBatch).
+    let count: Int
+    let hasMore: Bool
+    /// Approximate total matches across every enabled site — a REAL
+    /// number where a site states one (e-hentai, see
+    /// ExternalSiteProvider.lastKnownEstimatedTotal), else a lower-bound
+    /// guess from page-count math (see
+    /// ExternalCatalogGridView.estimatedTotalCount).
+    let estimatedTotal: Int
+    /// True only when EVERY enabled site contributed a real total — the
+    /// common case is a single e-hentai query. False the moment even one
+    /// site had to fall back to the page-count guess (label it "≈"/"not
+    /// less than" rather than presenting it as exact).
+    let isEstimateExact: Bool
+}
+
 /// Grid of titles from an external site (or SEVERAL at once — see `sites`
 /// and ExternalCombinedCatalogView) for a single tag/series/character/group/
 /// artist, or a free-text query (see the plan, Part 6 + the combined catalog).
@@ -87,7 +106,28 @@ struct ExternalCatalogGridView: View {
         self.leadingControls = leadingControls
     }
 
-    private static let pageSize = 25
+    /// Fluent setter for onResultsCount (see its doc-comment) — kept out of
+    /// both initializers above since it's an optional hook only
+    /// ExternalSearchView's "Found X titles" banner needs; every other call
+    /// site (ExternalTagBrowserView, ExternalCombinedCatalogView, ...) just
+    /// leaves it at its `nil` default.
+    func onResultsCount(_ handler: @escaping (ExternalCatalogItemsSummary) -> Void) -> Self {
+        var copy = self
+        copy.onResultsCount = handler
+        return copy
+    }
+
+    /// Фиксированное локальное кол-во тайтлов на "страницу" — по прямому
+    /// запросу ("фикс. кол-во тайтлов"). ЧЕСТНО работает как настоящий
+    /// лимит только там, где сайт реально это позволяет (hitomi — точный
+    /// byte-offset в .nozomi, см. HitomiProvider.fetchNozomiList) — все
+    /// остальные провайдеры (e-hentai/imhentai/3hentai/hentaiPill/
+    /// simplyHentai) СКРЕЙПЯТ обычную HTML-страницу листинга и физически не
+    /// могут запросить у сайта "ровно 40" — они честно игнорируют `limit` и
+    /// отдают столько, сколько сайт сам показывает на своей странице (см.
+    /// комментарии `limit` в каждом провайдере) — конкретное число там
+    /// задаёт сам сайт, не мы.
+    private static let pageSize = 45
 
     @State private var items: [ExternalCatalogItem] = []
     /// Next-page cursor PER SITE — a missing key means "not yet queried",
@@ -99,9 +139,31 @@ struct ExternalCatalogGridView: View {
     @State private var pending: Set<ExternalSite> = []
     @State private var details: [String: ExternalGalleryDetail] = [:]
     @State private var isLoading = false
-    @State private var isLoadingMore = false
     @State private var errorMessage: String?
     @State private var jumpPageText = ""
+    /// Текущая страница (1-based) — по прямому запросу ("когда долистал —
+    /// кнопка к странице X или назад") результат теперь листается ЯВНО
+    /// постранично (см. pageFooter/goToPage), а не бесконечным
+    /// автодогружением при подскролле к концу, как было раньше.
+    @State private var currentPage = 1
+    /// Показать после того, как страница уже загружена: как минимум один
+    /// сайт из `sites` ЕЩЁ имеет следующую страницу (см. loadNextBatch —
+    /// сайт остаётся в `pending`, пока не вернёт nextCursor == nil или не
+    /// ошибётся) — единственный источник правды о "есть ли ещё", без
+    /// придуманного общего количества страниц (ни один провайдер не
+    /// возвращает суммарный total, см. ExternalSiteProvider.fetchIdsByTag/
+    /// fetchIdsBySearch — только (ids, nextCursor)).
+    private var hasNextPage: Bool { !pending.isEmpty }
+    /// Обратная навигация работает для ЛЮБОЙ страницы, где currentPage > 1,
+    /// НЕЗАВИСИМО от hasNextPage — переход всегда идёт заново через
+    /// cursorForPage (см. goToPage), а не кэш уже просмотренных страниц.
+    private var hasPreviousPage: Bool { currentPage > 1 }
+    /// Reports this page's result count upward (see ExternalSearchView/
+    /// ExternalCombinedCatalogView — the "Found ~N titles" banner shown
+    /// after pressing Return in search). Called once per loaded page, with
+    /// a summary that's exact ONLY when every enabled site contributed a
+    /// real site-reported total (see ExternalCatalogItemsSummary.isEstimateExact).
+    var onResultsCount: ((ExternalCatalogItemsSummary) -> Void)? = nil
     /// OPAQUE sort key (see ExternalSiteProvider.
     /// fetchIdsByTag(sortKey:), HitomiProvider.SortOption.rawValue) — nil =
     /// default sort order (by date added). Only for sites with
@@ -172,6 +234,7 @@ struct ExternalCatalogGridView: View {
         items = []
         details = [:]
         cursors = [:]
+        currentPage = 1
         Task { await performInitialLoad() }
     }
 
@@ -213,11 +276,16 @@ struct ExternalCatalogGridView: View {
     /// dismissed".
     @State private var showJumpSheet = false
 
+    /// Shows the CURRENT page number right on the pill ("Стр. N") instead
+    /// of a bare "Стр." — per direct request to fix the page-jump visual:
+    /// otherwise there was no way to tell what page you were even on
+    /// without opening the sheet first.
     private var pageJumpButton: some View {
         Button {
+            jumpPageText = ""
             showJumpSheet = true
         } label: {
-            controlPill(icon: "arrow.right.to.line", text: "Стр.")
+            controlPill(icon: "arrow.right.to.line", text: "Стр. \(currentPage)")
         }
         .sheet(isPresented: $showJumpSheet) {
             jumpFieldSheet
@@ -226,17 +294,23 @@ struct ExternalCatalogGridView: View {
 
     private var jumpFieldSheet: some View {
         VStack(spacing: 16) {
-            Text("Перейти на страницу")
-                .font(.headline)
-                .foregroundStyle(Theme.textPrimary)
+            VStack(spacing: 4) {
+                Text("Перейти на страницу")
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                Text("Сейчас: страница \(currentPage)")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+            }
             HStack(spacing: 8) {
-                TextField("№", text: $jumpPageText)
+                TextField("№", text: $jumpPageText, prompt: Text("\(currentPage)").foregroundColor(Theme.textSecondary))
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.center)
                     .focused($isJumpFieldFocused)
+                    .foregroundStyle(Theme.textPrimary)
                     .padding(.horizontal, 6)
-                    .frame(width: 64, height: 40)
-                    .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .frame(width: 72, height: 44)
+                    .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 Button {
                     if let page = Int(jumpPageText), page > 0 {
                         jump(toPage: page)
@@ -244,15 +318,15 @@ struct ExternalCatalogGridView: View {
                     }
                 } label: {
                     Text("Перейти")
-                        .frame(maxWidth: .infinity, minHeight: 40)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
-                .disabled(Int(jumpPageText) == nil)
+                .disabled(Int(jumpPageText) == nil || Int(jumpPageText) == currentPage)
             }
         }
         .padding(20)
-        .presentationDetents([.height(160)])
+        .presentationDetents([.height(180)])
         .presentationDragIndicator(.visible)
         .background(Theme.background.ignoresSafeArea())
         .onAppear { isJumpFieldFocused = true }
@@ -359,11 +433,45 @@ struct ExternalCatalogGridView: View {
                 }
                 .padding(12)
 
-                if isLoadingMore {
-                    ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 16)
-                }
+                pageFooter
             }
             .scrollIndicators(.hidden)
+        }
+    }
+
+    /// Shown once you've scrolled down to the end of the current page —
+    /// a "Back"/"To page X" pair instead of silently auto-loading more, per
+    /// direct request. A spinner takes their place while performInitialLoad
+    /// is fetching the page you just navigated to (isLoading stays true for
+    /// that whole request, see jump(toPage:)/performInitialLoad).
+    @ViewBuilder
+    private var pageFooter: some View {
+        if isLoading {
+            ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 16)
+        } else if hasPreviousPage || hasNextPage {
+            HStack(spacing: 10) {
+                if hasPreviousPage {
+                    Button { goToPreviousPage() } label: {
+                        Label("Назад", systemImage: "chevron.left")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Theme.textSecondary)
+                }
+                if hasNextPage {
+                    Button { goToNextPage() } label: {
+                        HStack(spacing: 6) {
+                            Text("К странице \(currentPage + 1)")
+                            Image(systemName: "chevron.right")
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 16)
         }
     }
 
@@ -400,12 +508,16 @@ struct ExternalCatalogGridView: View {
         CatalogCard(item: item, detail: details[item.id], width: width, showsSourceBadge: showsSourceBadge)
     }
 
+    /// Only loads the per-card detail (title/cover/pages) needed to render
+    /// this specific cell. Used to also trigger auto-loading the next batch
+    /// once you scrolled near the end (infinite scroll) — replaced by
+    /// explicit Prev/Next buttons in pageFooter, per direct request ("when
+    /// you've scrolled to the end there should be a 'to page X' button or
+    /// a 'back' button", instead of silently loading more).
     private func onCardAppear(_ item: ExternalCatalogItem) {
         if details[item.id] == nil {
             Task { await loadDetail(item) }
         }
-        guard let index = items.firstIndex(of: item), index >= items.count - 6 else { return }
-        Task { await loadMoreIfNeeded() }
     }
 
     private func loadDetail(_ item: ExternalCatalogItem) async {
@@ -447,7 +559,12 @@ struct ExternalCatalogGridView: View {
     /// sites without capabilities.hasPageJump the cursor is simply not
     /// set, they honestly start over from page one (not a bug, see
     /// showsPageJump — the button is shown if AT LEAST one site supports it).
+    /// Also updates `currentPage`, which drives pageFooter/pageJumpButton —
+    /// the single source of truth for "what page am I looking at", whether
+    /// you got here via Next/Back (see goToNextPage/goToPreviousPage) or an
+    /// arbitrary jump (see jumpFieldSheet).
     private func jump(toPage page: Int) {
+        guard page >= 1 else { return }
         items = []
         details = [:]
         cursors = sites.reduce(into: [ExternalSite: String]()) { result, site in
@@ -455,7 +572,18 @@ struct ExternalCatalogGridView: View {
                 result[site] = cursor
             }
         }
+        currentPage = page
         Task { await performInitialLoad() }
+    }
+
+    private func goToNextPage() {
+        guard hasNextPage else { return }
+        jump(toPage: currentPage + 1)
+    }
+
+    private func goToPreviousPage() {
+        guard hasPreviousPage else { return }
+        jump(toPage: currentPage - 1)
     }
 
     private func performInitialLoad() async {
@@ -479,13 +607,37 @@ struct ExternalCatalogGridView: View {
             errorMessage = "Проверьте соединение и попробуйте ещё раз."
         }
         isLoading = false
+        // Reports this page's result count upward (see onResultsCount doc-
+        // comment) — always, even on an error/empty page, so a caller like
+        // ExternalSearchView can show an honest "Found 0 titles" instead of
+        // silently leaving a stale count from a previous search on screen.
+        if let onResultsCount {
+            let (total, isExact) = await estimatedTotalCount()
+            onResultsCount(ExternalCatalogItemsSummary(count: items.count, hasMore: hasNextPage, estimatedTotal: total, isEstimateExact: isExact))
+        }
     }
 
-    private func loadMoreIfNeeded() async {
-        guard !isLoadingMore, !pending.isEmpty else { return }
-        isLoadingMore = true
-        defer { isLoadingMore = false }
-        await loadNextBatch()
+    /// See ExternalCatalogItemsSummary.estimatedTotal/isEstimateExact.
+    private func estimatedTotalCount() async -> (total: Int, isExact: Bool) {
+        var total = 0
+        var allExact = true
+        for site in sites {
+            let provider = ExternalSiteRegistry.provider(for: site)
+            if let exact = await provider.lastKnownEstimatedTotal() {
+                total += exact
+            } else {
+                allExact = false
+                // Lower bound: full pages already paged through (this
+                // site's own typical native page size, see
+                // ExternalSiteCapabilities.typicalPageSize) plus whatever
+                // it actually contributed to the CURRENT page — "at least
+                // this many", never an invented exact figure.
+                let seenThisPage = items.filter { $0.site == site }.count
+                let priorPages = max(0, currentPage - 1)
+                total += priorPages * provider.capabilities.typicalPageSize + seenThisPage
+            }
+        }
+        return (total, allExact)
     }
 
     /// Queries all sites in `pending` IN PARALLEL (the first page is just
@@ -555,7 +707,21 @@ struct ExternalCatalogGridView: View {
         }
 
         let existing = Set(items.map(\.id))
-        items.append(contentsOf: merged.filter { !existing.contains($0.id) })
+        let newItems = merged.filter { !existing.contains($0.id) }
+        // Capped to pageSize TOTAL, not per site — in the combined "All
+        // sites" catalog (see ExternalCombinedCatalogView) a single batch
+        // is one native listing page from EACH enabled site at once, which
+        // could otherwise add up to several hundred titles in "page 1" and
+        // still feel like unbounded infinite scroll despite the pageSize
+        // constant. The trade-off (spelled out here rather than silently):
+        // for scraped sites that ignore `limit` (see the pageSize doc-
+        // comment) whatever doesn't fit on this page is simply DROPPED,
+        // not carried over to page 2 — Next always jumps to that site's own
+        // next native page (via cursorForPage), never "the rest of this
+        // one". Only genuinely lossless for hitomi, whose single-site batch
+        // never exceeds pageSize in the first place (real limit).
+        let capacity = max(0, Self.pageSize - items.count)
+        items.append(contentsOf: newItems.prefix(capacity))
         return anySucceeded
     }
 }

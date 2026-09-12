@@ -135,7 +135,8 @@ actor EHentaiProvider: ExternalSiteProvider {
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
-        hasComments: false
+        hasComments: false,
+        typicalPageSize: 25
     )
 
     /// A separate session — its own, not shared with either HitomiProvider.session
@@ -326,10 +327,40 @@ actor EHentaiProvider: ExternalSiteProvider {
                 nextCursor = String(html[cursorRange])
             }
         }
+        lastEstimatedTotal = Self.parseEstimatedTotal(html: html)
         return (ids, nextCursor)
     }
 
+    /// e-hentai states the total match count right on the listing page
+    /// itself — a big result set says "Found about 2,116 results." (an
+    /// approximation, the site's own wording, hence "about"), a small one
+    /// instead says "Showing 1 - 25 of 68 results" (exact). Either way,
+    /// this is a REAL number from the site, not a guess — used as-is by
+    /// lastKnownEstimatedTotal() above, no need for the page-count math
+    /// ExternalCatalogGridView falls back to for every other provider.
+    private static func parseEstimatedTotal(html: String) -> Int? {
+        let patterns = [#"Found about ([\d,]+) results?"#, #"of ([\d,]+) results?"#]
+        for pattern in patterns {
+            if let raw = firstMatch(in: html, pattern: pattern) {
+                let digits = raw.replacingOccurrences(of: ",", with: "")
+                if let value = Int(digits) { return value }
+            }
+        }
+        return nil
+    }
+
     // MARK: Title card
+
+    /// See the protocol doc-comment — the token IS the resolve key here.
+    func resolveKey(for id: Int) async -> String? { tokenCache[id] }
+
+    func primeResolveKey(_ key: String, for id: Int) async { tokenCache[id] = key }
+
+    /// Set by fetchGalleryList (see below) every time a listing page is
+    /// fetched — see the protocol doc-comment.
+    private var lastEstimatedTotal: Int?
+
+    func lastKnownEstimatedTotal() async -> Int? { lastEstimatedTotal }
 
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail {
         guard let token = tokenCache[id] else { throw EHentaiError.missingToken }

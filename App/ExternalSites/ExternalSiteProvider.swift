@@ -226,6 +226,38 @@ protocol ExternalSiteProvider {
     /// Full title metadata — for the card and for reading.
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail
 
+    /// Some scraped sites can't resolve a gallery by id ALONE — e-hentai's
+    /// URL is `/g/{id}/{token}/` (see EHentaiProvider.tokenCache) and
+    /// simplyHentai's is `/manga/{slug}` (see SimplyHentaiProvider.
+    /// SlugCache) — that extra key is normally only learned by encountering
+    /// the id in a listing/search result first. Reading it back here (right
+    /// when a title is bookmarked, see ExternalBookmarksStore.add) lets it
+    /// survive into ExternalBookmark.resolveKey — otherwise a bookmarked
+    /// title opened FRESH (no listing browsed yet this session, e.g. right
+    /// after launch) fails with "missing token"/"unknown slug" even though
+    /// the title itself is fine. nil for every site that resolves purely
+    /// from id — the default implementation below.
+    func resolveKey(for id: Int) async -> String?
+
+    /// The other half of resolveKey(for:) above — seeds the cache BACK in
+    /// before calling fetchGalleryDetail(id:), using the key saved on
+    /// ExternalBookmark.resolveKey (see ExternalGalleryDetailView.load). A
+    /// no-op default for sites resolveKey(for:) never returns non-nil for.
+    func primeResolveKey(_ key: String, for id: Int) async
+
+    /// A REAL site-reported total for the most recently fetched listing
+    /// page (tag/search, whichever ran last) — e-hentai states one right
+    /// on the page itself ("Found about 2,116 results."/"Showing 1 - 25 of
+    /// N results", see EHentaiProvider), so there's no need to guess. nil
+    /// for every site whose listing page states no such number (the
+    /// default implementation below) — ExternalCatalogGridView.
+    /// estimatedTotalCount then falls back to page-count math using
+    /// capabilities.typicalPageSize instead. Deliberately NOT tied to a
+    /// specific query (a plain cached "last seen" value, refreshed on
+    /// every fetchIdsByTag/fetchIdsBySearch call) — good enough for an
+    /// approximate UI hint, see the "found ~N titles" banner.
+    func lastKnownEstimatedTotal() async -> Int?
+
     /// URL of the full-size page for reading. For hitomi — a pure formula
     /// (gg.js), no network, just wrapped in async for the sake of the shared protocol; for
     /// e-hentai — a REAL network request every time (the link to the H@H node is
@@ -248,6 +280,10 @@ extension ExternalSiteProvider {
     }
 
     func cursorForPage(_ page: Int, limit: Int) -> String? { nil }
+
+    func resolveKey(for id: Int) async -> String? { nil }
+    func primeResolveKey(_ key: String, for id: Int) async {}
+    func lastKnownEstimatedTotal() async -> Int? { nil }
 }
 
 /// Simple static provider registry — no DI magic, there isn't any

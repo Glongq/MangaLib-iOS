@@ -64,7 +64,8 @@ struct HitomiProvider: ExternalSiteProvider {
         hasBookmarks: false,
         hasHistory: false,
         hasNotifications: false,
-        hasComments: false
+        hasComments: false,
+        typicalPageSize: 25
     )
 
     /// A separate session — not MangaNetworkService.session; headers/cookies/

@@ -73,4 +73,13 @@ struct ExternalSiteCapabilities {
     var hasHistory: Bool
     var hasNotifications: Bool
     var hasComments: Bool
+    /// How many titles the site's OWN listing page shows per native page —
+    /// observed directly on each site (hitomi 25, e-hentai 25 in thumbnail
+    /// view, 3hentai 25 [5x5], simplyHentai 25 [5x5], imhentai 20 [5x4],
+    /// hentaiPill 20 [5x4]). Used ONLY for the approximate "Found ~N
+    /// titles" estimate (see ExternalCatalogGridView.estimatedTotalCount) —
+    /// none of these sites let a client actually REQUEST this many (see the
+    /// `limit` doc-comment on ExternalCatalogGridView.pageSize), it's
+    /// purely informational math on top of what a page already returned.
+    var typicalPageSize: Int
 }

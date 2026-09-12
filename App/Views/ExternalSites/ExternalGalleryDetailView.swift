@@ -20,6 +20,13 @@ struct ExternalGalleryDetailView: View {
     /// If the detail was already loaded in the grid (see ExternalCatalogGridView),
     /// don't load it again — just use it right away.
     var preloaded: ExternalGalleryDetail?
+    /// Set when opened from Bookmarks (see ExternalBookmark.resolveKey) —
+    /// primed back into the provider's cache before load() calls
+    /// fetchGalleryDetail(id:), for sites that can't resolve an id alone
+    /// (e-hentai/simplyHentai, see ExternalSiteProvider.resolveKey(for:)).
+    /// nil for every other entry point (catalog card, tag browser, ...) —
+    /// there the cache is already fresh from just having listed this id.
+    var resolveKey: String?
 
     /// Local bookmarks (see the ExternalBookmarksStore doc-comment — external
     /// sites have no accounts, so there are no server-side bookmarks either,
@@ -67,6 +74,11 @@ struct ExternalGalleryDetailView: View {
     }
 
     @State private var tagCatalogTarget: TagCatalogTarget?
+    /// Открывает выбор папки для локальных закладок (см.
+    /// ExternalAddToFolderSheet) — тот же UX, что и "Добавить в" в
+    /// основном приложении (MangaDetailView.showAddToFolder), а не
+    /// мгновенный toggle без выбора папки.
+    @State private var showAddToFolder = false
 
     private func openTagCatalog(namespace: ExternalTagNamespace, value: String, title: String) {
         tagCatalogTarget = TagCatalogTarget(namespace: namespace, value: value, title: title)
@@ -148,6 +160,9 @@ struct ExternalGalleryDetailView: View {
         .navigationDestination(item: $tagCatalogTarget) { target in
             ExternalCatalogGridView(site: site, query: .tag(namespace: target.namespace, value: target.value), title: target.title)
         }
+        .sheet(isPresented: $showAddToFolder) {
+            ExternalAddToFolderSheet(detail: detail)
+        }
     }
 
     // MARK: Top of the card (B.1) — a 1-to-1 match for MangaDetailView.heroHeader/titleBlock
@@ -213,15 +228,14 @@ struct ExternalGalleryDetailView: View {
     /// MangaDetailView.actionButtons (the same 50/50 split, the same
     /// .bordered/.borderedProminent approach: a gray bordered bookmark
     /// button on the left, a filled accent "Read" button on the right).
-    /// Unlike the regular card — no FOLDER choice (see the
-    /// ExternalBookmarksStore doc-comment: external sites' local bookmarks
-    /// are a simple list, no folders), so tapping toggles immediately,
-    /// with no selection sheet.
+    /// Now also matches the regular card's FOLDER choice — tapping opens
+    /// ExternalAddToFolderSheet (see the local-folders feature added to
+    /// ExternalBookmarksStore) instead of an instant toggle.
     private func actionButtons(_ detail: ExternalGalleryDetail) -> some View {
         let inList = bookmarksStore.isBookmarked(site: detail.site, id: detail.id)
         return HStack(spacing: 8) {
             Button {
-                bookmarksStore.toggle(detail)
+                showAddToFolder = true
             } label: {
                 Label(inList ? "В закладках" : "Добавить в закладки", systemImage: inList ? "bookmark.fill" : "bookmark")
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -680,6 +694,15 @@ struct ExternalGalleryDetailView: View {
 
     private func load() async {
         errorMessage = nil
+        // Seed the provider's own cache from the bookmark BEFORE fetching —
+        // see the resolveKey doc-comment above. A no-op for every site
+        // whose fetchGalleryDetail doesn't need one (default protocol
+        // implementation), and harmless even if the cache already has a
+        // (possibly different, but always more current) entry — this only
+        // runs once per screen, right at load time.
+        if let resolveKey {
+            await provider.primeResolveKey(resolveKey, for: id)
+        }
         do {
             detail = try await provider.fetchGalleryDetail(id: id)
         } catch {

@@ -26,6 +26,22 @@ struct ExternalSearchView: View {
     /// below — debounce).
     @State private var committedQuery = ""
     @State private var showFilters = false
+    /// Result count of the CURRENT query, for the "Found X titles" banner
+    /// — per direct request, shown specifically after pressing Return in
+    /// the search field (see onSubmit below), not for every debounced
+    /// keystroke pause. nil hides the banner (nothing submitted yet, or the
+    /// query changed again since the last submit — see the query
+    /// .onChange below).
+    @State private var searchResultCount: Int?
+    /// True only when EVERY enabled site (here — always just `site`, a
+    /// single one) gave a REAL total (see
+    /// ExternalCatalogItemsSummary.isEstimateExact) — controls the "≈"/
+    /// "не менее" wording in foundCountBanner.
+    @State private var searchResultIsExact = false
+    /// True only right after Return was pressed, until the query changes
+    /// again — gates the banner so it doesn't show for the ambient
+    /// debounced search-while-typing (see committedQuery/.task(id:)).
+    @State private var searchJustSubmitted = false
 
     private var capabilities: ExternalSiteCapabilities { ExternalSiteRegistry.provider(for: site).capabilities }
     /// Two DIFFERENT category sets (e-hentai — EHentaiCategory, imhentai —
@@ -234,8 +250,37 @@ struct ExternalSearchView: View {
         if site == .imhentai {
             content
         } else {
-            content.searchable(text: $query, prompt: "Название, тег, автор…")
+            content
+                .searchable(text: $query, prompt: "Название, тег, автор…")
+                // Commits the query IMMEDIATELY on Return, instead of
+                // waiting out the 400ms debounce below — per direct
+                // request ("found X titles" specifically on pressing
+                // Enter). The debounce .task(id:) still runs too (harmless,
+                // same string), it just no longer needs to be the ONLY way
+                // to commit a search.
+                .onSubmit(of: .search) { commitSearch() }
         }
+    }
+
+    /// Found-count banner — only visible right after Return was pressed
+    /// (see searchJustSubmitted), reset as soon as the query text changes
+    /// again so it can't show a STALE count for a query you're no longer
+    /// looking at.
+    @ViewBuilder
+    private var foundCountBanner: some View {
+        if searchJustSubmitted, let searchResultCount {
+            Text(searchResultIsExact ? "Найдено \(searchResultCount) тайтлов" : "Найдено ≈\(searchResultCount) тайтлов")
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
+        }
+    }
+
+    private func commitSearch() {
+        searchJustSubmitted = true
+        committedQuery = query.trimmingCharacters(in: .whitespaces)
+        filterStore.queries[site] = committedQuery
     }
 
     private var content: some View {
@@ -243,19 +288,27 @@ struct ExternalSearchView: View {
         // (see HitomiProvider/EHentaiProvider.fetchIdsBySearch with an
         // empty query) — titles are visible right away, with no need to
         // type anything first.
-        // .id — forces a NEW view instance on every change to the
-        // query/categories, so the grid's @State (items/cursors/...) gets
-        // reset and .task restarts loading — simply changing the
-        // `query:` parameter doesn't do this, SwiftUI treats it as the
-        // SAME view at the same place in the tree.
-        ExternalCatalogGridView(
-            site: site,
-            query: resolvedQuery,
-            title: displayTitle,
-            embedded: true,
-            leadingControls: capabilities.hasCategoryFilter ? AnyView(filtersButton) : nil
-        )
-        .id("\(resolvedQueryIdentity)#\(excludedCategoryBits)")
+        VStack(spacing: 0) {
+            foundCountBanner
+            // .id — forces a NEW view instance on every change to the
+            // query/categories, so the grid's @State (items/cursors/...) gets
+            // reset and .task restarts loading — simply changing the
+            // `query:` parameter doesn't do this, SwiftUI treats it as the
+            // SAME view at the same place in the tree.
+            ExternalCatalogGridView(
+                site: site,
+                query: resolvedQuery,
+                title: displayTitle,
+                embedded: true,
+                leadingControls: capabilities.hasCategoryFilter ? AnyView(filtersButton) : nil
+            )
+            .onResultsCount { summary in
+                guard searchJustSubmitted else { return }
+                searchResultCount = summary.estimatedTotal
+                searchResultIsExact = summary.isEstimateExact
+            }
+            .id("\(resolvedQueryIdentity)#\(excludedCategoryBits)")
+        }
         .navigationTitle("Каталог")
         .navigationBarTitleDisplayMode(.large)
         .background(Theme.background.ignoresSafeArea())
@@ -272,6 +325,13 @@ struct ExternalSearchView: View {
             // simpler than adding a branch for it.
             query = filterStore.queries[site] ?? ""
             committedQuery = query
+        }
+        .onChange(of: query) { _, _ in
+            // Any further edit to the text invalidates the last submitted
+            // search's found-count banner (see foundCountBanner) — it
+            // would otherwise keep showing a stale count for a query
+            // that's no longer the one on screen.
+            searchJustSubmitted = false
         }
         .task(id: query) {
             // Debounce — 400ms of silence after the last keypress,

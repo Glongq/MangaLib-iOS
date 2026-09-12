@@ -11,9 +11,11 @@ import SwiftUI
 /// BookmarksView (see its doc comment): the same card-tile architecture
 /// (exact width computed via MangaCardView.gridCardWidth, the same shared
 /// @AppStorage("personalization_cards_per_row")), the same list/grid
-/// toggle, the same .searchable() under a large title. What does NOT match
-/// (honestly, there's no equivalent): folders (BookmarkFolder — a server-side concept of the 5
-/// standard folders on the real site, there's nowhere to get that here),
+/// toggle, the same .searchable() under a large title, and now also
+/// FOLDERS (see ExternalBookmarksStore.folders/ExternalAddToFolderSheet) —
+/// same flat-tabs-with-underline UX as BookmarksView.categoryTab, just
+/// entirely local (no server, no 5 standard folders — see the
+/// ExternalBookmarksStore doc-comment). Still genuinely no equivalent for:
 /// multi-select/bulk operations, reading progress/personal rating (external
 /// titles simply don't have that — see ExternalGalleryDetail, neither a user
 /// rating nor reading progress is stored). A card is ALWAYS labeled with its
@@ -34,13 +36,26 @@ struct ExternalBookmarksView: View {
 
     @State private var showViewSortSheet = false
 
+    // MARK: Локальные папки (см. ExternalBookmarksStore.folders) — тот же
+    // UX, что и в основном BookmarksView: nil = «Все», вкладки с
+    // подчёркиванием сверху (см. categoryMenu), а не отдельная панель снизу.
+    @State private var selectedFolderId: String? = nil
+    @State private var showNewFolder = false
+    @State private var newFolderName = ""
+    @Namespace private var categoryIndicator
+    /// Открывается долгим нажатием на тайтл в списке — смена папки без
+    /// удаления из закладок (см. ExternalAddToFolderSheet), тот же приём,
+    /// что и editingBookmark в BookmarksView.
+    @State private var editingBookmark: ExternalBookmark?
+
     private var gridColumnsCount: Int { cardsPerRow.columns }
     private static let gridSpacing: CGFloat = 12
     private static let gridHorizontalPadding: CGFloat = 12
 
     private var filtered: [ExternalBookmark] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = trimmed.isEmpty ? store.bookmarks : store.bookmarks.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
+        let base = store.titles(in: selectedFolderId)
+            .filter { trimmed.isEmpty || $0.title.localizedCaseInsensitiveContains(trimmed) }
         return sorted(base)
     }
 
@@ -77,11 +92,87 @@ struct ExternalBookmarksView: View {
             .sheet(isPresented: $showViewSortSheet) {
                 ExternalBookmarksViewSortSheet(viewMode: $viewMode, sortOption: $sortOption, sortDirection: $sortDirection)
             }
+            .sheet(item: $editingBookmark) { bm in
+                ExternalAddToFolderSheet(bookmark: bm)
+            }
+            .alert("Новая папка", isPresented: $showNewFolder) {
+                TextField("Название папки", text: $newFolderName)
+                Button("Отмена", role: .cancel) { newFolderName = "" }
+                Button("Создать") {
+                    if let folder = store.createFolder(name: newFolderName) {
+                        selectedFolderId = folder.id
+                    }
+                    newFolderName = ""
+                }
+            }
             .navigationDestination(for: ExternalBookmark.self) { bm in
-                ExternalGalleryDetailView(site: bm.site, id: bm.galleryId)
+                ExternalGalleryDetailView(site: bm.site, id: bm.galleryId, resolveKey: bm.resolveKey)
             }
         }
         .tint(Theme.accent)
+    }
+
+    // MARK: Полоска локальных папок — тот же плоский текст + подчёркивание,
+    // что и BookmarksView.categoryTab (см. его doc-comment), сразу под
+    // системным .searchable(), а не отдельной панелью внизу.
+
+    private var categoryMenu: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 20) {
+                categoryTab(title: "Все", id: nil)
+                ForEach(store.folders) { folder in
+                    categoryTab(title: folder.name, id: folder.id)
+                }
+                addFolderTab
+            }
+            .padding(.horizontal, 16)
+        }
+        .scrollIndicators(.hidden)
+        .padding(.vertical, 8)
+        .background(Theme.background)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.separator).frame(height: 1)
+        }
+    }
+
+    private func categoryTab(title: String, id: String?) -> some View {
+        let active = selectedFolderId == id
+        return Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                selectedFolderId = id
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(title).font(.subheadline.weight(active ? .semibold : .regular))
+                Text("\(store.titlesCount(in: id))").font(.caption2.weight(.bold))
+            }
+            .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.bottom, 13)
+            .overlay(alignment: .bottom) {
+                if active {
+                    Rectangle()
+                        .fill(Theme.accent)
+                        .frame(height: 2)
+                        .matchedGeometryEffect(id: "externalBookmarksTabIndicator", in: categoryIndicator)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var addFolderTab: some View {
+        Button {
+            newFolderName = ""
+            showNewFolder = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+                .padding(.bottom, 13)
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -96,18 +187,30 @@ struct ExternalBookmarksView: View {
             .scrollIndicators(.hidden)
         } else {
             Group {
-                switch viewMode {
-                case .list: listContent
-                case .grid: gridContent
+                if filtered.isEmpty {
+                    // Тайтлы вообще есть (см. store.bookmarks.isEmpty выше),
+                    // просто в ВЫБРАННОЙ папке/по запросу их нет — отдельное
+                    // сообщение, не общий "Пусто" про кнопку "Добавить в".
+                    ScrollView {
+                        StateView(icon: "folder", title: "Здесь пусто", description: "В этой папке пока нет тайтлов.", fillScreen: true)
+                            .containerRelativeFrame(.vertical)
+                    }
+                    .scrollIndicators(.hidden)
+                } else {
+                    switch viewMode {
+                    case .list: listContent
+                    case .grid: gridContent
+                    }
                 }
             }
             .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
+            .safeAreaInset(edge: .top, spacing: 0) { categoryMenu }
         }
     }
 
-    // MARK: Tapping a row/card opens the title detail; a long
-    // press/swipe removes it from bookmarks (no folders — no separate
-    // selection sheet like regular bookmarks have, just a direct removal).
+    // MARK: Tapping a row/card opens the title detail; a long press opens
+    // ExternalAddToFolderSheet (change folder / remove) — the same
+    // "editingBookmark" trick as BookmarksView.
 
     @ViewBuilder
     private func tapTarget<Content: View>(_ bm: ExternalBookmark, @ViewBuilder content: () -> Content) -> some View {
@@ -118,6 +221,11 @@ struct ExternalBookmarksView: View {
             NavigationLink(value: bm) { content() }
                 .buttonStyle(.plain)
                 .contextMenu {
+                    Button {
+                        editingBookmark = bm
+                    } label: {
+                        Label("Изменить папку", systemImage: "folder")
+                    }
                     Button(role: .destructive) {
                         store.remove(site: bm.site, id: bm.galleryId)
                     } label: {

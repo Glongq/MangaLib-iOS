@@ -113,7 +113,8 @@ struct ThreeHentaiProvider: ExternalSiteProvider {
         // Not a single comment-related markup fragment on any saved
         // title card in HAR — honestly false, we don't make it up (the
         // same principle as hitomi).
-        hasComments: false
+        hasComments: false,
+        typicalPageSize: 25
     )
 
     /// A separate session — doesn't overlap with any other provider.

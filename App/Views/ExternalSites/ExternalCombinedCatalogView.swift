@@ -25,6 +25,15 @@ struct ExternalCombinedCatalogView: View {
     @State private var query = ""
     @State private var committedQuery = ""
     @State private var showFilters = false
+    /// "Found ~N titles" banner — same mechanism as ExternalSearchView (see
+    /// its doc-comments): shown only right after Return, summing every
+    /// enabled site's own total where the site states one (currently only
+    /// e-hentai, see ExternalSiteProvider.lastKnownEstimatedTotal) and
+    /// falling back to page-count math for the rest (see
+    /// ExternalCatalogGridView.estimatedTotalCount).
+    @State private var searchResultCount: Int?
+    @State private var searchResultIsExact = false
+    @State private var searchJustSubmitted = false
 
     private var sites: [ExternalSite] { ExternalSite.allCases.filter { session.enabledSites.contains($0) } }
     /// Unlike ExternalSearchView (there it's always EXACTLY one site — you
@@ -202,21 +211,33 @@ struct ExternalCombinedCatalogView: View {
         // Empty query — the "Recently" feed right away across all enabled
         // sites (see ExternalSearchView — same principle), no need to
         // type something first.
-        ExternalCatalogGridView(
-            sites: sites,
-            queryForSite: query(for:),
-            title: committedQuery.isEmpty ? "Recently" : committedQuery,
-            embedded: true,
-            leadingControls: showsCategoryFilter ? AnyView(filtersButton) : nil
-        )
-        // .id — the same trick as ExternalSearchView: force a new view
-        // instance on any change to any of the independent queries (shared
-        // OR imhentai-specific), so the grid's @State resets and .task
-        // reloads from scratch.
-        .id("\(committedQuery)#\(sites.map { queryIdentity(for: $0) }.joined(separator: "|"))#\(excludedCategoryBits)")
+        VStack(spacing: 0) {
+            foundCountBanner
+            ExternalCatalogGridView(
+                sites: sites,
+                queryForSite: query(for:),
+                title: committedQuery.isEmpty ? "Recently" : committedQuery,
+                embedded: true,
+                leadingControls: showsCategoryFilter ? AnyView(filtersButton) : nil
+            )
+            .onResultsCount { summary in
+                guard searchJustSubmitted else { return }
+                searchResultCount = summary.estimatedTotal
+                searchResultIsExact = summary.isEstimateExact
+            }
+            // .id — the same trick as ExternalSearchView: force a new view
+            // instance on any change to any of the independent queries (shared
+            // OR imhentai-specific), so the grid's @State resets and .task
+            // reloads from scratch.
+            .id("\(committedQuery)#\(sites.map { queryIdentity(for: $0) }.joined(separator: "|"))#\(excludedCategoryBits)")
+        }
         .navigationTitle("Каталог")
         .navigationBarTitleDisplayMode(.large)
         .searchable(text: $query, prompt: "Название, тег, автор…")
+        // Commits immediately on Return (see ExternalSearchView.commitSearch
+        // — same "found ~N titles specifically on Enter" request), rather
+        // than waiting out the debounce below.
+        .onSubmit(of: .search) { commitSearch() }
         .background(Theme.background.ignoresSafeArea())
         .sheet(isPresented: $showFilters) {
             filtersSheet
@@ -225,11 +246,29 @@ struct ExternalCombinedCatalogView: View {
             query = filterStore.combinedQuery
             committedQuery = query
         }
+        .onChange(of: query) { _, _ in searchJustSubmitted = false }
         .task(id: query) {
             try? await Task.sleep(nanoseconds: 400_000_000)
             guard !Task.isCancelled else { return }
             committedQuery = query.trimmingCharacters(in: .whitespaces)
             filterStore.combinedQuery = committedQuery
+        }
+    }
+
+    private func commitSearch() {
+        searchJustSubmitted = true
+        committedQuery = query.trimmingCharacters(in: .whitespaces)
+        filterStore.combinedQuery = committedQuery
+    }
+
+    @ViewBuilder
+    private var foundCountBanner: some View {
+        if searchJustSubmitted, let searchResultCount {
+            Text(searchResultIsExact ? "Найдено \(searchResultCount) тайтлов" : "Найдено ≈\(searchResultCount) тайтлов")
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
         }
     }
 

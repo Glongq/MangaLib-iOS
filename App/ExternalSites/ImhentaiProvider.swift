@@ -244,7 +244,8 @@ struct ImhentaiProvider: ExternalSiteProvider {
         // had a single comment) — neither the request-body format nor the
         // response format WITH ACTUAL comments is confirmed, so honestly false,
         // we don't make it up.
-        hasComments: false
+        hasComments: false,
+        typicalPageSize: 20
     )
 
     private let session: URLSession = {

@@ -166,7 +166,8 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
         // `comment_count` is just a number right on the album, not a
         // single separate endpoint with a LIST of comments turned up in
         // HAR — honestly false, we don't make it up.
-        hasComments: false
+        hasComments: false,
+        typicalPageSize: 25
     )
 
     private let session: URLSession = {
@@ -529,6 +530,11 @@ struct SimplyHentaiProvider: ExternalSiteProvider {
     /// FULL page list, confirmed by HAR: the detail response's `images`
     /// only has 12 out of the stated 173 — the full list is only in the
     /// separate /pages) — run in parallel (async let), not sequentially.
+    /// See the protocol doc-comment — the slug IS the resolve key here.
+    func resolveKey(for id: Int) async -> String? { await SlugCache.shared.slug(for: id) }
+
+    func primeResolveKey(_ key: String, for id: Int) async { await SlugCache.shared.store(id: id, slug: key) }
+
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail {
         guard let slug = await SlugCache.shared.slug(for: id) else { throw SimplyHentaiError.unknownSlug }
         async let detailTask = Self.fetchAlbum(slug: slug, session: session)

@@ -103,7 +103,8 @@ struct HentaiPillProvider: ExternalSiteProvider {
         hasNotifications: false,
         // Not a single comment-related markup fragment on any
         // saved title card in HAR — honestly false, we don't make one up.
-        hasComments: false
+        hasComments: false,
+        typicalPageSize: 20
     )
 
     private let session: URLSession = {
