@@ -174,13 +174,15 @@ struct ExternalGalleryDetailView: View {
                 .scaledToFit()
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                // Rating — right on the cover, bottom left (see
-                // MangaDetailView.coverRatingBadge) — only for e-hentai,
-                // hitomi has no such field.
-                .overlay(alignment: .bottomLeading) { ratingBadge(detail) }
-                // Bookmark folder badge — ported from MangaDetailView.
-                // bookmarkStatusBadge, top left (same corner there).
-                .overlay(alignment: .topLeading) { bookmarkStatusBadge(detail) }
+                // Rating + bookmark folder badge — both bottom left, per
+                // direct request — stacked in one VStack (folder badge on
+                // top of rating) so they don't overlap each other.
+                .overlay(alignment: .bottomLeading) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        bookmarkStatusBadge(detail)
+                        ratingBadge(detail)
+                    }
+                }
         }
     }
 

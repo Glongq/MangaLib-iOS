@@ -798,21 +798,21 @@ private struct CatalogCard: View {
         }
         // Bookmark folder badge — ported from MangaCardView.statusBadge
         // (see its doc-comment) for the same "which list is this already
-        // in" hint, per direct request. topTrailing: topLeading is already
-        // showsSourceBadge, bottomTrailing is the page-count chip above.
-        // Capped to a FRACTION of the card width (not a fixed point value)
-        // — cards themselves resize with gridColumns (2/3/4/Auto, see
-        // ExternalCatalogGridView.gridColumns) — so it can never grow wide
-        // enough to run into the page-count chip in the opposite corner,
-        // on any column count.
-        .overlay(alignment: .topTrailing) {
+        // in" hint, per direct request. bottomLeading: topLeading is
+        // showsSourceBadge, bottomTrailing is the page-count chip above —
+        // this is the one free corner. Capped to a FRACTION of the card
+        // width (not a fixed point value) — cards themselves resize with
+        // gridColumns (2/3/4/Auto, see ExternalCatalogGridView.
+        // gridColumns) — so it can never grow wide enough to run into the
+        // page-count chip in the opposite corner, on any column count.
+        .overlay(alignment: .bottomLeading) {
             if let label = bookmarksStore.bookmarkBadgeLabel(site: item.site, id: item.galleryId) {
                 Text(label)
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: width * 0.62, alignment: .trailing)
+                    .frame(maxWidth: width * 0.62, alignment: .leading)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
                     .background(Theme.accent, in: Capsule())
