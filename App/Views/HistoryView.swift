@@ -1,25 +1,49 @@
 import SwiftUI
 
 /// Экран «История»: НАСТОЯЩАЯ история чтения аккаунта —
-/// `GET /user/chapters/history` (см. BookmarksStore.syncHistoryFromServer).
-/// Дедуп по тайтлу — самая свежая запись сверху, сервер и так отдаёт от
-/// новых к старым.
+/// `GET /user/chapters/history?page=N`. Дедуп по тайтлу — самая свежая
+/// запись сверху, сервер и так отдаёт от новых к старым.
 ///
-/// Шапка — НЕ общий бар: заголовок "История" отдельно плавает по центру в
-/// своём стекле, кнопка закрытия — отдельный кружок слева, каждый в своём
-/// материале (тот же принцип, что и в остальных экранах приложения). Поиск —
-/// отдельное плавающее поле снизу, над главной панелью.
+/// Поиск — родной .searchable() сверху, как в Каталоге/Закладках (эталон —
+/// MangaCatalogView/BookmarksView), а не отдельное плавающее поле снизу.
+///
+/// Пагинация — СВОЯ, локальная (rawEntries/historyPage/…), НЕ через
+/// BookmarksStore.syncHistoryFromServer(): та функция раньше вызывалась
+/// отсюда и разом вычитывала до 40 страниц ПОДРЯД при каждом заходе на
+/// экран — по прямой просьбе заменено на постепенную подгрузку по скроллу
+/// (см. loadMorePages). syncHistoryFromServer() при этом никуда не делась —
+/// она по-прежнему нужна и вызывается в других местах (AuthSession при
+/// входе, HomeView для виджета "Продолжить читать"/прогресса), этот экран
+/// просто больше не дублирует её работу для собственных нужд — здесь не
+/// нужен побочный эффект той функции (обновление BookmarksStore.progress),
+/// только сырой постраничный список.
 struct HistoryView: View {
     /// true — открыт PUSH-переходом внутри вкладки «Меню» (без своего
     /// NavigationStack; у экрана своя плавающая шапка с кнопкой «назад»).
     var embedded: Bool = false
 
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var store = BookmarksStore.shared
     @ObservedObject private var siteSession = SiteSession.shared
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var query = ""
-    @FocusState private var searchFocused: Bool
+
+    /// Сырые записи истории, накопленные постранично (см. loadMorePages) —
+    /// НЕ прогоняются через дедуп сами по себе, только в deduped ниже.
+    @State private var rawEntries: [HistoryEntry] = []
+    @State private var historyPage = 1
+    @State private var hasMoreHistory = true
+    /// true, только пока не пришла самая первая страница — гонит спиннер на
+    /// весь экран (см. list). Дозагрузка следующих страниц по скроллу его не
+    /// трогает, только isLoadingMoreHistory.
+    @State private var isLoadingHistory = false
+    @State private var isLoadingMoreHistory = false
+
+    /// Для сворачивания клавиатуры первым тапом по списку (см.
+    /// KeyboardDismissOnTap.dismissKeyboardOnFirstTap/
+    /// SearchDismissibleNavigationLink) — родной .searchable() без своего
+    /// @FocusState, isSearching/dismissSearch из окружения.
+    @Environment(\.isSearching) private var isSearching
+    @Environment(\.dismissSearch) private var dismissSearch
 
     /// Дедуп по media.id — сервер отдаёт КАЖДЫЙ просмотр главы отдельной
     /// записью, а не одну запись на тайтл (см. пример ответа в чате: два
@@ -33,7 +57,7 @@ struct HistoryView: View {
     /// только в очень старых кэшах — в этом случае запись не прячем.
     private var deduped: [HistoryEntry] {
         var seen = Set<Int>()
-        return store.historyEntries.filter { entry in
+        return rawEntries.filter { entry in
             guard entry.media.site == nil || entry.media.site == siteSession.activeSite.rawValue else { return false }
             guard !seen.contains(entry.media.id) else { return false }
             seen.insert(entry.media.id)
@@ -56,7 +80,57 @@ struct HistoryView: View {
             }
         }
         .tint(Theme.accent)
-        .task { await store.syncHistoryFromServer() }
+        .task { await resetAndLoad() }
+    }
+
+    // MARK: Пагинация
+
+    /// Полный сброс + загрузка первой страницы — начальный `.task` и
+    /// `.refreshable` (потянуть-обновить).
+    private func resetAndLoad() async {
+        guard AuthSession.shared.isLoggedIn else { return }
+        rawEntries = []
+        historyPage = 1
+        hasMoreHistory = true
+        isLoadingHistory = true
+        await loadMorePages()
+        isLoadingHistory = false
+    }
+
+    /// Вызывается из .onAppear строки — по прямой просьбе "+5": подгрузка
+    /// стартует, когда до конца ВИДИМОГО (уже дедуплицированного/
+    /// отфильтрованного) списка остаётся 5 или меньше строк.
+    private func loadMoreIfNeeded(current entry: HistoryEntry) async {
+        guard let idx = results.firstIndex(where: { $0.id == entry.id }) else { return }
+        guard idx >= results.count - 5 else { return }
+        await loadMorePages()
+    }
+
+    /// Тянет сырые страницы `/user/chapters/history`, пока видимый (после
+    /// дедупа) список реально не подрастёт хотя бы на 1 запись — а не просто
+    /// одну страницу за вызов: если человек запоем прочитал десятки глав
+    /// ОДНОГО тайтла подряд, несколько сырых страниц могут целиком состоять
+    /// из записей уже показанного (дедуп их всех схлопывает в 0 новых строк)
+    /// — тогда .onAppear на последней ВИДИМОЙ строке больше не перевызовется
+    /// сам (список не изменился), подгрузка бы "залипла". safety — локальный
+    /// потолок на один такой забег (меньше глобального 40-страничного
+    /// потолка старого eager-фетча — тут это просто подстраховка от
+    /// зависания на один вызов, не защита от бесконечной истории целиком).
+    private func loadMorePages() async {
+        guard !isLoadingMoreHistory, hasMoreHistory else { return }
+        isLoadingMoreHistory = true
+        defer { isLoadingMoreHistory = false }
+        let countBefore = results.count
+        var safety = 0
+        while hasMoreHistory, results.count <= countBefore, safety < 20 {
+            guard let batch = try? await MangaNetworkService.shared.fetchHistory(page: historyPage), !batch.isEmpty else {
+                hasMoreHistory = false
+                break
+            }
+            rawEntries.append(contentsOf: batch)
+            historyPage += 1
+            safety += 1
+        }
     }
 
     private var content: some View {
@@ -64,16 +138,21 @@ struct HistoryView: View {
             Theme.background.ignoresSafeArea()
             list
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            header
+        // Родной системный заголовок + системный back chevron, никакого
+        // своего кода (эталон — Настройки/Загрузки). embedded — push из
+        // Меню (системная кнопка "назад" сама появляется); не embedded —
+        // свой NavigationStack, нужен явный dismiss (тот же приём, что у
+        // AppSettingsView/DownloadsView в их !embedded-режиме).
+        .navigationTitle("История")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, prompt: "Поиск по названию")
+        .toolbar {
+            if !embedded {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Готово") { dismiss() }
+                }
+            }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            searchField
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
-        }
-        // У экрана своя плавающая шапка — системный навбар скрываем всегда.
-        .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(for: HistoryEntry.self) { entry in
             MangaDetailView(slug: entry.media.apiSlug, fallbackTitle: entry.media.displayTitle,
                              coverURL: entry.media.cover?.bestURL, item: entry.media)
@@ -81,89 +160,53 @@ struct HistoryView: View {
         .background { if embedded { InteractivePopGesture() } }
     }
 
-    // MARK: Шапка — заголовок и кнопка закрытия плавают раздельно
-
-    private var header: some View {
-        ZStack {
-            // Без стекла под текстом — просто заголовок, ничем не подложенный.
-            Text("История")
-                .font(.headline)
-                .foregroundStyle(Theme.textPrimary)
-
-            HStack {
-                // Стрелка назад вместо крестика — экран открывается ПОВЕРХ
-                // меню (см. SideMenuView.showHistory), а не как отдельный
-                // самостоятельный лист, так что "назад" точнее по смыслу, чем "закрыть".
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(width: 44, height: 44)
-                }
-                .glassEffect(.regular.interactive(), in: Circle())
-
-                Spacer()
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
-    }
-
-    // MARK: Поиск (снизу, над главной панелью)
-
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
-            TextField("", text: $query,
-                      prompt: Text("Поиск по названию").foregroundColor(Theme.textSecondary))
-                .foregroundStyle(Theme.textPrimary)
-                .focused($searchFocused)
-                .submitLabel(.search)
-            if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.interactive(), in: Capsule())
-    }
-
     // MARK: Список
 
     @ViewBuilder
     private var list: some View {
-        if store.isSyncingHistory && results.isEmpty {
+        if isLoadingHistory && results.isEmpty {
             ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if query.isEmpty && !AuthSession.shared.isLoggedIn {
+            // Раньше — та же ветка/иконка, что и у обычного "пока пусто" —
+            // не сигналило, что дело именно в отсутствии входа, а не в том,
+            // что истории правда ещё нет.
+            StateView(icon: "person.crop.circle.badge.exclamationmark", title: "Войдите в аккаунт", description: "Чтобы видеть историю чтения.", fillScreen: true)
         } else if results.isEmpty {
-            ContentUnavailableView(
-                query.isEmpty ? "Пока пусто" : "Ничего не найдено",
-                systemImage: "clock.arrow.circlepath",
-                description: Text(query.isEmpty
-                    ? (AuthSession.shared.isLoggedIn
-                       ? "Здесь появятся тайтлы, которые вы уже начали читать."
-                       : "Войдите в аккаунт, чтобы видеть историю чтения.")
-                    : "Попробуйте другой запрос.")
+            StateView(
+                icon: "clock.arrow.circlepath",
+                title: query.isEmpty ? "Пока пусто" : "Ничего не найдено",
+                description: query.isEmpty ? "Здесь появятся тайтлы, которые вы уже начали читать." : "Попробуйте другой запрос.",
+                fillScreen: true
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     ForEach(results) { entry in
-                        NavigationLink(value: entry) { row(entry) }
+                        SearchDismissibleNavigationLink(value: entry, isSearching: isSearching, dismiss: { dismissSearch() }) { row(entry) }
                             .buttonStyle(.plain)
+                            .onAppear { Task { await loadMoreIfNeeded(current: entry) } }
                     }
                 }
                 .padding(12)
-                .padding(.bottom, 90)
+
+                if isLoadingMoreHistory {
+                    ProgressView().tint(Theme.accent).frame(maxWidth: .infinity).padding(.vertical, 16)
+                }
             }
             .scrollIndicators(.hidden)
-            .refreshable { await store.syncHistoryFromServer() }
+            .refreshable { await resetAndLoad() }
+            .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
         }
     }
 
+    /// 1в1 как в Закладках/Новое (см. BookmarksView.row/NotificationsView.row)
+    /// по прямой просьбе — тот же размер/соотношение/радиус обложки (эталон
+    /// Каталога, 2:3/16, общая константа BookmarksView.bookmarkCoverWidth/
+    /// Height), обложка вплотную к краю подложки (не по центру с отступом
+    /// 10 со всех сторон, как было), тот же радиус подложки (16, было 18),
+    /// тот же размер текста (.subheadline/.caption2, было
+    /// .subheadline.weight(.medium)/.caption/.caption2 — крупнее и другой
+    /// шрифт), центрирование по высоте вместо .padding(10) со всех сторон.
     private func row(_ entry: HistoryEntry) -> some View {
         HStack(spacing: 12) {
             RemoteImage(url: entry.media.cover?.bestURL) { image in
@@ -173,17 +216,17 @@ struct HistoryView: View {
             } failure: {
                 ZStack { Theme.surfaceElevated; Image(systemName: "photo").foregroundStyle(Theme.textSecondary) }
             }
-            .frame(width: 60, height: 84)
+            .frame(width: BookmarksView.bookmarkCoverWidth, height: BookmarksView.bookmarkCoverHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(entry.media.displayTitle)
-                    .font(.subheadline.weight(.medium))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
                 Text("Том \(entry.item.volume), Глава \(entry.item.number)")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(Theme.accent)
                 Text(Self.dateFormatter.string(from: entry.viewAt))
                     .font(.caption2)
@@ -192,8 +235,9 @@ struct HistoryView: View {
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textSecondary)
         }
-        .padding(10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.trailing, 12)
+        .frame(height: BookmarksView.bookmarkCoverHeight)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private static let dateFormatter: DateFormatter = {
