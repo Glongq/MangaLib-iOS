@@ -186,7 +186,14 @@ struct ExternalBookmarksView: View {
             }
             .scrollIndicators(.hidden)
         } else {
-            Group {
+            // A plain VStack sibling, NOT .safeAreaInset(edge: .top) — that
+            // was fighting the ancestor NavigationStack's native large-
+            // title/.searchable() collapse logic and made the "Закладки"
+            // title vanish entirely (see the bug report). A fixed-height
+            // view above the ScrollView, both inside one VStack, is the
+            // standard pattern and doesn't confuse the nav bar.
+            VStack(spacing: 0) {
+                categoryMenu
                 if filtered.isEmpty {
                     // Тайтлы вообще есть (см. store.bookmarks.isEmpty выше),
                     // просто в ВЫБРАННОЙ папке/по запросу их нет — отдельное
@@ -204,7 +211,6 @@ struct ExternalBookmarksView: View {
                 }
             }
             .dismissKeyboardOnFirstTap(active: isSearching) { dismissSearch() }
-            .safeAreaInset(edge: .top, spacing: 0) { categoryMenu }
         }
     }
 

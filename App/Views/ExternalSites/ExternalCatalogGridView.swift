@@ -740,6 +740,7 @@ private struct CatalogCard: View {
     let width: CGFloat
     let showsSourceBadge: Bool
 
+    @ObservedObject private var bookmarksStore = ExternalBookmarksStore.shared
     @State private var isTitleTruncated = false
     @State private var showFullTitle = false
 
@@ -793,6 +794,22 @@ private struct CatalogCard: View {
                 .frame(height: 16)
                 .background(.black.opacity(0.55), in: Capsule())
                 .padding(6)
+            }
+        }
+        // Bookmark folder badge — ported from MangaCardView.statusBadge
+        // (see its doc-comment) for the same "which list is this already
+        // in" hint, per direct request. topTrailing: topLeading is already
+        // showsSourceBadge, bottomTrailing is the page-count chip above.
+        .overlay(alignment: .topTrailing) {
+            if let folder = bookmarksStore.folderName(site: item.site, id: item.galleryId) {
+                Text(folder)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Theme.accent, in: Capsule())
+                    .padding(6)
             }
         }
     }

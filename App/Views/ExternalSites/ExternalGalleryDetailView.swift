@@ -178,6 +178,23 @@ struct ExternalGalleryDetailView: View {
                 // MangaDetailView.coverRatingBadge) — only for e-hentai,
                 // hitomi has no such field.
                 .overlay(alignment: .bottomLeading) { ratingBadge(detail) }
+                // Bookmark folder badge — ported from MangaDetailView.
+                // bookmarkStatusBadge, top left (same corner there).
+                .overlay(alignment: .topLeading) { bookmarkStatusBadge(detail) }
+        }
+    }
+
+    @ViewBuilder
+    private func bookmarkStatusBadge(_ detail: ExternalGalleryDetail) -> some View {
+        if let folder = bookmarksStore.folderName(site: detail.site, id: detail.id) {
+            Text(folder)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Theme.accent, in: Capsule())
+                .padding(6)
         }
     }
 
@@ -705,6 +722,12 @@ struct ExternalGalleryDetailView: View {
         }
         do {
             detail = try await provider.fetchGalleryDetail(id: id)
+        } catch EHentaiError.missingToken, SimplyHentaiError.unknownSlug {
+            // Not a network failure — this bookmark predates ExternalBookmark.
+            // resolveKey (saved before this fix) and this site can't be
+            // resolved by id alone (see the resolveKey doc-comment) —
+            // honest message instead of the generic "check your connection".
+            errorMessage = "Этот тайтл был добавлен в закладки до обновления и не может открыться напрямую. Найдите его снова в каталоге."
         } catch {
             errorMessage = "Проверьте соединение и попробуйте ещё раз."
         }
