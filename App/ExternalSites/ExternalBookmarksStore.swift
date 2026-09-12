@@ -78,12 +78,23 @@ final class ExternalBookmarksStore: ObservableObject {
 
     /// Display name of the title's folder, if it's in a NAMED one — nil
     /// both when not bookmarked and when it's sitting in the implicit
-    /// "All" root (folderId == nil), same as MangaCardView.statusBadge/
-    /// MangaDetailView.bookmarkStatusBadge only showing a badge for a real
-    /// folder. Used by the catalog card / gallery cover badge.
+    /// "All" root (folderId == nil).
     func folderName(site: ExternalSite, id: Int) -> String? {
         guard let folderId = folderId(site: site, id: id) else { return nil }
         return folders.first { $0.id == folderId }?.name
+    }
+
+    /// Badge label for the catalog card / gallery cover — UNLIKE
+    /// MangaCardView.statusBadge/MangaDetailView.bookmarkStatusBadge (nil
+    /// unless in a NAMED folder, since the main app always assigns one of
+    /// 5 standard folders), here most bookmarks just sit in the implicit
+    /// "All" root (no folders exist unless the user makes one) — showing
+    /// nothing there would make the badge look entirely absent for the
+    /// common case. Falls back to a generic "В закладках" whenever the
+    /// title is bookmarked at all, regardless of folder.
+    func bookmarkBadgeLabel(site: ExternalSite, id: Int) -> String? {
+        guard isBookmarked(site: site, id: id) else { return nil }
+        return folderName(site: site, id: id) ?? "В закладках"
     }
 
     func toggle(_ detail: ExternalGalleryDetail) async {

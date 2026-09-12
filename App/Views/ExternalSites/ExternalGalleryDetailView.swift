@@ -186,11 +186,13 @@ struct ExternalGalleryDetailView: View {
 
     @ViewBuilder
     private func bookmarkStatusBadge(_ detail: ExternalGalleryDetail) -> some View {
-        if let folder = bookmarksStore.folderName(site: detail.site, id: detail.id) {
-            Text(folder)
+        if let label = bookmarksStore.bookmarkBadgeLabel(site: detail.site, id: detail.id) {
+            Text(label)
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: 140, alignment: .leading)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(Theme.accent, in: Capsule())
