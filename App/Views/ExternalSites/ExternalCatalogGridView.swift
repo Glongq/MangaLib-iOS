@@ -800,19 +800,21 @@ private struct CatalogCard: View {
         // (see its doc-comment) for the same "which list is this already
         // in" hint, per direct request. bottomLeading: topLeading is
         // showsSourceBadge, bottomTrailing is the page-count chip above —
-        // this is the one free corner. Capped to a FRACTION of the card
-        // width (not a fixed point value) — cards themselves resize with
-        // gridColumns (2/3/4/Auto, see ExternalCatalogGridView.
-        // gridColumns) — so it can never grow wide enough to run into the
-        // page-count chip in the opposite corner, on any column count.
+        // this is the one free corner. The label itself is pre-truncated
+        // to a fixed CHARACTER count (see ExternalBookmarksStore.
+        // truncatedBadgeLabel) rather than capped with .frame(maxWidth:) —
+        // that combination stretched short labels ("332") to fill the
+        // whole overlay width instead of hugging the text, because
+        // .overlay(alignment:) proposes the FULL cover size to its
+        // content, and frame(maxWidth:) expands to fill whatever's
+        // proposed up to its cap. Truncating the string up front sidesteps
+        // that entirely — plain Text always sizes to its own content.
         .overlay(alignment: .bottomLeading) {
             if let label = bookmarksStore.bookmarkBadgeLabel(site: item.site, id: item.galleryId) {
                 Text(label)
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: width * 0.62, alignment: .leading)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
                     .background(Theme.accent, in: Capsule())

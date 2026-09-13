@@ -92,9 +92,31 @@ final class ExternalBookmarksStore: ObservableObject {
     /// nothing there would make the badge look entirely absent for the
     /// common case. Falls back to a generic "В закладках" whenever the
     /// title is bookmarked at all, regardless of folder.
+    /// Max characters of the raw label before Self.truncatedBadgeLabel
+    /// clips it with an ellipsis — see that function's doc-comment for why
+    /// the badge string is capped HERE (character count) instead of via
+    /// SwiftUI's .frame(maxWidth:) at the call site.
+    private static let badgeLabelMaxLength = 14
+
     func bookmarkBadgeLabel(site: ExternalSite, id: Int) -> String? {
         guard isBookmarked(site: site, id: id) else { return nil }
-        return folderName(site: site, id: id) ?? "В закладках"
+        let label = folderName(site: site, id: id) ?? "В закладках"
+        return Self.truncatedBadgeLabel(label)
+    }
+
+    /// Caps the badge string at a fixed CHARACTER count, not a rendered
+    /// pixel width — deliberately not `.frame(maxWidth:)` at the call site
+    /// (ExternalCatalogGridView.CatalogCard / ExternalGalleryDetailView.
+    /// bookmarkStatusBadge): that combination stretched SHORT labels
+    /// ("332") to fill the badge's full max width, because .overlay(
+    /// alignment:) proposes the whole cover's size to its content and
+    /// frame(maxWidth:) fills up to its cap whenever more is proposed —
+    /// which is exactly what was overlapping the page-count chip.
+    /// Truncating the actual string sidesteps that: plain Text always
+    /// sizes tightly to its own (now guaranteed-short) content.
+    private static func truncatedBadgeLabel(_ label: String) -> String {
+        guard label.count > badgeLabelMaxLength else { return label }
+        return String(label.prefix(badgeLabelMaxLength - 1)) + "…"
     }
 
     func toggle(_ detail: ExternalGalleryDetail) async {

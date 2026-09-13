@@ -188,13 +188,14 @@ struct ExternalGalleryDetailView: View {
 
     @ViewBuilder
     private func bookmarkStatusBadge(_ detail: ExternalGalleryDetail) -> some View {
+        // Pre-truncated by character count, not .frame(maxWidth:) — see the
+        // long comment on the matching badge in ExternalCatalogGridView.
+        // CatalogCard for why that combination stretched short labels.
         if let label = bookmarksStore.bookmarkBadgeLabel(site: detail.site, id: detail.id) {
             Text(label)
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: 140, alignment: .leading)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(Theme.accent, in: Capsule())
