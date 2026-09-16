@@ -346,14 +346,18 @@ enum PixivAiFilter: String, CaseIterable, Identifiable, Hashable {
 
 /// One "Search options" configuration — see the fields' doc-comments in
 /// PixivContentType/PixivSearchTarget/PixivSort/PixivAiFilter above for
-/// what's confirmed. Combines ADDITIVELY with the screen's shared search
-/// field (unlike every EXCLUSIVE-advanced-query site in this folder —
-/// SimplyHentai/EHentai/3Hentai/Hitomi/HentaiPill — pixiv's own Search
-/// Options genuinely modify a normal keyword search rather than replacing
-/// it, so there's no separate `search`/`isEmpty`-gates-everything field
-/// here; `word` itself always comes from the shared field, see
-/// PixivProvider.fetchIdsBySearch).
+/// what's confirmed. EXCLUSIVE with respect to the screen's shared search
+/// field, the SAME rule as every other advanced-query site in this folder
+/// (EHentai/SimplyHentai/3Hentai/Hitomi — see e.g.
+/// EHentaiAdvancedQuery.search/EHentaiAdvancedFieldsPicker): pixiv's own
+/// `search` field lives right inside this "Search options" sheet
+/// (PixivAdvancedFieldsPicker), and as soon as ANYTHING here is set
+/// (including just `search` alone), the shared field stops applying to
+/// pixiv entirely — see ExternalSearchView.resolvedQuery/
+/// ExternalCombinedCatalogView.query(for:), same `isEmpty ? committedQuery
+/// : advanced.encoded()` branch as those sites.
 struct PixivAdvancedQuery: Equatable {
+    var search: String = ""
     var contentType: PixivContentType = .illustAndMangaAndUgoira
     var searchTarget: PixivSearchTarget = .partialMatchForTags
     var aiFilter: PixivAiFilter = .showAll
@@ -366,19 +370,22 @@ struct PixivAdvancedQuery: Equatable {
     var heightMax: Int?
 
     var isEmpty: Bool {
-        contentType == .illustAndMangaAndUgoira && searchTarget == .partialMatchForTags
+        search.trimmingCharacters(in: .whitespaces).isEmpty
+            && contentType == .illustAndMangaAndUgoira && searchTarget == .partialMatchForTags
             && aiFilter == .showAll && sort == .dateDesc && startDate == nil && endDate == nil
             && widthMin == nil && widthMax == nil && heightMin == nil && heightMax == nil
     }
 
-    /// Soldered into ONE string together with the shared search word, the
-    /// same private-control-character channel as
-    /// SimplyHentaiAdvancedQuery.encoded() (see its doc-comment) — the
+    /// Soldered into ONE string together with `search`, the same private-
+    /// control-character channel as SimplyHentaiAdvancedQuery.encoded()
+    /// (see its doc-comment) — the
     /// `ExternalCatalogQuery.search(query:excludedCategoryBits:)` case only
     /// carries a single opaque `query: String`, so this is how the extra
     /// fields get to PixivProvider.fetchIdsBySearch, which unpacks them
     /// right back out (see decode(from:)) before building the real
-    /// `/v1/search/illust` request.
+    /// `/v1/search/illust` request. Called ONLY when !isEmpty (see
+    /// ExternalSearchView.resolvedQuery) — same convention as every other
+    /// site's encoded().
     fileprivate static let fieldDelimiter = "\u{1}"
     private static let dateFormat: DateFormatter = {
         let formatter = DateFormatter()
@@ -388,8 +395,8 @@ struct PixivAdvancedQuery: Equatable {
         return formatter
     }()
 
-    func encoded(word: String) -> String {
-        var parts = [word.trimmingCharacters(in: .whitespaces)]
+    func encoded() -> String {
+        var parts = [search.trimmingCharacters(in: .whitespaces)]
         func append(_ key: String, _ value: String?) {
             guard let value, !value.isEmpty else { return }
             parts.append("\(Self.fieldDelimiter)\(key)=\(value)")
@@ -407,8 +414,10 @@ struct PixivAdvancedQuery: Equatable {
         return parts.joined()
     }
 
-    /// The other half of encoded(word:) — see
-    /// PixivProvider.fetchIdsBySearch.
+    /// The other half of encoded() — see PixivProvider.fetchIdsBySearch.
+    /// `word` here is whichever string was passed to fetchIdsBySearch as
+    /// `query` — either plain committedQuery (advanced fields untouched)
+    /// or an already-encoded string from encoded() above (exclusive case).
     static func decode(_ encodedQuery: String) -> (word: String, params: [String: String]) {
         let components = encodedQuery.components(separatedBy: fieldDelimiter)
         let word = components.first ?? ""
@@ -579,9 +588,11 @@ struct PixivProvider: ExternalSiteProvider {
     }
 
     /// `excludedCategoryBits` is unused here (pixiv has no such bitmask) —
-    /// the real filters travel INSIDE `query` itself, smuggled in by
-    /// PixivAdvancedQuery.encoded(word:) (see its doc-comment) and unpacked
-    /// right back out via PixivAdvancedQuery.decode(_:) below.
+    /// when the advanced fields are exclusively active (see
+    /// PixivAdvancedQuery's doc-comment), the real filters travel INSIDE
+    /// `query` itself, smuggled in by PixivAdvancedQuery.encoded() and
+    /// unpacked right back out via PixivAdvancedQuery.decode(_:) below;
+    /// otherwise `query` is just the plain shared search word.
     ///
     /// An EMPTY word (no search typed yet — the "Recently" feed on every
     /// other site) has no real pixiv equivalent: `/v1/search/illust`

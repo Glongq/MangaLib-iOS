@@ -225,12 +225,10 @@ struct ExternalCombinedCatalogView: View {
             let text = advanced.isEmpty ? committedQuery : advanced.encoded()
             return .search(query: text, excludedCategoryBits: excludedCategoryBits)
         }
-        // Pixiv's "Search options" combine ADDITIVELY with the shared
-        // field instead of replacing it (see PixivAdvancedQuery's
-        // doc-comment) — no exclusivity branch here, always
-        // committedQuery + whatever filters are set.
         if site == .pixiv {
-            return .search(query: advancedQueryPixiv.encoded(word: committedQuery), excludedCategoryBits: 0)
+            let advanced = advancedQueryPixiv
+            let text = advanced.isEmpty ? committedQuery : advanced.encoded()
+            return .search(query: text, excludedCategoryBits: 0)
         }
         return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
     }

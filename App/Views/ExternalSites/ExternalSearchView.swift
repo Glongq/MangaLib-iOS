@@ -124,7 +124,7 @@ struct ExternalSearchView: View {
         nonmutating set { filterStore.hitomiAdvancedQueries[site] = newValue }
     }
     /// Pixiv's "Search options" (see PixivAdvancedQuery's doc-comment) —
-    /// combines ADDITIVELY with committedQuery, unlike every advanced
+    /// exclusive with committedQuery, the same rule as every advanced
     /// query above.
     private var advancedQueryPixiv: PixivAdvancedQuery {
         get { filterStore.pixivAdvancedQueries[site] ?? PixivAdvancedQuery() }
@@ -210,9 +210,10 @@ struct ExternalSearchView: View {
             let text = advanced.isEmpty ? committedQuery : advanced.encoded()
             return .search(query: text, excludedCategoryBits: excludedCategoryBits)
         }
-        // Additive, not exclusive — see advancedQueryPixiv's doc-comment.
         if site == .pixiv {
-            return .search(query: advancedQueryPixiv.encoded(word: committedQuery), excludedCategoryBits: 0)
+            let advanced = advancedQueryPixiv
+            let text = advanced.isEmpty ? committedQuery : advanced.encoded()
+            return .search(query: text, excludedCategoryBits: 0)
         }
         return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
     }
@@ -252,6 +253,10 @@ struct ExternalSearchView: View {
         }
         if site == .hitomi, !advancedQueryHT.isEmpty {
             let text = advancedQueryHT.search.trimmingCharacters(in: .whitespaces)
+            return text.isEmpty ? "Recently" : text
+        }
+        if site == .pixiv, !advancedQueryPixiv.isEmpty {
+            let text = advancedQueryPixiv.search.trimmingCharacters(in: .whitespaces)
             return text.isEmpty ? "Recently" : text
         }
         return committedQuery.isEmpty ? "Recently" : committedQuery
