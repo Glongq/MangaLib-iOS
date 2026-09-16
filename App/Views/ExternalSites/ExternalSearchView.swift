@@ -42,6 +42,10 @@ struct ExternalSearchView: View {
     /// again — gates the banner so it doesn't show for the ambient
     /// debounced search-while-typing (see committedQuery/.task(id:)).
     @State private var searchJustSubmitted = false
+    /// Pixiv tag suggestions for the shared search field — see
+    /// ExternalCombinedCatalogView.pixivSuggestions's doc-comment (same
+    /// feature, single-site screen).
+    @State private var pixivSuggestions: [ExternalTagSuggestion] = []
 
     private var capabilities: ExternalSiteCapabilities { ExternalSiteRegistry.provider(for: site).capabilities }
     /// Two DIFFERENT category sets (e-hentai — EHentaiCategory, imhentai —
@@ -119,6 +123,13 @@ struct ExternalSearchView: View {
         get { filterStore.hitomiAdvancedQueries[site] ?? HitomiAdvancedQuery() }
         nonmutating set { filterStore.hitomiAdvancedQueries[site] = newValue }
     }
+    /// Pixiv's "Search options" (see PixivAdvancedQuery's doc-comment) —
+    /// combines ADDITIVELY with committedQuery, unlike every advanced
+    /// query above.
+    private var advancedQueryPixiv: PixivAdvancedQuery {
+        get { filterStore.pixivAdvancedQueries[site] ?? PixivAdvancedQuery() }
+        nonmutating set { filterStore.pixivAdvancedQueries[site] = newValue }
+    }
     private var excludedCategoryCount: Int {
         switch site {
         case .ehentai:
@@ -140,6 +151,8 @@ struct ExternalSearchView: View {
             return advancedQueryHP.isEmpty ? 0 : 1
         case .hitomi:
             return advancedQueryHT.isEmpty ? 0 : 1
+        case .pixiv:
+            return advancedQueryPixiv.isEmpty ? 0 : 1
         default: return 0
         }
     }
@@ -196,6 +209,10 @@ struct ExternalSearchView: View {
             let advanced = advancedQueryHT
             let text = advanced.isEmpty ? committedQuery : advanced.encoded()
             return .search(query: text, excludedCategoryBits: excludedCategoryBits)
+        }
+        // Additive, not exclusive — see advancedQueryPixiv's doc-comment.
+        if site == .pixiv {
+            return .search(query: advancedQueryPixiv.encoded(word: committedQuery), excludedCategoryBits: 0)
         }
         return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
     }
@@ -259,7 +276,35 @@ struct ExternalSearchView: View {
                 // same string), it just no longer needs to be the ONLY way
                 // to commit a search.
                 .onSubmit(of: .search) { commitSearch() }
+                .searchSuggestions {
+                    if site == .pixiv {
+                        ForEach(pixivSuggestions, id: \.name) { suggestion in
+                            Text(suggestion.category.isEmpty ? suggestion.name : "\(suggestion.name) (\(suggestion.category))")
+                                .searchCompletion(suggestion.name)
+                        }
+                    }
+                }
+                .task(id: query) { await updatePixivSuggestions() }
         }
+    }
+
+    /// See ExternalCombinedCatalogView.updatePixivSuggestions's doc-comment
+    /// — the same feature, one flat helper per screen rather than a shared
+    /// one, since the two screens' @State/`site` shape differs enough that
+    /// sharing it would need its own tiny view model just for this.
+    private func updatePixivSuggestions() async {
+        guard site == .pixiv else { pixivSuggestions = []; return }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { pixivSuggestions = []; return }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        guard !Task.isCancelled, trimmed == query.trimmingCharacters(in: .whitespaces) else { return }
+        let provider = ExternalSiteRegistry.provider(for: .pixiv)
+        guard let results = try? await provider.fetchAutocomplete(query: trimmed, namespace: nil) else {
+            pixivSuggestions = []
+            return
+        }
+        guard !Task.isCancelled else { return }
+        pixivSuggestions = Array(results.prefix(10))
     }
 
     /// Found-count banner — only visible right after Return was pressed
@@ -413,6 +458,8 @@ struct ExternalSearchView: View {
             advancedQueryHP = HentaiPillAdvancedQuery()
         case .hitomi:
             advancedQueryHT = HitomiAdvancedQuery()
+        case .pixiv:
+            advancedQueryPixiv = PixivAdvancedQuery()
         }
     }
 
@@ -473,6 +520,11 @@ struct ExternalSearchView: View {
             HitomiAdvancedFieldsPicker(query: Binding(
                 get: { advancedQueryHT },
                 set: { advancedQueryHT = $0 }
+            ))
+        case .pixiv:
+            PixivAdvancedFieldsPicker(query: Binding(
+                get: { advancedQueryPixiv },
+                set: { advancedQueryPixiv = $0 }
             ))
         }
     }

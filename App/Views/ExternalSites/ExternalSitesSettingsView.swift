@@ -13,6 +13,8 @@ struct ExternalSitesSettingsView: View {
 
     @ObservedObject private var session = ExternalSiteSession.shared
     @ObservedObject private var themeManager = ThemeManager.shared
+    @ObservedObject private var pixivAuth = PixivAuthStore.shared
+    @State private var showPixivLogin = false
 
     var body: some View {
         ZStack {
@@ -58,31 +60,66 @@ struct ExternalSitesSettingsView: View {
     }
 
     private func siteRow(_ site: ExternalSite) -> some View {
-        HStack {
-            Text(site.displayName)
-                .foregroundStyle(Theme.textPrimary)
-            Spacer()
-            Toggle("", isOn: Binding(
-                get: { session.enabledSites.contains(site) },
-                set: { isOn in
-                    if isOn { session.enabledSites.insert(site) } else {
-                        session.enabledSites.remove(site)
-                        // Disabled the site that was active — fall back
-                        // to normal mode (the same principle as if the
-                        // site had disappeared from the picker entirely).
-                        if session.activeExternalSite == site { session.activeExternalSite = nil }
-                        // Combined mode ("All sites") makes no sense with
-                        // no sites enabled — otherwise it would silently
-                        // stay active, showing an empty catalog.
-                        if session.enabledSites.isEmpty { session.combinedModeActive = false }
+        VStack(spacing: 0) {
+            HStack {
+                Text(site.displayName)
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { session.enabledSites.contains(site) },
+                    set: { isOn in
+                        if isOn { session.enabledSites.insert(site) } else {
+                            session.enabledSites.remove(site)
+                            // Disabled the site that was active — fall back
+                            // to normal mode (the same principle as if the
+                            // site had disappeared from the picker entirely).
+                            if session.activeExternalSite == site { session.activeExternalSite = nil }
+                            // Combined mode ("All sites") makes no sense with
+                            // no sites enabled — otherwise it would silently
+                            // stay active, showing an empty catalog.
+                            if session.enabledSites.isEmpty { session.combinedModeActive = false }
+                        }
                     }
-                }
-            ))
-            .labelsHidden()
-            .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
+                ))
+                .labelsHidden()
+                .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 52)
+            // Pixiv is the one site in this list that's a real
+            // account-gated API (see PixivProvider's doc-comment) — every
+            // request 401s without a login, so unlike the other five
+            // (anonymous scrapes) it needs its own sign-in row here.
+            if site == .pixiv {
+                pixivLoginRow
+            }
+        }
+    }
+
+    private var pixivLoginRow: some View {
+        HStack {
+            if pixivAuth.isLoggedIn {
+                Text(pixivAuth.username.map { "Вход выполнен: \($0)" } ?? "Вход выполнен")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                Spacer()
+                Button("Выйти", role: .destructive) { pixivAuth.logout() }
+                    .font(.footnote.weight(.semibold))
+            } else {
+                Text("Требуется вход в аккаунт Pixiv")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                Spacer()
+                Button("Войти") { showPixivLogin = true }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+            }
         }
         .padding(.horizontal, 16)
-        .frame(minHeight: 52)
+        .padding(.bottom, 12)
+        .sheet(isPresented: $showPixivLogin) {
+            PixivLoginView()
+        }
     }
 }
 

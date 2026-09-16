@@ -1,17 +1,18 @@
 import Foundation
 
-/// A user-named snapshot of one "Filters" tab's state in
-/// ExternalCombinedCatalogView — either the whole "All" tab (every site's
-/// filters together, `site == nil`) or one specific site's own section.
-/// Created via the "Save filter" chip in the "Saved filters" screen
-/// (ExternalCombinedCatalogView.savedFiltersSheet) and re-applied by
+/// A user-named snapshot of the combined catalog's ENTIRE "Filters" state
+/// (every site at once) — per direct feedback, saved filters are NOT
+/// scoped per site/tab (an earlier version of this feature was); saving
+/// from any tab captures ALL sites' current filters together, and applying
+/// one restores all of them together, regardless of which tab was active
+/// when you tapped either button. Created via the "Save filter" chip (see
+/// ExternalCombinedCatalogView.saveCurrentFilterChip) and re-applied by
 /// tapping its row (see applySavedFilter). Same in-memory-only lifetime as
 /// the rest of ExternalCatalogFilterStore — doesn't need to survive a
 /// relaunch.
 struct ExternalSavedFilter: Identifiable {
     let id = UUID()
     var name: String
-    let site: ExternalSite?
     var excludedCategoriesEH: Set<EHentaiCategory> = []
     var excludedCategoriesIH: Set<ImhentaiCategory> = []
     var excludedLanguagesIH: Set<ImhentaiLanguage> = []
@@ -21,10 +22,11 @@ struct ExternalSavedFilter: Identifiable {
     var advancedQuery3H = ThreeHentaiAdvancedQuery()
     var advancedQueryHP = HentaiPillAdvancedQuery()
     var advancedQueryHT = HitomiAdvancedQuery()
+    var advancedQueryPixiv = PixivAdvancedQuery()
 
     /// Active-filter count, for the small badge next to the name in the
     /// saved-filters list — same formula as
-    /// ExternalCombinedCatalogView.excludedCategoryCount(for:).
+    /// ExternalCombinedCatalogView.excludedCategoryCount.
     var filterCount: Int {
         excludedCategoriesEH.count + excludedCategoriesIH.count + excludedLanguagesIH.count
             + advancedQueryEH.tags.count + advancedQueryEH.series.count + advancedQueryEH.characters.count + advancedQueryEH.artists.count + advancedQueryEH.groups.count
@@ -34,6 +36,7 @@ struct ExternalSavedFilter: Identifiable {
             + advancedQuery3H.tags.count
             + (advancedQueryHP.isEmpty ? 0 : 1)
             + (advancedQueryHT.isEmpty ? 0 : 1)
+            + (advancedQueryPixiv.isEmpty ? 0 : 1)
     }
 }
 
@@ -85,6 +88,12 @@ final class ExternalCatalogFilterStore: ObservableObject {
     /// site's own female:/male:/type:/tag:/... prefix syntax directly,
     /// unlike every other site's structured chip fields.
     @Published var hitomiAdvancedQueries: [ExternalSite: HitomiAdvancedQuery] = [:]
+    /// Pixiv's own "Search options" (Targets/Type of Work/AI filter/Sort/
+    /// Posting date/Resolution, see PixivAdvancedQuery/
+    /// PixivAdvancedFieldsPicker) — combines ADDITIVELY with the shared
+    /// search field rather than replacing it (see PixivAdvancedQuery's
+    /// doc-comment), unlike every other entry in this file.
+    @Published var pixivAdvancedQueries: [ExternalSite: PixivAdvancedQuery] = [:]
 
     /// Combined "All sites" catalog (ExternalCombinedCatalogView) — its own
     /// separate state, not mixed in with the single-site ones.
@@ -98,6 +107,7 @@ final class ExternalCatalogFilterStore: ObservableObject {
     @Published var combinedThreeHentaiAdvancedQuery = ThreeHentaiAdvancedQuery()
     @Published var combinedHentaiPillAdvancedQuery = HentaiPillAdvancedQuery()
     @Published var combinedHitomiAdvancedQuery = HitomiAdvancedQuery()
+    @Published var combinedPixivAdvancedQuery = PixivAdvancedQuery()
     /// Active chip in the combined catalog's "Filters" sheet — which
     /// section is currently shown (see ExternalCombinedCatalogView.
     /// filtersSheet). nil = "All" (all sections at once, the old behavior).
@@ -107,10 +117,8 @@ final class ExternalCatalogFilterStore: ObservableObject {
     @Published var combinedFiltersActiveSite: ExternalSite?
 
     /// Saved filter presets for the combined catalog's "Filters" sheet —
-    /// see ExternalSavedFilter and ExternalCombinedCatalogView.
-    /// savedFiltersSheet. One flat list for every tab (`site == nil` for
-    /// "All" + one entry per site); each screen filters it down to its own
-    /// tab (see savedFilters(for:)).
+    /// see ExternalSavedFilter (NOT scoped per site/tab, per direct
+    /// feedback) and ExternalCombinedCatalogView.savedFiltersSheet.
     @Published var savedCombinedFilters: [ExternalSavedFilter] = []
 
     private init() {}

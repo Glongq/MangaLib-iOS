@@ -60,6 +60,12 @@ private func externalImageReferer(for url: URL) -> String {
     if host.hasSuffix("sh-cdn.com") {
         return "https://www.simply-hentai.com/"
     }
+    // i.pximg.net/s.pximg.net — pixiv's own image CDN, confirmed by HAR: a
+    // real request from the official app sends exactly this Referer (not
+    // pixiv.net itself) for both full-size images and profile/UI assets.
+    if host.hasSuffix("pximg.net") {
+        return "https://app-api.pixiv.net/"
+    }
     return "https://hitomi.la/"
 }
 

@@ -51,6 +51,11 @@ struct ExternalCombinedCatalogView: View {
     @State private var searchResultCount: Int?
     @State private var searchResultIsExact = false
     @State private var searchJustSubmitted = false
+    /// Pixiv tag suggestions for the shared search field (see
+    /// pixivSearchSuggestions) — "original (translation)", exactly the
+    /// real app's own search-bar behavior (per direct request), only
+    /// fetched/shown when pixiv is one of the enabled sites.
+    @State private var pixivSuggestions: [ExternalTagSuggestion] = []
 
     private var sites: [ExternalSite] { ExternalSite.allCases.filter { session.enabledSites.contains($0) } }
     /// Unlike ExternalSearchView (there it's always EXACTLY one site — you
@@ -67,8 +72,9 @@ struct ExternalCombinedCatalogView: View {
     private var showsThreeHentaiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .threeHentai } }
     private var showsHentaiPillFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .hentaiPill } }
     private var showsHitomiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .hitomi } }
+    private var showsPixivFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .pixiv } }
     private var showsCategoryFilter: Bool {
-        showsEHentaiFilter || showsImhentaiFilter || showsSimplyHentaiFilter || showsThreeHentaiFilter || showsHentaiPillFilter || showsHitomiFilter
+        showsEHentaiFilter || showsImhentaiFilter || showsSimplyHentaiFilter || showsThreeHentaiFilter || showsHentaiPillFilter || showsHitomiFilter || showsPixivFilter
     }
     /// Sites that currently have something to show in the "Filters" tab —
     /// the source of the switcher chips (see filtersSheet).
@@ -111,6 +117,10 @@ struct ExternalCombinedCatalogView: View {
         get { filterStore.combinedHitomiAdvancedQuery }
         nonmutating set { filterStore.combinedHitomiAdvancedQuery = newValue }
     }
+    private var advancedQueryPixiv: PixivAdvancedQuery {
+        get { filterStore.combinedPixivAdvancedQuery }
+        nonmutating set { filterStore.combinedPixivAdvancedQuery = newValue }
+    }
     /// The active chip tab in "Filters" — nil means "All" (all sections
     /// stacked, as before). See filtersSheet.
     private var activeFiltersSite: ExternalSite? {
@@ -135,6 +145,7 @@ struct ExternalCombinedCatalogView: View {
             + th.tags.count
             + (advancedQueryHP.isEmpty ? 0 : 1)
             + (advancedQueryHT.isEmpty ? 0 : 1)
+            + (advancedQueryPixiv.isEmpty ? 0 : 1)
     }
     /// Active filter count for ONE site — used only by the switcher chips
     /// (see filtersSheet), to show a per-section badge instead of the
@@ -158,6 +169,8 @@ struct ExternalCombinedCatalogView: View {
             return advancedQueryHP.isEmpty ? 0 : 1
         case .hitomi:
             return advancedQueryHT.isEmpty ? 0 : 1
+        case .pixiv:
+            return advancedQueryPixiv.isEmpty ? 0 : 1
         }
     }
     /// A separate query PER SITE — per direct feedback (Aug 31): imhentai
@@ -212,6 +225,13 @@ struct ExternalCombinedCatalogView: View {
             let text = advanced.isEmpty ? committedQuery : advanced.encoded()
             return .search(query: text, excludedCategoryBits: excludedCategoryBits)
         }
+        // Pixiv's "Search options" combine ADDITIVELY with the shared
+        // field instead of replacing it (see PixivAdvancedQuery's
+        // doc-comment) — no exclusivity branch here, always
+        // committedQuery + whatever filters are set.
+        if site == .pixiv {
+            return .search(query: advancedQueryPixiv.encoded(word: committedQuery), excludedCategoryBits: 0)
+        }
         return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
     }
     /// A string "fingerprint" of each site's query — only for `.id(...)`
@@ -255,6 +275,14 @@ struct ExternalCombinedCatalogView: View {
         // — same "found ~N titles specifically on Enter" request), rather
         // than waiting out the debounce below.
         .onSubmit(of: .search) { commitSearch() }
+        .searchSuggestions {
+            if sites.contains(.pixiv) {
+                ForEach(pixivSuggestions, id: \.name) { suggestion in
+                    Text(suggestion.category.isEmpty ? suggestion.name : "\(suggestion.name) (\(suggestion.category))")
+                        .searchCompletion(suggestion.name)
+                }
+            }
+        }
         .background(Theme.background.ignoresSafeArea())
         .sheet(isPresented: $showFilters) {
             filtersSheet
@@ -270,6 +298,27 @@ struct ExternalCombinedCatalogView: View {
             committedQuery = query.trimmingCharacters(in: .whitespaces)
             filterStore.combinedQuery = committedQuery
         }
+        .task(id: query) { await updatePixivSuggestions() }
+    }
+
+    /// Pixiv's own `/v2/search/autocomplete` — see PixivProvider.
+    /// fetchAutocomplete's doc-comment for the translated-tag behavior.
+    /// Runs as its OWN separate `.task(id: query)` (not merged into the
+    /// debounce above) so a slow/failed autocomplete call can never delay
+    /// committing the actual search text.
+    private func updatePixivSuggestions() async {
+        guard sites.contains(.pixiv) else { pixivSuggestions = []; return }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 1 else { pixivSuggestions = []; return }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        guard !Task.isCancelled, trimmed == query.trimmingCharacters(in: .whitespaces) else { return }
+        let provider = ExternalSiteRegistry.provider(for: .pixiv)
+        guard let results = try? await provider.fetchAutocomplete(query: trimmed, namespace: nil) else {
+            pixivSuggestions = []
+            return
+        }
+        guard !Task.isCancelled else { return }
+        pixivSuggestions = Array(results.prefix(10))
     }
 
     private func commitSearch() {
@@ -386,21 +435,20 @@ struct ExternalCombinedCatalogView: View {
     }
 
     /// "Saved filters" — opened by tapping the "Filters" sheet's own title.
-    /// Uses `activeFiltersSite` as-is (whatever tab was active in
-    /// filtersSheet when the title was tapped) — per direct feedback, this
-    /// screen does NOT repeat the All/site chip switcher (that lives one
-    /// level up, in filtersSheet itself); it just lists that one tab's
-    /// saved presets (savedFilters(for:)) and, via the "Save filter" chip,
-    /// captures whatever is CURRENTLY set for that tab under a new name
-    /// (snapshotCurrentFilters/saveCurrentFilter).
+    /// Per direct feedback, NOT scoped per site/tab (an earlier version of
+    /// this screen was, with its own All/site chip switcher) — one flat
+    /// list, saving/applying always covers every site's filters together
+    /// (see ExternalSavedFilter/snapshotCurrentFilters/applySavedFilter),
+    /// regardless of which tab was active in filtersSheet when you opened
+    /// this or tapped "Save filter".
     private var savedFiltersSheet: some View {
         NavigationStack {
             ScrollView {
-                savedFiltersListForActiveTab
+                savedFiltersList
                     .padding(16)
             }
             .background(Theme.background.ignoresSafeArea())
-            .navigationTitle("Сохранённые фильтры — \(activeFiltersSite?.displayName ?? "Все")")
+            .navigationTitle("Сохранённые фильтры")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -447,13 +495,9 @@ struct ExternalCombinedCatalogView: View {
         .buttonStyle(.plain)
     }
 
-    private func savedFilters(for site: ExternalSite?) -> [ExternalSavedFilter] {
-        filterStore.savedCombinedFilters.filter { $0.site == site }
-    }
-
     @ViewBuilder
-    private var savedFiltersListForActiveTab: some View {
-        let items = savedFilters(for: activeFiltersSite)
+    private var savedFiltersList: some View {
+        let items = filterStore.savedCombinedFilters
         if items.isEmpty {
             VStack(spacing: 8) {
                 Image(systemName: "bookmark").font(.largeTitle).foregroundStyle(Theme.textSecondary)
@@ -503,32 +547,23 @@ struct ExternalCombinedCatalogView: View {
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    /// Captures the CURRENT state of `site`'s tab (nil — the whole "All"
-    /// tab, every site's filters at once) into a new unnamed preset — the
-    /// name is filled in by saveCurrentFilter right after the alert.
-    private func snapshotCurrentFilters(for site: ExternalSite?) -> ExternalSavedFilter {
-        var snapshot = ExternalSavedFilter(name: "", site: site)
-        if site == nil || site == .ehentai {
-            snapshot.excludedCategoriesEH = excludedCategoriesEH
-            snapshot.advancedQueryEH = advancedQueryEH
-        }
-        if site == nil || site == .imhentai {
-            snapshot.excludedCategoriesIH = excludedCategoriesIH
-            snapshot.excludedLanguagesIH = excludedLanguagesIH
-            snapshot.advancedQueryIH = advancedQueryIH
-        }
-        if site == nil || site == .simplyHentai {
-            snapshot.advancedQuerySH = advancedQuerySH
-        }
-        if site == nil || site == .threeHentai {
-            snapshot.advancedQuery3H = advancedQuery3H
-        }
-        if site == nil || site == .hentaiPill {
-            snapshot.advancedQueryHP = advancedQueryHP
-        }
-        if site == nil || site == .hitomi {
-            snapshot.advancedQueryHT = advancedQueryHT
-        }
+    /// Captures the CURRENT state of every site's filters at once into a
+    /// new unnamed preset — the name is filled in by saveCurrentFilter
+    /// right after the alert. NOT scoped to `activeFiltersSite` (see
+    /// ExternalSavedFilter's doc-comment) — saving from any tab captures
+    /// everything the same way.
+    private func snapshotCurrentFilters() -> ExternalSavedFilter {
+        var snapshot = ExternalSavedFilter(name: "")
+        snapshot.excludedCategoriesEH = excludedCategoriesEH
+        snapshot.advancedQueryEH = advancedQueryEH
+        snapshot.excludedCategoriesIH = excludedCategoriesIH
+        snapshot.excludedLanguagesIH = excludedLanguagesIH
+        snapshot.advancedQueryIH = advancedQueryIH
+        snapshot.advancedQuerySH = advancedQuerySH
+        snapshot.advancedQuery3H = advancedQuery3H
+        snapshot.advancedQueryHP = advancedQueryHP
+        snapshot.advancedQueryHT = advancedQueryHT
+        snapshot.advancedQueryPixiv = advancedQueryPixiv
         return snapshot
     }
 
@@ -536,40 +571,24 @@ struct ExternalCombinedCatalogView: View {
         let trimmed = newFilterName.trimmingCharacters(in: .whitespaces)
         newFilterName = ""
         guard !trimmed.isEmpty else { return }
-        var snapshot = snapshotCurrentFilters(for: activeFiltersSite)
+        var snapshot = snapshotCurrentFilters()
         snapshot.name = trimmed
         filterStore.savedCombinedFilters.append(snapshot)
     }
 
-    /// Restores a saved preset back into the live filter state for its own
-    /// tab (nil — overwrites every site's filters at once, same scope it
-    /// was captured with in snapshotCurrentFilters) and switches the chip
-    /// switcher to that tab, so the underlying filtersSheet shows the
-    /// result right away once this screen is dismissed.
+    /// Restores a saved preset back into every site's live filter state at
+    /// once (see ExternalSavedFilter's doc-comment).
     private func applySavedFilter(_ preset: ExternalSavedFilter) {
-        let site = preset.site
-        if site == nil || site == .ehentai {
-            excludedCategoriesEH = preset.excludedCategoriesEH
-            advancedQueryEH = preset.advancedQueryEH
-        }
-        if site == nil || site == .imhentai {
-            excludedCategoriesIH = preset.excludedCategoriesIH
-            excludedLanguagesIH = preset.excludedLanguagesIH
-            advancedQueryIH = preset.advancedQueryIH
-        }
-        if site == nil || site == .simplyHentai {
-            advancedQuerySH = preset.advancedQuerySH
-        }
-        if site == nil || site == .threeHentai {
-            advancedQuery3H = preset.advancedQuery3H
-        }
-        if site == nil || site == .hentaiPill {
-            advancedQueryHP = preset.advancedQueryHP
-        }
-        if site == nil || site == .hitomi {
-            advancedQueryHT = preset.advancedQueryHT
-        }
-        activeFiltersSite = site
+        excludedCategoriesEH = preset.excludedCategoriesEH
+        advancedQueryEH = preset.advancedQueryEH
+        excludedCategoriesIH = preset.excludedCategoriesIH
+        excludedLanguagesIH = preset.excludedLanguagesIH
+        advancedQueryIH = preset.advancedQueryIH
+        advancedQuerySH = preset.advancedQuerySH
+        advancedQuery3H = preset.advancedQuery3H
+        advancedQueryHP = preset.advancedQueryHP
+        advancedQueryHT = preset.advancedQueryHT
+        advancedQueryPixiv = preset.advancedQueryPixiv
         showSavedFilters = false
     }
 
@@ -638,6 +657,7 @@ struct ExternalCombinedCatalogView: View {
                 if showsThreeHentaiFilter { filterSection(for: .threeHentai) }
                 if showsHentaiPillFilter { filterSection(for: .hentaiPill) }
                 if showsHitomiFilter { filterSection(for: .hitomi) }
+                if showsPixivFilter { filterSection(for: .pixiv) }
             }
         }
     }
@@ -718,6 +738,14 @@ struct ExternalCombinedCatalogView: View {
                     set: { advancedQueryHT = $0 }
                 ))
             }
+        case .pixiv:
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Pixiv — параметры поиска").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                PixivAdvancedFieldsPicker(query: Binding(
+                    get: { advancedQueryPixiv },
+                    set: { advancedQueryPixiv = $0 }
+                ))
+            }
         }
     }
 
@@ -755,6 +783,8 @@ struct ExternalCombinedCatalogView: View {
             advancedQueryHP = HentaiPillAdvancedQuery()
         case .hitomi:
             advancedQueryHT = HitomiAdvancedQuery()
+        case .pixiv:
+            advancedQueryPixiv = PixivAdvancedQuery()
         }
     }
 }

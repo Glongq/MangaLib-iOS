@@ -13,6 +13,11 @@ enum ExternalSite: String, CaseIterable, Identifiable, Codable {
     case imhentai
     case hentaiPill
     case simplyHentai
+    /// The odd one out in this file — a real account-gated JSON API
+    /// (app-api.pixiv.net), not an anonymous HTML scrape, see
+    /// PixivProvider's doc-comment. Confirmed by a live HAR of the
+    /// official iOS app (Sep 16).
+    case pixiv
     // Further sites get added here as their HAR captures are analyzed (see the plan).
 
     var id: String { rawValue }
@@ -25,6 +30,7 @@ enum ExternalSite: String, CaseIterable, Identifiable, Codable {
         case .imhentai: return "IMHentai"
         case .hentaiPill: return "HentaiPill"
         case .simplyHentai: return "Simply Hentai"
+        case .pixiv: return "Pixiv"
         }
     }
 }
