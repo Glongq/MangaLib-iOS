@@ -574,6 +574,12 @@ struct ExternalCombinedCatalogView: View {
                         activeFiltersSite = site
                     }
                 }
+                // Per direct feedback: visible right here, in every tab
+                // (All/site) of THIS bar — not only inside the separate
+                // "Saved filters" screen (savedFiltersSheet, opened via the
+                // title) — saves whatever's currently set for the active
+                // tab (activeFiltersSite) under a new name.
+                saveCurrentFilterChip
             }
         }
         .scrollClipDisabled()
