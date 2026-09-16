@@ -248,6 +248,20 @@ struct ExternalCombinedCatalogView: View {
         .sheet(isPresented: $showFilters) {
             filtersSheet
         }
+        // Attached at the ROOT (not inside filtersSheet/savedFiltersSheet
+        // themselves) so the "Save filter" chip works from BOTH places it
+        // appears — this sheet's own bottom row (filterSiteChips) AND
+        // savedFiltersSheet's, a sheet nested one level deeper — an alert
+        // declared here presents on top of either sheet regardless of
+        // nesting depth; declaring it inside one of the nested sheets
+        // instead left the OTHER chip's tap setting showSaveFilterPrompt
+        // with no alert modifier anywhere in its own presented hierarchy
+        // to react to it.
+        .alert("Сохранить фильтр", isPresented: $showSaveFilterPrompt) {
+            TextField("Название", text: $newFilterName)
+            Button("Отмена", role: .cancel) { newFilterName = "" }
+            Button("Сохранить") { saveCurrentFilter() }
+        }
         .onAppear {
             query = filterStore.combinedQuery
             committedQuery = query
@@ -408,11 +422,6 @@ struct ExternalCombinedCatalogView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .alert("Сохранить фильтр", isPresented: $showSaveFilterPrompt) {
-            TextField("Название", text: $newFilterName)
-            Button("Отмена", role: .cancel) { newFilterName = "" }
-            Button("Сохранить") { saveCurrentFilter() }
-        }
     }
 
     private var saveCurrentFilterChip: some View {
