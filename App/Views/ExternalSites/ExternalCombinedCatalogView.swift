@@ -25,6 +25,12 @@ struct ExternalCombinedCatalogView: View {
     @State private var query = ""
     @State private var committedQuery = ""
     @State private var showFilters = false
+    /// "Saved filters" screen — opened by tapping the filters sheet's own
+    /// title (see filtersSheet's .principal toolbar item / savedFiltersSheet).
+    @State private var showSavedFilters = false
+    /// Name-entry alert for the "Save filter" chip (see saveCurrentFilterChip).
+    @State private var showSaveFilterPrompt = false
+    @State private var newFilterName = ""
     /// "Found ~N titles" banner — same mechanism as ExternalSearchView (see
     /// its doc-comments): shown only right after Return, summing every
     /// enabled site's own total where the site states one (currently only
@@ -320,6 +326,23 @@ struct ExternalCombinedCatalogView: View {
             .navigationTitle("Фильтры")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // A tappable stand-in for the plain title — per direct
+                // request, tapping "Filters" opens the saved-presets
+                // screen (savedFiltersSheet). A .principal toolbar item
+                // replaces the default title view entirely, so the
+                // .navigationTitle above stays only for the back-button/
+                // accessibility label, never actually drawn here.
+                ToolbarItem(placement: .principal) {
+                    Button {
+                        showSavedFilters = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Фильтры").font(.headline)
+                            Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
+                        }
+                        .foregroundStyle(Theme.textPrimary)
+                    }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Сбросить") { resetFilters() }
                         .disabled(resetDisabled)
@@ -337,6 +360,207 @@ struct ExternalCombinedCatalogView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .sheet(isPresented: $showSavedFilters) {
+            savedFiltersSheet
+        }
+    }
+
+    /// "Saved filters" — opened by tapping the "Filters" sheet's own title.
+    /// Reuses `activeFiltersSite` as the shared tab context (switching a
+    /// chip here also changes which section filtersSheet shows underneath,
+    /// and vice versa) — instead of the filter fields themselves, each tab
+    /// lists its own saved presets (savedFilters(for:)) and, via the
+    /// trailing "Save filter" chip, captures whatever is CURRENTLY set for
+    /// that tab under a new name (snapshotCurrentFilters/saveCurrentFilter).
+    private var savedFiltersSheet: some View {
+        NavigationStack {
+            ScrollView {
+                savedFiltersListForActiveTab
+                    .padding(16)
+            }
+            .background(Theme.background.ignoresSafeArea())
+            .navigationTitle("Сохранённые фильтры")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Готово") { showSavedFilters = false }
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        filterChip(title: "Все", count: savedFilters(for: nil).count, isActive: activeFiltersSite == nil) {
+                            activeFiltersSite = nil
+                        }
+                        ForEach(filterableSites, id: \.self) { site in
+                            filterChip(title: site.displayName, count: savedFilters(for: site).count, isActive: activeFiltersSite == site) {
+                                activeFiltersSite = site
+                            }
+                        }
+                        saveCurrentFilterChip
+                    }
+                }
+                .scrollClipDisabled()
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
+                .padding(.bottom, 20)
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .alert("Сохранить фильтр", isPresented: $showSaveFilterPrompt) {
+            TextField("Название", text: $newFilterName)
+            Button("Отмена", role: .cancel) { newFilterName = "" }
+            Button("Сохранить") { saveCurrentFilter() }
+        }
+    }
+
+    private var saveCurrentFilterChip: some View {
+        Button {
+            newFilterName = ""
+            showSaveFilterPrompt = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "plus").font(.footnote.weight(.semibold))
+                Text("Сохранить фильтр").font(.footnote.weight(.medium)).lineLimit(1)
+            }
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 14)
+            .frame(minHeight: Theme.pillControlHeight)
+            .glassEffect(.regular.interactive(), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func savedFilters(for site: ExternalSite?) -> [ExternalSavedFilter] {
+        filterStore.savedCombinedFilters.filter { $0.site == site }
+    }
+
+    @ViewBuilder
+    private var savedFiltersListForActiveTab: some View {
+        let items = savedFilters(for: activeFiltersSite)
+        if items.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "bookmark").font(.largeTitle).foregroundStyle(Theme.textSecondary)
+                Text("Нет сохранённых фильтров").font(.subheadline).foregroundStyle(Theme.textSecondary)
+                Text("Настройте фильтры и нажмите «Сохранить фильтр» внизу")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 40)
+        } else {
+            VStack(spacing: 10) {
+                ForEach(items) { preset in
+                    savedFilterRow(preset)
+                }
+            }
+        }
+    }
+
+    private func savedFilterRow(_ preset: ExternalSavedFilter) -> some View {
+        HStack {
+            Button {
+                applySavedFilter(preset)
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(preset.name).font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary)
+                        Text("Активных фильтров: \(preset.filterCount)")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textSecondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Button {
+                deleteSavedFilter(preset)
+            } label: {
+                Image(systemName: "trash").font(.footnote).foregroundStyle(Theme.textSecondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Captures the CURRENT state of `site`'s tab (nil — the whole "All"
+    /// tab, every site's filters at once) into a new unnamed preset — the
+    /// name is filled in by saveCurrentFilter right after the alert.
+    private func snapshotCurrentFilters(for site: ExternalSite?) -> ExternalSavedFilter {
+        var snapshot = ExternalSavedFilter(name: "", site: site)
+        if site == nil || site == .ehentai {
+            snapshot.excludedCategoriesEH = excludedCategoriesEH
+            snapshot.advancedQueryEH = advancedQueryEH
+        }
+        if site == nil || site == .imhentai {
+            snapshot.excludedCategoriesIH = excludedCategoriesIH
+            snapshot.excludedLanguagesIH = excludedLanguagesIH
+            snapshot.advancedQueryIH = advancedQueryIH
+        }
+        if site == nil || site == .simplyHentai {
+            snapshot.advancedQuerySH = advancedQuerySH
+        }
+        if site == nil || site == .threeHentai {
+            snapshot.advancedQuery3H = advancedQuery3H
+        }
+        if site == nil || site == .hentaiPill {
+            snapshot.advancedQueryHP = advancedQueryHP
+        }
+        if site == nil || site == .hitomi {
+            snapshot.advancedQueryHT = advancedQueryHT
+        }
+        return snapshot
+    }
+
+    private func saveCurrentFilter() {
+        let trimmed = newFilterName.trimmingCharacters(in: .whitespaces)
+        newFilterName = ""
+        guard !trimmed.isEmpty else { return }
+        var snapshot = snapshotCurrentFilters(for: activeFiltersSite)
+        snapshot.name = trimmed
+        filterStore.savedCombinedFilters.append(snapshot)
+    }
+
+    /// Restores a saved preset back into the live filter state for its own
+    /// tab (nil — overwrites every site's filters at once, same scope it
+    /// was captured with in snapshotCurrentFilters) and switches the chip
+    /// switcher to that tab, so the underlying filtersSheet shows the
+    /// result right away once this screen is dismissed.
+    private func applySavedFilter(_ preset: ExternalSavedFilter) {
+        let site = preset.site
+        if site == nil || site == .ehentai {
+            excludedCategoriesEH = preset.excludedCategoriesEH
+            advancedQueryEH = preset.advancedQueryEH
+        }
+        if site == nil || site == .imhentai {
+            excludedCategoriesIH = preset.excludedCategoriesIH
+            excludedLanguagesIH = preset.excludedLanguagesIH
+            advancedQueryIH = preset.advancedQueryIH
+        }
+        if site == nil || site == .simplyHentai {
+            advancedQuerySH = preset.advancedQuerySH
+        }
+        if site == nil || site == .threeHentai {
+            advancedQuery3H = preset.advancedQuery3H
+        }
+        if site == nil || site == .hentaiPill {
+            advancedQueryHP = preset.advancedQueryHP
+        }
+        if site == nil || site == .hitomi {
+            advancedQueryHT = preset.advancedQueryHT
+        }
+        activeFiltersSite = site
+        showSavedFilters = false
+    }
+
+    private func deleteSavedFilter(_ preset: ExternalSavedFilter) {
+        filterStore.savedCombinedFilters.removeAll { $0.id == preset.id }
     }
 
     private var filterSiteChips: some View {

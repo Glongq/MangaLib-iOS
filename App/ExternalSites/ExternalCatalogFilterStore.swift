@@ -1,5 +1,42 @@
 import Foundation
 
+/// A user-named snapshot of one "Filters" tab's state in
+/// ExternalCombinedCatalogView — either the whole "All" tab (every site's
+/// filters together, `site == nil`) or one specific site's own section.
+/// Created via the "Save filter" chip in the "Saved filters" screen
+/// (ExternalCombinedCatalogView.savedFiltersSheet) and re-applied by
+/// tapping its row (see applySavedFilter). Same in-memory-only lifetime as
+/// the rest of ExternalCatalogFilterStore — doesn't need to survive a
+/// relaunch.
+struct ExternalSavedFilter: Identifiable {
+    let id = UUID()
+    var name: String
+    let site: ExternalSite?
+    var excludedCategoriesEH: Set<EHentaiCategory> = []
+    var excludedCategoriesIH: Set<ImhentaiCategory> = []
+    var excludedLanguagesIH: Set<ImhentaiLanguage> = []
+    var advancedQueryEH = EHentaiAdvancedQuery()
+    var advancedQueryIH = ImhentaiAdvancedQuery()
+    var advancedQuerySH = SimplyHentaiAdvancedQuery()
+    var advancedQuery3H = ThreeHentaiAdvancedQuery()
+    var advancedQueryHP = HentaiPillAdvancedQuery()
+    var advancedQueryHT = HitomiAdvancedQuery()
+
+    /// Active-filter count, for the small badge next to the name in the
+    /// saved-filters list — same formula as
+    /// ExternalCombinedCatalogView.excludedCategoryCount(for:).
+    var filterCount: Int {
+        excludedCategoriesEH.count + excludedCategoriesIH.count + excludedLanguagesIH.count
+            + advancedQueryEH.tags.count + advancedQueryEH.series.count + advancedQueryEH.characters.count + advancedQueryEH.artists.count + advancedQueryEH.groups.count
+            + advancedQueryIH.tags.count + advancedQueryIH.parodies.count + advancedQueryIH.artists.count + advancedQueryIH.characters.count + advancedQueryIH.groups.count
+            + advancedQuerySH.tags.count + advancedQuerySH.parodies.count + advancedQuerySH.characters.count + advancedQuerySH.artists.count + advancedQuerySH.translators.count + advancedQuerySH.language.count
+            + (advancedQuerySH.seriesTitle.trimmingCharacters(in: .whitespaces).isEmpty ? 0 : 1)
+            + advancedQuery3H.tags.count
+            + (advancedQueryHP.isEmpty ? 0 : 1)
+            + (advancedQueryHT.isEmpty ? 0 : 1)
+    }
+}
+
 /// Persistent (in memory for the app's runtime — not UserDefaults, does not
 /// need to survive a relaunch) state of external-site catalog filters — per
 /// a direct request (08/30): "filters should not reset when leaving the
@@ -68,6 +105,13 @@ final class ExternalCatalogFilterStore: ObservableObject {
     /// the sheet gets recreated on every open, the chip's position should
     /// not reset.
     @Published var combinedFiltersActiveSite: ExternalSite?
+
+    /// Saved filter presets for the combined catalog's "Filters" sheet —
+    /// see ExternalSavedFilter and ExternalCombinedCatalogView.
+    /// savedFiltersSheet. One flat list for every tab (`site == nil` for
+    /// "All" + one entry per site); each screen filters it down to its own
+    /// tab (see savedFilters(for:)).
+    @Published var savedCombinedFilters: [ExternalSavedFilter] = []
 
     private init() {}
 }
