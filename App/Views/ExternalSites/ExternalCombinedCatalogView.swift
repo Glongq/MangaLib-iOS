@@ -28,8 +28,19 @@ struct ExternalCombinedCatalogView: View {
     /// "Saved filters" screen — opened by tapping the filters sheet's own
     /// title (see filtersSheet's .principal toolbar item / savedFiltersSheet).
     @State private var showSavedFilters = false
-    /// Name-entry alert for the "Save filter" chip (see saveCurrentFilterChip).
+    /// Name-entry alerts for the "Save filter" chip (see
+    /// saveCurrentFilterChip) — ONE PER SHEET rather than a single shared
+    /// flag. SwiftUI presents `.alert` from the view instance it's actually
+    /// attached to; with a single flag shared between filtersSheet's own
+    /// chip and savedFiltersSheet's (a sheet nested one level deeper), the
+    /// alert only reliably showed up from whichever sheet the modifier
+    /// happened to be declared on, and intermittently failed to appear at
+    /// all from the other (SwiftUI trying to present over an
+    /// already-transitioning nested-sheet stack). Two independent flags,
+    /// each with its own `.alert` declared directly on its own sheet, means
+    /// every presentation happens from the sheet that's ACTUALLY topmost.
     @State private var showSaveFilterPrompt = false
+    @State private var showSaveFilterPromptInSavedFilters = false
     @State private var newFilterName = ""
     /// "Found ~N titles" banner — same mechanism as ExternalSearchView (see
     /// its doc-comments): shown only right after Return, summing every
@@ -248,20 +259,6 @@ struct ExternalCombinedCatalogView: View {
         .sheet(isPresented: $showFilters) {
             filtersSheet
         }
-        // Attached at the ROOT (not inside filtersSheet/savedFiltersSheet
-        // themselves) so the "Save filter" chip works from BOTH places it
-        // appears — this sheet's own bottom row (filterSiteChips) AND
-        // savedFiltersSheet's, a sheet nested one level deeper — an alert
-        // declared here presents on top of either sheet regardless of
-        // nesting depth; declaring it inside one of the nested sheets
-        // instead left the OTHER chip's tap setting showSaveFilterPrompt
-        // with no alert modifier anywhere in its own presented hierarchy
-        // to react to it.
-        .alert("Сохранить фильтр", isPresented: $showSaveFilterPrompt) {
-            TextField("Название", text: $newFilterName)
-            Button("Отмена", role: .cancel) { newFilterName = "" }
-            Button("Сохранить") { saveCurrentFilter() }
-        }
         .onAppear {
             query = filterStore.combinedQuery
             committedQuery = query
@@ -377,15 +374,25 @@ struct ExternalCombinedCatalogView: View {
         .sheet(isPresented: $showSavedFilters) {
             savedFiltersSheet
         }
+        // Declared directly on THIS sheet (not hoisted to the root — see
+        // showSaveFilterPrompt's doc-comment) so it reliably presents when
+        // the chip in filterSiteChips (this sheet's own bottom row) is
+        // tapped.
+        .alert("Сохранить фильтр", isPresented: $showSaveFilterPrompt) {
+            TextField("Название", text: $newFilterName)
+            Button("Отмена", role: .cancel) { newFilterName = "" }
+            Button("Сохранить") { saveCurrentFilter() }
+        }
     }
 
     /// "Saved filters" — opened by tapping the "Filters" sheet's own title.
-    /// Reuses `activeFiltersSite` as the shared tab context (switching a
-    /// chip here also changes which section filtersSheet shows underneath,
-    /// and vice versa) — instead of the filter fields themselves, each tab
-    /// lists its own saved presets (savedFilters(for:)) and, via the
-    /// trailing "Save filter" chip, captures whatever is CURRENTLY set for
-    /// that tab under a new name (snapshotCurrentFilters/saveCurrentFilter).
+    /// Uses `activeFiltersSite` as-is (whatever tab was active in
+    /// filtersSheet when the title was tapped) — per direct feedback, this
+    /// screen does NOT repeat the All/site chip switcher (that lives one
+    /// level up, in filtersSheet itself); it just lists that one tab's
+    /// saved presets (savedFilters(for:)) and, via the "Save filter" chip,
+    /// captures whatever is CURRENTLY set for that tab under a new name
+    /// (snapshotCurrentFilters/saveCurrentFilter).
     private var savedFiltersSheet: some View {
         NavigationStack {
             ScrollView {
@@ -393,7 +400,7 @@ struct ExternalCombinedCatalogView: View {
                     .padding(16)
             }
             .background(Theme.background.ignoresSafeArea())
-            .navigationTitle("Сохранённые фильтры")
+            .navigationTitle("Сохранённые фильтры — \(activeFiltersSite?.displayName ?? "Все")")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -401,33 +408,31 @@ struct ExternalCombinedCatalogView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        filterChip(title: "Все", count: savedFilters(for: nil).count, isActive: activeFiltersSite == nil) {
-                            activeFiltersSite = nil
-                        }
-                        ForEach(filterableSites, id: \.self) { site in
-                            filterChip(title: site.displayName, count: savedFilters(for: site).count, isActive: activeFiltersSite == site) {
-                                activeFiltersSite = site
-                            }
-                        }
-                        saveCurrentFilterChip
-                    }
-                }
-                .scrollClipDisabled()
-                .padding(.horizontal, 20)
-                .padding(.top, 4)
-                .padding(.bottom, 20)
+                saveCurrentFilterChip(isPresented: $showSaveFilterPromptInSavedFilters)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 4)
+                    .padding(.bottom, 20)
             }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        // Declared directly on THIS sheet — see showSaveFilterPrompt's
+        // doc-comment: a shared alert hoisted to the root intermittently
+        // failed to present from here, since this sheet sits nested two
+        // levels deep (root → filtersSheet → savedFiltersSheet) and the
+        // root was often mid-transition presenting/dismissing one of the
+        // two sheets above it when the flag flipped.
+        .alert("Сохранить фильтр", isPresented: $showSaveFilterPromptInSavedFilters) {
+            TextField("Название", text: $newFilterName)
+            Button("Отмена", role: .cancel) { newFilterName = "" }
+            Button("Сохранить") { saveCurrentFilter() }
+        }
     }
 
-    private var saveCurrentFilterChip: some View {
+    private func saveCurrentFilterChip(isPresented: Binding<Bool>) -> some View {
         Button {
             newFilterName = ""
-            showSaveFilterPrompt = true
+            isPresented.wrappedValue = true
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "plus").font(.footnote.weight(.semibold))
@@ -588,7 +593,7 @@ struct ExternalCombinedCatalogView: View {
                 // "Saved filters" screen (savedFiltersSheet, opened via the
                 // title) — saves whatever's currently set for the active
                 // tab (activeFiltersSite) under a new name.
-                saveCurrentFilterChip
+                saveCurrentFilterChip(isPresented: $showSaveFilterPrompt)
             }
         }
         .scrollClipDisabled()
