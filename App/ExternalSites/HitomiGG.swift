@@ -32,10 +32,24 @@ enum HitomiGG {
         return String(Int(hex, radix: 16) ?? 0)
     }
 
-    /// `gg.m(g)` — 0 if `g` is in the LIVE (not hardcoded) set of `case`
-    /// values from gg.js (see HitomiGGCache), otherwise 1.
+    /// `gg.m(g)` — the real gg.js body is `var o = 0; switch (g) { case
+    /// ...: o = 1; break; } return o;`: default 0, flipped to 1 ONLY for
+    /// `g` values in the LIVE (not hardcoded) `case` set (see
+    /// HitomiGGCache). This was INVERTED here for who knows how long
+    /// (`caseSet.contains(g) ? 0 : 1`) — confirmed live (Sep 17): for a
+    /// real gallery's page hash, `g` fell inside gg.js's live case set (so
+    /// the real site returns `m=1` → host `a2`), the inverted formula
+    /// picked `m=0` → host `a1`, and `a1` 404s while `a2` returns the
+    /// actual image. Since this function decides EVERY reader page's CDN
+    /// subdomain (see HitomiProvider.pageImageURL) and was backwards for
+    /// every hash, every single full-size page 404s this way (thumbnails
+    /// use a separate, unaffected formula — HitomiProvider.
+    /// thumbnailShard/coverURL/pageThumbnailURL never call this) —
+    /// matching a report of "spinner forever, black screen" for every
+    /// page in the reader while the catalog/preview grid's covers and
+    /// thumbnails load fine.
     static func m(_ g: Int, caseSet: Set<Int>) -> Int {
-        caseSet.contains(g) ? 0 : 1
+        caseSet.contains(g) ? 1 : 0
     }
 }
 

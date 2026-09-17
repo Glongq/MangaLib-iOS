@@ -703,10 +703,14 @@ struct HitomiProvider: ExternalSiteProvider {
     /// "a"/the ".avif" extension — FIXED (Aug 30, third attempt): this used to
     /// be "w"/".webp" here — an assumption based on the general convention of public
     /// hitomi clients, NOT confirmed by live traffic; fresh HAR data captured
-    /// REAL reader URLs (`a1.../*.avif`, `a2.../*.avif`, status 200) —
-    /// the bucket/host-selection formula (gg.s/gg.m) was correct, the mistake was specifically
-    /// in the host letter and the extension. Verified with a live curl test on several
-    /// hashes from the fresh HAR plus one more title separately — all 200
+    /// REAL reader URLs (`a1.../*.avif`, `a2.../*.avif`, status 200).
+    /// `gg.m()` ITSELF turned out to separately have an inverted 0/1 (see
+    /// HitomiGG.m's doc comment, fixed Sep 17 — every full-size page was
+    /// 404ing to the wrong `a1`/`a2` host, confirmed live), so "the
+    /// bucket/host-selection formula was correct" below no longer holds —
+    /// only the host LETTER/extension were right at the time. Verified
+    /// with a live curl test on several hashes from the fresh HAR plus one
+    /// more title separately — all 200
     /// image/avif (Referer: hitomi.la is required — already set in session).
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL {
         let hash = page.key
