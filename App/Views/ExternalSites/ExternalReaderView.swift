@@ -473,6 +473,46 @@ struct ExternalReaderView: View {
     }
 }
 
+/// Resolves a page's image URL and warms `RemoteImageCache` with it —
+/// RETRIES a few times on failure. Both `pageImageURL` (a network round
+/// trip; e.g. HitomiGGCache's live gg.js fetch — can throw on a transient
+/// host hiccup) and `preloadExternalImage` (also network — an external CDN,
+/// especially under a burst of concurrent preload requests fired right when
+/// the reader opens, see preloadUpcoming/preloadVerticalWindow, occasionally
+/// times out/resets) used to be tried EXACTLY ONCE, with `try?` silently
+/// swallowing the error — a single failure left the CURRENTLY VISIBLE page
+/// permanently black (`.task` never re-runs on its own, nothing else in
+/// this pipeline retries). Reported (09/18): "sometimes ANY external site's
+/// reader shows a black screen, even scrolling doesn't help — but the
+/// preview grid has every image" (that grid uses `page.thumbnailURL`
+/// straight from already-parsed detail data, never touching
+/// `pageImageURL` at all, which is why it was unaffected).
+///
+/// Returns the last resolved URL even if warming the cache never actually
+/// succeeded (a real, non-transient 403/404) — as a last-resort fallback so
+/// ZoomableImageScrollView/VerticalPageImage's own RemoteImageLoader still
+/// gets a chance, instead of a guaranteed-black page.
+private func resolveExternalPageURL(
+    provider: any ExternalSiteProvider,
+    galleryId: Int,
+    page: ExternalGalleryPage
+) async -> URL? {
+    var lastURL: URL?
+    for attempt in 0..<3 {
+        if let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) {
+            lastURL = url
+            await preloadExternalImage(url)
+            if RemoteImageCache.shared.image(for: url) != nil {
+                return url
+            }
+        }
+        if attempt < 2 {
+            try? await Task.sleep(nanoseconds: UInt64(300_000_000 * (attempt + 1)))
+        }
+    }
+    return lastURL
+}
+
 // MARK: - Horizontal-mode page (asynchronous URL resolution + ZoomableImageScrollView)
 
 /// Wraps `ZoomableImageScrollView` (see MangaReaderView.swift — reused
@@ -504,22 +544,10 @@ private struct ExternalHorizontalPageImage: View {
             )
         }
         .task {
-            guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
-            // Warm RemoteImageCache with the CORRECT (per-host) Referer
-            // session BEFORE handing the url to ZoomableImageScrollView —
-            // without this, the CURRENT (visible right now) page, unlike
-            // the ones preloaded ahead of time (see preloadPage), had no
-            // chance of ending up in the cache beforehand: page 1 is
-            // never preloaded at all (the preload window starts from the
-            // next one), so ZoomableImageScrollView/RemoteImageLoader
-            // inside it would ALWAYS try to fetch it themselves — with
-            // the wrong session's Referer (see preloadExternalImage
-            // doc-comment) — 404, the image fails to decode, and the
-            // first (sometimes the second too, if TabView renders it
-            // before preloading catches up) page of the reader just
-            // stayed a black background (complaint on 08/31).
-            await preloadExternalImage(url)
-            resolvedURL = url
+            // See resolveExternalPageURL's doc-comment — retries a few
+            // times on a transient failure instead of leaving the page
+            // permanently black on the first hiccup (complaint 09/18).
+            resolvedURL = await resolveExternalPageURL(provider: provider, galleryId: galleryId, page: page)
         }
     }
 }
@@ -540,14 +568,10 @@ private struct ExternalVerticalPageImage: View {
             height: page.height > 0 ? page.height : nil
         )
         .task {
-            guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
-            // See ExternalHorizontalPageImage.task — the same race with
-            // the wrong Referer for the CURRENTLY visible (not
-            // preloaded ahead of time) page, the same fix: warm the
-            // cache with the CORRECT session before handing the url to
-            // VerticalPageImage.
-            await preloadExternalImage(url)
-            resolvedURL = url
+            // See ExternalHorizontalPageImage.task/resolveExternalPageURL
+            // — the same retry-on-transient-failure fix for the CURRENTLY
+            // visible (not preloaded ahead of time) page.
+            resolvedURL = await resolveExternalPageURL(provider: provider, galleryId: galleryId, page: page)
         }
     }
 }
