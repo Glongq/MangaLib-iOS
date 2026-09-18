@@ -27,7 +27,7 @@ enum SimplyHentaiError: Error {
 /// the screen's general search field stops participating for this site at
 /// all — the request is built ONLY from these fields. If they're all
 /// empty — same as before, the usual general field.
-struct SimplyHentaiAdvancedQuery {
+struct SimplyHentaiAdvancedQuery: Codable {
     /// The field's own search string — used INSTEAD OF the screen's
     /// general field when at least one field of this struct is filled in
     /// (see isEmpty).

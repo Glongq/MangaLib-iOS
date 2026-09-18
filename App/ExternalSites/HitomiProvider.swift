@@ -17,7 +17,7 @@ enum HitomiError: Error {
 /// `character:`/`series:` — see HitomiProvider.fetchIdsBySearch), because
 /// that IS how hitomi's own search bar works — there's nothing to
 /// structure into separate chip fields.
-struct HitomiAdvancedQuery {
+struct HitomiAdvancedQuery: Codable {
     var search: String = ""
 
     var isEmpty: Bool { search.trimmingCharacters(in: .whitespaces).isEmpty }

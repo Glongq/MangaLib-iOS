@@ -23,7 +23,7 @@ enum ImhentaiError: Error {
 /// ranges guarantee that. Each provider masks the incoming bitmask down to
 /// ITS OWN known bits (see fetchIdsBySearch below) — other providers' bits in the
 /// same Int are simply ignored, and don't corrupt f_cats/m=&d=&...
-enum ImhentaiCategory: CaseIterable, Identifiable {
+enum ImhentaiCategory: CaseIterable, Identifiable, Codable {
     case manga, doujinshi, western, imageSet, artistCG, gameCG
 
     var id: Self { self }
@@ -79,7 +79,7 @@ enum ImhentaiCategory: CaseIterable, Identifiable {
 /// (see the ImhentaiCategory.bit doc-comment — same principle, just another
 /// non-overlapping dimension in the same channel, without touching the
 /// ExternalSiteProvider protocol).
-enum ImhentaiLanguage: CaseIterable, Identifiable {
+enum ImhentaiLanguage: CaseIterable, Identifiable, Codable {
     case english, japanese, spanish, french, korean, german, russian
 
     var id: Self { self }
@@ -153,7 +153,7 @@ enum ImhentaiLanguage: CaseIterable, Identifiable {
 /// also not confirmed separately (only ONE active tag showed up in the HAR),
 /// assembled by analogy — several `+kind:"..."` separated by a space,
 /// as in most similar little search mini-languages.
-struct ImhentaiAdvancedQuery {
+struct ImhentaiAdvancedQuery: Codable {
     /// IMHentai's own search string — per a direct request (Aug 31),
     /// SEPARATE from the general top search field: ordinary text typed
     /// "the same way as for other sites" reliably finds nothing on imhentai (see

@@ -269,7 +269,7 @@ final class PixivAuthStore: ObservableObject {
 // (Bookmarked works/Bookmark date) or never actually exercised in the
 // capture (Creation tools/Other)).
 
-enum PixivContentType: String, CaseIterable, Identifiable, Hashable {
+enum PixivContentType: String, CaseIterable, Identifiable, Hashable, Codable {
     case illustAndMangaAndUgoira = "illust_and_manga_and_ugoira"
     case illust
     case manga
@@ -288,7 +288,7 @@ enum PixivContentType: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-enum PixivSearchTarget: String, CaseIterable, Identifiable, Hashable {
+enum PixivSearchTarget: String, CaseIterable, Identifiable, Hashable, Codable {
     case partialMatchForTags = "partial_match_for_tags"
     case exactMatchForTags = "exact_match_for_tags"
     case titleAndCaption = "title_and_caption"
@@ -310,7 +310,7 @@ enum PixivSearchTarget: String, CaseIterable, Identifiable, Hashable {
 /// screen carries a "P" badge) — sending it on a free account is expected
 /// to either be ignored or error, same honest "let the server decide"
 /// principle as every other provider in this folder.
-enum PixivSort: String, CaseIterable, Identifiable, Hashable {
+enum PixivSort: String, CaseIterable, Identifiable, Hashable, Codable {
     case dateDesc = "date_desc"
     case dateAsc = "date_asc"
     case popularDesc = "popular_desc"
@@ -331,7 +331,7 @@ enum PixivSort: String, CaseIterable, Identifiable, Hashable {
 /// account-level "AI display setting" convention (0 = show everything,
 /// 1 = hide AI-generated works) rather than being independently confirmed
 /// from this capture alone.
-enum PixivAiFilter: String, CaseIterable, Identifiable, Hashable {
+enum PixivAiFilter: String, CaseIterable, Identifiable, Hashable, Codable {
     case showAll = "0"
     case hideAIGenerated = "1"
 
@@ -356,7 +356,7 @@ enum PixivAiFilter: String, CaseIterable, Identifiable, Hashable {
 /// pixiv entirely — see ExternalSearchView.resolvedQuery/
 /// ExternalCombinedCatalogView.query(for:), same `isEmpty ? committedQuery
 /// : advanced.encoded()` branch as those sites.
-struct PixivAdvancedQuery: Equatable {
+struct PixivAdvancedQuery: Equatable, Codable {
     var search: String = ""
     var contentType: PixivContentType = .illustAndMangaAndUgoira
     var searchTarget: PixivSearchTarget = .partialMatchForTags

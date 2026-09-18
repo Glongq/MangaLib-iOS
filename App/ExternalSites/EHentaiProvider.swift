@@ -26,7 +26,7 @@ enum EHentaiError: Error {
 /// in EHentaiProvider.formEncoded for the rest of f_search); this is an
 /// ASSUMPTION made by symmetry with the confirmed path `/tag/other:nudity+
 /// only`, not separately confirmed specifically inside an f_search command.
-struct EHentaiAdvancedQuery {
+struct EHentaiAdvancedQuery: Codable {
     var search: String = ""
     var tags: [String] = []
     var series: [String] = []
@@ -67,7 +67,7 @@ struct EHentaiAdvancedQuery {
 /// when nothing is excluded, the site doesn't send f_cats at all (see
 /// EHentaiProvider.fetchIdsBySearch(excludedCategoryBits:) — 0 means
 /// "no parameter").
-enum EHentaiCategory: CaseIterable, Identifiable {
+enum EHentaiCategory: CaseIterable, Identifiable, Codable {
     case doujinshi, manga, artistCG, gameCG, western, nonH, imageSet, cosplay, asianPorn, misc
 
     var id: Self { self }

@@ -20,7 +20,7 @@ enum ThreeHentaiError: Error {
 /// ExternalSearchView.resolvedQuery): if the Tags field or the field's own
 /// search is filled in, the screen's general search field stops
 /// participating for 3hentai.
-struct ThreeHentaiAdvancedQuery {
+struct ThreeHentaiAdvancedQuery: Codable {
     var search: String = ""
     var tags: [String] = []
 

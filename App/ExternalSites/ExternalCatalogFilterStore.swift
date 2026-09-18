@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// A user-named snapshot of the combined catalog's ENTIRE "Filters" state
 /// (every site at once) — per direct feedback, saved filters are NOT
@@ -7,10 +8,10 @@ import Foundation
 /// one restores all of them together, regardless of which tab was active
 /// when you tapped either button. Created via the "Save filter" chip (see
 /// ExternalCombinedCatalogView.saveCurrentFilterChip) and re-applied by
-/// tapping its row (see applySavedFilter). Same in-memory-only lifetime as
-/// the rest of ExternalCatalogFilterStore — doesn't need to survive a
-/// relaunch.
-struct ExternalSavedFilter: Identifiable {
+/// tapping its row (see applySavedFilter). Persisted to disk along with
+/// the rest of ExternalCatalogFilterStore (see its doc-comment) — a named
+/// preset disappearing on relaunch would defeat the point of "saving" it.
+struct ExternalSavedFilter: Identifiable, Codable {
     let id = UUID()
     var name: String
     var excludedCategoriesEH: Set<EHentaiCategory> = []
@@ -40,13 +41,16 @@ struct ExternalSavedFilter: Identifiable {
     }
 }
 
-/// Persistent (in memory for the app's runtime — not UserDefaults, does not
-/// need to survive a relaunch) state of external-site catalog filters — per
-/// a direct request (08/30): "filters should not reset when leaving the
-/// tab". Previously query/excludedCategories were plain `@State` on a
-/// value-type View (ExternalSearchView/ExternalCombinedCatalogView) —
-/// switching tabs Catalog → another → back recreates these views, and all
-/// input/selected categories were lost.
+/// Persisted (UserDefaults, JSON-encoded — see PersistedState below) state
+/// of external-site catalog filters. Originally (08/30) this only needed to
+/// survive leaving/returning to the tab within one app run ("filters should
+/// not reset when leaving the tab" — query/excludedCategories used to be
+/// plain `@State` on a value-type View, ExternalSearchView/
+/// ExternalCombinedCatalogView, and switching tabs recreates those views);
+/// per later direct feedback, that wasn't enough — filters (saved presets
+/// especially, see ExternalSavedFilter) should survive a full app relaunch
+/// too, so this now round-trips through disk instead of living only in
+/// memory for the process's lifetime.
 @MainActor
 final class ExternalCatalogFilterStore: ObservableObject {
     static let shared = ExternalCatalogFilterStore()
@@ -121,5 +125,122 @@ final class ExternalCatalogFilterStore: ObservableObject {
     /// feedback) and ExternalCombinedCatalogView.savedFiltersSheet.
     @Published var savedCombinedFilters: [ExternalSavedFilter] = []
 
-    private init() {}
+    /// Everything above, mirrored field-for-field — the actual on-disk
+    /// shape (see load()/save()). A separate Codable struct rather than
+    /// making the class itself Codable: `ObservableObject`/`@Published`
+    /// don't play well with synthesized Codable, and this keeps the
+    /// persisted shape decoupled from the live property wrappers.
+    private struct PersistedState: Codable {
+        var queries: [ExternalSite: String] = [:]
+        var excludedCategories: [ExternalSite: Set<EHentaiCategory>] = [:]
+        var excludedImhentaiCategories: [ExternalSite: Set<ImhentaiCategory>] = [:]
+        var excludedImhentaiLanguages: [ExternalSite: Set<ImhentaiLanguage>] = [:]
+        var imhentaiAdvancedQueries: [ExternalSite: ImhentaiAdvancedQuery] = [:]
+        var simplyHentaiAdvancedQueries: [ExternalSite: SimplyHentaiAdvancedQuery] = [:]
+        var ehentaiAdvancedQueries: [ExternalSite: EHentaiAdvancedQuery] = [:]
+        var threeHentaiAdvancedQueries: [ExternalSite: ThreeHentaiAdvancedQuery] = [:]
+        var hentaiPillAdvancedQueries: [ExternalSite: HentaiPillAdvancedQuery] = [:]
+        var hitomiAdvancedQueries: [ExternalSite: HitomiAdvancedQuery] = [:]
+        var pixivAdvancedQueries: [ExternalSite: PixivAdvancedQuery] = [:]
+
+        var combinedQuery: String = ""
+        var combinedExcludedCategories: Set<EHentaiCategory> = []
+        var combinedExcludedImhentaiCategories: Set<ImhentaiCategory> = []
+        var combinedExcludedImhentaiLanguages: Set<ImhentaiLanguage> = []
+        var combinedImhentaiAdvancedQuery = ImhentaiAdvancedQuery()
+        var combinedSimplyHentaiAdvancedQuery = SimplyHentaiAdvancedQuery()
+        var combinedEHentaiAdvancedQuery = EHentaiAdvancedQuery()
+        var combinedThreeHentaiAdvancedQuery = ThreeHentaiAdvancedQuery()
+        var combinedHentaiPillAdvancedQuery = HentaiPillAdvancedQuery()
+        var combinedHitomiAdvancedQuery = HitomiAdvancedQuery()
+        var combinedPixivAdvancedQuery = PixivAdvancedQuery()
+        var combinedFiltersActiveSite: ExternalSite?
+
+        var savedCombinedFilters: [ExternalSavedFilter] = []
+    }
+
+    /// Versioned key (not just "external_catalog_filters") — if this
+    /// shape ever needs a breaking change, bumping the suffix leaves old
+    /// installs decoding cleanly to defaults instead of crashing/silently
+    /// dropping fields on a JSONDecoder failure.
+    private static let storageKey = "external_catalog_filter_store_v1"
+    private let defaults = UserDefaults.standard
+    /// Keeps the objectWillChange subscription below alive for the
+    /// lifetime of this singleton.
+    private var saveSubscription: AnyCancellable?
+
+    private init() {
+        load()
+        // Autosave — ANY change to ANY @Published property above funnels
+        // through objectWillChange, so one subscription here covers all
+        // of them instead of a save() call at every individual mutation
+        // site (dozens, across ExternalSearchView/
+        // ExternalCombinedCatalogView/PixivAdvancedFieldsPicker/...).
+        // objectWillChange fires BEFORE the value is actually updated, so
+        // save() is dispatched to the next main-thread runloop turn,
+        // where the mutation has already landed.
+        saveSubscription = objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.save() }
+        }
+    }
+
+    private func load() {
+        guard let data = defaults.data(forKey: Self.storageKey),
+              let state = try? JSONDecoder().decode(PersistedState.self, from: data) else { return }
+        queries = state.queries
+        excludedCategories = state.excludedCategories
+        excludedImhentaiCategories = state.excludedImhentaiCategories
+        excludedImhentaiLanguages = state.excludedImhentaiLanguages
+        imhentaiAdvancedQueries = state.imhentaiAdvancedQueries
+        simplyHentaiAdvancedQueries = state.simplyHentaiAdvancedQueries
+        ehentaiAdvancedQueries = state.ehentaiAdvancedQueries
+        threeHentaiAdvancedQueries = state.threeHentaiAdvancedQueries
+        hentaiPillAdvancedQueries = state.hentaiPillAdvancedQueries
+        hitomiAdvancedQueries = state.hitomiAdvancedQueries
+        pixivAdvancedQueries = state.pixivAdvancedQueries
+        combinedQuery = state.combinedQuery
+        combinedExcludedCategories = state.combinedExcludedCategories
+        combinedExcludedImhentaiCategories = state.combinedExcludedImhentaiCategories
+        combinedExcludedImhentaiLanguages = state.combinedExcludedImhentaiLanguages
+        combinedImhentaiAdvancedQuery = state.combinedImhentaiAdvancedQuery
+        combinedSimplyHentaiAdvancedQuery = state.combinedSimplyHentaiAdvancedQuery
+        combinedEHentaiAdvancedQuery = state.combinedEHentaiAdvancedQuery
+        combinedThreeHentaiAdvancedQuery = state.combinedThreeHentaiAdvancedQuery
+        combinedHentaiPillAdvancedQuery = state.combinedHentaiPillAdvancedQuery
+        combinedHitomiAdvancedQuery = state.combinedHitomiAdvancedQuery
+        combinedPixivAdvancedQuery = state.combinedPixivAdvancedQuery
+        combinedFiltersActiveSite = state.combinedFiltersActiveSite
+        savedCombinedFilters = state.savedCombinedFilters
+    }
+
+    private func save() {
+        let state = PersistedState(
+            queries: queries,
+            excludedCategories: excludedCategories,
+            excludedImhentaiCategories: excludedImhentaiCategories,
+            excludedImhentaiLanguages: excludedImhentaiLanguages,
+            imhentaiAdvancedQueries: imhentaiAdvancedQueries,
+            simplyHentaiAdvancedQueries: simplyHentaiAdvancedQueries,
+            ehentaiAdvancedQueries: ehentaiAdvancedQueries,
+            threeHentaiAdvancedQueries: threeHentaiAdvancedQueries,
+            hentaiPillAdvancedQueries: hentaiPillAdvancedQueries,
+            hitomiAdvancedQueries: hitomiAdvancedQueries,
+            pixivAdvancedQueries: pixivAdvancedQueries,
+            combinedQuery: combinedQuery,
+            combinedExcludedCategories: combinedExcludedCategories,
+            combinedExcludedImhentaiCategories: combinedExcludedImhentaiCategories,
+            combinedExcludedImhentaiLanguages: combinedExcludedImhentaiLanguages,
+            combinedImhentaiAdvancedQuery: combinedImhentaiAdvancedQuery,
+            combinedSimplyHentaiAdvancedQuery: combinedSimplyHentaiAdvancedQuery,
+            combinedEHentaiAdvancedQuery: combinedEHentaiAdvancedQuery,
+            combinedThreeHentaiAdvancedQuery: combinedThreeHentaiAdvancedQuery,
+            combinedHentaiPillAdvancedQuery: combinedHentaiPillAdvancedQuery,
+            combinedHitomiAdvancedQuery: combinedHitomiAdvancedQuery,
+            combinedPixivAdvancedQuery: combinedPixivAdvancedQuery,
+            combinedFiltersActiveSite: combinedFiltersActiveSite,
+            savedCombinedFilters: savedCombinedFilters
+        )
+        guard let data = try? JSONEncoder().encode(state) else { return }
+        defaults.set(data, forKey: Self.storageKey)
+    }
 }

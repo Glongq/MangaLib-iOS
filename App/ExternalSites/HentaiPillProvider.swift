@@ -25,7 +25,7 @@ enum HentaiPillError: Error {
 /// fetchIdsByTag(namespace: kind, value: value, ...) (see
 /// ExternalSearchView.resolvedQuery — this is the only site where
 /// the advanced field produces ExternalCatalogQuery.tag(...) rather than .search(...)).
-struct HentaiPillAdvancedQuery {
+struct HentaiPillAdvancedQuery: Codable {
     var kind: ExternalTagNamespace = .tag
     var value: String = ""
 
