@@ -47,8 +47,6 @@ final class OCROverlayContainerView: UIView {
             view.backgroundColor = style.backgroundColor
             view.layer.cornerRadius = style.cornerRadius
             view.label.text = text
-            let fontSize = max(10, bounds.height * block.rect.height * 0.35)
-            view.label.font = .systemFont(ofSize: fontSize, weight: .semibold)
             if style.hasTextShadow {
                 view.label.layer.shadowColor = UIColor.black.cgColor
                 view.label.layer.shadowOpacity = 0.9
@@ -64,19 +62,22 @@ final class OCROverlayContainerView: UIView {
                 width: bounds.width * block.rect.width,
                 height: bounds.height * block.rect.height
             )
-            // Translated text (especially Russian) routinely runs longer
-            // than the source CJK/English — a fixed growth multiplier
-            // used to clip it with "..." (UILabel's default truncation on
-            // its last visible line once content overflows a fixed
-            // frame). Measure the ACTUAL wrapped height at this width
-            // instead, so the plate always grows to fit, symmetrically
-            // around the original bbox's vertical center.
+            // Best-effort fit: shrink the font toward the original bbox
+            // first; only grow the box (never truncate) if it still
+            // doesn't fit at the minimum readable size — see
+            // OCROverlayFit's doc-comment for the exact steps.
             let horizontalInset: CGFloat = 8
-            let measured = view.label.sizeThatFits(CGSize(width: max(1, baseRect.width - horizontalInset), height: .greatestFiniteMagnitude))
-            let finalHeight = max(baseRect.height, measured.height + 4)
+            let startFontSize = max(10, min(28, baseRect.height * 0.35))
+            let fit = OCROverlayFit.fit(
+                text: text,
+                baseSize: CGSize(width: max(1, baseRect.width - horizontalInset), height: baseRect.height - 4),
+                startFontSize: startFontSize
+            )
+            view.label.font = .systemFont(ofSize: fit.fontSize, weight: .semibold)
+            let finalSize = CGSize(width: fit.size.width + horizontalInset, height: fit.size.height + 4)
             view.frame = CGRect(
-                x: baseRect.minX, y: baseRect.midY - finalHeight / 2,
-                width: baseRect.width, height: finalHeight
+                x: baseRect.midX - finalSize.width / 2, y: baseRect.midY - finalSize.height / 2,
+                width: finalSize.width, height: finalSize.height
             )
         }
     }

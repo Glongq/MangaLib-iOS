@@ -20,6 +20,16 @@ enum RephraseError: Error {
     case missingAPIKey
 }
 
+/// One Stage-A line plus a soft length hint — see
+/// RecognizedTextBlock.characterBudget(imageSize:) for how the budget is
+/// estimated from the block's original on-screen footprint.
+struct RephraseLineInput: Encodable {
+    let text: String
+    let characterBudget: Int
+
+    private enum CodingKeys: String, CodingKey { case text, characterBudget = "budget" }
+}
+
 /// Own session/own tiny error enum, no shared HTTP base class — same
 /// idiom as the external-site providers (see HitomiProvider).
 struct RephraseClient {
@@ -47,10 +57,13 @@ struct RephraseClient {
     }
 
     /// Rewrites `lines` (Stage-A literal translations, in order) into
-    /// natural `targetLanguageName` style. Throws on ANY failure (network,
-    /// timeout, malformed JSON, wrong count) — callers must catch and
-    /// silently keep the Stage-A text, no error UI (per product decision).
-    func rephrase(lines: [String], targetLanguageName: String) async throws -> [String] {
+    /// natural `targetLanguageName` style, nudged toward each line's
+    /// `characterBudget` (a soft target — see RephraseLineInput) so the
+    /// result more often fits back into the original speech bubble.
+    /// Throws on ANY failure (network, timeout, malformed JSON, wrong
+    /// count) — callers must catch and silently keep the Stage-A text, no
+    /// error UI (per product decision).
+    func rephrase(lines: [RephraseLineInput], targetLanguageName: String) async throws -> [String] {
         guard !lines.isEmpty else { return [] }
         if case .cloud(_, let apiKey, _) = engine, apiKey.isEmpty {
             throw RephraseError.missingAPIKey
@@ -66,7 +79,7 @@ struct RephraseClient {
         let userContent = (try? JSONEncoder().encode(lines)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         var body: [String: Any] = [
             "messages": [
-                ["role": "system", "content": "Rewrite this JSON array of literally machine-translated manga dialogue lines into natural, colloquial \(targetLanguageName), preserving order and count, keeping comic-bubble brevity. Reply with ONLY a JSON array of strings, the same length as the input — no markdown, no commentary."],
+                ["role": "system", "content": "Rewrite this JSON array of literally machine-translated manga dialogue lines into natural, colloquial \(targetLanguageName). Each item has a \"budget\" — the approximate character count that fits back into the original speech bubble. Treat it as a SOFT target: prefer a more concise phrasing that gets close to it, but NEVER omit meaning or cut a sentence short just to fit — going over the budget is fine when it's genuinely needed. Preserve order and count. Reply with ONLY a JSON array of strings, the same length as the input — no markdown, no commentary."],
                 ["role": "user", "content": userContent]
             ],
             "temperature": 0.3,

@@ -21,4 +21,22 @@ struct RecognizedTextBlock: Codable, Identifiable, Hashable {
     /// Lines joined top-to-bottom with "\n".
     let text: String
     let lines: [RecognizedTextLine]
+
+    /// Rough character budget the translated text should aim for,
+    /// estimated from this block's actual pixel footprint in the source
+    /// image (`imageSize` — see CachedPageTranslation.imageSize) using the
+    /// same font-size heuristic as the on-screen overlay (OCROverlayFit).
+    /// A SOFT target for Stage-B's rephrase prompt, not a hard limit —
+    /// the prompt is explicit that meaning must never be cut to fit it.
+    func characterBudget(imageSize: CGSize) -> Int {
+        guard imageSize.width > 0, imageSize.height > 0 else { return max(text.count, 8) }
+        let pixelWidth = rect.width * imageSize.width
+        let pixelHeight = rect.height * imageSize.height
+        let estimatedFontSize = max(8, pixelHeight * 0.35)
+        let avgCharWidth = estimatedFontSize * 0.55
+        let charsPerLine = max(1, pixelWidth / avgCharWidth)
+        let lineHeight = estimatedFontSize * 1.2
+        let numLines = max(1, (pixelHeight * OCROverlayFit.maxHeightMultiplier) / lineHeight)
+        return max(4, Int((charsPerLine * numLines).rounded()))
+    }
 }

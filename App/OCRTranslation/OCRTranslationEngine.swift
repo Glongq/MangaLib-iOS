@@ -41,7 +41,8 @@ enum OCRTranslationEngine {
         let result = CachedPageTranslation(
             blocks: blocks,
             stageAText: Dictionary(uniqueKeysWithValues: stageA.map { ($0.key.uuidString, $0.value) }),
-            stageBText: [:]
+            stageBText: [:],
+            imageSize: image.size
         )
         OCRTranslationMemoryCache.shared[cacheKey] = result
         await OCRTranslationDiskCache.shared.save(cacheKey, result)
@@ -63,7 +64,12 @@ enum OCRTranslationEngine {
     ) async {
         guard !cached.stageBText.isEmpty else {
             guard stageBEnabled, let rephraseClient else { return }
-            let orderedLines = cached.blocks.map { cached.stageAText[$0.id.uuidString] ?? "" }
+            let orderedLines = cached.blocks.map {
+                RephraseLineInput(
+                    text: cached.stageAText[$0.id.uuidString] ?? "",
+                    characterBudget: $0.characterBudget(imageSize: cached.imageSize)
+                )
+            }
             guard let stageB = try? await rephraseClient.rephrase(lines: orderedLines, targetLanguageName: targetLanguageName) else { return }
 
             var updated = cached

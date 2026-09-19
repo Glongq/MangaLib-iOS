@@ -20,19 +20,21 @@ struct OCROverlaySwiftUIView: View {
                     width: fitRect.width * block.rect.width,
                     height: fitRect.height * block.rect.height
                 )
-                // Translated text (especially Russian) routinely runs
-                // longer than the source CJK/English — a fixed-height
-                // frame used to clip it. `.fixedSize(vertical: true)`
-                // makes Text take whatever height it actually needs to
-                // wrap at `base.width`, no clipping, no truncation;
-                // `.position` centers the (now variable-size) view at the
-                // original bbox's center, so it grows symmetrically.
+                // Best-effort fit: shrink the font toward the original
+                // bbox first, same algorithm as the horizontal/UIKit
+                // overlay (OCROverlayFit) so both modes behave alike.
+                // `.fixedSize(vertical: true)` is a safety net in case
+                // SwiftUI's own text layout needs a touch more room than
+                // the UIKit-based estimate — it can only grow, never clip.
+                let startFontSize = max(10, min(28, base.height * 0.35))
+                let fit = OCROverlayFit.fit(text: text, baseSize: base.size, startFontSize: startFontSize)
+
                 Text(text)
-                    .font(.system(size: max(10, base.height * 0.35), weight: .semibold))
+                    .font(.system(size: fit.fontSize, weight: .semibold))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 4).padding(.vertical, 2)
-                    .frame(width: base.width)
+                    .frame(width: fit.size.width)
                     .fixedSize(horizontal: false, vertical: true)
                     .background {
                         if style == .backdropPlate {

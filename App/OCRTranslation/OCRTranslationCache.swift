@@ -13,7 +13,7 @@ struct OCRCacheKey: Hashable {
     let targetLanguage: String
     let engineVersion: Int
 
-    static let currentEngineVersion = 1
+    static let currentEngineVersion = 2
 
     var diskFileName: String {
         "\(pageKey)_\(sourceLanguage)_\(targetLanguage)_v\(engineVersion).json"
@@ -24,6 +24,13 @@ struct CachedPageTranslation: Codable {
     let blocks: [RecognizedTextBlock]
     var stageAText: [String: String] // keyed by RecognizedTextBlock.id.uuidString
     var stageBText: [String: String]
+    /// The source page image's pixel size at OCR time — persisted so a
+    /// LATER Stage-B attempt (re-run purely from cache, no image at hand,
+    /// see OCRTranslationEngine.runStageB) can still work out each
+    /// block's approximate original on-screen footprint
+    /// (RecognizedTextBlock.characterBudget(imageSize:)) to hint the
+    /// rephrase prompt toward text that fits.
+    let imageSize: CGSize
 
     func text(for blockID: UUID) -> String? {
         stageBText[blockID.uuidString] ?? stageAText[blockID.uuidString]
