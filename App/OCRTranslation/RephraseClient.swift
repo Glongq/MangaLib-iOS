@@ -192,21 +192,48 @@ struct RephraseClient {
         return content
     }
 
-    /// Defensive parse: the model is asked for a bare JSON array, but a
-    /// small local model may wrap it in markdown or add stray prose —
-    /// fall back to slicing between the first `[` and last `]` before
-    /// giving up.
+    /// Defensive parse: the model is asked for ONE bare JSON array, but a
+    /// small local model doesn't always keep that instruction straight —
+    /// observed failure modes: wrapping it in markdown/prose (fixed by
+    /// slicing between the first `[` and last `]`), and — with larger
+    /// batches specifically — losing track and emitting one `[...]` per
+    /// line instead of a single combined array, e.g.
+    /// `["a"],["b"],["c"]` or the same separated by newlines. The last
+    /// resort below handles that: pull out every top-level bracket group
+    /// and flatten them into one array, in order.
     private static func parseLines(from content: String) throws -> [String] {
         if let direct = try? JSONDecoder().decode([String].self, from: Data(content.utf8)) {
             return direct
         }
-        guard let start = content.firstIndex(of: "["), let end = content.lastIndex(of: "]"), start < end else {
+        if let start = content.firstIndex(of: "["), let end = content.lastIndex(of: "]"), start < end {
+            let sliced = String(content[start...end])
+            if let fallback = try? JSONDecoder().decode([String].self, from: Data(sliced.utf8)) {
+                return fallback
+            }
+        }
+        let flattened = try flattenBracketGroups(content)
+        guard !flattened.isEmpty else { throw RephraseError.decodingFailed }
+        return flattened
+    }
+
+    /// Regex-extracts every non-nested `[...]` group (each expected to
+    /// decode as its own `[String]`, usually with just one element) and
+    /// concatenates them in the order they appear.
+    private static func flattenBracketGroups(_ content: String) throws -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: "\\[[^\\[\\]]*\\]") else {
             throw RephraseError.decodingFailed
         }
-        let sliced = String(content[start...end])
-        guard let fallback = try? JSONDecoder().decode([String].self, from: Data(sliced.utf8)) else {
-            throw RephraseError.decodingFailed
+        let nsContent = content as NSString
+        let matches = regex.matches(in: content, range: NSRange(location: 0, length: nsContent.length))
+        guard !matches.isEmpty else { throw RephraseError.decodingFailed }
+        var result: [String] = []
+        for match in matches {
+            let group = nsContent.substring(with: match.range)
+            guard let decoded = try? JSONDecoder().decode([String].self, from: Data(group.utf8)) else {
+                throw RephraseError.decodingFailed
+            }
+            result.append(contentsOf: decoded)
         }
-        return fallback
+        return result
     }
 }
