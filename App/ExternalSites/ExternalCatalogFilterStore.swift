@@ -133,6 +133,15 @@ final class ExternalCatalogFilterStore: ObservableObject {
     /// feedback) and ExternalCombinedCatalogView.savedFiltersSheet.
     @Published var savedCombinedFilters: [ExternalSavedFilter] = []
 
+    /// Cross-site "which languages to show" filter (see
+    /// ExternalCatalogLanguage/ExternalLanguagePicker) — deliberately NOT
+    /// prefixed `combined`/keyed per site like everything else above: it's
+    /// applied client-side in ExternalCatalogGridView.filteredItems
+    /// regardless of which screen (single-site or combined) the grid was
+    /// reached from, unlike the per-site network-query filters. Empty set =
+    /// no filter, show every language (including titles with none declared).
+    @Published var selectedLanguages: Set<ExternalCatalogLanguage> = []
+
     /// Everything above, mirrored field-for-field — the actual on-disk
     /// shape (see load()/save()). A separate Codable struct rather than
     /// making the class itself Codable: `ObservableObject`/`@Published`
@@ -165,6 +174,7 @@ final class ExternalCatalogFilterStore: ObservableObject {
         var combinedFiltersActiveSite: ExternalSite?
 
         var savedCombinedFilters: [ExternalSavedFilter] = []
+        var selectedLanguages: Set<ExternalCatalogLanguage> = []
     }
 
     /// Versioned key (not just "external_catalog_filters") — if this
@@ -223,6 +233,7 @@ final class ExternalCatalogFilterStore: ObservableObject {
         combinedPixivAdvancedQuery = state.combinedPixivAdvancedQuery
         combinedFiltersActiveSite = state.combinedFiltersActiveSite
         savedCombinedFilters = state.savedCombinedFilters
+        selectedLanguages = state.selectedLanguages
     }
 
     private func save() {
@@ -250,7 +261,8 @@ final class ExternalCatalogFilterStore: ObservableObject {
             combinedHitomiAdvancedQuery: combinedHitomiAdvancedQuery,
             combinedPixivAdvancedQuery: combinedPixivAdvancedQuery,
             combinedFiltersActiveSite: combinedFiltersActiveSite,
-            savedCombinedFilters: savedCombinedFilters
+            savedCombinedFilters: savedCombinedFilters,
+            selectedLanguages: selectedLanguages
         )
         guard let data = try? JSONEncoder().encode(state) else { return }
         defaults.set(data, forKey: Self.storageKey)

@@ -146,6 +146,7 @@ struct ExternalCombinedCatalogView: View {
             + (advancedQueryHP.isEmpty ? 0 : 1)
             + (advancedQueryHT.isEmpty ? 0 : 1)
             + (advancedQueryPixiv.isEmpty ? 0 : 1)
+            + filterStore.selectedLanguages.count
     }
     /// Active filter count for ONE site — used only by the switcher chips
     /// (see filtersSheet), to show a per-section badge instead of the
@@ -650,6 +651,15 @@ struct ExternalCombinedCatalogView: View {
     @ViewBuilder
     private var filterSectionsContent: some View {
         VStack(alignment: .leading, spacing: 20) {
+            if activeFiltersSite == nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Язык").font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                    ExternalLanguagePicker(selected: Binding(
+                        get: { filterStore.selectedLanguages },
+                        set: { filterStore.selectedLanguages = $0 }
+                    ))
+                }
+            }
             if let site = activeFiltersSite {
                 filterSection(for: site)
             } else {
@@ -765,6 +775,7 @@ struct ExternalCombinedCatalogView: View {
             resetFilters(for: site)
         } else {
             for site in filterableSites { resetFilters(for: site) }
+            filterStore.selectedLanguages = []
         }
     }
 

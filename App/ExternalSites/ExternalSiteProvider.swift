@@ -41,6 +41,62 @@ enum ExternalTagNamespace: Hashable, Codable {
     case tag, female, male, character, artist, group, series
 }
 
+/// Cross-site "which languages to show" filter (see
+/// ExternalCatalogFilterStore.selectedLanguages/ExternalLanguagePicker) —
+/// a GENERAL concept like ExternalTagNamespace above, NOT tied to any one
+/// site's own language scheme (compare ImhentaiLanguage, which is
+/// imhentai-only and used for that site's own exclusion bitmask). Applied
+/// client-side, against whatever free-form string each provider already
+/// scrapes into `ExternalGalleryDetail.language` (see `detectAll`) —
+/// titles with no declared language always pass the filter (see
+/// ExternalCatalogGridView.filteredItems), since there's nothing to match
+/// against either way.
+enum ExternalCatalogLanguage: String, CaseIterable, Identifiable, Codable, Hashable {
+    case english, japanese, chinese, korean, russian, spanish, french, german
+
+    var id: Self { self }
+
+    var displayName: String {
+        switch self {
+        case .english: return "Английский"
+        case .japanese: return "Японский"
+        case .chinese: return "Китайский"
+        case .korean: return "Корейский"
+        case .russian: return "Русский"
+        case .spanish: return "Испанский"
+        case .french: return "Французский"
+        case .german: return "Немецкий"
+        }
+    }
+
+    /// English + Russian keywords — providers' scraped `language` strings
+    /// are always in English (site UI text), but matched case-insensitively
+    /// against the lowercased raw string either way.
+    private var keywords: [String] {
+        switch self {
+        case .english: return ["english", "английск"]
+        case .japanese: return ["japan", "японск"]
+        case .chinese: return ["chin", "mandarin", "китайск"]
+        case .korean: return ["korea", "корейск"]
+        case .russian: return ["russian", "русск"]
+        case .spanish: return ["spanish", "испанск"]
+        case .french: return ["french", "французск"]
+        case .german: return ["german", "немецк"]
+        }
+    }
+
+    /// A raw scraped string can list several languages at once (e.g.
+    /// "English, Japanese" — translated + original), so this returns
+    /// every language it mentions, not just the first/most relevant one
+    /// (unlike DetectedTitleLanguage.detect, which picks ONE for the OCR
+    /// source-language suggestion — a different use case).
+    static func detectAll(from rawLanguage: String?) -> Set<ExternalCatalogLanguage> {
+        guard let rawLanguage, !rawLanguage.isEmpty else { return [] }
+        let normalized = rawLanguage.lowercased()
+        return Set(allCases.filter { language in language.keywords.contains(where: normalized.contains) })
+    }
+}
+
 /// One tag on a title card (ExternalGalleryDetail.tags) — female/male
 /// are both false at once for neutral tags (not tied to a gender).
 struct ExternalGalleryTag: Hashable {

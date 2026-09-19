@@ -129,6 +129,13 @@ struct ExternalCatalogGridView: View {
     /// задаёт сам сайт, не мы.
     private static let pageSize = 45
 
+    /// Cross-site language filter (see ExternalCatalogLanguage/
+    /// ExternalLanguagePicker) — applied here, client-side, rather than
+    /// per-provider query params: most sites have no real language-filter
+    /// mechanism at all (see filteredItems), so this is the one place that
+    /// works uniformly for every site/entry point into this grid.
+    @ObservedObject private var filterStore = ExternalCatalogFilterStore.shared
+
     @State private var items: [ExternalCatalogItem] = []
     /// Next-page cursor PER SITE — a missing key means "not yet queried",
     /// a nil cursor is used for the first request (see fetchPage).
@@ -421,7 +428,7 @@ struct ExternalCatalogGridView: View {
 
             ScrollView {
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                    ForEach(items) { item in
+                    ForEach(filteredItems) { item in
                         NavigationLink {
                             ExternalGalleryDetailView(site: item.site, id: item.galleryId, preloaded: details[item.id])
                         } label: {
@@ -506,6 +513,21 @@ struct ExternalCatalogGridView: View {
 
     private func card(item: ExternalCatalogItem, width: CGFloat) -> some View {
         CatalogCard(item: item, detail: details[item.id], width: width, showsSourceBadge: showsSourceBadge)
+    }
+
+    /// `items` filtered by filterStore.selectedLanguages — a title whose
+    /// detail hasn't loaded yet is kept (so onCardAppear still fires and
+    /// loads it; it may drop out of view a moment later once its language
+    /// comes back mismatched), and a title with no declared language
+    /// always passes, per direct feedback ("если язык не указан — он
+    /// всё равно появится в выдаче").
+    private var filteredItems: [ExternalCatalogItem] {
+        guard !filterStore.selectedLanguages.isEmpty else { return items }
+        return items.filter { item in
+            guard let language = details[item.id]?.language else { return true }
+            let detected = ExternalCatalogLanguage.detectAll(from: language)
+            return detected.isEmpty || !detected.isDisjoint(with: filterStore.selectedLanguages)
+        }
     }
 
     /// Only loads the per-card detail (title/cover/pages) needed to render
