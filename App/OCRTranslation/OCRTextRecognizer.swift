@@ -45,7 +45,7 @@ enum OCRTextRecognizer {
 
         let lines: [RecognizedTextLine] = observations.compactMap { observation in
             guard let candidate = observation.topCandidates(1).first,
-                  candidate.confidence >= 0.3,
+                  candidate.confidence >= 0.2,
                   !candidate.string.isEmpty else { return nil }
             let box = observation.boundingBox
             // Vision: normalized, bottom-left origin. Overlay math (UIKit
