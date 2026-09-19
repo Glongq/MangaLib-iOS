@@ -712,6 +712,14 @@ private struct ExternalHorizontalPageImage: View {
         .onChange(of: ocrStageBEnabled) { _, enabled in
             translationController.setStageBEnabled(enabled, rephraseClient: ocrRephraseClient, targetLanguageName: ocrTargetLanguageName, promptTemplate: ocrStageBPrompt)
         }
+        // Without this, editing the custom Stage-B prompt while a page
+        // was ALREADY showing (no toggle flip, no page change) had no
+        // effect until you navigated away and back — setStageBEnabled
+        // re-runs the same "already done with a DIFFERENT prompt?" check
+        // as the toggle path (see OCRTranslationEngine.attemptStageB).
+        .onChange(of: ocrStageBPrompt) { _, newValue in
+            translationController.setStageBEnabled(ocrStageBEnabled, rephraseClient: ocrRephraseClient, targetLanguageName: ocrTargetLanguageName, promptTemplate: newValue)
+        }
         .onChange(of: ocrStyle) { _, newValue in translationController.style = newValue }
         .onChange(of: ocrEraseOriginal) { _, newValue in translationController.eraseOriginalText = newValue }
     }
@@ -797,6 +805,10 @@ private struct ExternalVerticalPageImage: View {
         }
         .onChange(of: ocrStageBEnabled) { _, enabled in
             translationController.setStageBEnabled(enabled, rephraseClient: ocrRephraseClient, targetLanguageName: ocrTargetLanguageName, promptTemplate: ocrStageBPrompt)
+        }
+        // See ExternalHorizontalPageImage's matching .onChange — same fix.
+        .onChange(of: ocrStageBPrompt) { _, newValue in
+            translationController.setStageBEnabled(ocrStageBEnabled, rephraseClient: ocrRephraseClient, targetLanguageName: ocrTargetLanguageName, promptTemplate: newValue)
         }
     }
 }

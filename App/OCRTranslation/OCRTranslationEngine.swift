@@ -42,9 +42,13 @@ enum OCRTranslationEngine {
 
     /// Attempts Stage B on top of an already-known Stage-A result (fresh
     /// or from cache) — returns it unchanged if Stage B already succeeded
-    /// for it, or nil if the attempt fails (network/timeout/malformed
-    /// reply/wrong count); callers must keep showing Stage-A text on nil,
-    /// no error UI (per product decision).
+    /// for it WITH THIS SAME PROMPT, or nil if the attempt fails (network/
+    /// timeout/malformed reply/wrong count); callers must keep showing
+    /// Stage-A text on nil, no error UI (per product decision). A prompt
+    /// that differs from `result.stageBPrompt` is treated the same as
+    /// "not done yet" — otherwise editing the custom prompt in Settings
+    /// would never affect a page that already has SOME cached Stage-B
+    /// text, no matter how old/different that prompt was.
     ///
     /// English sources get a fresh DIRECT English->target translation
     /// from the LLM (reads more natural than rephrasing an already-
@@ -59,7 +63,7 @@ enum OCRTranslationEngine {
         targetLanguageName: String,
         promptTemplate: String
     ) async -> CachedPageTranslation? {
-        guard result.stageBText.isEmpty else { return result }
+        guard result.stageBText.isEmpty || result.stageBPrompt != promptTemplate else { return result }
 
         let useDirectTranslation = cacheKey.sourceLanguage == "en"
         let orderedLines = result.blocks.map { block -> RephraseLineInput in
@@ -74,6 +78,7 @@ enum OCRTranslationEngine {
         for (block, text) in zip(result.blocks, translated) {
             updated.stageBText[block.id.uuidString] = text
         }
+        updated.stageBPrompt = promptTemplate
         OCRTranslationMemoryCache.shared[cacheKey] = updated
         await OCRTranslationDiskCache.shared.save(cacheKey, updated)
         return updated

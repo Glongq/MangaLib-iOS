@@ -151,7 +151,7 @@ final class PageTranslationController: ObservableObject {
         blocks = result.blocks
         updateDisplay(from: result, preferStageB: stageBEnabled)
 
-        guard stageBEnabled, let rephraseClient, result.stageBText.isEmpty else { return }
+        guard stageBEnabled, let rephraseClient, result.stageBText.isEmpty || result.stageBPrompt != promptTemplate else { return }
         stageBTask = Task { [weak self] in
             guard let updated = await OCRTranslationEngine.attemptStageB(result, cacheKey: cacheKey, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName, promptTemplate: promptTemplate) else { return }
             if Task.isCancelled { return }

@@ -33,6 +33,14 @@ struct CachedPageTranslation: Codable {
     let blocks: [RecognizedTextBlock]
     var stageAText: [String: String] // keyed by RecognizedTextBlock.id.uuidString
     var stageBText: [String: String]
+    /// The prompt template Stage B was actually run with — lets
+    /// OCRTranslationEngine.attemptStageB tell "already done, nothing to
+    /// do" apart from "done with a prompt the user has since edited,
+    /// needs a redo" (previously ANY non-empty stageBText short-circuited
+    /// a retry forever, so editing the custom prompt in Settings had no
+    /// visible effect on already-cached pages — "написал кастомный
+    /// промт, а он по прежнему не переводил").
+    var stageBPrompt: String = ""
     /// The source page image's pixel size at OCR time — persisted so a
     /// LATER Stage-B attempt (re-run purely from cache, no image at hand,
     /// see OCRTranslationEngine.runStageB) can still work out each
