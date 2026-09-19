@@ -36,6 +36,11 @@ struct ExternalGalleryDetailView: View {
 
     @State private var detail: ExternalGalleryDetail?
     @State private var errorMessage: String?
+    /// One-shot "translate from this title's language?" suggestion — see
+    /// TitleLanguageSuggestionCapsule/evaluateLanguageSuggestion.
+    @State private var languageSuggestion: DetectedTitleLanguage?
+    @AppStorage("external_reader_ocr_enabled") private var ocrEnabled = false
+    @AppStorage("external_reader_ocr_source_lang") private var ocrSourceLang = "auto"
     @State private var tab: Tab = .about
     @State private var previewPage: Int = 1
     @State private var previewJumpText = ""
@@ -108,9 +113,42 @@ struct ExternalGalleryDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .background(Theme.background.ignoresSafeArea())
             .task {
-                if let preloaded { detail = preloaded; return }
+                if let preloaded { detail = preloaded; evaluateLanguageSuggestion(preloaded); return }
                 await load()
             }
+            .overlay(alignment: .bottom) {
+                if let languageSuggestion {
+                    TitleLanguageSuggestionCapsule(
+                        language: languageSuggestion,
+                        onConfirm: {
+                            ocrSourceLang = languageSuggestion.rawValue
+                            ocrEnabled = true
+                            dismissLanguageSuggestion()
+                        },
+                        onDismiss: dismissLanguageSuggestion
+                    )
+                    .padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(response: 0.42, dampingFraction: 0.82), value: languageSuggestion)
+    }
+
+    /// Shows the capsule at most once per title (see
+    /// TitleLanguageSuggestionSeenStore) and only when there's actually
+    /// something to change: a recognized, non-Russian source language that
+    /// either differs from the current OCR source setting or that
+    /// translation isn't even turned on for yet.
+    private func evaluateLanguageSuggestion(_ detail: ExternalGalleryDetail) {
+        guard let detected = DetectedTitleLanguage.detect(from: detail.language), detected != .ru else { return }
+        guard !ocrEnabled || ocrSourceLang != detected.rawValue else { return }
+        guard !TitleLanguageSuggestionSeenStore.hasBeenShown(site: site, id: id) else { return }
+        languageSuggestion = detected
+    }
+
+    private func dismissLanguageSuggestion() {
+        TitleLanguageSuggestionSeenStore.markShown(site: site, id: id)
+        languageSuggestion = nil
     }
 
     @ViewBuilder
@@ -726,7 +764,9 @@ struct ExternalGalleryDetailView: View {
             await provider.primeResolveKey(resolveKey, for: id)
         }
         do {
-            detail = try await provider.fetchGalleryDetail(id: id)
+            let fetched = try await provider.fetchGalleryDetail(id: id)
+            detail = fetched
+            evaluateLanguageSuggestion(fetched)
         } catch EHentaiError.missingToken, SimplyHentaiError.unknownSlug {
             // Not a network failure — this bookmark predates ExternalBookmark.
             // resolveKey (saved before this fix) and this site can't be
