@@ -224,7 +224,10 @@ struct ExternalCombinedCatalogView: View {
         if site == .hitomi {
             let advanced = advancedQueryHT
             let text = advanced.isEmpty ? committedQuery : advanced.encoded()
-            return .search(query: text, excludedCategoryBits: excludedCategoryBits)
+            return .search(
+                query: HitomiProvider.appendingLanguageFilter(to: text, selectedLanguages: filterStore.selectedLanguages),
+                excludedCategoryBits: excludedCategoryBits
+            )
         }
         if site == .pixiv {
             let advanced = advancedQueryPixiv

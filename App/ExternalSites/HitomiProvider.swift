@@ -538,12 +538,16 @@ struct HitomiProvider: ExternalSiteProvider {
     private enum ExplicitKind {
         case namespace(ExternalTagNamespace)
         case type
+        case language
     }
 
     private static func parseSearchCommand(_ text: String) -> (kind: ExplicitKind, value: String, explicit: Bool) {
         let lower = text.lowercased()
         if lower.hasPrefix("type:") {
             return (.type, String(lower.dropFirst("type:".count)).trimmingCharacters(in: .whitespaces), true)
+        }
+        if lower.hasPrefix("language:") {
+            return (.language, String(lower.dropFirst("language:".count)).trimmingCharacters(in: .whitespaces), true)
         }
         for (prefix, ns) in searchPrefixes where lower.hasPrefix(prefix) {
             return (.namespace(ns), String(lower.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces), true)
@@ -552,13 +556,14 @@ struct HitomiProvider: ExternalSiteProvider {
     }
 
     /// Turns an explicit command's parsed (kind, value) into the (kit,
-    /// resolvedValue) pair fetchIdsByRawKit needs — `.type` maps straight
-    /// onto its own kit with the value untouched (no embedded-prefix
-    /// trick, unlike female/male, see prefixedValue); everything else
-    /// reuses the existing namespace machinery unchanged.
+    /// resolvedValue) pair fetchIdsByRawKit needs — `.type`/`.language`
+    /// map straight onto their own kit with the value untouched (no
+    /// embedded-prefix trick, unlike female/male, see prefixedValue);
+    /// everything else reuses the existing namespace machinery unchanged.
     private static func resolveExplicit(_ kind: ExplicitKind, value: String) -> (kit: ContinuationKit, resolvedValue: String) {
         switch kind {
         case .type: return (.type, value)
+        case .language: return (.language, value)
         case .namespace(let ns): return (continuationKit(for: ns), prefixedValue(for: ns, value: value))
         }
     }
@@ -574,10 +579,14 @@ struct HitomiProvider: ExternalSiteProvider {
     /// counterpart at all (see resolveExplicit) — it never goes through
     /// this function, only through its own ContinuationKit case directly.
     private enum ContinuationKit: String {
-        case tag, character, artist, series, type
-        /// The raw nozomi path segment for this kit — `type` has no
-        /// ExternalTagNamespace counterpart (see fetchIdsByRawKit), hence
-        /// a plain string property instead of routing through `.namespace`.
+        case tag, character, artist, series, type, language
+        /// The raw nozomi path segment for this kit — `type`/`language`
+        /// have no ExternalTagNamespace counterpart (see
+        /// fetchIdsByRawKit), hence a plain string property instead of
+        /// routing through `.namespace`. `language` confirmed live: the
+        /// site's own search bar recognizes `language:russian`
+        /// (autocomplete offers "russian (language)"), the same
+        /// `/language/{value}-all.nozomi` kit as every other namespace.
         var kitPath: String {
             switch self {
             case .tag: return "tag"
@@ -585,8 +594,42 @@ struct HitomiProvider: ExternalSiteProvider {
             case .artist: return "artist"
             case .series: return "series"
             case .type: return "type"
+            case .language: return "language"
             }
         }
+    }
+
+    /// Maps the cross-site ExternalCatalogLanguage filter (see
+    /// ExternalCatalogFilterStore.selectedLanguages) onto hitomi's own
+    /// `language:{value}` kit names — see appendingLanguageFilter below
+    /// for why only a SINGLE selected language can use this (hitomi ANDs
+    /// space-separated search terms, and a title has exactly one
+    /// language, so two `language:` terms would always intersect empty).
+    private static func hitomiLanguageValue(_ language: ExternalCatalogLanguage) -> String {
+        switch language {
+        case .english: return "english"
+        case .japanese: return "japanese"
+        case .chinese: return "chinese"
+        case .korean: return "korean"
+        case .russian: return "russian"
+        case .spanish: return "spanish"
+        case .french: return "french"
+        case .german: return "german"
+        }
+    }
+
+    /// Appends a real `language:{value}` term to a Hitomi search query
+    /// when exactly one language is selected — real, server-side
+    /// filtering (accurate pagination, no lazily-loaded-then-hidden
+    /// cards), unlike the client-side post-filter every other site falls
+    /// back to (see ExternalCatalogGridView.filteredItems). Left
+    /// untouched for zero or 2+ selected languages (can't be ANDed, see
+    /// hitomiLanguageValue) — that fallback still applies in both cases.
+    static func appendingLanguageFilter(to text: String, selectedLanguages: Set<ExternalCatalogLanguage>) -> String {
+        guard selectedLanguages.count == 1, let language = selectedLanguages.first else { return text }
+        let term = "language:\(hitomiLanguageValue(language))"
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? term : "\(trimmed) \(term)"
     }
 
     private static func continuationKit(for namespace: ExternalTagNamespace) -> ContinuationKit {
