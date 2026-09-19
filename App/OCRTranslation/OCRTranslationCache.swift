@@ -6,17 +6,26 @@ import Foundation
 struct OCRCacheKey: Hashable {
     let site: ExternalSite
     let galleryId: Int
-    /// `ExternalGalleryPage.key` — stable per-image identifier, more
-    /// robust than a positional index if the provider ever reorders pages.
+    /// The field that actually disambiguates pages — confirmed some
+    /// providers (ThreeHentai, Imhentai) reuse the exact same
+    /// `ExternalGalleryPage.key` for EVERY page in a gallery (there it
+    /// doubles as the page-image-URL host+path formula, so it can't be
+    /// changed to vary per page), which used to collide every page in
+    /// those galleries onto one cached translation. `index` is always a
+    /// plain per-page loop counter in every provider, so it's the one
+    /// field guaranteed unique.
+    let pageIndex: Int
+    /// Kept alongside `pageIndex` for extra specificity (e.g. Hitomi's
+    /// real per-file hash) but never relied on alone — see `pageIndex`.
     let pageKey: String
     let sourceLanguage: String
     let targetLanguage: String
     let engineVersion: Int
 
-    static let currentEngineVersion = 2
+    static let currentEngineVersion = 4
 
     var diskFileName: String {
-        "\(pageKey)_\(sourceLanguage)_\(targetLanguage)_v\(engineVersion).json"
+        "\(pageIndex)_\(sourceLanguage)_\(targetLanguage)_v\(engineVersion).json"
     }
 }
 

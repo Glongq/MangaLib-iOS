@@ -78,7 +78,12 @@ enum OCRTextRecognizer {
                 let overlapFraction = overlap / min(line.rect.width, last.rect.width)
                 let verticalGap = line.rect.minY - last.rect.maxY
                 let avgLineHeight = (line.rect.height + last.rect.height) / 2
-                return overlapFraction >= 0.3 && verticalGap <= 0.6 * avgLineHeight
+                // Tightened (was 0.3/0.6x) — too loose was bridging lines
+                // from visually separate bubbles/labels into one block,
+                // inflating its rect (and so the overlay box) well past
+                // the actual text's footprint ("большие отступы,
+                // не попадает в размер оригинала").
+                return overlapFraction >= 0.4 && verticalGap <= 0.45 * avgLineHeight
             }) {
                 clusters[lastIndex].append(line)
             } else {

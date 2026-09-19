@@ -126,7 +126,7 @@ struct ExternalReaderView: View {
 
     private func ocrCacheKey(for page: ExternalGalleryPage) -> OCRCacheKey {
         OCRCacheKey(
-            site: site, galleryId: detail.id, pageKey: page.key,
+            site: site, galleryId: detail.id, pageIndex: page.index, pageKey: page.key,
             sourceLanguage: ocrSourceLang, targetLanguage: ocrTargetLang,
             engineVersion: OCRCacheKey.currentEngineVersion
         )

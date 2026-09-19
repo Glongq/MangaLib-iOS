@@ -17,6 +17,21 @@ enum OCROverlayFit {
     /// tolerance, not a hard cap (see step 3 below).
     static let maxWidthMultiplier: CGFloat = 1.2
     static let maxHeightMultiplier: CGFloat = 1.6
+    /// UIKit/SwiftUI's default multi-line leading is noticeably looser
+    /// than typical comic-bubble lettering — tightened here so wrapped
+    /// translated text reads as compact/native instead of visibly
+    /// "airier" than the original, and so it actually needs a size closer
+    /// to the original bbox. Shared by `measure` (sizing) AND the actual
+    /// renderers (OCROverlayContainerView/OCROverlaySwiftUIView) so what
+    /// gets sized is what gets drawn.
+    static let lineHeightMultiple: CGFloat = 0.86
+
+    static func paragraphStyle(alignment: NSTextAlignment = .center) -> NSMutableParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.alignment = alignment
+        style.lineHeightMultiple = lineHeightMultiple
+        return style
+    }
 
     static func fit(text: String, baseSize: CGSize, startFontSize: CGFloat, weight: UIFont.Weight = .semibold) -> Result {
         guard baseSize.width > 0, baseSize.height > 0, !text.isEmpty else {
@@ -59,7 +74,7 @@ enum OCROverlayFit {
         let bounding = (text as NSString).boundingRect(
             with: CGSize(width: width, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font],
+            attributes: [.font: font, .paragraphStyle: paragraphStyle()],
             context: nil
         )
         return CGSize(width: min(width, bounding.width.rounded(.up)), height: bounding.height.rounded(.up))

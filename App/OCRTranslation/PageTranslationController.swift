@@ -17,7 +17,20 @@ final class PageTranslationController: ObservableObject {
     }
 
     private var task: Task<Void, Never>?
-    private weak var overlayView: OCROverlayContainerView?
+    /// Owned for this controller's entire lifetime (NOT looked up by
+    /// searching `imageView.subviews` for "whatever overlay happens to be
+    /// there" — that assumed the imageView is never shared/reused across
+    /// pages, which isn't a safe assumption to make about a UIKit view
+    /// wrapped by SwiftUI. Owning it here and explicitly moving it between
+    /// imageViews means this controller can never end up rendering into,
+    /// or reading stale content left behind by, a DIFFERENT page's
+    /// controller.
+    private let overlayView = OCROverlayContainerView()
+    private weak var attachedImageView: UIImageView?
+
+    init() {
+        overlayView.isUserInteractionEnabled = false
+    }
 
     /// Vertical/SwiftUI mode — image already decoded by VerticalPageImage.
     func load(
@@ -61,6 +74,12 @@ final class PageTranslationController: ObservableObject {
         task?.cancel()
         blocks = []
         displayText = [:]
+        // Wipe any stale overlay content IMMEDIATELY — previously this
+        // only happened once the next attach()/apply() fired, so a
+        // just-recycled UIImageView (see attach(to:)'s doc-comment) could
+        // keep showing the PREVIOUS page's translated text on screen for
+        // a while after a new page/image had already started loading.
+        renderOverlay()
         task = Task { [weak self] in
             // The session is created asynchronously by
             // PageTranslationSessionHost's .translationTask — it's
@@ -102,28 +121,25 @@ final class PageTranslationController: ObservableObject {
 
     /// Called from ZoomableImageScrollView.Coordinator.layoutImage (via the
     /// onImageViewReady hook) whenever the base image/frame changes —
-    /// attaches (once) or repositions the overlay as a child of imageView,
-    /// so UIScrollView's zoom transform scales it for free.
+    /// (re)parents THIS controller's own overlay view under imageView, so
+    /// UIScrollView's zoom transform scales it for free. Moves it rather
+    /// than re-adding it if imageView hasn't actually changed.
     func attach(to imageView: UIImageView) {
-        let overlay: OCROverlayContainerView
-        if let existing = imageView.subviews.compactMap({ $0 as? OCROverlayContainerView }).first {
-            overlay = existing
-        } else {
-            let created = OCROverlayContainerView()
-            created.isUserInteractionEnabled = false
-            imageView.addSubview(created)
-            overlay = created
+        if attachedImageView !== imageView {
+            overlayView.removeFromSuperview()
+            imageView.addSubview(overlayView)
+            attachedImageView = imageView
         }
-        overlay.frame = imageView.bounds
-        overlayView = overlay
+        overlayView.frame = imageView.bounds
         renderOverlay()
     }
 
     private func renderOverlay() {
-        overlayView?.render(blocks: blocks, texts: displayText, style: style)
+        overlayView.render(blocks: blocks, texts: displayText, style: style)
     }
 
     deinit {
         task?.cancel()
+        overlayView.removeFromSuperview()
     }
 }

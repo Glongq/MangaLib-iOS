@@ -46,7 +46,6 @@ final class OCROverlayContainerView: UIView {
 
             view.backgroundColor = style.backgroundColor
             view.layer.cornerRadius = style.cornerRadius
-            view.label.text = text
             if style.hasTextShadow {
                 view.label.layer.shadowColor = UIColor.black.cgColor
                 view.label.layer.shadowOpacity = 0.9
@@ -56,12 +55,16 @@ final class OCROverlayContainerView: UIView {
                 view.label.layer.shadowOpacity = 0
             }
 
+            // Small outward margin beyond Vision's tight bbox — its edges
+            // hug the glyphs closely enough that, flush, a sliver of the
+            // original text/anti-aliasing could still peek out from under
+            // the plate.
             let baseRect = CGRect(
                 x: bounds.width * block.rect.minX,
                 y: bounds.height * block.rect.minY,
                 width: bounds.width * block.rect.width,
                 height: bounds.height * block.rect.height
-            )
+            ).insetBy(dx: -2, dy: -2)
             // Best-effort fit: shrink the font toward the original bbox
             // first; only grow the box (never truncate) if it still
             // doesn't fit at the minimum readable size — see
@@ -73,7 +76,12 @@ final class OCROverlayContainerView: UIView {
                 baseSize: CGSize(width: max(1, baseRect.width - horizontalInset), height: baseRect.height - 4),
                 startFontSize: startFontSize
             )
-            view.label.font = .systemFont(ofSize: fit.fontSize, weight: .semibold)
+            let font = UIFont.systemFont(ofSize: fit.fontSize, weight: .semibold)
+            view.label.attributedText = NSAttributedString(string: text, attributes: [
+                .font: font,
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: OCROverlayFit.paragraphStyle()
+            ])
             let finalSize = CGSize(width: fit.size.width + horizontalInset, height: fit.size.height + 4)
             view.frame = CGRect(
                 x: baseRect.midX - finalSize.width / 2, y: baseRect.midY - finalSize.height / 2,
