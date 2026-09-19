@@ -1,5 +1,57 @@
 import Foundation
 
+/// Кэш данных карточки тайтла (detail/главы/похожее/связанное/статы/
+/// персонажи/доп.обложки) — по slug, с TTL. Та же идея, что и
+/// RemoteImageCache для картинок (см. RemoteImage.swift): без него каждое
+/// повторное открытие ТОЙ ЖЕ карточки (новый экземпляр MangaDetailView —
+/// напр. зашёл-вышел-зашёл снова, или тайтл встречается сразу в нескольких
+/// лентах/списках) заново долбило ВСЕ ~6 эндпоинтов карточки с нуля.
+/// Подтверждено реальным логом сети от пользователя: один и тот же slug,
+/// десятки повторных запросов за полторы минуты, часть уже ловит 429
+/// (рейт-лимит сервера) — притом что пользователь даже не был залогинен, то
+/// есть дело не в токене/повторной авторизации, а именно в отсутствии
+/// какого-либо переиспользования уже полученных данных между заходами.
+@MainActor
+final class MangaDetailCache {
+    static let shared = MangaDetailCache()
+    private init() {}
+
+    struct Entry {
+        var detail: MangaDetail
+        var chapters: [ChapterItem]
+        var similar: [SimilarItem]
+        var related: [RelatedItem]
+        var characters: [Character]
+        var coverGallery: [MangaCoverGalleryItem]
+        var stats: MangaStats?
+        var effectiveSite: Int?
+        let cachedAt: Date
+    }
+
+    /// 2 минуты — достаточно, чтобы повторные заходы туда-обратно в течение
+    /// одной сессии просмотра не долбили сеть заново, но не настолько
+    /// долго, чтобы надолго застрять на устаревших счётчиках/статистике при
+    /// следующем реальном визите на карточку.
+    private let ttl: TimeInterval = 120
+    private var entries: [String: Entry] = [:]
+
+    func entry(for slug: String) -> Entry? {
+        guard let e = entries[slug], Date().timeIntervalSince(e.cachedAt) < ttl else { return nil }
+        return e
+    }
+
+    func store(_ entry: Entry, for slug: String) {
+        entries[slug] = entry
+    }
+
+    /// Сброс кэша конкретного тайтла — для явного "Обновить" на карточке
+    /// (см. MangaDetailViewModel.load(force:)), чтобы кнопка реально дёргала
+    /// сеть, а не молча повторно показывала те же кэшированные данные.
+    func invalidate(slug: String) {
+        entries[slug] = nil
+    }
+}
+
 /// Режим сортировки комментариев — "Старые"/"Новые" реально уходят на сервер
 /// (sort_type=asc/desc, тот же подтверждённый параметр, что и в fetchComments
 /// по умолчанию), "Популярные" считается на клиенте по score (см.
@@ -53,6 +105,11 @@ final class MangaDetailViewModel: ObservableObject {
     @Published private(set) var isPostingComment = false
     @Published private(set) var commentSort: CommentSort = .new
     private var commentsPage = 1
+    /// Закреплённый комментарий (см. MangaNetworkService.fetchStickyComment) —
+    /// грузится один раз параллельно с обычной лентой, не зависит от
+    /// сортировки/пагинации (см. loadCommentsIfNeeded).
+    @Published private(set) var stickyComment: Comment?
+    private var hasLoadedSticky = false
 
     // MARK: Похожее (GET /manga/{slug}/similar, POST /similar/{id}/vote —
     // ПОДТВЕРЖДЕНО перехватом, см. MangaNetworkService.fetchSimilar/voteSimilar).
@@ -70,6 +127,12 @@ final class MangaDetailViewModel: ObservableObject {
     /// Опциональный блок-карусель, как «Похожее»/«Связанное»: ошибка не
     /// показывается, пустой список просто прячет строку.
     @Published private(set) var characters: [Character] = []
+
+    // MARK: Доп. обложки (GET /manga/{slug}/covers — ПОДТВЕРЖДЕНО перехватом,
+    // см. MangaNetworkService.fetchCoverGallery). Опциональный блок, как и
+    // остальные выше — ошибка не показывается, пустой список просто прячет
+    // чип со счётчиком на обложке (см. MangaDetailView.coverGalleryBadge).
+    @Published private(set) var coverGallery: [MangaCoverGalleryItem] = []
 
     // MARK: Статистика (GET /manga/{slug}/stats — ПОДТВЕРЖДЕНО перехватом).
     /// Оценки пользователей + распределение по спискам. Опциональный блок:
@@ -116,7 +179,28 @@ final class MangaDetailViewModel: ObservableObject {
 
     /// Загружает карточку и главы параллельно и независимо:
     /// ошибка одного запроса не отменяет другой.
-    func load() async {
+    ///
+    /// `force` — игнорировать кэш и дёрнуть сеть заново (кнопка "Обновить"
+    /// на карточке, см. MangaDetailView) — обычное открытие карточки (см.
+    /// `.task` в MangaDetailView.body) всегда `force: false`, отсюда и
+    /// переиспользование недавно загруженных данных того же slug (см.
+    /// MangaDetailCache выше).
+    func load(force: Bool = false) async {
+        if !force, let cached = MangaDetailCache.shared.entry(for: slug) {
+            detail = cached.detail
+            chapters = cached.chapters
+            similar = cached.similar
+            related = cached.related
+            characters = cached.characters
+            coverGallery = cached.coverGallery
+            stats = cached.stats
+            effectiveSite = cached.effectiveSite
+            errorMessage = nil
+            detailErrorMessage = nil
+            return
+        }
+        if force { MangaDetailCache.shared.invalidate(slug: slug) }
+
         isLoading = true
         errorMessage = nil
         detailErrorMessage = nil
@@ -133,13 +217,36 @@ final class MangaDetailViewModel: ObservableObject {
         async let similarResult: Void = loadSimilar()
         async let relatedResult: Void = loadRelated()
         async let statsResult: Void = loadStats()
-        let (chaptersError, _, _, _) = await (chaptersResult, similarResult, relatedResult, statsResult)
+        async let coverGalleryResult: Void = loadCoverGallery()
+        let (chaptersError, _, _, _, _) = await (chaptersResult, similarResult, relatedResult, statsResult, coverGalleryResult)
 
         // Показываем общую ошибку только если ничего не удалось загрузить.
         if detail == nil, chapters.isEmpty {
             errorMessage = detailError ?? chaptersError
         }
         isLoading = false
+
+        // Успех — сохраняем в кэш, чтобы следующее открытие ЭТОГО ЖЕ
+        // тайтла (в течение TTL) не долбило все эндпоинты заново.
+        storeCache()
+    }
+
+    /// Сохраняет ТЕКУЩЕЕ состояние (detail/главы/похожее/статы/...) в
+    /// MangaDetailCache под этим slug — общий хвост load() и submitRating()
+    /// (см. там же: без повторного сохранения после re-stamp свежей оценки
+    /// кэш оставался со старым/отставшим "user", и при следующем заходе на
+    /// эту же карточку — до истечения TTL — снова показывалось "не
+    /// оценено", хотя оценка на сервере уже была).
+    private func storeCache() {
+        guard let detail else { return }
+        MangaDetailCache.shared.store(
+            MangaDetailCache.Entry(
+                detail: detail, chapters: chapters, similar: similar, related: related,
+                characters: characters, coverGallery: coverGallery, stats: stats,
+                effectiveSite: effectiveSite, cachedAt: Date()
+            ),
+            for: slug
+        )
     }
 
     /// Грузит карточку, подбирая рабочий site_id: сначала переданный при
@@ -228,6 +335,15 @@ final class MangaDetailViewModel: ObservableObject {
         }
     }
 
+    private func loadCoverGallery() async {
+        do {
+            coverGallery = try await service.fetchCoverGallery(slug: slug, siteId: resolvedSiteId)
+        } catch {
+            // Тихо игнорируем — по той же причине, что и loadSimilar/loadRelated:
+            // опциональный блок, ошибка загрузки не должна затенять основной экран.
+        }
+    }
+
     /// Голос "+"/"-" за элемент "Похожего" (см. MangaNetworkService.voteSimilar).
     /// Сервер возвращает АКТУАЛЬНЫЕ up/down/user целиком — подставляем их
     /// сразу в нужный элемент similar, без перезагрузки всего списка.
@@ -235,13 +351,45 @@ final class MangaDetailViewModel: ObservableObject {
     func voteSimilar(_ item: SimilarItem, isUp: Bool) async -> Bool {
         guard let index = similar.firstIndex(where: { $0.id == item.id }) else { return false }
         do {
-            similar[index].votes = try await service.voteSimilar(id: item.id, isUp: isUp)
+            similar[index].votes = try await service.voteSimilar(id: item.id, isUp: isUp, siteId: resolvedSiteId)
             return true
         } catch NetworkError.cancelled {
             return false
         } catch {
             return false
         }
+    }
+
+    /// Отправляет оценку тайтлу (1-10 звёзд, см. RatingSheet) — POST
+    /// /manga/rate. Раньше здесь ответ POST отбрасывался, а "моя оценка"
+    /// подтягивалась только из последующего `load(force: true)` — из-за
+    /// этого она заметно ЗАПАЗДЫВАЛА (полная перезагрузка карточки не
+    /// мгновенная, плюс GET /manga/{slug} может на секунду-другую отставать
+    /// от только что сделанной записи). POST-ответ уже содержит АКТУАЛЬНЫЙ
+    /// агрегат (average/votes/user) — применяем его в `detail.rating`
+    /// СРАЗУ, без ожидания сети, это и есть твоя оценка мгновенно на
+    /// карточке/в закладках (см. MangaDetailView.onChange →
+    /// BookmarksStore.setMyRating). Полная перезагрузка (force: true)
+    /// всё равно нужна — она подтягивает обновлённое распределение по
+    /// звёздам (stats.rating.stats), которого в ответе POST нет — но раз
+    /// её результат может на мгновение прийти с ещё не досчитанным на
+    /// сервере "user", переприменяем уже известный свежий rating поверх
+    /// него, чтобы UI не откатился обратно на старое значение. Бросает
+    /// ошибку дальше — RatingSheet сам решает, как её показать (см.
+    /// DownloadsManager.showBanner).
+    func submitRating(_ score: Int) async throws {
+        guard let mangaId = detail?.id else { return }
+        let freshRating = try await service.rateManga(id: mangaId, score: score, siteId: resolvedSiteId)
+        detail?.rating = freshRating
+        MangaDetailCache.shared.invalidate(slug: slug)
+        await load(force: true)
+        detail?.rating = freshRating
+        // load(force:true) уже сохранил кэш САМ (см. storeCache в конце
+        // load()), но с тем "user", что вернул его собственный GET — мог
+        // ещё не досчитаться на сервере. Пересохраняем кэш ПОСЛЕ re-stamp
+        // выше, иначе следующий заход на эту карточку (в течение TTL) снова
+        // покажет "не оценено".
+        storeCache()
     }
 
     /// Сортировка глав по возрастанию тома, затем номера главы.
@@ -262,7 +410,15 @@ final class MangaDetailViewModel: ObservableObject {
     /// (потянуть-обновить/кнопка "Повторить").
     func loadCommentsIfNeeded() async {
         guard !hasLoadedComments, !isLoadingComments else { return }
-        await loadComments()
+        async let commentsTask: Void = loadComments()
+        async let stickyTask: Void = loadStickyCommentIfNeeded()
+        _ = await (commentsTask, stickyTask)
+    }
+
+    private func loadStickyCommentIfNeeded() async {
+        guard !hasLoadedSticky, let mangaId = detail?.id else { return }
+        hasLoadedSticky = true
+        stickyComment = try? await service.fetchStickyComment(postId: mangaId, siteId: resolvedSiteId)
     }
 
     /// Серверная сортировка (подтверждена перехватом): Новые — id/desc,
@@ -283,7 +439,7 @@ final class MangaDetailViewModel: ObservableObject {
         commentsError = nil
         commentsPage = 1
         do {
-            let result = try await service.fetchComments(postId: mangaId, sortBy: sortByParam, sortType: sortTypeParam, page: 1)
+            let result = try await service.fetchComments(postId: mangaId, sortBy: sortByParam, sortType: sortTypeParam, page: 1, siteId: resolvedSiteId)
             comments = result.comments
             hasMoreComments = result.hasNextPage
             hasLoadedComments = true
@@ -313,7 +469,7 @@ final class MangaDetailViewModel: ObservableObject {
         isLoadingComments = true
         let nextPage = commentsPage + 1
         do {
-            let result = try await service.fetchComments(postId: mangaId, sortBy: sortByParam, sortType: sortTypeParam, page: nextPage)
+            let result = try await service.fetchComments(postId: mangaId, sortBy: sortByParam, sortType: sortTypeParam, page: nextPage, siteId: resolvedSiteId)
             comments.append(contentsOf: result.comments)
             hasMoreComments = result.hasNextPage
             commentsPage = nextPage
@@ -338,7 +494,7 @@ final class MangaDetailViewModel: ObservableObject {
     /// GET-ответах: корневой комментарий = 0, любой ответ = commentLevel
     /// родителя + 1.
     @discardableResult
-    func postComment(text: String, replyingTo: Comment? = nil) async -> Bool {
+    func postComment(text: String, spoilerLabel: String? = nil, replyingTo: Comment? = nil) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let mangaId = detail?.id else { return false }
         isPostingComment = true
@@ -346,8 +502,9 @@ final class MangaDetailViewModel: ObservableObject {
         let level = (replyingTo?.commentLevel).map { $0 + 1 } ?? 0
         do {
             let created = try await service.postComment(
-                postId: mangaId, text: trimmed,
-                commentLevel: level, parentComment: replyingTo?.id
+                postId: mangaId, text: trimmed, spoilerLabel: spoilerLabel,
+                commentLevel: level, parentComment: replyingTo?.id,
+                siteId: resolvedSiteId
             )
             comments.insert(created, at: 0)
             isPostingComment = false
@@ -370,7 +527,7 @@ final class MangaDetailViewModel: ObservableObject {
         guard AuthSession.shared.isLoggedIn,
               let idx = comments.firstIndex(where: { $0.id == comment.id }) else { return false }
         do {
-            let votes = try await service.voteComment(id: comment.id, direction: isUp ? 1 : 0)
+            let votes = try await service.voteComment(id: comment.id, direction: isUp ? 1 : 0, siteId: resolvedSiteId)
             comments[idx].votesUp = votes.up
             comments[idx].votesDown = votes.down
             comments[idx].userVote = votes.user
