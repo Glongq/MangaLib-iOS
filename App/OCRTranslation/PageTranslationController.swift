@@ -59,9 +59,10 @@ final class PageTranslationController: ObservableObject {
         runtime: PageTranslationRuntime,
         stageBEnabled: Bool,
         rephraseClient: RephraseClient?,
-        targetLanguageName: String
+        targetLanguageName: String,
+        promptTemplate: String
     ) {
-        loadPage(cacheKey: cacheKey, runtime: runtime, stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName) {
+        loadPage(cacheKey: cacheKey, runtime: runtime, stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName, promptTemplate: promptTemplate) {
             image
         }
     }
@@ -75,9 +76,10 @@ final class PageTranslationController: ObservableObject {
         runtime: PageTranslationRuntime,
         stageBEnabled: Bool,
         rephraseClient: RephraseClient?,
-        targetLanguageName: String
+        targetLanguageName: String,
+        promptTemplate: String
     ) {
-        loadPage(cacheKey: cacheKey, runtime: runtime, stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName) {
+        loadPage(cacheKey: cacheKey, runtime: runtime, stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName, promptTemplate: promptTemplate) {
             if let cached = RemoteImageCache.shared.image(for: imageURL) { return cached }
             return await RemoteImageLoader.fetchImage(candidates: [imageURL])
         }
@@ -89,6 +91,7 @@ final class PageTranslationController: ObservableObject {
         stageBEnabled: Bool,
         rephraseClient: RephraseClient?,
         targetLanguageName: String,
+        promptTemplate: String,
         image: @escaping () async -> UIImage?
     ) {
         // Already loaded/loading this exact page — a settings change that
@@ -116,7 +119,7 @@ final class PageTranslationController: ObservableObject {
             if Task.isCancelled { return }
             await MainActor.run {
                 guard let self, self.currentCacheKey == cacheKey else { return }
-                self.handle(result, cacheKey: cacheKey, stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName)
+                self.handle(result, cacheKey: cacheKey, stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName, promptTemplate: promptTemplate)
             }
         }
     }
@@ -127,9 +130,9 @@ final class PageTranslationController: ObservableObject {
     /// falls back to the already-cached Stage-A text (no network wait);
     /// turning it on shows Stage-A immediately and kicks off Stage B in
     /// the background, upgrading in place once/if it succeeds.
-    func setStageBEnabled(_ enabled: Bool, rephraseClient: RephraseClient?, targetLanguageName: String) {
+    func setStageBEnabled(_ enabled: Bool, rephraseClient: RephraseClient?, targetLanguageName: String, promptTemplate: String) {
         guard let result = currentResult, let cacheKey = currentCacheKey else { return }
-        handle(result, cacheKey: cacheKey, stageBEnabled: enabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName)
+        handle(result, cacheKey: cacheKey, stageBEnabled: enabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName, promptTemplate: promptTemplate)
     }
 
     /// Shared by both loadPage's completion and setStageBEnabled: shows
@@ -140,7 +143,8 @@ final class PageTranslationController: ObservableObject {
         cacheKey: OCRCacheKey,
         stageBEnabled: Bool,
         rephraseClient: RephraseClient?,
-        targetLanguageName: String
+        targetLanguageName: String,
+        promptTemplate: String
     ) {
         stageBTask?.cancel()
         currentResult = result
@@ -149,7 +153,7 @@ final class PageTranslationController: ObservableObject {
 
         guard stageBEnabled, let rephraseClient, result.stageBText.isEmpty else { return }
         stageBTask = Task { [weak self] in
-            guard let updated = await OCRTranslationEngine.attemptStageB(result, cacheKey: cacheKey, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName) else { return }
+            guard let updated = await OCRTranslationEngine.attemptStageB(result, cacheKey: cacheKey, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName, promptTemplate: promptTemplate) else { return }
             if Task.isCancelled { return }
             await MainActor.run {
                 // The user may have navigated away (currentCacheKey

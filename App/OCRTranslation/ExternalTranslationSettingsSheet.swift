@@ -21,6 +21,7 @@ struct ExternalTranslationSettingsSheet: View {
     @AppStorage("external_reader_ocr_stage_b_local_model") private var localModel = ""
     @AppStorage("external_reader_ocr_stage_b_cloud_url") private var cloudURL = "https://api.openai.com"
     @AppStorage("external_reader_ocr_stage_b_cloud_model") private var cloudModel = ""
+    @AppStorage("external_reader_ocr_stage_b_prompt") private var stageBPrompt = RephraseClient.defaultSystemPromptTemplate
 
     /// Not @AppStorage — a real secret, goes through the same
     /// KeychainHelper the app already uses for auth tokens (see
@@ -90,6 +91,8 @@ struct ExternalTranslationSettingsSheet: View {
                             }
 
                             testConnectionRow
+
+                            promptRow
                         }
                     }
 
@@ -130,6 +133,26 @@ struct ExternalTranslationSettingsSheet: View {
                 }
             }
         }
+    }
+
+    private var promptRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Промт для нейросети").font(.footnote).foregroundStyle(palette.secondary)
+                Spacer()
+                Button("Сбросить") { stageBPrompt = RephraseClient.defaultSystemPromptTemplate }
+                    .font(.footnote.weight(.semibold))
+                    .disabled(stageBPrompt == RephraseClient.defaultSystemPromptTemplate)
+            }
+            TextEditor(text: $stageBPrompt)
+                .font(.footnote)
+                .foregroundStyle(palette.foreground)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 140)
+            caption("Используй {target} — на это место подставится язык перевода (например \"Russian\"). Отправляется модели вместе с JSON-массивом строк на перевод/причёсывание.")
+        }
+        .padding(16)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private var testConnectionRow: some View {

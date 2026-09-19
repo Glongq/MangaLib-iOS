@@ -95,6 +95,7 @@ struct ExternalReaderView: View {
     @AppStorage("external_reader_ocr_stage_b_local_model") private var ocrStageBLocalModel = ""
     @AppStorage("external_reader_ocr_stage_b_cloud_url") private var ocrStageBCloudURL = "https://api.openai.com"
     @AppStorage("external_reader_ocr_stage_b_cloud_model") private var ocrStageBCloudModel = ""
+    @AppStorage("external_reader_ocr_stage_b_prompt") private var ocrStageBPrompt = RephraseClient.defaultSystemPromptTemplate
     @StateObject private var translationRuntime = PageTranslationRuntime()
     private static let ocrKeychain = KeychainHelper(service: "com.glongq.MangaLib.ocrTranslation")
 
@@ -284,7 +285,8 @@ struct ExternalReaderView: View {
                     ocrRephraseClient: ocrRephraseClient,
                     ocrTargetLanguageName: ocrTargetLanguageName,
                     ocrStyle: ocrStyle,
-                    ocrEraseOriginal: ocrEraseOriginal
+                    ocrEraseOriginal: ocrEraseOriginal,
+                    ocrStageBPrompt: ocrStageBPrompt
                 )
                 .frame(width: geo.size.width, height: horizontalPageHeight(geo: geo, page: page))
             }
@@ -344,7 +346,8 @@ struct ExternalReaderView: View {
                                 ocrRephraseClient: ocrRephraseClient,
                                 ocrTargetLanguageName: ocrTargetLanguageName,
                                 ocrStyle: ocrStyle,
-                                ocrEraseOriginal: ocrEraseOriginal
+                                ocrEraseOriginal: ocrEraseOriginal,
+                                ocrStageBPrompt: ocrStageBPrompt
                             )
                                 .id(index + 1)
                                 .background(
@@ -476,6 +479,7 @@ struct ExternalReaderView: View {
         let stageBEnabled = ocrStageBEnabled
         let rephraseClient = ocrRephraseClient
         let targetLanguageName = ocrTargetLanguageName
+        let promptTemplate = ocrStageBPrompt
         let runtime = translationRuntime
         Task {
             guard let session = await runtime.waitForSession() else { return }
@@ -484,7 +488,7 @@ struct ExternalReaderView: View {
             guard let image else { return }
             guard let result = await OCRTranslationEngine.processStageA(image: image, cacheKey: cacheKey, session: session) else { return }
             guard stageBEnabled, let rephraseClient, result.stageBText.isEmpty else { return }
-            _ = await OCRTranslationEngine.attemptStageB(result, cacheKey: cacheKey, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName)
+            _ = await OCRTranslationEngine.attemptStageB(result, cacheKey: cacheKey, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName, promptTemplate: promptTemplate)
         }
     }
 
@@ -646,6 +650,7 @@ private struct ExternalHorizontalPageImage: View {
     let ocrTargetLanguageName: String
     let ocrStyle: OCROverlayStyle
     let ocrEraseOriginal: Bool
+    let ocrStageBPrompt: String
 
     @State private var resolvedURL: URL?
     @StateObject private var translationController = PageTranslationController()
@@ -701,11 +706,11 @@ private struct ExternalHorizontalPageImage: View {
             translationController.load(
                 imageURL: resolvedURL, cacheKey: ocrCacheKey, runtime: ocrRuntime,
                 stageBEnabled: ocrStageBEnabled, rephraseClient: ocrRephraseClient,
-                targetLanguageName: ocrTargetLanguageName
+                targetLanguageName: ocrTargetLanguageName, promptTemplate: ocrStageBPrompt
             )
         }
         .onChange(of: ocrStageBEnabled) { _, enabled in
-            translationController.setStageBEnabled(enabled, rephraseClient: ocrRephraseClient, targetLanguageName: ocrTargetLanguageName)
+            translationController.setStageBEnabled(enabled, rephraseClient: ocrRephraseClient, targetLanguageName: ocrTargetLanguageName, promptTemplate: ocrStageBPrompt)
         }
         .onChange(of: ocrStyle) { _, newValue in translationController.style = newValue }
         .onChange(of: ocrEraseOriginal) { _, newValue in translationController.eraseOriginalText = newValue }
@@ -727,6 +732,7 @@ private struct ExternalVerticalPageImage: View {
     let ocrTargetLanguageName: String
     let ocrStyle: OCROverlayStyle
     let ocrEraseOriginal: Bool
+    let ocrStageBPrompt: String
 
     @State private var resolvedURL: URL?
     @State private var loadedImage: UIImage?
@@ -786,11 +792,11 @@ private struct ExternalVerticalPageImage: View {
             translationController.load(
                 image: loadedImage, cacheKey: ocrCacheKey, runtime: ocrRuntime,
                 stageBEnabled: ocrStageBEnabled, rephraseClient: ocrRephraseClient,
-                targetLanguageName: ocrTargetLanguageName
+                targetLanguageName: ocrTargetLanguageName, promptTemplate: ocrStageBPrompt
             )
         }
         .onChange(of: ocrStageBEnabled) { _, enabled in
-            translationController.setStageBEnabled(enabled, rephraseClient: ocrRephraseClient, targetLanguageName: ocrTargetLanguageName)
+            translationController.setStageBEnabled(enabled, rephraseClient: ocrRephraseClient, targetLanguageName: ocrTargetLanguageName, promptTemplate: ocrStageBPrompt)
         }
     }
 }

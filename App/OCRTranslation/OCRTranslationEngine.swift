@@ -56,7 +56,8 @@ enum OCRTranslationEngine {
         _ result: CachedPageTranslation,
         cacheKey: OCRCacheKey,
         rephraseClient: RephraseClient,
-        targetLanguageName: String
+        targetLanguageName: String,
+        promptTemplate: String
     ) async -> CachedPageTranslation? {
         guard result.stageBText.isEmpty else { return result }
 
@@ -66,12 +67,7 @@ enum OCRTranslationEngine {
             return RephraseLineInput(text: sourceText, characterBudget: block.characterBudget(imageSize: result.imageSize))
         }
 
-        let translated: [String]?
-        if useDirectTranslation {
-            translated = try? await rephraseClient.translateDirect(lines: orderedLines, targetLanguageName: targetLanguageName)
-        } else {
-            translated = try? await rephraseClient.rephrase(lines: orderedLines, targetLanguageName: targetLanguageName)
-        }
+        let translated = try? await rephraseClient.translate(lines: orderedLines, targetLanguageName: targetLanguageName, promptTemplate: promptTemplate)
         guard let translated, translated.count == result.blocks.count else { return nil }
 
         var updated = result

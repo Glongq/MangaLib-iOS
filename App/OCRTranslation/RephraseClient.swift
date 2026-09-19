@@ -56,32 +56,29 @@ struct RephraseClient {
         }
     }
 
-    /// Rewrites `lines` (Stage-A literal translations, in order) into
-    /// natural `targetLanguageName` style, nudged toward each line's
-    /// `characterBudget` (a soft target — see RephraseLineInput) so the
-    /// result more often fits back into the original speech bubble.
-    /// Throws on ANY failure (network, timeout, malformed JSON, wrong
-    /// count) — callers must catch and silently keep the Stage-A text, no
-    /// error UI (per product decision).
-    func rephrase(lines: [RephraseLineInput], targetLanguageName: String) async throws -> [String] {
-        try await perform(
-            lines: lines,
-            systemPrompt: "Rewrite this JSON array of literally machine-translated manga dialogue lines into natural, colloquial \(targetLanguageName). Each item has a \"budget\" — the approximate character count that fits back into the original speech bubble. Treat it as a SOFT target: prefer a more concise phrasing that gets close to it, but NEVER omit meaning or cut a sentence short just to fit — going over the budget is fine when it's genuinely needed. Preserve order and count. Reply with ONLY a JSON array of strings, the same length as the input — no markdown, no commentary."
-        )
-    }
+    /// The built-in system prompt — user-editable (see
+    /// ExternalTranslationSettingsSheet's "Промт для нейросети" field,
+    /// stored in `external_reader_ocr_stage_b_prompt`), with a "Сбросить"
+    /// button that restores exactly this. `{target}` is replaced with the
+    /// target language's display name (e.g. "Russian") before sending.
+    /// Written to work whether `lines` are raw source-language text
+    /// (English-sourced pages, translating directly) or already-literal
+    /// Stage-A machine translations (every other source language, being
+    /// rephrased) — one prompt covers both call sites in
+    /// OCRTranslationEngine.attemptStageB.
+    static let defaultSystemPromptTemplate = "Translate or rewrite this JSON array of manga dialogue lines into natural, colloquial {target}. If a line is already in {target}, polish its phrasing instead of translating it again. Each item has a \"budget\" — the approximate character count that fits back into the original speech bubble. Treat it as a SOFT target: prefer a more concise phrasing that gets close to it, but NEVER omit meaning or cut a sentence short just to fit — going over the budget is fine when it's genuinely needed. Preserve order and count. Reply with ONLY a JSON array of strings, the same length as the input — no markdown, no commentary."
 
-    /// Translates `lines` (RAW English OCR text, in order) directly into
-    /// `targetLanguageName` in one pass — used instead of `rephrase`
-    /// specifically for English-sourced pages (see
-    /// OCRTranslationEngine.process), skipping Apple's literal Stage-A
-    /// translation entirely: one model doing translation+phrasing together
-    /// tends to read more natural than rephrasing an already-literal MT
-    /// output. Same failure contract as `rephrase`.
-    func translateDirect(lines: [RephraseLineInput], targetLanguageName: String) async throws -> [String] {
-        try await perform(
-            lines: lines,
-            systemPrompt: "Translate this JSON array of English manga dialogue lines into natural, colloquial \(targetLanguageName). Each item has a \"budget\" — the approximate character count that fits back into the original speech bubble. Treat it as a SOFT target: prefer a more concise phrasing that gets close to it, but NEVER omit meaning or cut a sentence short just to fit — going over the budget is fine when it's genuinely needed. Preserve order and count. Reply with ONLY a JSON array of strings, the same length as the input — no markdown, no commentary."
-        )
+    /// Translates/rewrites `lines` into `targetLanguageName`, nudged
+    /// toward each line's `characterBudget` (a soft target — see
+    /// RephraseLineInput) so the result more often fits back into the
+    /// original speech bubble. `promptTemplate` is the (possibly
+    /// user-edited) system prompt, with `{target}` substituted. Throws on
+    /// ANY failure (network, timeout, malformed JSON, wrong count) —
+    /// callers must catch and silently keep the Stage-A text, no error UI
+    /// (per product decision).
+    func translate(lines: [RephraseLineInput], targetLanguageName: String, promptTemplate: String) async throws -> [String] {
+        let systemPrompt = promptTemplate.replacingOccurrences(of: "{target}", with: targetLanguageName)
+        return try await perform(lines: lines, systemPrompt: systemPrompt)
     }
 
     private func perform(lines: [RephraseLineInput], systemPrompt: String) async throws -> [String] {
