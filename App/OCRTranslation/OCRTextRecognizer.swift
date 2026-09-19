@@ -93,7 +93,18 @@ enum OCRTextRecognizer {
 
         return clusters.map { clusterLines in
             let rect = clusterLines.dropFirst().reduce(clusterLines[0].rect) { $0.union($1.rect) }
-            let text = clusterLines.map(\.text).joined(separator: "\n")
+            // Joined with a SPACE, not "\n": stylized comic lettering
+            // frequently makes Vision detect one "line" per word/short
+            // phrase, so hard-joining with newlines baked that ORIGINAL
+            // (often very short) line segmentation into both the
+            // translation input and the rendered text — every one of
+            // those became a forced line break downstream, stretching the
+            // caption tall with big gaps regardless of font/line-height,
+            // even after tightening those. Reflowing as one continuous
+            // string lets Stage A/B translate it as actual sentences and
+            // lets the renderer wrap it naturally at the overlay's own
+            // width instead.
+            let text = clusterLines.map(\.text).joined(separator: " ")
             return RecognizedTextBlock(id: UUID(), rect: rect, text: text, lines: clusterLines)
         }
     }
