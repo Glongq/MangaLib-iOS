@@ -20,15 +20,20 @@ struct OCROverlaySwiftUIView: View {
                     width: fitRect.width * block.rect.width,
                     height: fitRect.height * block.rect.height
                 )
-                let grownHeight = min(base.height * 1.6, base.height + 40)
-
+                // Translated text (especially Russian) routinely runs
+                // longer than the source CJK/English — a fixed-height
+                // frame used to clip it. `.fixedSize(vertical: true)`
+                // makes Text take whatever height it actually needs to
+                // wrap at `base.width`, no clipping, no truncation;
+                // `.position` centers the (now variable-size) view at the
+                // original bbox's center, so it grows symmetrically.
                 Text(text)
                     .font(.system(size: max(10, base.height * 0.35), weight: .semibold))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.5)
                     .padding(.horizontal, 4).padding(.vertical, 2)
-                    .frame(width: base.width, height: grownHeight)
+                    .frame(width: base.width)
+                    .fixedSize(horizontal: false, vertical: true)
                     .background {
                         if style == .backdropPlate {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -36,7 +41,7 @@ struct OCROverlaySwiftUIView: View {
                         }
                     }
                     .shadow(color: style.hasTextShadow ? .black.opacity(0.9) : .clear, radius: 3)
-                    .position(x: base.midX, y: base.midY - (grownHeight - base.height) / 2)
+                    .position(x: base.midX, y: base.midY)
             }
         }
     }

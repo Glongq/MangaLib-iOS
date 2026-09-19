@@ -12,10 +12,9 @@ final class OCROverlayContainerView: UIView {
         init() {
             super.init(frame: .zero)
             label.numberOfLines = 0
+            label.lineBreakMode = .byWordWrapping
             label.textColor = .white
             label.textAlignment = .center
-            label.minimumScaleFactor = 0.5
-            label.adjustsFontSizeToFitWidth = true
             addSubview(label)
         }
         required init?(coder: NSCoder) { fatalError() }
@@ -65,13 +64,19 @@ final class OCROverlayContainerView: UIView {
                 width: bounds.width * block.rect.width,
                 height: bounds.height * block.rect.height
             )
-            // Translated text tends to run longer than the source CJK —
-            // let the plate grow a bit rather than clip, capped so it
-            // doesn't swallow neighboring bubbles.
-            let grownHeight = min(baseRect.height * 1.6, baseRect.height + 40)
+            // Translated text (especially Russian) routinely runs longer
+            // than the source CJK/English — a fixed growth multiplier
+            // used to clip it with "..." (UILabel's default truncation on
+            // its last visible line once content overflows a fixed
+            // frame). Measure the ACTUAL wrapped height at this width
+            // instead, so the plate always grows to fit, symmetrically
+            // around the original bbox's vertical center.
+            let horizontalInset: CGFloat = 8
+            let measured = view.label.sizeThatFits(CGSize(width: max(1, baseRect.width - horizontalInset), height: .greatestFiniteMagnitude))
+            let finalHeight = max(baseRect.height, measured.height + 4)
             view.frame = CGRect(
-                x: baseRect.minX, y: baseRect.minY - (grownHeight - baseRect.height) / 2,
-                width: baseRect.width, height: grownHeight
+                x: baseRect.minX, y: baseRect.midY - finalHeight / 2,
+                width: baseRect.width, height: finalHeight
             )
         }
     }
