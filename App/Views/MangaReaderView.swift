@@ -1634,8 +1634,16 @@ struct ZoomableImageScrollView: UIViewRepresentable {
     /// экранной) части контейнера, а не по центру всей длинной страницы (см.
     /// Coordinator.centerRing).
     var viewportHeight: CGFloat = 0
+    /// Внешний код (external-ридер, см. PageTranslationController) может
+    /// повесить свою subview поверх imageView (например, оверлей перевода) —
+    /// вызывается при каждой перевёрстке базового кадра картинки (см.
+    /// layoutImage), НЕ во время самого зума (тот меняет только transform,
+    /// не frame/bounds), поэтому любая subview внутри imageView.bounds
+    /// масштабируется зумом бесплатно. nil по умолчанию — основной ридер
+    /// это никак не использует и не меняет поведение.
+    var onImageViewReady: ((UIImageView) -> Void)? = nil
 
-    func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap, fitWidth: fitWidth, doubleTapZoom: doubleTapZoom, onZoomChanged: onZoomChanged) }
+    func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap, fitWidth: fitWidth, doubleTapZoom: doubleTapZoom, onZoomChanged: onZoomChanged, onImageViewReady: onImageViewReady) }
 
     func makeUIView(context: Context) -> UIScrollView {
         let scroll = LayoutCallbackScrollView()
@@ -1681,6 +1689,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
     func updateUIView(_ uiView: UIScrollView, context: Context) {
         context.coordinator.onTap = onTap
         context.coordinator.onZoomChanged = onZoomChanged
+        context.coordinator.onImageViewReady = onImageViewReady
         context.coordinator.doubleTapZoom = doubleTapZoom
         context.coordinator.ringView?.ringColor = ringColor
         context.coordinator.viewportHeight = viewportHeight
@@ -1700,6 +1709,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         var viewportHeight: CGFloat = 0
         var onTap: (CGFloat) -> Void
         var onZoomChanged: ((Bool) -> Void)?
+        var onImageViewReady: ((UIImageView) -> Void)?
         var fitWidth: Bool
         var doubleTapZoom: Bool
         var currentKey: URL?
@@ -1707,11 +1717,12 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         private var lastBounds: CGSize = .zero
         private var lastReportedZoomed = false
 
-        init(onTap: @escaping (CGFloat) -> Void, fitWidth: Bool, doubleTapZoom: Bool, onZoomChanged: ((Bool) -> Void)? = nil) {
+        init(onTap: @escaping (CGFloat) -> Void, fitWidth: Bool, doubleTapZoom: Bool, onZoomChanged: ((Bool) -> Void)? = nil, onImageViewReady: ((UIImageView) -> Void)? = nil) {
             self.onTap = onTap
             self.fitWidth = fitWidth
             self.doubleTapZoom = doubleTapZoom
             self.onZoomChanged = onZoomChanged
+            self.onImageViewReady = onImageViewReady
         }
 
         func load(candidates: [URL]) {
@@ -1802,6 +1813,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
             scroll.contentSize = size
             centerImage()
             centerRing()
+            onImageViewReady?(imageView)
         }
 
         private func centerImage() {
@@ -1916,6 +1928,10 @@ struct VerticalPageImage: View {
     /// прежний фиксированный placeholder (сервер их не прислал).
     let width: Int?
     let height: Int?
+    /// Внешний код (external-ридер, см. PageTranslationController) хочет
+    /// сам декодированный UIImage, как только он готов — для OCR. nil по
+    /// умолчанию, основной ридер это не использует.
+    var onImageLoaded: ((UIImage) -> Void)? = nil
     @State private var image: UIImage?
     /// Реальный прогресс скачивания (0...1) — по прямой просьбе, кольцо
     /// вместо неопределённого спиннера (см. RemoteImageLoader.fetchImage
@@ -1963,6 +1979,7 @@ struct VerticalPageImage: View {
             image = await RemoteImageLoader.fetchImage(candidates: candidates, priority: URLSessionTask.highPriority) { p in
                 Task { @MainActor in progress = p }
             }
+            if let image { onImageLoaded?(image) }
         }
     }
 

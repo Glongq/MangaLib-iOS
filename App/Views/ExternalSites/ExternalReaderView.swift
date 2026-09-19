@@ -57,6 +57,11 @@ struct ExternalReaderView: View {
     /// recalculated and re-trigger the very same already-requested
     /// pages.
     @State private var preloadedIndices: Set<Int> = []
+    /// Separate from `preloadedIndices` (images) — a page's image can be
+    /// warmed before the translation session is ready, so it needs its
+    /// own "already started" tracking to still get OCR-preloaded on a
+    /// later tick instead of being skipped forever.
+    @State private var ocrPreloadedIndices: Set<Int> = []
     @State private var vScale: CGFloat = 1
     @State private var vScaleBase: CGFloat = 1
     @State private var didScrollToInitial = false
@@ -76,10 +81,56 @@ struct ExternalReaderView: View {
     /// "Манга"/"Манхва" with different defaults.
     @AppStorage("external_reader_fit_width") private var fitWidth = false
 
+    // MARK: OCR translation overlay (external sites only, see
+    // App/OCRTranslation/) — off by default, zero effect on the core
+    // app's own MangaReaderView.
+    @AppStorage("external_reader_ocr_enabled") private var ocrEnabled = false
+    @AppStorage("external_reader_ocr_source_lang") private var ocrSourceLang = "auto"
+    @AppStorage("external_reader_ocr_target_lang") private var ocrTargetLang = "ru"
+    @AppStorage("external_reader_ocr_style") private var ocrStyleRaw = 0
+    @AppStorage("external_reader_ocr_stage_b_enabled") private var ocrStageBEnabled = false
+    @AppStorage("external_reader_ocr_stage_b_engine") private var ocrStageBEngine = 0
+    @AppStorage("external_reader_ocr_stage_b_local_url") private var ocrStageBLocalURL = ""
+    @AppStorage("external_reader_ocr_stage_b_local_model") private var ocrStageBLocalModel = ""
+    @AppStorage("external_reader_ocr_stage_b_cloud_url") private var ocrStageBCloudURL = "https://api.openai.com"
+    @AppStorage("external_reader_ocr_stage_b_cloud_model") private var ocrStageBCloudModel = ""
+    @StateObject private var translationRuntime = PageTranslationRuntime()
+    private static let ocrKeychain = KeychainHelper(service: "com.glongq.MangaLib.ocrTranslation")
+
     private var provider: any ExternalSiteProvider { ExternalSiteRegistry.provider(for: site) }
     private var palette: ReaderPalette { .make(theme: readerTheme, system: systemColorScheme) }
     private var fg: Color { palette.foreground }
     private var readerBackground: Color { palette.pageBackground }
+
+    private var ocrStyle: OCROverlayStyle { OCROverlayStyle(rawValue: ocrStyleRaw) ?? .backdropPlate }
+
+    private var ocrSourceLocale: Locale.Language? {
+        ocrSourceLang == "auto" ? nil : Locale.Language(identifier: ocrSourceLang)
+    }
+    private var ocrTargetLocale: Locale.Language { Locale.Language(identifier: ocrTargetLang) }
+    private var ocrTargetLanguageName: String { ocrTargetLang == "en" ? "English" : "Russian" }
+
+    /// nil when Stage B is off or not fully configured (missing URL/key) —
+    /// callers simply skip Stage B in that case, no error surfaced.
+    private var ocrRephraseClient: RephraseClient? {
+        guard ocrStageBEnabled else { return nil }
+        if ocrStageBEngine == 0 {
+            guard let url = URL(string: ocrStageBLocalURL), !ocrStageBLocalURL.isEmpty else { return nil }
+            return RephraseClient(engine: .local(baseURL: url, model: ocrStageBLocalModel))
+        } else {
+            guard let url = URL(string: ocrStageBCloudURL),
+                  let key = Self.ocrKeychain.readString("stageBCloudAPIKey"), !key.isEmpty else { return nil }
+            return RephraseClient(engine: .cloud(baseURL: url, apiKey: key, model: ocrStageBCloudModel))
+        }
+    }
+
+    private func ocrCacheKey(for page: ExternalGalleryPage) -> OCRCacheKey {
+        OCRCacheKey(
+            site: site, galleryId: detail.id, pageKey: page.key,
+            sourceLanguage: ocrSourceLang, targetLanguage: ocrTargetLang,
+            engineVersion: OCRCacheKey.currentEngineVersion
+        )
+    }
 
     /// `initialPage` — open directly on this page (1-based,
     /// `ExternalGalleryPage.index`) — a tap on a thumbnail in the title
@@ -96,6 +147,19 @@ struct ExternalReaderView: View {
     var body: some View {
         ZStack {
             readerBackground.ignoresSafeArea()
+
+            // Always mounted (NOT gated on ocrEnabled) — Apple's
+            // TranslationSession is torn down the instant the view its
+            // .translationTask is attached to disappears, and using it
+            // afterward is a hard, non-catchable fatalError (confirmed via
+            // device log: toggling the setting off mid-translation crashed
+            // the whole app). Keeping this host alive for the reader
+            // screen's entire lifetime, independent of the setting,
+            // avoids that teardown race entirely — actual OCR/translation
+            // work is still fully gated by ocrEnabled elsewhere (the page
+            // wrappers' OCRTrigger .task), so nothing runs or downloads a
+            // language pack unless the feature is actually turned on.
+            PageTranslationSessionHost(sourceLanguage: ocrSourceLocale, targetLanguage: ocrTargetLocale, runtime: translationRuntime)
 
             content
 
@@ -211,7 +275,14 @@ struct ExternalReaderView: View {
                     fitWidth: fitWidth, doubleTapZoom: doubleTapZoom,
                     ringColor: UIColor(fg),
                     onTap: { xFraction in handleReaderTap(xFraction) },
-                    onZoomChanged: { zoomed in isCurrentPageZoomed = zoomed }
+                    onZoomChanged: { zoomed in isCurrentPageZoomed = zoomed },
+                    ocrEnabled: ocrEnabled,
+                    ocrCacheKey: ocrCacheKey(for: page),
+                    ocrRuntime: translationRuntime,
+                    ocrStageBEnabled: ocrStageBEnabled,
+                    ocrRephraseClient: ocrRephraseClient,
+                    ocrTargetLanguageName: ocrTargetLanguageName,
+                    ocrStyle: ocrStyle
                 )
                 .frame(width: geo.size.width, height: horizontalPageHeight(geo: geo, page: page))
             }
@@ -262,7 +333,16 @@ struct ExternalReaderView: View {
                 ScrollView([.vertical, .horizontal]) {
                     LazyVStack(spacing: CGFloat(verticalGap)) {
                         ForEach(Array(detail.pages.enumerated()), id: \.offset) { index, page in
-                            ExternalVerticalPageImage(provider: provider, galleryId: detail.id, page: page)
+                            ExternalVerticalPageImage(
+                                provider: provider, galleryId: detail.id, page: page,
+                                ocrEnabled: ocrEnabled,
+                                ocrCacheKey: ocrCacheKey(for: page),
+                                ocrRuntime: translationRuntime,
+                                ocrStageBEnabled: ocrStageBEnabled,
+                                ocrRephraseClient: ocrRephraseClient,
+                                ocrTargetLanguageName: ocrTargetLanguageName,
+                                ocrStyle: ocrStyle
+                            )
                                 .id(index + 1)
                                 .background(
                                     GeometryReader { pageGeo in
@@ -376,6 +456,34 @@ struct ExternalReaderView: View {
         Task {
             guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
             await preloadExternalImage(url)
+            preloadOCRTranslation(page: page, url: url)
+        }
+    }
+
+    /// Warms the OCR/translation cache for a preloaded page in the
+    /// background (no UI update — the two callbacks are no-ops; the
+    /// point is purely that OCRTranslationEngine.process's cache tiers
+    /// end up populated) so that by the time the reader actually shows
+    /// this page, PageTranslationController.load usually hits the cache
+    /// instead of starting cold.
+    private func preloadOCRTranslation(page: ExternalGalleryPage, url: URL) {
+        guard ocrEnabled, !ocrPreloadedIndices.contains(page.index) else { return }
+        ocrPreloadedIndices.insert(page.index)
+        let cacheKey = ocrCacheKey(for: page)
+        let stageBEnabled = ocrStageBEnabled
+        let rephraseClient = ocrRephraseClient
+        let targetLanguageName = ocrTargetLanguageName
+        let runtime = translationRuntime
+        Task {
+            guard let session = await runtime.waitForSession() else { return }
+            var image = RemoteImageCache.shared.image(for: url)
+            if image == nil { image = await RemoteImageLoader.fetchImage(candidates: [url]) }
+            guard let image else { return }
+            await OCRTranslationEngine.process(
+                image: image, cacheKey: cacheKey, session: session,
+                stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName,
+                onStageAReady: { _ in }, onStageBReady: { _ in }
+            )
         }
     }
 
@@ -529,7 +637,32 @@ private struct ExternalHorizontalPageImage: View {
     let onTap: (CGFloat) -> Void
     let onZoomChanged: (Bool) -> Void
 
+    let ocrEnabled: Bool
+    let ocrCacheKey: OCRCacheKey
+    let ocrRuntime: PageTranslationRuntime
+    let ocrStageBEnabled: Bool
+    let ocrRephraseClient: RephraseClient?
+    let ocrTargetLanguageName: String
+    let ocrStyle: OCROverlayStyle
+
     @State private var resolvedURL: URL?
+    @StateObject private var translationController = PageTranslationController()
+
+    /// Drives the OCR `.task(id:)` below — a plain `.task {}` only runs
+    /// ONCE per page view lifetime, so toggling the translation setting
+    /// (or source/target language, or Stage B) while ALREADY viewing a
+    /// page previously had zero effect until the page view was recreated
+    /// (e.g. swiping away and back). Keying on this struct instead makes
+    /// the task re-run whenever anything relevant changes.
+    private struct OCRTrigger: Equatable {
+        let enabled: Bool
+        let url: URL?
+        let cacheKey: OCRCacheKey
+        let stageBEnabled: Bool
+    }
+    private var ocrTrigger: OCRTrigger {
+        OCRTrigger(enabled: ocrEnabled, url: resolvedURL, cacheKey: ocrCacheKey, stageBEnabled: ocrStageBEnabled)
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -540,7 +673,12 @@ private struct ExternalHorizontalPageImage: View {
                 onTap: onTap,
                 onZoomChanged: onZoomChanged,
                 ringColor: ringColor,
-                viewportHeight: geo.size.height
+                viewportHeight: geo.size.height,
+                // Always attached (not gated on ocrEnabled): cheap/idempotent,
+                // and guarantees the overlay container already exists by the
+                // time translationController has data to render, regardless
+                // of whether OCR was enabled when the image first loaded.
+                onImageViewReady: { imageView in translationController.attach(to: imageView) }
             )
         }
         .task {
@@ -548,6 +686,18 @@ private struct ExternalHorizontalPageImage: View {
             // times on a transient failure instead of leaving the page
             // permanently black on the first hiccup (complaint 09/18).
             resolvedURL = await resolveExternalPageURL(provider: provider, galleryId: galleryId, page: page)
+        }
+        .task(id: ocrTrigger) {
+            guard ocrEnabled, let resolvedURL else {
+                translationController.clear()
+                return
+            }
+            translationController.style = ocrStyle
+            translationController.load(
+                imageURL: resolvedURL, cacheKey: ocrCacheKey, runtime: ocrRuntime,
+                stageBEnabled: ocrStageBEnabled, rephraseClient: ocrRephraseClient,
+                targetLanguageName: ocrTargetLanguageName
+            )
         }
     }
 }
@@ -559,19 +709,72 @@ private struct ExternalVerticalPageImage: View {
     let galleryId: Int
     let page: ExternalGalleryPage
 
+    let ocrEnabled: Bool
+    let ocrCacheKey: OCRCacheKey
+    let ocrRuntime: PageTranslationRuntime
+    let ocrStageBEnabled: Bool
+    let ocrRephraseClient: RephraseClient?
+    let ocrTargetLanguageName: String
+    let ocrStyle: OCROverlayStyle
+
     @State private var resolvedURL: URL?
+    @State private var loadedImage: UIImage?
+    @StateObject private var translationController = PageTranslationController()
+
+    /// Same reasoning as ExternalHorizontalPageImage.OCRTrigger — without
+    /// this, toggling the translation setting while a page's image was
+    /// ALREADY decoded (onImageLoaded already fired once) had zero effect.
+    private struct OCRTrigger: Equatable {
+        let enabled: Bool
+        let hasImage: Bool
+        let cacheKey: OCRCacheKey
+        let stageBEnabled: Bool
+    }
+    private var ocrTrigger: OCRTrigger {
+        OCRTrigger(enabled: ocrEnabled, hasImage: loadedImage != nil, cacheKey: ocrCacheKey, stageBEnabled: ocrStageBEnabled)
+    }
 
     var body: some View {
         VerticalPageImage(
             candidates: resolvedURL.map { [$0] } ?? [],
             width: page.width > 0 ? page.width : nil,
-            height: page.height > 0 ? page.height : nil
+            height: page.height > 0 ? page.height : nil,
+            // Always set (not gated on ocrEnabled) — otherwise enabling
+            // translation AFTER this page's image already finished
+            // decoding would never capture it (VerticalPageImage's own
+            // internal fetch .task only runs once per candidates.first).
+            onImageLoaded: { image in loadedImage = image }
         )
+        .overlay {
+            if ocrEnabled, let loadedImage {
+                GeometryReader { geo in
+                    OCROverlaySwiftUIView(
+                        blocks: translationController.blocks,
+                        texts: translationController.displayText,
+                        style: ocrStyle,
+                        fitRect: OCROverlaySwiftUIView.aspectFitRect(imageSize: loadedImage.size, in: geo.size)
+                    )
+                }
+                .allowsHitTesting(false)
+            }
+        }
         .task {
             // See ExternalHorizontalPageImage.task/resolveExternalPageURL
             // — the same retry-on-transient-failure fix for the CURRENTLY
             // visible (not preloaded ahead of time) page.
             resolvedURL = await resolveExternalPageURL(provider: provider, galleryId: galleryId, page: page)
+        }
+        .task(id: ocrTrigger) {
+            guard ocrEnabled, let loadedImage else {
+                translationController.clear()
+                return
+            }
+            translationController.style = ocrStyle
+            translationController.load(
+                image: loadedImage, cacheKey: ocrCacheKey, runtime: ocrRuntime,
+                stageBEnabled: ocrStageBEnabled, rephraseClient: ocrRephraseClient,
+                targetLanguageName: ocrTargetLanguageName
+            )
         }
     }
 }
@@ -606,6 +809,7 @@ private struct ExternalReaderSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme
     @State private var showPaging = false
+    @State private var showTranslation = false
     private let gapHaptic = UIImpactFeedbackGenerator(style: .light)
 
     private var palette: ReaderPalette { .make(theme: readerTheme, system: systemColorScheme) }
@@ -673,6 +877,19 @@ private struct ExternalReaderSettingsSheet: View {
                     toggleRow("Увеличить двойным нажатием", isOn: $doubleTapZoom)
                     toggleRow("Скрыть номер страниц", isOn: $hidePageNumber)
 
+                    Button { showTranslation = true } label: {
+                        HStack {
+                            Text("Перевод").foregroundStyle(palette.foreground)
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(palette.secondary)
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 52)
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 16)
@@ -687,6 +904,9 @@ private struct ExternalReaderSettingsSheet: View {
         .tint(Theme.accent)
         .sheet(isPresented: $showPaging) {
             pagingSheet
+        }
+        .sheet(isPresented: $showTranslation) {
+            ExternalTranslationSettingsSheet(readerTheme: readerTheme)
         }
     }
 

@@ -9,8 +9,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.10"
-    MARKETING_VERSION: "0.91.4"
-    CURRENT_PROJECT_VERSION: "442"
+    MARKETING_VERSION: "0.92.0"
+    CURRENT_PROJECT_VERSION: "443"
 
 targets:
   MangaLib:
@@ -29,5 +29,11 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: NO
+        # Allows plain HTTP to local-network addresses (RFC1918/loopback/
+        # .local) — needed for the Stage-B translation rephrase pass
+        # talking to a local LM Studio server (see
+        # App/OCRTranslation/RephraseClient.swift). Does not open up
+        # arbitrary public-internet HTTP.
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
     scheme:
       testTargets: []
