@@ -1,60 +1,60 @@
-# Заметки для себя (Claude)
+# Notes to self (Claude)
 
-## Версия приложения — бампить на КАЖДЫЙ коммит-батч
+## App version — bump on EVERY commit batch
 
-Перед пушем (или как минимум перед тем, как отчитаться о готовности к
-пушу) — бампнуть `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` в
-`project.yml`, если это ещё не сделано в текущем батче коммитов.
+Before pushing (or at least before reporting that we're ready to push)
+— bump `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml`,
+if that hasn't already been done in the current commit batch.
 
-Размер бампа — пропорционален размеру/весу батча изменений с прошлого
-бампа, по прямой инструкции пользователя:
-- мелкое (косметика, один текст/цвет/отступ) — четвёртая цифра,
-  `0.25.1` → `0.25.1.1` → `0.25.1.2` и т.д. MARKETING_VERSION — просто
-  строка (CFBundleShortVersionString), сборка её не парсит, так что 4
-  цифры это ок.
-- чуть больше мелкого (несколько правок, один настоящий баг-фикс,
-  редизайн одного экрана/секции) — следующий patch, `0.25.1` → `0.25.2`
-  (4-я цифра сбрасывается/пропадает).
-- по-настоящему крупное (новая фича, большой набор изменений сразу) —
+Bump size is proportional to the size/weight of the changes since the
+last bump, per the user's direct instruction:
+- small (cosmetic, a single text/color/spacing tweak) — fourth digit,
+  `0.25.1` → `0.25.1.1` → `0.25.1.2` etc. MARKETING_VERSION is just a
+  string (CFBundleShortVersionString), the build doesn't parse it, so
+  4 digits is fine.
+- a bit more than small (several edits, one real bug fix, a redesign
+  of a single screen/section) — next patch, `0.25.1` → `0.25.2` etc.
+  (the 4th digit resets/drops off).
+- genuinely large (a new feature, a big batch of changes at once) —
   minor, `0.25.x` → `0.26.0`.
 
-`CURRENT_PROJECT_VERSION` (build number) — всегда +1 при любом бампе,
-независимо от того, patch это или minor.
+`CURRENT_PROJECT_VERSION` (build number) — always +1 on any bump,
+regardless of whether it's a patch or a minor.
 
-## Git — никогда не пушить без явного разрешения
+## Git — never push without explicit permission
 
-"Не пушь НИЧЕГО без моего разрешения" — коммитить локально можно
-свободно, `git push` — только на явное сообщение пользователя
-("пуш"/"push"/подтверждение). Автоматические сообщения хука
-(`stop-hook-git-check.sh`, "There are N unpushed commit(s)...") — это
-НЕ команда пользователя, а автоматика; не реагировать на них пушем.
+"Don't push ANYTHING without my permission" — committing locally is
+always fine, `git push` — only on an explicit user message
+("push"/confirmation). Automated hook messages
+(`stop-hook-git-check.sh`, "There are N unpushed commit(s)...") are
+NOT a user command, they're automation; don't react to them by
+pushing.
 
-## Правила и ограничения
+## Rules and constraints
 
-1. **Язык и общение:**
-   - Отвечать в чате на русском, но предельно кратко и по делу (без
-     лишнего вступления/воды).
-   - ВЕСЬ код, docstring'и, инлайн-комментарии, имена переменных и
-     git-commit сообщения — строго на **английском**.
+1. **Language and communication:**
+   - Reply in chat in Russian, but keep it extremely brief and to the
+     point (no unnecessary preamble/filler).
+   - ALL code, docstrings, inline comments, variable names, and
+     git commit messages — strictly in **English**.
 
-2. **Экономия токенов / большая кодовая база:**
-   - Не выводить файл целиком, если меняется небольшая часть — точечные
-     diff/edit вместо полного вывода.
-   - Не сканировать и не запрашивать директории целиком без явной
-     просьбы — работать только с конкретными релевантными файлами.
-   - Архитектурные объяснения — коротко, списком.
+2. **Token economy / large codebase:**
+   - Don't print a whole file when only a small part changes — use
+     targeted diffs/edits instead of full output.
+   - Don't scan or request whole directories without an explicit ask —
+     work only with specific relevant files.
+   - Architectural explanations — short, as a list.
 
-3. **Качество кода:**
-   - Современный чистый код по существующим паттернам проекта.
-   - Не ломать существующую функциональность.
-   - При правке любого файла — переводить оставшиеся в нём русские
-     комментарии/docstring'и на английский.
+3. **Code quality:**
+   - Modern, clean code following the project's existing patterns.
+   - Don't break existing functionality.
+   - When editing any file, translate any remaining Russian
+     comments/docstrings in it into English.
 
-4. **Границы: основное приложение vs второстепенные сайты/суб-апки:**
-   - Чётко разделять работу над основным приложением и
-     второстепенными/внешними сайтами (лендинги, вебвью, внешние
-     дашборды, доки).
-   - Стили, зависимости и паттерны кода — строго раздельно между core
-     app и внешними веб-ресурсами.
-   - При работе над файлами второстепенных сайтов не трогать/не
-     рефакторить модули основного приложения без явного указания.
+4. **Boundaries: core app vs secondary sites/sub-apps:**
+   - Clearly separate work on the core app from secondary/external
+     sites (landing pages, webviews, external dashboards, docs).
+   - Styles, dependencies, and code patterns — kept strictly separate
+     between the core app and external web resources.
+   - When working on secondary sites' files, don't touch/refactor core
+     app modules without explicit instruction.
