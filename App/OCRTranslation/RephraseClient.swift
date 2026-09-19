@@ -37,10 +37,44 @@ struct RephraseClient {
 
     private static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 8
-        config.timeoutIntervalForResource = 10
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 40
         return URLSession(configuration: config)
     }()
+
+    /// Serializes `.local` requests (one at a time) — a single LM Studio
+    /// instance has exactly one model loaded, and OCRTranslationEngine
+    /// callers (the live page AND every preloaded page ahead of it, up
+    /// to 50 in vertical mode) fire their own independent Stage-B calls
+    /// with no coordination between them. Without this, several requests
+    /// land on LM Studio at once, it visibly interleaves/queues them
+    /// (see its own server log), and each one's wall-clock time balloons
+    /// past even a generous client timeout — observed in practice as
+    /// constant "Client disconnected. Stopping generation" and truncated/
+    /// empty completions. `.cloud` engines are real multi-request
+    /// servers and don't need this.
+    private static let localRequestGate = RequestGate()
+
+    private actor RequestGate {
+        private var busy = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func acquire() async {
+            if !busy {
+                busy = true
+                return
+            }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func release() {
+            if waiters.isEmpty {
+                busy = false
+            } else {
+                waiters.removeFirst().resume()
+            }
+        }
+    }
 
     private var baseURL: URL {
         switch engine {
@@ -106,6 +140,10 @@ struct RephraseClient {
         ]
         if let model { body["model"] = model }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let isLocal = { if case .local = engine { return true }; return false }()
+        if isLocal { await Self.localRequestGate.acquire() }
+        defer { if isLocal { Task { await Self.localRequestGate.release() } } }
 
         let (data, response) = try await Self.session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
