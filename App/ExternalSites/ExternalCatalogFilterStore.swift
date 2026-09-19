@@ -14,6 +14,13 @@ import Combine
 struct ExternalSavedFilter: Identifiable, Codable {
     let id = UUID()
     var name: String
+    /// The shared top search field (ExternalCombinedCatalogView's
+    /// `.searchable`, i.e. `committedQuery`/`filterStore.combinedQuery`) —
+    /// captured/restored alongside the rest of the filters per direct
+    /// feedback, so a saved preset also brings back whatever tag/title was
+    /// typed there when it was saved, not just the category/advanced-query
+    /// filters below.
+    var query: String = ""
     var excludedCategoriesEH: Set<EHentaiCategory> = []
     var excludedCategoriesIH: Set<ImhentaiCategory> = []
     var excludedLanguagesIH: Set<ImhentaiLanguage> = []
@@ -29,7 +36,8 @@ struct ExternalSavedFilter: Identifiable, Codable {
     /// saved-filters list — same formula as
     /// ExternalCombinedCatalogView.excludedCategoryCount.
     var filterCount: Int {
-        excludedCategoriesEH.count + excludedCategoriesIH.count + excludedLanguagesIH.count
+        (query.trimmingCharacters(in: .whitespaces).isEmpty ? 0 : 1)
+            + excludedCategoriesEH.count + excludedCategoriesIH.count + excludedLanguagesIH.count
             + advancedQueryEH.tags.count + advancedQueryEH.series.count + advancedQueryEH.characters.count + advancedQueryEH.artists.count + advancedQueryEH.groups.count
             + advancedQueryIH.tags.count + advancedQueryIH.parodies.count + advancedQueryIH.artists.count + advancedQueryIH.characters.count + advancedQueryIH.groups.count
             + advancedQuerySH.tags.count + advancedQuerySH.parodies.count + advancedQuerySH.characters.count + advancedQuerySH.artists.count + advancedQuerySH.translators.count + advancedQuerySH.language.count
@@ -162,8 +170,12 @@ final class ExternalCatalogFilterStore: ObservableObject {
     /// Versioned key (not just "external_catalog_filters") — if this
     /// shape ever needs a breaking change, bumping the suffix leaves old
     /// installs decoding cleanly to defaults instead of crashing/silently
-    /// dropping fields on a JSONDecoder failure.
-    private static let storageKey = "external_catalog_filter_store_v1"
+    /// dropping fields on a JSONDecoder failure. Bumped to v2 when
+    /// ExternalSavedFilter gained its new required `query` field (a
+    /// JSONDecoder failure on the WHOLE blob from a v1 install missing
+    /// that key would otherwise silently reset every filter, not just
+    /// saved presets).
+    private static let storageKey = "external_catalog_filter_store_v2"
     private let defaults = UserDefaults.standard
     /// Keeps the objectWillChange subscription below alive for the
     /// lifetime of this singleton.

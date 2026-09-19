@@ -552,6 +552,7 @@ struct ExternalCombinedCatalogView: View {
     /// everything the same way.
     private func snapshotCurrentFilters() -> ExternalSavedFilter {
         var snapshot = ExternalSavedFilter(name: "")
+        snapshot.query = committedQuery
         snapshot.excludedCategoriesEH = excludedCategoriesEH
         snapshot.advancedQueryEH = advancedQueryEH
         snapshot.excludedCategoriesIH = excludedCategoriesIH
@@ -577,6 +578,9 @@ struct ExternalCombinedCatalogView: View {
     /// Restores a saved preset back into every site's live filter state at
     /// once (see ExternalSavedFilter's doc-comment).
     private func applySavedFilter(_ preset: ExternalSavedFilter) {
+        query = preset.query
+        committedQuery = preset.query
+        filterStore.combinedQuery = preset.query
         excludedCategoriesEH = preset.excludedCategoriesEH
         advancedQueryEH = preset.advancedQueryEH
         excludedCategoriesIH = preset.excludedCategoriesIH
