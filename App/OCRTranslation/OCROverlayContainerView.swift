@@ -91,7 +91,7 @@ final class OCROverlayContainerView: UIView {
                 startFontSize: startFontSize
             )
             let font = UIFont.systemFont(ofSize: fit.fontSize, weight: .semibold)
-            view.label.attributedText = NSAttributedString(string: text, attributes: [
+            view.label.attributedText = NSAttributedString(string: fit.wrappedText, attributes: [
                 .font: font,
                 .foregroundColor: textColor,
                 .paragraphStyle: OCROverlayFit.paragraphStyle()

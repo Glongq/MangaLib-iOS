@@ -9,6 +9,11 @@ enum OCROverlayFit {
     struct Result {
         let fontSize: CGFloat
         let size: CGSize
+        /// The text with manual `\n`s already inserted at the balanced
+        /// line breaks (see `wrap`) — renderers should draw THIS, not the
+        /// original single-line `text`, so what got measured is what's
+        /// actually drawn.
+        let wrappedText: String
     }
 
     /// Lowered from 8 — small bubbles with a lot of translated text (a
@@ -39,7 +44,7 @@ enum OCROverlayFit {
 
     static func fit(text: String, baseSize: CGSize, startFontSize: CGFloat, weight: UIFont.Weight = .semibold) -> Result {
         guard baseSize.width > 0, baseSize.height > 0, !text.isEmpty else {
-            return Result(fontSize: startFontSize, size: baseSize)
+            return Result(fontSize: startFontSize, size: baseSize, wrappedText: text)
         }
         let heightBudget = baseSize.height * maxHeightMultiplier
         var fontSize = max(minFontSize, startFontSize)
@@ -47,13 +52,17 @@ enum OCROverlayFit {
         // 1) Shrink the font at the ORIGINAL width until it fits the
         // height budget — the common case (translation a bit longer than
         // the source, same rough shape).
-        var measured = measure(text: text, width: baseSize.width, fontSize: fontSize, weight: weight)
-        while measured.height > heightBudget, fontSize > minFontSize {
+        var wrapped = wrap(text: text, width: baseSize.width, fontSize: fontSize, weight: weight)
+        while wrapped.size.height > heightBudget, fontSize > minFontSize {
             fontSize -= 1
-            measured = measure(text: text, width: baseSize.width, fontSize: fontSize, weight: weight)
+            wrapped = wrap(text: text, width: baseSize.width, fontSize: fontSize, weight: weight)
         }
-        if measured.height <= heightBudget {
-            return Result(fontSize: fontSize, size: CGSize(width: baseSize.width, height: max(baseSize.height, measured.height)))
+        if wrapped.size.height <= heightBudget {
+            return Result(
+                fontSize: fontSize,
+                size: CGSize(width: baseSize.width, height: max(baseSize.height, wrapped.size.height)),
+                wrappedText: wrapped.lines.joined(separator: "\n")
+            )
         }
 
         // 2) Still doesn't fit even at the minimum font size — a bit of
@@ -61,16 +70,20 @@ enum OCROverlayFit {
         // lines. Retry the shrink from the top once more at that width.
         let widerWidth = baseSize.width * maxWidthMultiplier
         fontSize = max(minFontSize, startFontSize)
-        measured = measure(text: text, width: widerWidth, fontSize: fontSize, weight: weight)
-        while measured.height > heightBudget, fontSize > minFontSize {
+        wrapped = wrap(text: text, width: widerWidth, fontSize: fontSize, weight: weight)
+        while wrapped.size.height > heightBudget, fontSize > minFontSize {
             fontSize -= 1
-            measured = measure(text: text, width: widerWidth, fontSize: fontSize, weight: weight)
+            wrapped = wrap(text: text, width: widerWidth, fontSize: fontSize, weight: weight)
         }
 
         // 3) Never truncates: if it STILL doesn't fit within the
         // tolerance at min font size, just let the box be as tall as it
         // actually needs to be — an oversized bubble beats cut-off text.
-        return Result(fontSize: fontSize, size: CGSize(width: widerWidth, height: max(baseSize.height, measured.height)))
+        return Result(
+            fontSize: fontSize,
+            size: CGSize(width: widerWidth, height: max(baseSize.height, wrapped.size.height)),
+            wrappedText: wrapped.lines.joined(separator: "\n")
+        )
     }
 
     private static func measure(text: String, width: CGFloat, fontSize: CGFloat, weight: UIFont.Weight) -> CGSize {
@@ -82,5 +95,63 @@ enum OCROverlayFit {
             context: nil
         )
         return CGSize(width: min(width, bounding.width.rounded(.up)), height: bounding.height.rounded(.up))
+    }
+
+    /// Balanced word wrap — per standard comic-typesetting practice, line
+    /// breaks should be placed deliberately (not left to whatever a naive
+    /// greedy fill produces), aiming for evenly-sized lines instead of a
+    /// lone short "orphan" word stranded on the last line. Implements the
+    /// same trick as CSS's `text-wrap: balance`: find the NARROWEST width
+    /// that still wraps into the same number of lines as a full-width
+    /// greedy wrap, then wrap at that width — narrowing pulls trailing
+    /// words up onto earlier lines without ever increasing the line
+    /// count, which is what makes the result more even/"diamond"-shaped
+    /// instead of ragged.
+    private static func wrap(text: String, width: CGFloat, fontSize: CGFloat, weight: UIFont.Weight) -> (lines: [String], size: CGSize) {
+        let words = text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard words.count > 1 else {
+            return (lines: [text], size: measure(text: text, width: width, fontSize: fontSize, weight: weight))
+        }
+
+        let font = UIFont.systemFont(ofSize: fontSize, weight: weight)
+        func lineWidth(_ line: String) -> CGFloat {
+            (line as NSString).size(withAttributes: [.font: font]).width
+        }
+        func greedyLines(maxWidth: CGFloat) -> [String] {
+            var lines: [String] = []
+            var current = ""
+            for word in words {
+                let candidate = current.isEmpty ? word : "\(current) \(word)"
+                if current.isEmpty || lineWidth(candidate) <= maxWidth {
+                    current = candidate
+                } else {
+                    lines.append(current)
+                    current = word
+                }
+            }
+            if !current.isEmpty { lines.append(current) }
+            return lines
+        }
+
+        let fullWidthLines = greedyLines(maxWidth: width)
+        guard fullWidthLines.count > 1 else {
+            return (lines: fullWidthLines, size: measure(text: text, width: width, fontSize: fontSize, weight: weight))
+        }
+
+        var low = words.map(lineWidth).max() ?? width
+        var high = width
+        for _ in 0..<8 {
+            guard high - low > 1 else { break }
+            let mid = (low + high) / 2
+            if greedyLines(maxWidth: mid).count <= fullWidthLines.count {
+                high = mid
+            } else {
+                low = mid
+            }
+        }
+
+        let balancedLines = greedyLines(maxWidth: high)
+        let joined = balancedLines.joined(separator: "\n")
+        return (lines: balancedLines, size: measure(text: joined, width: width, fontSize: fontSize, weight: weight))
     }
 }

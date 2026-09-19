@@ -38,7 +38,7 @@ struct OCROverlaySwiftUIView: View {
                 let eraseFill: Color = Color(sampled?.uiColor ?? .white)
                 let eraseTextColor: Color = (sampled?.isDark ?? false) ? .white : .black
 
-                Text(text)
+                Text(fit.wrappedText)
                     .font(.system(size: fit.fontSize, weight: .semibold))
                     .foregroundStyle(eraseOriginalText ? eraseTextColor : .white)
                     .multilineTextAlignment(.center)
