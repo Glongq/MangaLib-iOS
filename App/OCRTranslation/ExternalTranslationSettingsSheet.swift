@@ -14,6 +14,7 @@ struct ExternalTranslationSettingsSheet: View {
     @AppStorage("external_reader_ocr_source_lang") private var sourceLang = "auto"
     @AppStorage("external_reader_ocr_target_lang") private var targetLang = "ru"
     @AppStorage("external_reader_ocr_style") private var style = 0
+    @AppStorage("external_reader_ocr_erase_original") private var eraseOriginal = false
     @AppStorage("external_reader_ocr_stage_b_enabled") private var stageBEnabled = false
     @AppStorage("external_reader_ocr_stage_b_engine") private var stageBEngine = 0
     @AppStorage("external_reader_ocr_stage_b_local_url") private var localURL = ""
@@ -64,6 +65,10 @@ struct ExternalTranslationSettingsSheet: View {
                             Text("Подложка").tag(0)
                             Text("Только текст").tag(1)
                         }.pickerStyle(.segmented)
+                        .disabled(eraseOriginal)
+
+                        toggleRow("Стирать оригинальный текст", isOn: $eraseOriginal)
+                        caption("Экспериментально: закрашивает область оригинального текста цветом, определённым по фону вокруг, вместо плашки/подписи (переопределяет стиль оверлея выше). Хорошо работает на однотонных баллонах, на сложном/текстурном фоне может выглядеть грубо — это приближение, не настоящее удаление.")
 
                         toggleRow("Улучшать перевод нейросетью", isOn: $stageBEnabled)
                         caption("Дополнительно причёсывает машинный перевод стилистически — подменяет текст на экране через несколько секунд после появления обычного перевода. Недоступность сервера просто не даёт улучшения, без ошибок.")

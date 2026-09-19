@@ -10,6 +10,10 @@ struct OCROverlaySwiftUIView: View {
     let texts: [UUID: String]
     let style: OCROverlayStyle
     let fitRect: CGRect
+    /// Opt-in — see PageTranslationController.eraseOriginalText's
+    /// doc-comment. Overrides `style`: fills with each block's sampled
+    /// background color instead of the fixed plate/text-only look.
+    let eraseOriginalText: Bool
 
     var body: some View {
         ForEach(blocks) { block in
@@ -28,12 +32,15 @@ struct OCROverlaySwiftUIView: View {
                 // `.fixedSize(vertical: true)` is a safety net in case
                 // SwiftUI's own text layout needs a touch more room than
                 // the UIKit-based estimate — it can only grow, never clip.
-                let startFontSize = max(10, min(28, base.height * 0.35))
+                let startFontSize = max(OCROverlayFit.minFontSize, min(28, base.height * 0.35))
                 let fit = OCROverlayFit.fit(text: text, baseSize: base.size, startFontSize: startFontSize)
+                let sampled = block.backgroundColor
+                let eraseFill: Color = Color(sampled?.uiColor ?? .white)
+                let eraseTextColor: Color = (sampled?.isDark ?? false) ? .white : .black
 
                 Text(text)
                     .font(.system(size: fit.fontSize, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(eraseOriginalText ? eraseTextColor : .white)
                     .multilineTextAlignment(.center)
                     // Matches OCROverlayFit.lineHeightMultiple (the
                     // measurement this sizing is based on) — SwiftUI's
@@ -44,12 +51,14 @@ struct OCROverlaySwiftUIView: View {
                     .frame(width: fit.size.width)
                     .fixedSize(horizontal: false, vertical: true)
                     .background {
-                        if style == .backdropPlate {
+                        if eraseOriginalText {
+                            RoundedRectangle(cornerRadius: 3, style: .continuous).fill(eraseFill)
+                        } else if style == .backdropPlate {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .fill(Color.black.opacity(0.72))
                         }
                     }
-                    .shadow(color: style.hasTextShadow ? .black.opacity(0.9) : .clear, radius: 3)
+                    .shadow(color: (!eraseOriginalText && style.hasTextShadow) ? .black.opacity(0.9) : .clear, radius: 3)
                     .position(x: base.midX, y: base.midY)
             }
         }

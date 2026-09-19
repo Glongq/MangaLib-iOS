@@ -64,6 +64,27 @@ struct RephraseClient {
     /// count) — callers must catch and silently keep the Stage-A text, no
     /// error UI (per product decision).
     func rephrase(lines: [RephraseLineInput], targetLanguageName: String) async throws -> [String] {
+        try await perform(
+            lines: lines,
+            systemPrompt: "Rewrite this JSON array of literally machine-translated manga dialogue lines into natural, colloquial \(targetLanguageName). Each item has a \"budget\" — the approximate character count that fits back into the original speech bubble. Treat it as a SOFT target: prefer a more concise phrasing that gets close to it, but NEVER omit meaning or cut a sentence short just to fit — going over the budget is fine when it's genuinely needed. Preserve order and count. Reply with ONLY a JSON array of strings, the same length as the input — no markdown, no commentary."
+        )
+    }
+
+    /// Translates `lines` (RAW English OCR text, in order) directly into
+    /// `targetLanguageName` in one pass — used instead of `rephrase`
+    /// specifically for English-sourced pages (see
+    /// OCRTranslationEngine.process), skipping Apple's literal Stage-A
+    /// translation entirely: one model doing translation+phrasing together
+    /// tends to read more natural than rephrasing an already-literal MT
+    /// output. Same failure contract as `rephrase`.
+    func translateDirect(lines: [RephraseLineInput], targetLanguageName: String) async throws -> [String] {
+        try await perform(
+            lines: lines,
+            systemPrompt: "Translate this JSON array of English manga dialogue lines into natural, colloquial \(targetLanguageName). Each item has a \"budget\" — the approximate character count that fits back into the original speech bubble. Treat it as a SOFT target: prefer a more concise phrasing that gets close to it, but NEVER omit meaning or cut a sentence short just to fit — going over the budget is fine when it's genuinely needed. Preserve order and count. Reply with ONLY a JSON array of strings, the same length as the input — no markdown, no commentary."
+        )
+    }
+
+    private func perform(lines: [RephraseLineInput], systemPrompt: String) async throws -> [String] {
         guard !lines.isEmpty else { return [] }
         if case .cloud(_, let apiKey, _) = engine, apiKey.isEmpty {
             throw RephraseError.missingAPIKey
@@ -79,7 +100,7 @@ struct RephraseClient {
         let userContent = (try? JSONEncoder().encode(lines)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         var body: [String: Any] = [
             "messages": [
-                ["role": "system", "content": "Rewrite this JSON array of literally machine-translated manga dialogue lines into natural, colloquial \(targetLanguageName). Each item has a \"budget\" — the approximate character count that fits back into the original speech bubble. Treat it as a SOFT target: prefer a more concise phrasing that gets close to it, but NEVER omit meaning or cut a sentence short just to fit — going over the budget is fine when it's genuinely needed. Preserve order and count. Reply with ONLY a JSON array of strings, the same length as the input — no markdown, no commentary."],
+                ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": userContent]
             ],
             "temperature": 0.3,

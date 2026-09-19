@@ -1,7 +1,12 @@
 import UIKit
 
-/// Visual style of the translation overlay — no color-sampling/inpainting
-/// attempted anywhere, per the explicit "не нужен идеал" product decision.
+extension OCRSampledColor {
+    var uiColor: UIColor { UIColor(red: red, green: green, blue: blue, alpha: 1) }
+}
+
+/// Visual style of the translation overlay when "erase original text" is
+/// OFF (see PageTranslationController.eraseOriginalText) — a fixed plate
+/// color/text-only caption, not any per-block color sampling.
 enum OCROverlayStyle: Int {
     case backdropPlate = 0
     case textOnly = 1

@@ -11,6 +11,20 @@ struct RecognizedTextLine: Codable, Hashable {
     let confidence: Float
 }
 
+/// A crude estimate of the page background right around a text block —
+/// see OCRBackgroundSampler. Stored as plain components (not UIColor,
+/// which isn't cleanly Codable) so it survives the disk cache. Always
+/// computed (cheap — a small cropped region, not the whole page), used
+/// only when the user opts into "erase original text" — see
+/// ExternalTranslationSettingsSheet.
+struct OCRSampledColor: Codable, Hashable {
+    let red: Double
+    let green: Double
+    let blue: Double
+
+    var isDark: Bool { (0.299 * red + 0.587 * green + 0.114 * blue) < 0.5 }
+}
+
 /// A cluster of OCR lines grouped into a single speech-bubble-sized block
 /// (see OCRTextRecognizer's clustering pass) — the unit the translation
 /// pipeline and the overlay both operate on.
@@ -21,6 +35,10 @@ struct RecognizedTextBlock: Codable, Identifiable, Hashable {
     /// Lines joined top-to-bottom with "\n".
     let text: String
     let lines: [RecognizedTextLine]
+    /// nil for cache entries computed before this field existed, or if
+    /// sampling failed (e.g. degenerate crop) — renderers fall back to a
+    /// neutral color in that case. See OCRBackgroundSampler.
+    var backgroundColor: OCRSampledColor? = nil
 
     /// Rough character budget the translated text should aim for,
     /// estimated from this block's actual pixel footprint in the source

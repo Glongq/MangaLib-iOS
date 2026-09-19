@@ -11,7 +11,11 @@ enum OCROverlayFit {
         let size: CGSize
     }
 
-    static let minFontSize: CGFloat = 8
+    /// Lowered from 8 — small bubbles with a lot of translated text (a
+    /// short original CJK/EN line packing into a compact bubble, but
+    /// expanding a lot once translated) need to be able to shrink further
+    /// before the "grow the box instead" fallback kicks in.
+    static let minFontSize: CGFloat = 6
     /// How far the box is allowed to stray from the original bbox before
     /// giving up on shrinking further and just letting it grow — a soft
     /// tolerance, not a hard cap (see step 3 below).

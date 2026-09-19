@@ -88,6 +88,7 @@ struct ExternalReaderView: View {
     @AppStorage("external_reader_ocr_source_lang") private var ocrSourceLang = "auto"
     @AppStorage("external_reader_ocr_target_lang") private var ocrTargetLang = "ru"
     @AppStorage("external_reader_ocr_style") private var ocrStyleRaw = 0
+    @AppStorage("external_reader_ocr_erase_original") private var ocrEraseOriginal = false
     @AppStorage("external_reader_ocr_stage_b_enabled") private var ocrStageBEnabled = false
     @AppStorage("external_reader_ocr_stage_b_engine") private var ocrStageBEngine = 0
     @AppStorage("external_reader_ocr_stage_b_local_url") private var ocrStageBLocalURL = ""
@@ -282,7 +283,8 @@ struct ExternalReaderView: View {
                     ocrStageBEnabled: ocrStageBEnabled,
                     ocrRephraseClient: ocrRephraseClient,
                     ocrTargetLanguageName: ocrTargetLanguageName,
-                    ocrStyle: ocrStyle
+                    ocrStyle: ocrStyle,
+                    ocrEraseOriginal: ocrEraseOriginal
                 )
                 .frame(width: geo.size.width, height: horizontalPageHeight(geo: geo, page: page))
             }
@@ -341,7 +343,8 @@ struct ExternalReaderView: View {
                                 ocrStageBEnabled: ocrStageBEnabled,
                                 ocrRephraseClient: ocrRephraseClient,
                                 ocrTargetLanguageName: ocrTargetLanguageName,
-                                ocrStyle: ocrStyle
+                                ocrStyle: ocrStyle,
+                                ocrEraseOriginal: ocrEraseOriginal
                             )
                                 .id(index + 1)
                                 .background(
@@ -461,10 +464,10 @@ struct ExternalReaderView: View {
     }
 
     /// Warms the OCR/translation cache for a preloaded page in the
-    /// background (no UI update — the two callbacks are no-ops; the
-    /// point is purely that OCRTranslationEngine.process's cache tiers
-    /// end up populated) so that by the time the reader actually shows
-    /// this page, PageTranslationController.load usually hits the cache
+    /// background (no UI update — nothing reads the return value; the
+    /// point is purely that OCRTranslationEngine's cache tiers end up
+    /// populated) so that by the time the reader actually shows this
+    /// page, PageTranslationController.load usually hits the cache
     /// instead of starting cold.
     private func preloadOCRTranslation(page: ExternalGalleryPage, url: URL) {
         guard ocrEnabled, !ocrPreloadedIndices.contains(page.index) else { return }
@@ -479,11 +482,9 @@ struct ExternalReaderView: View {
             var image = RemoteImageCache.shared.image(for: url)
             if image == nil { image = await RemoteImageLoader.fetchImage(candidates: [url]) }
             guard let image else { return }
-            await OCRTranslationEngine.process(
-                image: image, cacheKey: cacheKey, session: session,
-                stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName,
-                onStageAReady: { _ in }, onStageBReady: { _ in }
-            )
+            guard let result = await OCRTranslationEngine.processStageA(image: image, cacheKey: cacheKey, session: session) else { return }
+            guard stageBEnabled, let rephraseClient, result.stageBText.isEmpty else { return }
+            _ = await OCRTranslationEngine.attemptStageB(result, cacheKey: cacheKey, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName)
         }
     }
 
@@ -644,24 +645,27 @@ private struct ExternalHorizontalPageImage: View {
     let ocrRephraseClient: RephraseClient?
     let ocrTargetLanguageName: String
     let ocrStyle: OCROverlayStyle
+    let ocrEraseOriginal: Bool
 
     @State private var resolvedURL: URL?
     @StateObject private var translationController = PageTranslationController()
 
     /// Drives the OCR `.task(id:)` below — a plain `.task {}` only runs
     /// ONCE per page view lifetime, so toggling the translation setting
-    /// (or source/target language, or Stage B) while ALREADY viewing a
-    /// page previously had zero effect until the page view was recreated
-    /// (e.g. swiping away and back). Keying on this struct instead makes
-    /// the task re-run whenever anything relevant changes.
+    /// (or source/target language) while ALREADY viewing a page previously
+    /// had zero effect until the page view was recreated (e.g. swiping
+    /// away and back). Keying on this struct instead makes the task
+    /// re-run whenever anything relevant changes. Deliberately does NOT
+    /// include ocrStageBEnabled — that's handled reactively via
+    /// setStageBEnabled (see .onChange below) so toggling it never re-runs
+    /// OCR/Stage-A or blanks the currently-shown translation.
     private struct OCRTrigger: Equatable {
         let enabled: Bool
         let url: URL?
         let cacheKey: OCRCacheKey
-        let stageBEnabled: Bool
     }
     private var ocrTrigger: OCRTrigger {
-        OCRTrigger(enabled: ocrEnabled, url: resolvedURL, cacheKey: ocrCacheKey, stageBEnabled: ocrStageBEnabled)
+        OCRTrigger(enabled: ocrEnabled, url: resolvedURL, cacheKey: ocrCacheKey)
     }
 
     var body: some View {
@@ -693,12 +697,18 @@ private struct ExternalHorizontalPageImage: View {
                 return
             }
             translationController.style = ocrStyle
+            translationController.eraseOriginalText = ocrEraseOriginal
             translationController.load(
                 imageURL: resolvedURL, cacheKey: ocrCacheKey, runtime: ocrRuntime,
                 stageBEnabled: ocrStageBEnabled, rephraseClient: ocrRephraseClient,
                 targetLanguageName: ocrTargetLanguageName
             )
         }
+        .onChange(of: ocrStageBEnabled) { _, enabled in
+            translationController.setStageBEnabled(enabled, rephraseClient: ocrRephraseClient, targetLanguageName: ocrTargetLanguageName)
+        }
+        .onChange(of: ocrStyle) { _, newValue in translationController.style = newValue }
+        .onChange(of: ocrEraseOriginal) { _, newValue in translationController.eraseOriginalText = newValue }
     }
 }
 
@@ -716,6 +726,7 @@ private struct ExternalVerticalPageImage: View {
     let ocrRephraseClient: RephraseClient?
     let ocrTargetLanguageName: String
     let ocrStyle: OCROverlayStyle
+    let ocrEraseOriginal: Bool
 
     @State private var resolvedURL: URL?
     @State private var loadedImage: UIImage?
@@ -724,14 +735,14 @@ private struct ExternalVerticalPageImage: View {
     /// Same reasoning as ExternalHorizontalPageImage.OCRTrigger — without
     /// this, toggling the translation setting while a page's image was
     /// ALREADY decoded (onImageLoaded already fired once) had zero effect.
+    /// Deliberately does NOT include ocrStageBEnabled — see .onChange below.
     private struct OCRTrigger: Equatable {
         let enabled: Bool
         let hasImage: Bool
         let cacheKey: OCRCacheKey
-        let stageBEnabled: Bool
     }
     private var ocrTrigger: OCRTrigger {
-        OCRTrigger(enabled: ocrEnabled, hasImage: loadedImage != nil, cacheKey: ocrCacheKey, stageBEnabled: ocrStageBEnabled)
+        OCRTrigger(enabled: ocrEnabled, hasImage: loadedImage != nil, cacheKey: ocrCacheKey)
     }
 
     var body: some View {
@@ -752,7 +763,8 @@ private struct ExternalVerticalPageImage: View {
                         blocks: translationController.blocks,
                         texts: translationController.displayText,
                         style: ocrStyle,
-                        fitRect: OCROverlaySwiftUIView.aspectFitRect(imageSize: loadedImage.size, in: geo.size)
+                        fitRect: OCROverlaySwiftUIView.aspectFitRect(imageSize: loadedImage.size, in: geo.size),
+                        eraseOriginalText: ocrEraseOriginal
                     )
                 }
                 .allowsHitTesting(false)
@@ -770,11 +782,15 @@ private struct ExternalVerticalPageImage: View {
                 return
             }
             translationController.style = ocrStyle
+            translationController.eraseOriginalText = ocrEraseOriginal
             translationController.load(
                 image: loadedImage, cacheKey: ocrCacheKey, runtime: ocrRuntime,
                 stageBEnabled: ocrStageBEnabled, rephraseClient: ocrRephraseClient,
                 targetLanguageName: ocrTargetLanguageName
             )
+        }
+        .onChange(of: ocrStageBEnabled) { _, enabled in
+            translationController.setStageBEnabled(enabled, rephraseClient: ocrRephraseClient, targetLanguageName: ocrTargetLanguageName)
         }
     }
 }

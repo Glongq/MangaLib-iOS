@@ -27,7 +27,7 @@ final class OCROverlayContainerView: UIView {
 
     private var blockViews: [UUID: BlockLabelView] = [:]
 
-    func render(blocks: [RecognizedTextBlock], texts: [UUID: String], style: OCROverlayStyle) {
+    func render(blocks: [RecognizedTextBlock], texts: [UUID: String], style: OCROverlayStyle, eraseOriginalText: Bool) {
         let visibleIDs = Set(blocks.compactMap { texts[$0.id] != nil ? $0.id : nil })
 
         for (id, view) in blockViews where !visibleIDs.contains(id) {
@@ -44,15 +44,29 @@ final class OCROverlayContainerView: UIView {
                 return created
             }()
 
-            view.backgroundColor = style.backgroundColor
-            view.layer.cornerRadius = style.cornerRadius
-            if style.hasTextShadow {
-                view.label.layer.shadowColor = UIColor.black.cgColor
-                view.label.layer.shadowOpacity = 0.9
-                view.label.layer.shadowRadius = 3
-                view.label.layer.shadowOffset = .zero
-            } else {
+            // "Erase original text" overrides the plate/text-only style
+            // choice — filling with the sampled background color IS the
+            // point, so a text-only (no background) style wouldn't erase
+            // anything.
+            let textColor: UIColor
+            if eraseOriginalText {
+                let sampled = block.backgroundColor
+                view.backgroundColor = (sampled?.uiColor ?? .white).withAlphaComponent(1)
+                view.layer.cornerRadius = 3
+                textColor = (sampled?.isDark ?? false) ? .white : .black
                 view.label.layer.shadowOpacity = 0
+            } else {
+                view.backgroundColor = style.backgroundColor
+                view.layer.cornerRadius = style.cornerRadius
+                textColor = .white
+                if style.hasTextShadow {
+                    view.label.layer.shadowColor = UIColor.black.cgColor
+                    view.label.layer.shadowOpacity = 0.9
+                    view.label.layer.shadowRadius = 3
+                    view.label.layer.shadowOffset = .zero
+                } else {
+                    view.label.layer.shadowOpacity = 0
+                }
             }
 
             // Small outward margin beyond Vision's tight bbox — its edges
@@ -70,7 +84,7 @@ final class OCROverlayContainerView: UIView {
             // doesn't fit at the minimum readable size — see
             // OCROverlayFit's doc-comment for the exact steps.
             let horizontalInset: CGFloat = 8
-            let startFontSize = max(10, min(28, baseRect.height * 0.35))
+            let startFontSize = max(OCROverlayFit.minFontSize, min(28, baseRect.height * 0.35))
             let fit = OCROverlayFit.fit(
                 text: text,
                 baseSize: CGSize(width: max(1, baseRect.width - horizontalInset), height: baseRect.height - 4),
@@ -79,7 +93,7 @@ final class OCROverlayContainerView: UIView {
             let font = UIFont.systemFont(ofSize: fit.fontSize, weight: .semibold)
             view.label.attributedText = NSAttributedString(string: text, attributes: [
                 .font: font,
-                .foregroundColor: UIColor.white,
+                .foregroundColor: textColor,
                 .paragraphStyle: OCROverlayFit.paragraphStyle()
             ])
             let finalSize = CGSize(width: fit.size.width + horizontalInset, height: fit.size.height + 4)

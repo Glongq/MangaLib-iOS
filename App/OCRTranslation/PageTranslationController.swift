@@ -4,10 +4,15 @@ import UIKit
 /// Per-page controller — one `@StateObject` instance per page wrapper
 /// (ExternalHorizontalPageImage/ExternalVerticalPageImage), so its
 /// lifecycle matches the page view: created when the page appears,
-/// cancelled/deallocated when SwiftUI recycles it. Drives OCR ->
-/// Stage A -> Stage B for that one page and publishes the result for
-/// both the UIKit overlay (attach(to:)) and the SwiftUI overlay
-/// (blocks/displayText).
+/// cancelled/deallocated when SwiftUI recycles it.
+///
+/// OCR/Stage-A loading (loadPage, via load(image:...)/load(imageURL:...))
+/// and Stage-B toggling (setStageBEnabled) are DELIBERATELY independent:
+/// flipping the Stage-B setting must never re-run OCR/Stage-A or blank
+/// what's already on screen — it always shows Stage-A immediately, then
+/// silently upgrades to Stage B once/if that finishes, and instantly
+/// reverts to Stage-A (no network wait — it's already cached) the moment
+/// Stage B gets turned back off.
 final class PageTranslationController: ObservableObject {
     @Published private(set) var blocks: [RecognizedTextBlock] = []
     @Published private(set) var displayText: [UUID: String] = [:]
@@ -15,8 +20,19 @@ final class PageTranslationController: ObservableObject {
     var style: OCROverlayStyle = .backdropPlate {
         didSet { renderOverlay() }
     }
+    /// Opt-in (see ExternalTranslationSettingsSheet's "Стирать оригинальный
+    /// текст"): fills each block with its sampled background color instead
+    /// of the fixed plate color, approximating erasing the original text.
+    /// Best-effort — see OCRBackgroundSampler's doc-comment.
+    var eraseOriginalText: Bool = false {
+        didSet { renderOverlay() }
+    }
 
     private var task: Task<Void, Never>?
+    private var stageBTask: Task<Void, Never>?
+    private var currentCacheKey: OCRCacheKey?
+    private var currentResult: CachedPageTranslation?
+
     /// Owned for this controller's entire lifetime (NOT looked up by
     /// searching `imageView.subviews` for "whatever overlay happens to be
     /// there" — that assumed the imageView is never shared/reused across
@@ -33,6 +49,10 @@ final class PageTranslationController: ObservableObject {
     }
 
     /// Vertical/SwiftUI mode — image already decoded by VerticalPageImage.
+    /// `stageBEnabled`/`rephraseClient` here are just the INITIAL
+    /// preference for this page load (e.g. it was already on when the
+    /// page first appeared) — ongoing toggling goes through
+    /// `setStageBEnabled`, not this.
     func load(
         image: UIImage,
         cacheKey: OCRCacheKey,
@@ -41,7 +61,7 @@ final class PageTranslationController: ObservableObject {
         rephraseClient: RephraseClient?,
         targetLanguageName: String
     ) {
-        run(cacheKey: cacheKey, runtime: runtime, stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName) {
+        loadPage(cacheKey: cacheKey, runtime: runtime, stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName) {
             image
         }
     }
@@ -57,13 +77,13 @@ final class PageTranslationController: ObservableObject {
         rephraseClient: RephraseClient?,
         targetLanguageName: String
     ) {
-        run(cacheKey: cacheKey, runtime: runtime, stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName) {
+        loadPage(cacheKey: cacheKey, runtime: runtime, stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName) {
             if let cached = RemoteImageCache.shared.image(for: imageURL) { return cached }
             return await RemoteImageLoader.fetchImage(candidates: [imageURL])
         }
     }
 
-    private func run(
+    private func loadPage(
         cacheKey: OCRCacheKey,
         runtime: PageTranslationRuntime,
         stageBEnabled: Bool,
@@ -71,14 +91,16 @@ final class PageTranslationController: ObservableObject {
         targetLanguageName: String,
         image: @escaping () async -> UIImage?
     ) {
+        // Already loaded/loading this exact page — a settings change that
+        // doesn't affect OCR/Stage-A (e.g. Stage-B toggling, which comes
+        // through setStageBEnabled instead) must NOT retrigger this.
+        guard currentCacheKey != cacheKey else { return }
+        currentCacheKey = cacheKey
+        currentResult = nil
         task?.cancel()
+        stageBTask?.cancel()
         blocks = []
         displayText = [:]
-        // Wipe any stale overlay content IMMEDIATELY — previously this
-        // only happened once the next attach()/apply() fired, so a
-        // just-recycled UIImageView (see attach(to:)'s doc-comment) could
-        // keep showing the PREVIOUS page's translated text on screen for
-        // a while after a new page/image had already started loading.
         renderOverlay()
         task = Task { [weak self] in
             // The session is created asynchronously by
@@ -90,32 +112,77 @@ final class PageTranslationController: ObservableObject {
             if Task.isCancelled { return }
             guard let image = await image() else { return }
             if Task.isCancelled { return }
-            await OCRTranslationEngine.process(
-                image: image, cacheKey: cacheKey, session: session,
-                stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName,
-                onStageAReady: { result in Task { await MainActor.run { self?.apply(result) } } },
-                onStageBReady: { result in Task { await MainActor.run { self?.apply(result) } } }
-            )
+            guard let result = await OCRTranslationEngine.processStageA(image: image, cacheKey: cacheKey, session: session) else { return }
+            if Task.isCancelled { return }
+            await MainActor.run {
+                guard let self, self.currentCacheKey == cacheKey else { return }
+                self.handle(result, cacheKey: cacheKey, stageBEnabled: stageBEnabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName)
+            }
         }
     }
 
-    /// Cancels any in-flight work and clears the overlay — called when
-    /// translation gets turned off (or a page fails to resolve) so a
-    /// stale translation doesn't linger on screen.
-    func clear() {
-        task?.cancel()
-        blocks = []
-        displayText = [:]
+    /// Reactively called when the Stage-B setting (or its engine/URL/key
+    /// config) changes, for whichever page is CURRENTLY loaded in this
+    /// controller — never touches OCR/Stage-A. Turning it off instantly
+    /// falls back to the already-cached Stage-A text (no network wait);
+    /// turning it on shows Stage-A immediately and kicks off Stage B in
+    /// the background, upgrading in place once/if it succeeds.
+    func setStageBEnabled(_ enabled: Bool, rephraseClient: RephraseClient?, targetLanguageName: String) {
+        guard let result = currentResult, let cacheKey = currentCacheKey else { return }
+        handle(result, cacheKey: cacheKey, stageBEnabled: enabled, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName)
+    }
+
+    /// Shared by both loadPage's completion and setStageBEnabled: shows
+    /// the current best text for `stageBEnabled`'s preference, and — only
+    /// if enabled, configured, and not already done — kicks off Stage B.
+    private func handle(
+        _ result: CachedPageTranslation,
+        cacheKey: OCRCacheKey,
+        stageBEnabled: Bool,
+        rephraseClient: RephraseClient?,
+        targetLanguageName: String
+    ) {
+        stageBTask?.cancel()
+        currentResult = result
+        blocks = result.blocks
+        updateDisplay(from: result, preferStageB: stageBEnabled)
+
+        guard stageBEnabled, let rephraseClient, result.stageBText.isEmpty else { return }
+        stageBTask = Task { [weak self] in
+            guard let updated = await OCRTranslationEngine.attemptStageB(result, cacheKey: cacheKey, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName) else { return }
+            if Task.isCancelled { return }
+            await MainActor.run {
+                // The user may have navigated away (currentCacheKey
+                // changed) or turned Stage B back off while this was in
+                // flight — don't stomp on whatever's showing now.
+                guard let self, self.currentCacheKey == cacheKey else { return }
+                self.currentResult = updated
+                self.updateDisplay(from: updated, preferStageB: stageBEnabled)
+            }
+        }
+    }
+
+    private func updateDisplay(from result: CachedPageTranslation, preferStageB: Bool) {
+        var text: [UUID: String] = [:]
+        for block in result.blocks {
+            let key = block.id.uuidString
+            let value = preferStageB ? (result.stageBText[key] ?? result.stageAText[key]) : result.stageAText[key]
+            if let value { text[block.id] = value }
+        }
+        displayText = text
         renderOverlay()
     }
 
-    private func apply(_ result: CachedPageTranslation) {
-        blocks = result.blocks
-        var text: [UUID: String] = [:]
-        for block in result.blocks {
-            if let value = result.text(for: block.id) { text[block.id] = value }
-        }
-        displayText = text
+    /// Cancels any in-flight work and clears the overlay — called when
+    /// translation gets turned off entirely (or a page fails to resolve)
+    /// so a stale translation doesn't linger on screen.
+    func clear() {
+        task?.cancel()
+        stageBTask?.cancel()
+        currentCacheKey = nil
+        currentResult = nil
+        blocks = []
+        displayText = [:]
         renderOverlay()
     }
 
@@ -135,11 +202,12 @@ final class PageTranslationController: ObservableObject {
     }
 
     private func renderOverlay() {
-        overlayView.render(blocks: blocks, texts: displayText, style: style)
+        overlayView.render(blocks: blocks, texts: displayText, style: style, eraseOriginalText: eraseOriginalText)
     }
 
     deinit {
         task?.cancel()
+        stageBTask?.cancel()
         overlayView.removeFromSuperview()
     }
 }
