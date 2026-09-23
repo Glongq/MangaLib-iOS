@@ -455,8 +455,13 @@ struct ExternalReaderView: View {
         preloadedIndices.insert(page.index)
         let galleryId = detail.id
         Task {
-            guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
-            await preloadExternalImage(url)
+            guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else {
+                preloadedIndices.remove(page.index)
+                return
+            }
+            if await preloadExternalImage(url) == false {
+                preloadedIndices.remove(page.index)
+            }
         }
     }
 
@@ -554,44 +559,59 @@ struct ExternalReaderView: View {
     }
 }
 
-/// Resolves a page's image URL and warms `RemoteImageCache` with it —
-/// RETRIES a few times on failure. Both `pageImageURL` (a network round
-/// trip; e.g. HitomiGGCache's live gg.js fetch — can throw on a transient
-/// host hiccup) and `preloadExternalImage` (also network — an external CDN,
-/// especially under a burst of concurrent preload requests fired right when
-/// the reader opens, see preloadUpcoming/preloadVerticalWindow, occasionally
-/// times out/resets) used to be tried EXACTLY ONCE, with `try?` silently
-/// swallowing the error — a single failure left the CURRENTLY VISIBLE page
-/// permanently black (`.task` never re-runs on its own, nothing else in
-/// this pipeline retries). Reported (09/18): "sometimes ANY external site's
-/// reader shows a black screen, even scrolling doesn't help — but the
-/// preview grid has every image" (that grid uses `page.thumbnailURL`
-/// straight from already-parsed detail data, never touching
-/// `pageImageURL` at all, which is why it was unaffected).
-///
-/// Returns the last resolved URL even if warming the cache never actually
-/// succeeded (a real, non-transient 403/404) — as a last-resort fallback so
-/// ZoomableImageScrollView/VerticalPageImage's own RemoteImageLoader still
-/// gets a chance, instead of a guaranteed-black page.
+/// Resolves a page URL and downloads the visible image with the external
+/// site's own Referer before handing the URL to the shared reader views.
+/// Visible requests use a separate URLSession from background preloads,
+/// retry with cache bypass, and never fall through to RemoteImageLoader
+/// whose headers belong to the core MangaLib reader.
 private func resolveExternalPageURL(
     provider: any ExternalSiteProvider,
     galleryId: Int,
     page: ExternalGalleryPage
 ) async -> URL? {
-    var lastURL: URL?
-    for attempt in 0..<3 {
+    for attempt in 0..<5 {
+        if Task.isCancelled { return nil }
         if let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) {
-            lastURL = url
-            await preloadExternalImage(url)
-            if RemoteImageCache.shared.image(for: url) != nil {
+            if await preloadExternalImage(
+                url,
+                bypassNetworkCache: attempt > 0,
+                readerPriority: true
+            ) {
                 return url
             }
         }
-        if attempt < 2 {
-            try? await Task.sleep(nanoseconds: UInt64(300_000_000 * (attempt + 1)))
+        if attempt < 4 {
+            let delay = min(2_000_000_000, 350_000_000 * (1 << attempt))
+            try? await Task.sleep(nanoseconds: UInt64(delay))
         }
     }
-    return lastURL
+    return nil
+}
+
+private struct ExternalPageLoadOverlay: View {
+    let failed: Bool
+    let color: Color
+    let retry: () -> Void
+
+    var body: some View {
+        Group {
+            if failed {
+                Button(action: retry) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(color)
+                        .frame(width: 52, height: 52)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Retry image")
+            } else {
+                ProgressView()
+                    .tint(color)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
 }
 
 // MARK: - Horizontal-mode page (asynchronous URL resolution + ZoomableImageScrollView)
@@ -621,6 +641,8 @@ private struct ExternalHorizontalPageImage: View {
     let ocrStageBPrompt: String
 
     @State private var resolvedURL: URL?
+    @State private var pageLoadFailed = false
+    @State private var pageLoadAttempt = 0
     @StateObject private var translationController = PageTranslationController()
 
     /// Drives the OCR `.task(id:)` below — a plain `.task {}` only runs
@@ -658,11 +680,23 @@ private struct ExternalHorizontalPageImage: View {
                 onImageViewReady: { imageView in translationController.attach(to: imageView) }
             )
         }
-        .task {
-            // See resolveExternalPageURL's doc-comment — retries a few
-            // times on a transient failure instead of leaving the page
-            // permanently black on the first hiccup (complaint 09/18).
-            resolvedURL = await resolveExternalPageURL(provider: provider, galleryId: galleryId, page: page)
+        .overlay {
+            if resolvedURL == nil {
+                ExternalPageLoadOverlay(
+                    failed: pageLoadFailed,
+                    color: Color(uiColor: ringColor),
+                    retry: { pageLoadAttempt += 1 }
+                )
+            }
+        }
+        .task(id: pageLoadAttempt) {
+            pageLoadFailed = false
+            resolvedURL = nil
+            translationController.clear()
+            let url = await resolveExternalPageURL(provider: provider, galleryId: galleryId, page: page)
+            guard !Task.isCancelled else { return }
+            resolvedURL = url
+            pageLoadFailed = url == nil
         }
         .task(id: ocrTrigger) {
             guard ocrEnabled, let resolvedURL else {
@@ -712,6 +746,8 @@ private struct ExternalVerticalPageImage: View {
 
     @State private var resolvedURL: URL?
     @State private var loadedImage: UIImage?
+    @State private var pageLoadFailed = false
+    @State private var pageLoadAttempt = 0
     @StateObject private var translationController = PageTranslationController()
 
     /// Same reasoning as ExternalHorizontalPageImage.OCRTrigger — without
@@ -739,7 +775,13 @@ private struct ExternalVerticalPageImage: View {
             onImageLoaded: { image in loadedImage = image }
         )
         .overlay {
-            if ocrEnabled, let loadedImage {
+            if resolvedURL == nil {
+                ExternalPageLoadOverlay(
+                    failed: pageLoadFailed,
+                    color: .primary,
+                    retry: { pageLoadAttempt += 1 }
+                )
+            } else if ocrEnabled, let loadedImage {
                 GeometryReader { geo in
                     OCROverlaySwiftUIView(
                         blocks: translationController.blocks,
@@ -752,11 +794,15 @@ private struct ExternalVerticalPageImage: View {
                 .allowsHitTesting(false)
             }
         }
-        .task {
-            // See ExternalHorizontalPageImage.task/resolveExternalPageURL
-            // — the same retry-on-transient-failure fix for the CURRENTLY
-            // visible (not preloaded ahead of time) page.
-            resolvedURL = await resolveExternalPageURL(provider: provider, galleryId: galleryId, page: page)
+        .task(id: pageLoadAttempt) {
+            pageLoadFailed = false
+            resolvedURL = nil
+            loadedImage = nil
+            translationController.clear()
+            let url = await resolveExternalPageURL(provider: provider, galleryId: galleryId, page: page)
+            guard !Task.isCancelled else { return }
+            resolvedURL = url
+            pageLoadFailed = url == nil
         }
         .task(id: ocrTrigger) {
             guard ocrEnabled, let loadedImage else {

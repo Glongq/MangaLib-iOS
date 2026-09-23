@@ -69,21 +69,36 @@ private func externalImageReferer(for url: URL) -> String {
     return "https://hitomi.la/"
 }
 
-private let externalImageSession: URLSession = {
+private func makeExternalImageSession() -> URLSession {
     let config = URLSessionConfiguration.default
     config.httpAdditionalHeaders = [
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1"
     ]
     return URLSession(configuration: config)
-}()
+}
+
+private let externalImageSession = makeExternalImageSession()
+/// Visible reader pages use a separate connection pool, so a burst of
+/// background page preloads cannot leave the current page waiting behind
+/// dozens of lower-value requests.
+private let externalReaderImageSession = makeExternalImageSession()
 
 /// A single network request for an image — shared by ExternalImageLoader/
 /// ExternalSpriteLoader below (same per-host Referer/cache/session).
-private func fetchExternalImage(_ url: URL) async -> UIImage? {
+private func fetchExternalImage(
+    _ url: URL,
+    bypassNetworkCache: Bool = false,
+    readerPriority: Bool = false
+) async -> UIImage? {
     if let cached = ExternalImageCache.shared.object(forKey: url as NSURL) { return cached }
-    var request = URLRequest(url: url)
+    var request = URLRequest(
+        url: url,
+        cachePolicy: bypassNetworkCache ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy
+    )
     request.setValue(externalImageReferer(for: url), forHTTPHeaderField: "Referer")
-    guard let (data, _) = try? await externalImageSession.data(for: request),
+    let session = readerPriority ? externalReaderImageSession : externalImageSession
+    guard let (data, response) = try? await session.data(for: request),
+          (response as? HTTPURLResponse).map({ (200...299).contains($0.statusCode) }) ?? true,
           let decoded = UIImage(data: data) else { return nil }
     ExternalImageCache.shared.setObject(decoded, forKey: url as NSURL)
     return decoded
@@ -109,10 +124,20 @@ private func fetchExternalImage(_ url: URL) async -> UIImage? {
 /// (via our own, correct Referer session) here ahead of time —
 /// RemoteImageLoader.fetchImage finds it in the cache and never touches the
 /// network at all.
-func preloadExternalImage(_ url: URL) async {
-    guard RemoteImageCache.shared.image(for: url) == nil else { return }
-    guard let image = await fetchExternalImage(url) else { return }
+@discardableResult
+func preloadExternalImage(
+    _ url: URL,
+    bypassNetworkCache: Bool = false,
+    readerPriority: Bool = false
+) async -> Bool {
+    if RemoteImageCache.shared.image(for: url) != nil { return true }
+    guard let image = await fetchExternalImage(
+        url,
+        bypassNetworkCache: bypassNetworkCache,
+        readerPriority: readerPriority
+    ) else { return false }
     RemoteImageCache.shared.insert(image, for: url)
+    return true
 }
 
 @MainActor
