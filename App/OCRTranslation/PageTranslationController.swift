@@ -1,4 +1,3 @@
-import Translation
 import UIKit
 
 /// Per-page controller — one `@StateObject` instance per page wrapper
@@ -106,16 +105,9 @@ final class PageTranslationController: ObservableObject {
         displayText = [:]
         renderOverlay()
         task = Task { [weak self] in
-            // The session is created asynchronously by
-            // PageTranslationSessionHost's .translationTask — it's
-            // frequently not ready yet the instant a page's own task
-            // starts, so this waits (bounded) rather than silently giving
-            // up on that page forever.
-            guard let session = await runtime.waitForSession() else { return }
-            if Task.isCancelled { return }
             guard let image = await image() else { return }
             if Task.isCancelled { return }
-            guard let result = await OCRTranslationEngine.processStageA(image: image, cacheKey: cacheKey, session: session) else { return }
+            guard let result = await OCRTranslationEngine.processStageA(image: image, cacheKey: cacheKey, runtime: runtime) else { return }
             if Task.isCancelled { return }
             await MainActor.run {
                 guard let self, self.currentCacheKey == cacheKey else { return }

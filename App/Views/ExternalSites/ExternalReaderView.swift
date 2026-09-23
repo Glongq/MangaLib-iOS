@@ -57,11 +57,6 @@ struct ExternalReaderView: View {
     /// recalculated and re-trigger the very same already-requested
     /// pages.
     @State private var preloadedIndices: Set<Int> = []
-    /// Separate from `preloadedIndices` (images) — a page's image can be
-    /// warmed before the translation session is ready, so it needs its
-    /// own "already started" tracking to still get OCR-preloaded on a
-    /// later tick instead of being skipped forever.
-    @State private var ocrPreloadedIndices: Set<Int> = []
     @State private var vScale: CGFloat = 1
     @State private var vScaleBase: CGFloat = 1
     @State private var didScrollToInitial = false
@@ -462,33 +457,6 @@ struct ExternalReaderView: View {
         Task {
             guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else { return }
             await preloadExternalImage(url)
-            preloadOCRTranslation(page: page, url: url)
-        }
-    }
-
-    /// Warms the OCR/translation cache for a preloaded page in the
-    /// background (no UI update — nothing reads the return value; the
-    /// point is purely that OCRTranslationEngine's cache tiers end up
-    /// populated) so that by the time the reader actually shows this
-    /// page, PageTranslationController.load usually hits the cache
-    /// instead of starting cold.
-    private func preloadOCRTranslation(page: ExternalGalleryPage, url: URL) {
-        guard ocrEnabled, !ocrPreloadedIndices.contains(page.index) else { return }
-        ocrPreloadedIndices.insert(page.index)
-        let cacheKey = ocrCacheKey(for: page)
-        let stageBEnabled = ocrStageBEnabled
-        let rephraseClient = ocrRephraseClient
-        let targetLanguageName = ocrTargetLanguageName
-        let promptTemplate = ocrStageBPrompt
-        let runtime = translationRuntime
-        Task {
-            guard let session = await runtime.waitForSession() else { return }
-            var image = RemoteImageCache.shared.image(for: url)
-            if image == nil { image = await RemoteImageLoader.fetchImage(candidates: [url]) }
-            guard let image else { return }
-            guard let result = await OCRTranslationEngine.processStageA(image: image, cacheKey: cacheKey, session: session) else { return }
-            guard stageBEnabled, let rephraseClient, result.stageBText.isEmpty else { return }
-            _ = await OCRTranslationEngine.attemptStageB(result, cacheKey: cacheKey, rephraseClient: rephraseClient, targetLanguageName: targetLanguageName, promptTemplate: promptTemplate)
         }
     }
 

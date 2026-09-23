@@ -1,4 +1,3 @@
-import Translation
 import UIKit
 
 /// OCR -> Stage A -> Stage B, split into two independent, composable
@@ -9,9 +8,8 @@ import UIKit
 enum OCRTranslationEngine {
 
     /// OCR + Stage A only — checks both cache tiers first. Used by the
-    /// live page path (PageTranslationController.loadPage) and the
-    /// preload path (ExternalReaderView.preloadOCRTranslation).
-    static func processStageA(image: UIImage, cacheKey: OCRCacheKey, session: TranslationSession) async -> CachedPageTranslation? {
+    /// live page path (PageTranslationController.loadPage).
+    static func processStageA(image: UIImage, cacheKey: OCRCacheKey, runtime: PageTranslationRuntime) async -> CachedPageTranslation? {
         if let cached = OCRTranslationMemoryCache.shared[cacheKey] { return cached }
         if let cached = await OCRTranslationDiskCache.shared.load(cacheKey) {
             OCRTranslationMemoryCache.shared[cacheKey] = cached
@@ -27,7 +25,7 @@ enum OCRTranslationEngine {
         for index in blocks.indices {
             blocks[index].backgroundColor = OCRBackgroundSampler.sample(rect: blocks[index].rect, in: image)
         }
-        guard let stageA = try? await TranslationPipeline.translateBatch(blocks, session: session), !stageA.isEmpty else { return nil }
+        guard let stageA = await runtime.translate(blocks, targetLanguage: cacheKey.targetLanguage), !stageA.isEmpty else { return nil }
 
         let result = CachedPageTranslation(
             blocks: blocks,
