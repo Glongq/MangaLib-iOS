@@ -516,7 +516,8 @@ struct ExternalGalleryDetailView: View {
 
     // MARK: Info row — a 1-to-1 match for MangaDetailView.infoRow/infoBlock
     // (Type/Status/Year/Views/Format) — here it's Type/Posted/Length + the
-    // fields that exist ONLY for e-hentai (Parent/Visibility/Size/Favorited);
+    // fields that exist ONLY for e-hentai (Parent/Visibility/Size/Favorited),
+    // followed by the source site shared by every external title;
     // Language is broken out into its own separate chip block (see
     // aboutTab — part of the general split by subcategories), not
     // duplicated here. hitomi simply has no such e-hentai fields, they're
@@ -530,7 +531,8 @@ struct ExternalGalleryDetailView: View {
             (heading: "Родитель", value: detail.parentId.map { "#\($0)" }),
             (heading: "Видимость", value: detail.visible),
             (heading: "Размер", value: detail.fileSize),
-            (heading: "В избранном", value: detail.favoritedCount)
+            (heading: "В избранном", value: detail.favoritedCount),
+            (heading: "Сайт", value: site.displayName)
         ]
         let items: [(heading: String, value: String)] = rawItems.compactMap { item in
             guard let value = item.value, !value.isEmpty else { return nil }
