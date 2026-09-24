@@ -16,24 +16,53 @@ enum OCRTranslationEngine {
             return cached
         }
 
-        let googleClient = OCRGoogleCloudCredentials.apiKey.map(GoogleCloudLanguageClient.init(apiKey:))
+        let googleCloudClient = OCRGoogleCloudCredentials.apiKey.map(GoogleCloudLanguageClient.init(apiKey:))
         var blocks: [RecognizedTextBlock] = []
+        var appleProbe: [RecognizedTextBlock] = []
         var usedProviderFallback = false
-        if cacheKey.recognitionProvider == OCRRecognitionProvider.googleCloudVision.rawValue {
-            if let googleClient,
-               let lines = await googleClient.recognize(image: image, sourceLanguage: cacheKey.sourceLanguage) {
+        switch OCRRecognitionProvider(rawValue: cacheKey.recognitionProvider) ?? .appleVision {
+        case .appleVision:
+            break
+        case .googleMLKit:
+            let sourceLanguage: String
+            if cacheKey.sourceLanguage == "auto" {
+                appleProbe = await OCRTextRecognizer.recognize(image: image, sourceLanguage: "auto")
+                sourceLanguage = OCRTextRecognizer.inferredLanguage(from: appleProbe)
+            } else {
+                sourceLanguage = cacheKey.sourceLanguage
+            }
+            if let lines = await GoogleMLKitLanguageClient.shared.recognize(
+                image: image,
+                sourceLanguage: sourceLanguage
+            ) {
                 blocks = OCRTextRecognizer.blocks(from: lines)
             }
             if blocks.isEmpty {
                 usedProviderFallback = true
                 await OCRProviderFallbackNotifier.post(
-                    "Google OCR недоступен — использован Apple Vision",
+                    "Локальный Google OCR не сработал — использован Apple Vision",
+                    cacheKey: cacheKey
+                )
+            }
+        case .googleCloudVision:
+            if let googleCloudClient,
+               let lines = await googleCloudClient.recognize(image: image, sourceLanguage: cacheKey.sourceLanguage) {
+                blocks = OCRTextRecognizer.blocks(from: lines)
+            }
+            if blocks.isEmpty {
+                usedProviderFallback = true
+                await OCRProviderFallbackNotifier.post(
+                    "Google OCR API недоступен — использован Apple Vision",
                     cacheKey: cacheKey
                 )
             }
         }
         if blocks.isEmpty {
-            blocks = await OCRTextRecognizer.recognize(image: image, sourceLanguage: cacheKey.sourceLanguage)
+            if appleProbe.isEmpty {
+                blocks = await OCRTextRecognizer.recognize(image: image, sourceLanguage: cacheKey.sourceLanguage)
+            } else {
+                blocks = appleProbe
+            }
         }
         guard !blocks.isEmpty else { return nil }
         // Always computed (cheap — small cropped regions, not the whole
@@ -44,9 +73,25 @@ enum OCRTranslationEngine {
             blocks[index].backgroundColor = OCRBackgroundSampler.sample(rect: blocks[index].rect, in: image)
         }
         var stageA: [UUID: String]?
-        if cacheKey.translationProvider == OCRPrimaryTranslationProvider.googleCloudTranslation.rawValue {
-            if let googleClient {
-                stageA = await googleClient.translate(
+        switch OCRPrimaryTranslationProvider(rawValue: cacheKey.translationProvider) ?? .appleTranslation {
+        case .appleTranslation:
+            break
+        case .googleMLKit:
+            stageA = await GoogleMLKitLanguageClient.shared.translate(
+                blocks: blocks,
+                sourceLanguage: cacheKey.sourceLanguage,
+                targetLanguage: cacheKey.targetLanguage
+            )
+            if stageA?.isEmpty != false {
+                usedProviderFallback = true
+                await OCRProviderFallbackNotifier.post(
+                    "Локальный Google Перевод не сработал — переключено на Apple",
+                    cacheKey: cacheKey
+                )
+            }
+        case .googleCloudTranslation:
+            if let googleCloudClient {
+                stageA = await googleCloudClient.translate(
                     blocks: blocks,
                     sourceLanguage: cacheKey.sourceLanguage,
                     targetLanguage: cacheKey.targetLanguage
@@ -55,7 +100,7 @@ enum OCRTranslationEngine {
             if stageA?.isEmpty != false {
                 usedProviderFallback = true
                 await OCRProviderFallbackNotifier.post(
-                    "Google Translate недоступен — переключено на перевод Apple",
+                    "Google Translate API недоступен — переключено на Apple",
                     cacheKey: cacheKey
                 )
             }

@@ -228,7 +228,7 @@ struct ExternalReaderView: View {
             let token = providerFallbackNoticeToken
             withAnimation(.easeOut(duration: 0.18)) { providerFallbackNotice = message }
             Task { @MainActor in
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .seconds(2.4))
                 guard providerFallbackNoticeToken == token else { return }
                 withAnimation(.easeIn(duration: 0.18)) { providerFallbackNotice = nil }
             }

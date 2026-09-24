@@ -52,17 +52,19 @@ struct ExternalTranslationSettingsSheet: View {
                     if enabled {
                         label("Распознавание текста")
                         Picker("", selection: $recognitionProvider) {
-                            Text("Apple Vision").tag(OCRRecognitionProvider.appleVision.rawValue)
-                            Text("Google Vision").tag(OCRRecognitionProvider.googleCloudVision.rawValue)
+                            Text("Apple").tag(OCRRecognitionProvider.appleVision.rawValue)
+                            Text("Google локально").tag(OCRRecognitionProvider.googleMLKit.rawValue)
+                            Text("Google API").tag(OCRRecognitionProvider.googleCloudVision.rawValue)
                         }.pickerStyle(.segmented)
-                        caption("Google Vision лучше распознаёт мелкий и сложный текст, но отправляет изображение страницы в Google Cloud. При ошибке автоматически используется Apple Vision.")
+                        caption(recognitionProviderCaption)
 
                         label("Первичный перевод")
                         Picker("", selection: $translationProvider) {
                             Text("Apple").tag(OCRPrimaryTranslationProvider.appleTranslation.rawValue)
-                            Text("Google").tag(OCRPrimaryTranslationProvider.googleCloudTranslation.rawValue)
+                            Text("Google локально").tag(OCRPrimaryTranslationProvider.googleMLKit.rawValue)
+                            Text("Google API").tag(OCRPrimaryTranslationProvider.googleCloudTranslation.rawValue)
                         }.pickerStyle(.segmented)
-                        caption("Google обычно переводит связнее. При недоступности сервиса автоматически используется встроенный перевод Apple.")
+                        caption(translationProviderCaption)
 
                         if usesGoogleCloud {
                             googleCloudSection
@@ -188,6 +190,28 @@ struct ExternalTranslationSettingsSheet: View {
         .background(palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
+    private var recognitionProviderCaption: String {
+        switch OCRRecognitionProvider(rawValue: recognitionProvider) ?? .appleVision {
+        case .appleVision:
+            return "Apple Vision работает полностью на устройстве и остаётся резервным вариантом при любой ошибке Google."
+        case .googleMLKit:
+            return "Google ML Kit работает полностью на устройстве. Модели японского, китайского, корейского и латиницы встроены в приложение."
+        case .googleCloudVision:
+            return "Google Cloud Vision отправляет изображение страницы в Google Cloud и требует API-ключ."
+        }
+    }
+
+    private var translationProviderCaption: String {
+        switch OCRPrimaryTranslationProvider(rawValue: translationProvider) ?? .appleTranslation {
+        case .appleTranslation:
+            return "Встроенный перевод Apple работает на устройстве."
+        case .googleMLKit:
+            return "Google ML Kit работает без API-ключа. При первом запуске скачивает языковые модели около 30 МБ, затем переводит офлайн."
+        case .googleCloudTranslation:
+            return "Google Cloud Translation требует API-ключ и соединение с интернетом."
+        }
+    }
+
     private var usesGoogleCloud: Bool {
         recognitionProvider == OCRRecognitionProvider.googleCloudVision.rawValue ||
             translationProvider == OCRPrimaryTranslationProvider.googleCloudTranslation.rawValue
@@ -197,7 +221,7 @@ struct ExternalTranslationSettingsSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             secureFieldRow("Google Cloud API-ключ", text: $googleAPIKey, placeholder: "AIza...")
             HStack(spacing: 12) {
-                Button("Проверить Google") { testGoogleConnection() }
+                Button("Проверить Google API") { testGoogleConnection() }
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.accent)
                 switch googleConnectionState {
@@ -207,7 +231,7 @@ struct ExternalTranslationSettingsSheet: View {
                 case .failure: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
                 }
             }
-            caption("В проекте Google Cloud должны быть включены Cloud Vision API и Cloud Translation API. Ключ хранится в Keychain. Проверка проверяет доступ к переводу; недоступное распознавание автоматически откатится на Apple Vision.")
+            caption("В Google Cloud должны быть включены Cloud Vision API и Cloud Translation API. Ключ хранится в Keychain.")
         }
     }
 

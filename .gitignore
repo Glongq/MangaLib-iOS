@@ -19,6 +19,9 @@ xcuserdata/
 .swiftpm/
 Package.resolved
 
+# CocoaPods
+Pods/
+
 # macOS
 .DS_Store
 
@@ -28,5 +31,5 @@ Package.resolved
 .env
 .env.*
 
-# Scratch/debug files (не должны попадать в коммиты)
+# Scratch/debug files
 .tmp_*

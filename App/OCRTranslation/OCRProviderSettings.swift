@@ -3,11 +3,13 @@ import Foundation
 enum OCRRecognitionProvider: Int, CaseIterable {
     case appleVision = 0
     case googleCloudVision = 1
+    case googleMLKit = 2
 }
 
 enum OCRPrimaryTranslationProvider: Int, CaseIterable {
     case appleTranslation = 0
     case googleCloudTranslation = 1
+    case googleMLKit = 2
 }
 
 enum OCRGoogleCloudCredentials {

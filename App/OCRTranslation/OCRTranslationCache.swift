@@ -24,7 +24,7 @@ struct OCRCacheKey: Hashable {
     let translationProvider: Int
     let engineVersion: Int
 
-    static let currentEngineVersion = 8
+    static let currentEngineVersion = 9
 
     var diskFileName: String {
         "\(pageIndex)_\(sourceLanguage)_\(targetLanguage)_ocr\(recognitionProvider)_tr\(translationProvider)_v\(engineVersion).json"
