@@ -9,8 +9,14 @@ enum OCRTextRecognizer {
         guard let cgImage = image.cgImage else { return [] }
         return await Task.detached(priority: .userInitiated) {
             let lines = recognizeLines(cgImage: cgImage, sourceLanguage: sourceLanguage)
-            return cluster(lines: lines)
+            return blocks(from: lines)
         }.value
+    }
+
+    /// Shared post-processing for alternative OCR engines that return text
+    /// plus normalized boxes but do not understand manga reading order.
+    static func blocks(from lines: [RecognizedTextLine]) -> [RecognizedTextBlock] {
+        cluster(lines: lines)
     }
 
     private static func languages(for sourceLanguage: String) -> [String] {

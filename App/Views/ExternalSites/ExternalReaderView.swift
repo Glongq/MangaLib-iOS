@@ -24,7 +24,7 @@ import UIKit
 /// chapters), translation like/rating, bookmarking (hasBookmarks:
 /// false), inline per-page comments (hitomi has no comments at all;
 /// e-hentai's are attached to the TITLE as a whole — already shown in
-/// the card's "Комментарии" tab, see ExternalGalleryDetailView), an
+/// the card's comments tab, see ExternalGalleryDetailView), an
 /// "image server" setting (both sites have exactly one real page
 /// source, no alternate mirrors/CDNs to choose from).
 struct ExternalReaderView: View {
@@ -60,6 +60,9 @@ struct ExternalReaderView: View {
     @State private var vScale: CGFloat = 1
     @State private var vScaleBase: CGFloat = 1
     @State private var didScrollToInitial = false
+    @State private var providerFallbackNotice: String?
+    @State private var providerFallbackNoticeToken = 0
+    @State private var lastProviderFallbackNoticeDate = Date.distantPast
 
     /// 0 — left, 1 — up (continuous), 2 — right; the same values/key as
     /// MangaReaderView.pageMode.
@@ -73,13 +76,15 @@ struct ExternalReaderView: View {
     @AppStorage("reader_preload_count") private var preloadCount = 3
     /// Its own key (not the shared "reader_fit_width_{type}" from
     /// MangaReaderView) — hitomi/e-hentai have no notion of
-    /// "Манга"/"Манхва" with different defaults.
+    /// manga/manhwa distinction with different defaults.
     @AppStorage("external_reader_fit_width") private var fitWidth = false
 
     // MARK: OCR translation overlay (external sites only, see
     // App/OCRTranslation/) — off by default, zero effect on the core
     // app's own MangaReaderView.
     @AppStorage("external_reader_ocr_enabled") private var ocrEnabled = false
+    @AppStorage("external_reader_ocr_recognition_provider") private var ocrRecognitionProvider = 0
+    @AppStorage("external_reader_ocr_translation_provider") private var ocrTranslationProvider = 0
     @AppStorage("external_reader_ocr_source_lang") private var ocrSourceLang = "auto"
     @AppStorage("external_reader_ocr_target_lang") private var ocrTargetLang = "ru"
     @AppStorage("external_reader_ocr_style") private var ocrStyleRaw = 0
@@ -125,6 +130,8 @@ struct ExternalReaderView: View {
         OCRCacheKey(
             site: site, galleryId: detail.id, pageIndex: page.index, pageKey: page.key,
             sourceLanguage: ocrSourceLang, targetLanguage: ocrTargetLang,
+            recognitionProvider: ocrRecognitionProvider,
+            translationProvider: ocrTranslationProvider,
             engineVersion: OCRCacheKey.currentEngineVersion
         )
     }
@@ -175,6 +182,24 @@ struct ExternalReaderView: View {
                 .allowsHitTesting(false)
                 .animation(.easeInOut(duration: 0.16), value: showUI)
             }
+
+            if let providerFallbackNotice {
+                VStack {
+                    Text(providerFallbackNotice)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(.black.opacity(0.78), in: Capsule())
+                        .padding(.top, 18)
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .allowsHitTesting(false)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(20)
+            }
         }
         .ignoresSafeArea(.container, edges: .bottom)
         .statusBarHidden(!showUI)
@@ -192,6 +217,21 @@ struct ExternalReaderView: View {
         }
         .onChange(of: pageMode) { _, mode in
             if mode == 1 { preloadVerticalWindow(from: verticalPage) } else { preloadUpcoming(from: currentPage) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: OCRProviderFallbackNotifier.notification)) { notification in
+            guard let message = notification.userInfo?[OCRProviderFallbackNotifier.messageKey] as? String,
+                  notification.userInfo?[OCRProviderFallbackNotifier.siteKey] as? String == site.rawValue,
+                  notification.userInfo?[OCRProviderFallbackNotifier.galleryIDKey] as? Int == detail.id,
+                  Date().timeIntervalSince(lastProviderFallbackNoticeDate) >= 4 else { return }
+            lastProviderFallbackNoticeDate = Date()
+            providerFallbackNoticeToken += 1
+            let token = providerFallbackNoticeToken
+            withAnimation(.easeOut(duration: 0.18)) { providerFallbackNotice = message }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1))
+                guard providerFallbackNoticeToken == token else { return }
+                withAnimation(.easeIn(duration: 0.18)) { providerFallbackNotice = nil }
+            }
         }
         .sheet(isPresented: $showSettings) {
             ExternalReaderSettingsSheet(
@@ -534,7 +574,7 @@ struct ExternalReaderView: View {
 
     private var bottomBar: some View {
         HStack {
-            // line.3.horizontal — the same spot/icon as "Список глав" in
+            // line.3.horizontal — the same spot/icon as the chapter list in
             // the original reader (see MangaReaderView.bottomBar — same
             // left position there), it just opens not a chapter list
             // (that concept doesn't exist here at all) but a quick page

@@ -16,7 +16,25 @@ enum OCRTranslationEngine {
             return cached
         }
 
-        var blocks = await OCRTextRecognizer.recognize(image: image, sourceLanguage: cacheKey.sourceLanguage)
+        let googleClient = OCRGoogleCloudCredentials.apiKey.map(GoogleCloudLanguageClient.init(apiKey:))
+        var blocks: [RecognizedTextBlock] = []
+        var usedProviderFallback = false
+        if cacheKey.recognitionProvider == OCRRecognitionProvider.googleCloudVision.rawValue {
+            if let googleClient,
+               let lines = await googleClient.recognize(image: image, sourceLanguage: cacheKey.sourceLanguage) {
+                blocks = OCRTextRecognizer.blocks(from: lines)
+            }
+            if blocks.isEmpty {
+                usedProviderFallback = true
+                await OCRProviderFallbackNotifier.post(
+                    "Google OCR недоступен — использован Apple Vision",
+                    cacheKey: cacheKey
+                )
+            }
+        }
+        if blocks.isEmpty {
+            blocks = await OCRTextRecognizer.recognize(image: image, sourceLanguage: cacheKey.sourceLanguage)
+        }
         guard !blocks.isEmpty else { return nil }
         // Always computed (cheap — small cropped regions, not the whole
         // page) so the optional "erase original text" overlay style can
@@ -25,16 +43,39 @@ enum OCRTranslationEngine {
         for index in blocks.indices {
             blocks[index].backgroundColor = OCRBackgroundSampler.sample(rect: blocks[index].rect, in: image)
         }
-        guard let stageA = await runtime.translate(blocks, targetLanguage: cacheKey.targetLanguage), !stageA.isEmpty else { return nil }
+        var stageA: [UUID: String]?
+        if cacheKey.translationProvider == OCRPrimaryTranslationProvider.googleCloudTranslation.rawValue {
+            if let googleClient {
+                stageA = await googleClient.translate(
+                    blocks: blocks,
+                    sourceLanguage: cacheKey.sourceLanguage,
+                    targetLanguage: cacheKey.targetLanguage
+                )
+            }
+            if stageA?.isEmpty != false {
+                usedProviderFallback = true
+                await OCRProviderFallbackNotifier.post(
+                    "Google Translate недоступен — переключено на перевод Apple",
+                    cacheKey: cacheKey
+                )
+            }
+        }
+        if stageA?.isEmpty != false {
+            stageA = await runtime.translate(blocks, targetLanguage: cacheKey.targetLanguage)
+        }
+        guard let stageA, !stageA.isEmpty else { return nil }
 
         let result = CachedPageTranslation(
             blocks: blocks,
             stageAText: Dictionary(uniqueKeysWithValues: stageA.map { ($0.key.uuidString, $0.value) }),
             stageBText: [:],
-            imageSize: image.size
+            imageSize: image.size,
+            usedProviderFallback: usedProviderFallback
         )
-        OCRTranslationMemoryCache.shared[cacheKey] = result
-        await OCRTranslationDiskCache.shared.save(cacheKey, result)
+        if !usedProviderFallback {
+            OCRTranslationMemoryCache.shared[cacheKey] = result
+            await OCRTranslationDiskCache.shared.save(cacheKey, result)
+        }
         return result
     }
 
@@ -77,8 +118,10 @@ enum OCRTranslationEngine {
             updated.stageBText[block.id.uuidString] = text
         }
         updated.stageBPrompt = promptTemplate
-        OCRTranslationMemoryCache.shared[cacheKey] = updated
-        await OCRTranslationDiskCache.shared.save(cacheKey, updated)
+        if !updated.usedProviderFallback {
+            OCRTranslationMemoryCache.shared[cacheKey] = updated
+            await OCRTranslationDiskCache.shared.save(cacheKey, updated)
+        }
         return updated
     }
 }

@@ -20,12 +20,14 @@ struct OCRCacheKey: Hashable {
     let pageKey: String
     let sourceLanguage: String
     let targetLanguage: String
+    let recognitionProvider: Int
+    let translationProvider: Int
     let engineVersion: Int
 
-    static let currentEngineVersion = 7
+    static let currentEngineVersion = 8
 
     var diskFileName: String {
-        "\(pageIndex)_\(sourceLanguage)_\(targetLanguage)_v\(engineVersion).json"
+        "\(pageIndex)_\(sourceLanguage)_\(targetLanguage)_ocr\(recognitionProvider)_tr\(translationProvider)_v\(engineVersion).json"
     }
 }
 
@@ -38,8 +40,7 @@ struct CachedPageTranslation: Codable {
     /// do" apart from "done with a prompt the user has since edited,
     /// needs a redo" (previously ANY non-empty stageBText short-circuited
     /// a retry forever, so editing the custom prompt in Settings had no
-    /// visible effect on already-cached pages — "написал кастомный
-    /// промт, а он по прежнему не переводил").
+    /// visible effect on already-cached pages.
     var stageBPrompt: String = ""
     /// The source page image's pixel size at OCR time — persisted so a
     /// LATER Stage-B attempt (re-run purely from cache, no image at hand,
@@ -48,6 +49,10 @@ struct CachedPageTranslation: Codable {
     /// (RecognizedTextBlock.characterBudget(imageSize:)) to hint the
     /// rephrase prompt toward text that fits.
     let imageSize: CGSize
+    /// Fallback results stay visible for the current page but are not
+    /// persisted, so a temporary Google outage is retried later instead
+    /// of silently pinning the Apple fallback to the Google cache key.
+    var usedProviderFallback: Bool = false
 
     func text(for blockID: UUID) -> String? {
         stageBText[blockID.uuidString] ?? stageAText[blockID.uuidString]
@@ -73,7 +78,7 @@ final class OCRTranslationMemoryCache {
 }
 
 /// Disk tier — regeneratable JSON files under Library/Caches, swept
-/// automatically by the app's existing "Очистить кеш" (StorageSettingsView
+/// automatically by the app's existing cache-clearing action (StorageSettingsView
 /// already walks the whole cachesDirectory), no extra cleanup code needed.
 actor OCRTranslationDiskCache {
     static let shared = OCRTranslationDiskCache()
