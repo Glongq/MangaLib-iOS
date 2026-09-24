@@ -19,6 +19,9 @@ xcuserdata/
 .swiftpm/
 Package.resolved
 
+# CocoaPods
+Pods/
+
 # macOS
 .DS_Store
 
@@ -27,3 +30,6 @@ Package.resolved
 *.mobileprovision
 .env
 .env.*
+
+# Scratch/debug files
+.tmp_*
