@@ -32,13 +32,21 @@ struct RecognizedTextBlock: Codable, Identifiable, Hashable {
     let id: UUID
     /// Normalized (0...1), top-left origin — union of all line rects.
     let rect: CGRect
-    /// Lines joined top-to-bottom with "\n".
+    /// A wider normalized area used to lay out translated horizontal text
+    /// when the source was written in narrow vertical columns. `nil` for
+    /// regular horizontal text and cache entries created before vertical
+    /// layout support.
+    var placementRect: CGRect? = nil
+    /// Lines joined in source reading order.
     let text: String
     let lines: [RecognizedTextLine]
     /// nil for cache entries computed before this field existed, or if
     /// sampling failed (e.g. degenerate crop) — renderers fall back to a
     /// neutral color in that case. See OCRBackgroundSampler.
     var backgroundColor: OCRSampledColor? = nil
+
+    var overlayRect: CGRect { placementRect ?? rect }
+    var isVertical: Bool { placementRect != nil }
 
     /// Rough character budget the translated text should aim for,
     /// estimated from this block's actual pixel footprint in the source
@@ -48,8 +56,9 @@ struct RecognizedTextBlock: Codable, Identifiable, Hashable {
     /// the prompt is explicit that meaning must never be cut to fit it.
     func characterBudget(imageSize: CGSize) -> Int {
         guard imageSize.width > 0, imageSize.height > 0 else { return max(text.count, 8) }
-        let pixelWidth = rect.width * imageSize.width
-        let pixelHeight = rect.height * imageSize.height
+        let layoutRect = overlayRect
+        let pixelWidth = layoutRect.width * imageSize.width
+        let pixelHeight = layoutRect.height * imageSize.height
         let estimatedFontSize = max(8, pixelHeight * 0.35)
         let avgCharWidth = estimatedFontSize * 0.55
         let charsPerLine = max(1, pixelWidth / avgCharWidth)

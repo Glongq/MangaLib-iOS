@@ -22,7 +22,7 @@ struct OCRCacheKey: Hashable {
     let targetLanguage: String
     let engineVersion: Int
 
-    static let currentEngineVersion = 6
+    static let currentEngineVersion = 7
 
     var diskFileName: String {
         "\(pageIndex)_\(sourceLanguage)_\(targetLanguage)_v\(engineVersion).json"

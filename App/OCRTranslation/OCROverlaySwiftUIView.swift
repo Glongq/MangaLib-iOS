@@ -20,11 +20,12 @@ struct OCROverlaySwiftUIView: View {
             if let text = texts[block.id] {
                 // Small outward margin beyond Vision's tight bbox — see
                 // OCROverlayContainerView's matching comment.
+                let overlayRect = block.overlayRect
                 let base = CGRect(
-                    x: fitRect.minX + fitRect.width * block.rect.minX,
-                    y: fitRect.minY + fitRect.height * block.rect.minY,
-                    width: fitRect.width * block.rect.width,
-                    height: fitRect.height * block.rect.height
+                    x: fitRect.minX + fitRect.width * overlayRect.minX,
+                    y: fitRect.minY + fitRect.height * overlayRect.minY,
+                    width: fitRect.width * overlayRect.width,
+                    height: fitRect.height * overlayRect.height
                 ).insetBy(dx: -2, dy: -2)
                 // Best-effort fit: shrink the font toward the original
                 // bbox first, same algorithm as the horizontal/UIKit

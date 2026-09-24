@@ -73,11 +73,12 @@ final class OCROverlayContainerView: UIView {
             // hug the glyphs closely enough that, flush, a sliver of the
             // original text/anti-aliasing could still peek out from under
             // the plate.
+            let overlayRect = block.overlayRect
             let baseRect = CGRect(
-                x: bounds.width * block.rect.minX,
-                y: bounds.height * block.rect.minY,
-                width: bounds.width * block.rect.width,
-                height: bounds.height * block.rect.height
+                x: bounds.width * overlayRect.minX,
+                y: bounds.height * overlayRect.minY,
+                width: bounds.width * overlayRect.width,
+                height: bounds.height * overlayRect.height
             ).insetBy(dx: -2, dy: -2)
             // Best-effort fit: shrink the font toward the original bbox
             // first; only grow the box (never truncate) if it still
