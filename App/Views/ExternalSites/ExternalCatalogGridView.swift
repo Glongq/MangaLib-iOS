@@ -117,16 +117,11 @@ struct ExternalCatalogGridView: View {
         return copy
     }
 
-    /// Фиксированное локальное кол-во тайтлов на "страницу" — по прямому
-    /// запросу ("фикс. кол-во тайтлов"). ЧЕСТНО работает как настоящий
-    /// лимит только там, где сайт реально это позволяет (hitomi — точный
-    /// byte-offset в .nozomi, см. HitomiProvider.fetchNozomiList) — все
-    /// остальные провайдеры (e-hentai/imhentai/3hentai/hentaiPill/
-    /// simplyHentai) СКРЕЙПЯТ обычную HTML-страницу листинга и физически не
-    /// могут запросить у сайта "ровно 40" — они честно игнорируют `limit` и
-    /// отдают столько, сколько сайт сам показывает на своей странице (см.
-    /// комментарии `limit` в каждом провайдере) — конкретное число там
-    /// задаёт сам сайт, не мы.
+    /// Fixed local number of titles per page. It acts as a real request limit
+    /// only where the site supports one (Hitomi uses an exact byte offset in
+    /// its .nozomi index; see HitomiProvider.fetchNozomiList). All other
+    /// providers scrape a regular listing page and cannot request exactly 40
+    /// items, so they ignore `limit` and return the site's native page size.
     private static let pageSize = 45
 
     /// Cross-site language filter (see ExternalCatalogLanguage/
@@ -148,22 +143,17 @@ struct ExternalCatalogGridView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var jumpPageText = ""
-    /// Текущая страница (1-based) — по прямому запросу ("когда долистал —
-    /// кнопка к странице X или назад") результат теперь листается ЯВНО
-    /// постранично (см. pageFooter/goToPage), а не бесконечным
-    /// автодогружением при подскролле к концу, как было раньше.
+    /// Current one-based page. Results use explicit pagination through
+    /// pageFooter/goToPage instead of the previous infinite loading behavior.
     @State private var currentPage = 1
-    /// Показать после того, как страница уже загружена: как минимум один
-    /// сайт из `sites` ЕЩЁ имеет следующую страницу (см. loadNextBatch —
-    /// сайт остаётся в `pending`, пока не вернёт nextCursor == nil или не
-    /// ошибётся) — единственный источник правды о "есть ли ещё", без
-    /// придуманного общего количества страниц (ни один провайдер не
-    /// возвращает суммарный total, см. ExternalSiteProvider.fetchIdsByTag/
-    /// fetchIdsBySearch — только (ids, nextCursor)).
+    /// Shown after a page loads while at least one site still has a next page.
+    /// See loadNextBatch: a site remains pending until it returns a nil cursor
+    /// or fails. This is the sole source of truth because providers return
+    /// `(ids, nextCursor)` rather than a shared total page count.
     private var hasNextPage: Bool { !pending.isEmpty }
-    /// Обратная навигация работает для ЛЮБОЙ страницы, где currentPage > 1,
-    /// НЕЗАВИСИМО от hasNextPage — переход всегда идёт заново через
-    /// cursorForPage (см. goToPage), а не кэш уже просмотренных страниц.
+    /// Backward navigation works on every page above the first regardless of
+    /// hasNextPage. goToPage resolves it again through cursorForPage instead
+    /// of relying on a cache of previously visited pages.
     private var hasPreviousPage: Bool { currentPage > 1 }
     /// Reports this page's result count upward (see ExternalSearchView/
     /// ExternalCombinedCatalogView — the "Found ~N titles" banner shown
@@ -283,8 +273,8 @@ struct ExternalCatalogGridView: View {
     /// dismissed".
     @State private var showJumpSheet = false
 
-    /// Shows the CURRENT page number right on the pill ("Стр. N") instead
-    /// of a bare "Стр." — per direct request to fix the page-jump visual:
+    /// Shows the current page number directly on the pill instead of a generic
+    /// page label, keeping the jump control's state visible.
     /// otherwise there was no way to tell what page you were even on
     /// without opening the sheet first.
     private var pageJumpButton: some View {
@@ -519,8 +509,7 @@ struct ExternalCatalogGridView: View {
     /// detail hasn't loaded yet is kept (so onCardAppear still fires and
     /// loads it; it may drop out of view a moment later once its language
     /// comes back mismatched), and a title with no declared language
-    /// always passes, per direct feedback ("если язык не указан — он
-    /// всё равно появится в выдаче").
+    /// always passes because an absent language must not hide the title.
     private var filteredItems: [ExternalCatalogItem] {
         guard !filterStore.selectedLanguages.isEmpty else { return items }
         return items.filter { item in
@@ -871,10 +860,6 @@ private struct CatalogCard: View {
                             .background(titleMeasurement(detail.title))
                     }
                     .buttonStyle(.plain)
-                    // The tap only works when the title ACTUALLY didn't
-                    // fit — otherwise the card would look tappable in
-                    // places where there's nothing to open.
-                    .disabled(!isTitleTruncated)
 
                     Text(detail.type.isEmpty ? " " : detail.type)
                         .font(Font(ExternalCatalogGridView.typeUIFont))

@@ -44,6 +44,7 @@ struct ExternalGalleryDetailView: View {
     @State private var tab: Tab = .about
     @State private var previewPage: Int = 1
     @State private var previewJumpText = ""
+    @State private var shareURL: URL?
     @Namespace private var tabIndicator
 
     /// Reader — ONLY `.fullScreenCover`, not pushed via NavigationLink
@@ -79,10 +80,9 @@ struct ExternalGalleryDetailView: View {
     }
 
     @State private var tagCatalogTarget: TagCatalogTarget?
-    /// Открывает выбор папки для локальных закладок (см.
-    /// ExternalAddToFolderSheet) — тот же UX, что и "Добавить в" в
-    /// основном приложении (MangaDetailView.showAddToFolder), а не
-    /// мгновенный toggle без выбора папки.
+    /// Opens the local-bookmark folder picker (see ExternalAddToFolderSheet),
+    /// matching the main app's "Add to" flow (MangaDetailView.showAddToFolder)
+    /// instead of immediately toggling a bookmark without choosing a folder.
     @State private var showAddToFolder = false
 
     private func openTagCatalog(namespace: ExternalTagNamespace, value: String, title: String) {
@@ -111,10 +111,25 @@ struct ExternalGalleryDetailView: View {
     var body: some View {
         content
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if let shareURL {
+                        ShareLink(item: shareURL) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .accessibilityLabel("Поделиться")
+                    }
+                }
+            }
             .background(Theme.background.ignoresSafeArea())
             .task {
-                if let preloaded { detail = preloaded; evaluateLanguageSuggestion(preloaded); return }
-                await load()
+                if let preloaded {
+                    detail = preloaded
+                    evaluateLanguageSuggestion(preloaded)
+                } else {
+                    await load()
+                }
+                shareURL = await resolvedShareURL()
             }
             .overlay(alignment: .bottom) {
                 if let languageSuggestion {
@@ -149,6 +164,40 @@ struct ExternalGalleryDetailView: View {
     private func dismissLanguageSuggestion() {
         TitleLanguageSuggestionSeenStore.markShown(site: site, id: id)
         languageSuggestion = nil
+    }
+
+    private func resolvedShareURL() async -> URL? {
+        switch site {
+        case .hitomi:
+            return URL(string: "https://hitomi.la/reader/\(id).html")
+        case .ehentai:
+            let token: String?
+            if let resolveKey {
+                token = resolveKey
+            } else {
+                token = await provider.resolveKey(for: id)
+            }
+            guard let token else { return nil }
+            return URL(string: "https://e-hentai.org/g/\(id)/\(token)/")
+        case .threeHentai:
+            return URL(string: "https://ru.3hentai.net/d/\(id)")
+        case .imhentai:
+            return URL(string: "https://imhentai.xxx/gallery/\(id)/")
+        case .hentaiPill:
+            return URL(string: "https://hentaipill.com/gallery/g\(id)")
+        case .simplyHentai:
+            let slug: String?
+            if let resolveKey {
+                slug = resolveKey
+            } else {
+                slug = await provider.resolveKey(for: id)
+            }
+            guard let slug else { return nil }
+            let encodedSlug = slug.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? slug
+            return URL(string: "https://www.simply-hentai.com/manga/\(encodedSlug)")
+        case .pixiv:
+            return URL(string: "https://www.pixiv.net/artworks/\(id)")
+        }
     }
 
     @ViewBuilder
@@ -363,7 +412,7 @@ struct ExternalGalleryDetailView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: Tab «О тайтле»
+    // MARK: About tab
 
     private func aboutTab(_ detail: ExternalGalleryDetail) -> some View {
         let categories = tagsByCategory(detail)
