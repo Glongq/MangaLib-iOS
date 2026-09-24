@@ -675,7 +675,7 @@ struct ImhentaiProvider: ExternalSiteProvider {
                 let metadata = imageMetadata[n]
                 let imageExtension = metadata?.fileExtension ?? "webp"
                 let fullImageURL = "https://\(storageKey)/\(n).\(imageExtension)"
-                ExternalGalleryPage(
+                return ExternalGalleryPage(
                     index: n,
                     key: fullImageURL,
                     width: metadata?.width ?? 0,
