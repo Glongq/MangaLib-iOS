@@ -635,15 +635,17 @@ struct ImhentaiProvider: ExternalSiteProvider {
             }
         }
 
-        // Images — from the hidden fields load_server/load_dir/load_id/
-        // load_pages (confirmed by HAR on TWO independent titles, not
-        // rechecked with a live curl — the site is behind Cloudflare, see the
-        // type's doc-comment). The formula is CONFIRMED against a real
-        // `/view/{id}/1/`: `https://m{server}.imhentai.xxx/{dir}/{id}/{page}.webp`.
+        // Images use the hidden load_server/load_dir/load_id/load_pages
+        // fields plus the `g_th` JSON map. Every `g_th` value begins with a
+        // format key and may include width and height, for example
+        // `"w,1280,1800"`. The format is page-specific; assuming WebP for the
+        // entire gallery makes JPG/PNG/AVIF galleries fail in the reader even
+        // though their separate JPG thumbnails still load normally.
         let loadServer = firstMatch(in: html, pattern: #"name="load_server"[^>]*value="([^"]*)""#)
         let loadDir = firstMatch(in: html, pattern: #"name="load_dir"[^>]*value="([^"]*)""#)
         let loadId = firstMatch(in: html, pattern: #"name="load_id"[^>]*value="([^"]*)""#)
         let loadPages = firstMatch(in: html, pattern: #"name="load_pages"[^>]*value="([^"]*)""#).flatMap(Int.init) ?? 0
+        let imageMetadata = parsePageImageMetadata(html: html)
 
         var pages: [ExternalGalleryPage] = []
         var coverURL: URL?
@@ -670,8 +672,14 @@ struct ImhentaiProvider: ExternalSiteProvider {
             // fine, see the type's doc-comment), any further loading of
             // images should go through without issue.
             pages = (1...loadPages).map { n in
+                let metadata = imageMetadata[n]
+                let imageExtension = metadata?.fileExtension ?? "webp"
+                let fullImageURL = "https://\(storageKey)/\(n).\(imageExtension)"
                 ExternalGalleryPage(
-                    index: n, key: storageKey, width: 0, height: 0,
+                    index: n,
+                    key: fullImageURL,
+                    width: metadata?.width ?? 0,
+                    height: metadata?.height ?? 0,
                     thumbnailURL: URL(string: "https://\(storageKey)/\(n)t.jpg"),
                     thumbnailSpriteOffsetX: nil
                 )
@@ -711,19 +719,60 @@ struct ImhentaiProvider: ExternalSiteProvider {
 
     // MARK: Image URLs
 
-    /// A pure formula (host+dir+id already in `page.key`, see parseDetail) —
-    /// no network, like hitomi/3hentai (unlike e-hentai — that makes a real
-    /// request on every page), just wrapped in async for the sake of the shared
-    /// protocol. Confirmed by live HAR (`/view/{id}/1/` →
-    /// `<img id="gimg" src="https://m11.imhentai.xxx/032/{id}/1.webp">`).
+    /// parseDetail stores the complete URL because each page may have a
+    /// different extension. The legacy formula remains for old in-memory
+    /// page values created before this change.
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL {
-        guard let url = URL(string: "https://\(page.key)/\(page.index).webp") else {
+        let urlString = page.key.hasPrefix("https://")
+            ? page.key
+            : "https://\(page.key)/\(page.index).webp"
+        guard let url = URL(string: urlString) else {
             throw ImhentaiError.badResponse
         }
         return url
     }
 
     // MARK: Utilities
+
+    private struct PageImageMetadata {
+        let fileExtension: String
+        let width: Int
+        let height: Int
+    }
+
+    private static func parsePageImageMetadata(html: String) -> [Int: PageImageMetadata] {
+        guard let rawJSON = firstMatch(
+            in: html,
+            pattern: #"g_th\s*=\s*\$\.parseJSON\(\s*'([^']+)'\s*\)"#
+        ), let data = rawJSON.data(using: .utf8),
+              let values = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return [:]
+        }
+
+        var result: [Int: PageImageMetadata] = [:]
+        for (pageKey, value) in values {
+            guard let page = Int(pageKey) else { continue }
+            let components = value.split(separator: ",", omittingEmptySubsequences: false)
+            guard let formatKey = components.first?.first,
+                  let fileExtension = imageExtension(for: formatKey) else { continue }
+            let width = components.count > 1 ? Int(components[1]) ?? 0 : 0
+            let height = components.count > 2 ? Int(components[2]) ?? 0 : 0
+            result[page] = PageImageMetadata(fileExtension: fileExtension, width: width, height: height)
+        }
+        return result
+    }
+
+    private static func imageExtension(for key: Swift.Character) -> String? {
+        switch key {
+        case "j": return "jpg"
+        case "p": return "png"
+        case "b": return "bmp"
+        case "g": return "gif"
+        case "w": return "webp"
+        case "a": return "avif"
+        default: return nil
+        }
+    }
 
     private static func firstMatch(in html: String, pattern: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
