@@ -63,23 +63,12 @@ struct MangaDetailView: View {
         let backgroundSnapshot: UIImage?
     }
     @State private var coverGalleryPresentation: CoverGalleryPresentation?
-    /// Namespace для .matchedTransitionSource/.navigationTransition(.zoom) —
-    /// листалка "вырастает" из этой самой обложки при открытии, а не выезжает
-    /// отдельным чёрным экраном (по прямой просьбе).
+    /// Namespace used by the zoom transition from the selected cover.
     @Namespace private var coverGalleryNamespace
-    /// URL'ы для листалки — реальная галерея (GET /manga/{slug}/covers), а
-    /// если она пустая (у большинства тайтлов доп. обложек вообще нет) —
-    /// один-единственный URL основной обложки: тап должен открывать
-    /// полноэкранный вид ВСЕГДА, вне зависимости от того, есть ли доп.
-    /// обложки (по прямой просьбе), просто без пролистывания в этом случае.
+    /// Full-resolution URLs for the cover gallery, with the main cover as fallback.
     private var coverGalleryImageURLs: [URL] {
-        // bestURL (md), не fullResURL (orig) — в листалке нет зума, orig
-        // ничего не даёт визуально (экран телефона всё равно меньше), а
-        // декодировать/рендерить полноразмерный оригинал на лету во время
-        // интерактивного свайпа заметно тяжелее — вероятная причина
-        // "резко перепрыгивает" при пролистывании (просадка кадров).
         if !viewModel.coverGallery.isEmpty {
-            return viewModel.coverGallery.compactMap { $0.cover.bestURL }
+            return viewModel.coverGallery.compactMap { $0.cover.fullResURL }
         }
         if let url = viewModel.detail?.cover?.bestURL ?? coverURL ?? listItem?.cover?.bestURL {
             return [url]
