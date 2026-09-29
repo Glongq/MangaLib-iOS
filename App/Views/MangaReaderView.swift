@@ -73,9 +73,22 @@ struct MangaReaderView: View {
     @StateObject private var viewModel: ReaderViewModel
     @Environment(\.dismiss) private var dismiss
 
-    /// Тег 1 — первая РЕАЛЬНАЯ страница главы (тег 0 зарезервирован под
-    /// prevTriggerPage, см. pager/singlePageView ниже).
-    @State private var currentPage = 1
+    /// A page selection belongs to one chapter throughout a swipe.
+    private struct PagerSelection: Hashable {
+        let chapterIndex: Int
+        let page: Int
+    }
+
+    @State private var selectedPage: PagerSelection
+    private var currentPage: Int { selectedPage.page }
+
+    private var pagerSelection: Binding<PagerSelection> {
+        Binding(
+            get: { selectedPage },
+            set: { selectPage($0) }
+        )
+    }
+
     /// true — следующая успешно загруженная глава должна поставить
     /// currentPage на её endPage (свайпнули НАЗАД, "Конец" прошлой главы), а
     /// не на страницу 1 (обычный вход/переход вперёд/скачок из списка глав).
@@ -182,6 +195,8 @@ struct MangaReaderView: View {
          coverURL: String? = nil,
          preferredBranchId: Int? = nil,
          siteId: Int? = nil) {
+        let initialIndex = min(max(startIndex, 0), max(chapters.count - 1, 0))
+        _selectedPage = State(initialValue: PagerSelection(chapterIndex: initialIndex, page: 1))
         _viewModel = StateObject(wrappedValue: ReaderViewModel(
             slug: slug, chapters: chapters, startIndex: startIndex,
             mangaId: mangaId, mangaTitle: mangaTitle, coverURL: coverURL,
@@ -322,13 +337,6 @@ struct MangaReaderView: View {
             // без await), можно применять посадку сразу. Сетевой путь ещё
             // пуст — применится через onChange(pages.count) ниже.
             applyLandingIfNeeded()
-        }
-        .onChange(of: currentPage) { _, page in
-            isCurrentPageZoomed = false
-            // Долистали до страницы-триггера — открываем след./прошлую главу
-            // (работает и в режиме «выключить перелистывание», где листаем тапом).
-            if page == viewModel.pages.count + 2 { openNext() }
-            else if page == 0 { openPrevious() }
         }
         // Подстраховка на сетевой путь (см. onChange(currentIndex) выше) —
         // срабатывает, когда pages наконец реально наполнились.
@@ -568,29 +576,30 @@ struct MangaReaderView: View {
     }
 
     private var pager: some View {
-        TabView(selection: $currentPage) {
+        TabView(selection: pagerSelection) {
             // Страница-триггер перехода к ПРОШЛОЙ главе — свайп дальше назад
             // с первой страницы главы попадает сюда, а не упирается в край
             // (см. ReaderViewModel.pageCache/prefetchNeighbors — обычно уже
             // готова заранее, без сетевого спиннера).
             if viewModel.hasPrevious {
-                prevTriggerPage.tag(0)
+                prevTriggerPage.tag(PagerSelection(chapterIndex: viewModel.currentIndex, page: 0))
             }
 
             ForEach(Array(viewModel.pages.enumerated()), id: \.offset) { index, page in
                 horizontalPage(index: index, page: page)
-                    .tag(index + 1)
+                    .tag(PagerSelection(chapterIndex: viewModel.currentIndex, page: index + 1))
             }
 
             // Страница-перелистывание в конце главы.
-            endPage.tag(viewModel.pages.count + 1)
+            endPage.tag(PagerSelection(chapterIndex: viewModel.currentIndex, page: viewModel.pages.count + 1))
 
             // Ещё одна страница-триггер: доведя свайп до неё, открываем следующую главу.
             if nextChapter != nil {
-                nextTriggerPage.tag(viewModel.pages.count + 2)
+                nextTriggerPage.tag(PagerSelection(chapterIndex: viewModel.currentIndex, page: viewModel.pages.count + 2))
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        .id(viewModel.currentIndex)
         .ignoresSafeArea()
     }
 
@@ -686,13 +695,34 @@ struct MangaReaderView: View {
         let maxTag = viewModel.pages.count + 1 + (nextChapter != nil ? 1 : 0)
         let clamped = min(max(target, minTag), maxTag)
         guard clamped != currentPage else { return }
+        let selection = PagerSelection(chapterIndex: viewModel.currentIndex, page: clamped)
         if smoothPaging {
             // Ускорено ×1.5 (0.25 → ~0.167).
-            withAnimation(.easeInOut(duration: 0.167)) { currentPage = clamped }
+            withAnimation(.easeInOut(duration: 0.167)) { selectPage(selection) }
         } else {
             var tx = Transaction()
             tx.disablesAnimations = true
-            withTransaction(tx) { currentPage = clamped }
+            withTransaction(tx) { selectPage(selection) }
+        }
+    }
+
+    private func selectPage(_ selection: PagerSelection) {
+        guard selection.chapterIndex == viewModel.currentIndex,
+              selection != selectedPage else { return }
+
+        let previous = selectedPage
+        selectedPage = selection
+        isCurrentPageZoomed = false
+
+        guard previous.chapterIndex == selection.chapterIndex,
+              pageMode != 1, !viewModel.isLoading, !viewModel.pages.isEmpty,
+              pagesAppliedForIndex == selection.chapterIndex else { return }
+
+        let pageCount = viewModel.pages.count
+        if previous.page == pageCount + 1, selection.page == pageCount + 2 {
+            openNext(from: selection.chapterIndex)
+        } else if previous.page == 1, selection.page == 0 {
+            openPrevious(from: selection.chapterIndex)
         }
     }
 
@@ -791,8 +821,9 @@ struct MangaReaderView: View {
             }
 
             if let next = nextChapter {
+                let sourceIndex = viewModel.currentIndex
                 Button {
-                    openNext()
+                    openNext(from: sourceIndex)
                 } label: {
                     VStack(spacing: 6) {
                         Text("Следующая глава")
@@ -902,19 +933,18 @@ struct MangaReaderView: View {
         }
     }
 
-    private func openNext() {
-        let targetIndex = viewModel.currentIndex + 1
+    private func openNext(from sourceIndex: Int) {
+        guard sourceIndex == viewModel.currentIndex else { return }
+        let targetIndex = sourceIndex + 1
         guard viewModel.chapters.indices.contains(targetIndex) else { return }
         pendingLandOnEnd = false
-        // Capture the destination before scheduling the task. If SwiftUI emits
-        // the boundary event twice, both tasks target the same chapter and the
-        // second call is rejected by ReaderViewModel.goTo instead of skipping.
         Task { await viewModel.goTo(index: targetIndex) }
     }
 
     /// Opens the previous chapter at its end page.
-    private func openPrevious() {
-        let targetIndex = viewModel.currentIndex - 1
+    private func openPrevious(from sourceIndex: Int) {
+        guard sourceIndex == viewModel.currentIndex else { return }
+        let targetIndex = sourceIndex - 1
         guard viewModel.chapters.indices.contains(targetIndex) else { return }
         pendingLandOnEnd = true
         Task { await viewModel.goTo(index: targetIndex) }
@@ -931,7 +961,10 @@ struct MangaReaderView: View {
     private func applyLandingIfNeeded() {
         guard !viewModel.pages.isEmpty, pagesAppliedForIndex != viewModel.currentIndex else { return }
         pagesAppliedForIndex = viewModel.currentIndex
-        currentPage = pendingLandOnEnd ? viewModel.pages.count + 1 : 1
+        selectedPage = PagerSelection(
+            chapterIndex: viewModel.currentIndex,
+            page: pendingLandOnEnd ? viewModel.pages.count + 1 : 1
+        )
         pendingLandOnEnd = false
         preloadUpcoming(from: currentPage - 1)
     }
