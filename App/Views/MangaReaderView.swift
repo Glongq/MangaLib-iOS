@@ -81,13 +81,14 @@ struct MangaReaderView: View {
     /// не на страницу 1 (обычный вход/переход вперёд/скачок из списка глав).
     /// См. openPrevious()/applyLandingIfNeeded().
     @State private var pendingLandOnEnd = false
-    /// currentIndex, для которого уже применена посадка currentPage (см.
-    /// applyLandingIfNeeded) — идемпотентность вместо расчёта "на изменение
-    /// pages.count": при переходе на главу с БЫСТРЫМ путём (уже в pageCache,
-    /// см. ReaderViewModel.goTo) новое число страниц может СЛУЧАЙНО совпасть
-    /// со старым, и тогда .onChange(of: pages.count) вообще не сработал бы —
-    /// сравнение "применяли ли уже для ЭТОГО currentIndex" работает всегда.
-    @State private var pagesAppliedForIndex: Int?
+    /// Identifies which chapter owns the tags currently rendered by the
+    /// horizontal pager. Keeping the page count in the same context prevents
+    /// a stale transition tag from being interpreted against a new chapter.
+    private struct PagerChapterContext: Equatable {
+        let chapterIndex: Int
+        let pageCount: Int
+    }
+    @State private var pagerChapterContext: PagerChapterContext?
     @State private var showUI = true
     @State private var showChapters = false
     @State private var showSettings = false
@@ -311,28 +312,29 @@ struct MangaReaderView: View {
             }
         }
         .onChange(of: viewModel.currentIndex) { _, _ in
-            // На новой главе заливка закладки возвращается «как была».
+            // Reset state that belongs to the previous chapter. Landing is
+            // applied only after pagesRevision confirms a page assignment for
+            // the new chapter.
             withAnimation(.easeInOut(duration: 0.2)) { bookmarkFilled = false }
-            // Индексы revealedCommentPages относились к pages ПРЕДЫДУЩЕЙ главы.
             revealedCommentPages.removeAll()
             endCommentsRevealed = false
             isCurrentPageZoomed = false
-            // Быстрый путь (кэш соседей/офлайн, см. ReaderViewModel.goTo) —
-            // pages уже готовы к этому моменту (goTo наполняет их СИНХРОННО,
-            // без await), можно применять посадку сразу. Сетевой путь ещё
-            // пуст — применится через onChange(pages.count) ниже.
-            applyLandingIfNeeded()
         }
         .onChange(of: currentPage) { _, page in
             isCurrentPageZoomed = false
-            // Долистали до страницы-триггера — открываем след./прошлую главу
-            // (работает и в режиме «выключить перелистывание», где листаем тапом).
-            if page == viewModel.pages.count + 2 { openNext() }
-            else if page == 0 { openPrevious() }
+            guard pageMode != 1,
+                  let context = pagerChapterContext,
+                  context.chapterIndex == viewModel.currentIndex,
+                  context.pageCount == viewModel.pages.count else { return }
+            if page == context.pageCount + 2 {
+                openNext(from: context.chapterIndex)
+            } else if page == 0 {
+                openPrevious(from: context.chapterIndex)
+            }
         }
-        // Подстраховка на сетевой путь (см. onChange(currentIndex) выше) —
-        // срабатывает, когда pages наконец реально наполнились.
-        .onChange(of: viewModel.pages.count) { _, _ in
+        // A revision is required instead of pages.count: adjacent chapters
+        // can contain the same number of pages, and page IDs often restart.
+        .onChange(of: viewModel.pagesRevision) { _, _ in
             applyLandingIfNeeded()
         }
         .sheet(isPresented: $showChapters) {
@@ -792,7 +794,7 @@ struct MangaReaderView: View {
 
             if let next = nextChapter {
                 Button {
-                    openNext()
+                    openNext(from: viewModel.currentIndex)
                 } label: {
                     VStack(spacing: 6) {
                         Text("Следующая глава")
@@ -902,33 +904,37 @@ struct MangaReaderView: View {
         }
     }
 
-    private func openNext() {
-        guard nextChapter != nil else { return }
+    private func openNext(from sourceIndex: Int) {
+        guard sourceIndex == viewModel.currentIndex else { return }
+        let targetIndex = sourceIndex + 1
+        guard viewModel.chapters.indices.contains(targetIndex) else { return }
         pendingLandOnEnd = false
-        Task { await viewModel.goTo(index: viewModel.currentIndex + 1) }
+        Task { await viewModel.goTo(index: targetIndex) }
     }
 
-    /// Свайпнули/дотапали до prevTriggerPage — переходим на ПРОШЛУЮ главу и
-    /// приземляемся на её "Конец" (endPage), а не на страницу 1 — зеркально
-    /// тому, как forward-переход всегда высаживает на первую страницу новой
-    /// главы (см. pendingLandOnEnd/onChange(of: viewModel.pages.count)).
-    private func openPrevious() {
-        guard viewModel.hasPrevious else { return }
+    /// Navigates back from a trigger belonging to a specific chapter and
+    /// lands on the previous chapter's end page.
+    private func openPrevious(from sourceIndex: Int) {
+        guard sourceIndex == viewModel.currentIndex else { return }
+        let targetIndex = sourceIndex - 1
+        guard viewModel.chapters.indices.contains(targetIndex) else { return }
         pendingLandOnEnd = true
-        Task { await viewModel.goTo(index: viewModel.currentIndex - 1) }
+        Task { await viewModel.goTo(index: targetIndex) }
     }
 
-    /// Ставит currentPage на верную страницу ТЕКУЩЕЙ (уже загруженной)
-    /// главы — 1, либо, если ждали возврата назад (pendingLandOnEnd), на её
-    /// endPage. Идемпотентно (см. pagesAppliedForIndex) и безопасно вызывать
-    /// из нескольких мест (см. .task/.onChange(currentIndex)/.onChange(pages.
-    /// count) выше) — не полагается на факт "значение pages.count
-    /// ИЗМЕНИЛОСЬ" (при переходе по уже закэшированным соседям новое число
-    /// страниц может случайно совпасть со старым, и тогда обычный onChange
-    /// просто не сработал бы).
+    /// Applies the landing page once per chapter and then records the exact
+    /// chapter/page-count pair whose tags are safe to interpret.
     private func applyLandingIfNeeded() {
-        guard !viewModel.pages.isEmpty, pagesAppliedForIndex != viewModel.currentIndex else { return }
-        pagesAppliedForIndex = viewModel.currentIndex
+        guard !viewModel.pages.isEmpty else { return }
+        let context = PagerChapterContext(
+            chapterIndex: viewModel.currentIndex,
+            pageCount: viewModel.pages.count
+        )
+        guard pagerChapterContext?.chapterIndex != context.chapterIndex else {
+            pagerChapterContext = context
+            return
+        }
+        pagerChapterContext = context
         currentPage = pendingLandOnEnd ? viewModel.pages.count + 1 : 1
         pendingLandOnEnd = false
         preloadUpcoming(from: currentPage - 1)

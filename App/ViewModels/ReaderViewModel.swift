@@ -5,6 +5,9 @@ import Foundation
 final class ReaderViewModel: ObservableObject {
 
     @Published private(set) var pages: [PageItem] = []
+    /// Changes whenever a page collection is assigned, even when the new
+    /// chapter has the same number and IDs of pages as the previous one.
+    @Published private(set) var pagesRevision: UInt = 0
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var currentIndex: Int
@@ -84,6 +87,11 @@ final class ReaderViewModel: ObservableObject {
     var hasNext: Bool { currentIndex < chapters.count - 1 }
 
     func imageURLs(for page: PageItem) -> [URL] { MangaImageURL.pageURLs(for: page) }
+
+    private func replacePages(with newPages: [PageItem]) {
+        pages = newPages
+        pagesRevision &+= 1
+    }
 
     // MARK: - Предзагрузка метаданных соседних глав
 
@@ -173,7 +181,7 @@ final class ReaderViewModel: ObservableObject {
         recordProgress()
         isLoading = true
         errorMessage = nil
-        pages = []
+        replacePages(with: [])
         chapterTeams = []
         chapterLikesCount = nil
         chapterIsLiked = nil
@@ -186,9 +194,9 @@ final class ReaderViewModel: ObservableObject {
         let bid = branchId(for: chapter)
         let localFiles = DownloadsManager.shared.localPageFiles(slug: slug, chapterId: chapter.id, branchId: bid)
         if !localFiles.isEmpty {
-            pages = localFiles.enumerated().map { idx, url in
+            replacePages(with: localFiles.enumerated().map { idx, url in
                 PageItem(id: idx, slug: nil, image: nil, url: url.absoluteString, width: nil, height: nil)
-            }
+            })
             isLoading = false
             prefetchNeighbors(of: currentIndex)
             return
@@ -202,7 +210,7 @@ final class ReaderViewModel: ObservableObject {
                 branchId: bid,
                 siteId: siteId
             )
-            pages = result.pages
+            replacePages(with: result.pages)
             currentChapterAlreadyViewed = result.isViewed
             chapterTeams = result.teams
             chapterLikesCount = result.likesCount
@@ -224,7 +232,7 @@ final class ReaderViewModel: ObservableObject {
         currentChapterAlreadyViewed = false
         if let cached = pageCache[index] {
             currentIndex = index
-            pages = cached.pages
+            replacePages(with: cached.pages)
             currentChapterAlreadyViewed = cached.isViewed
             chapterTeams = cached.teams
             chapterLikesCount = cached.likesCount
