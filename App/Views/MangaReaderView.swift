@@ -517,7 +517,7 @@ struct MangaReaderView: View {
                     }
             )
             .onTapGesture(count: 2) {
-                let target: CGFloat = vScale > 1 ? 1 : 2
+                let target: CGFloat = vScale > 1 ? 1 : 1.4
                 withAnimation(.easeOut(duration: 0.2)) { vScale = target }
                 vScaleBase = target
             }
@@ -646,6 +646,7 @@ struct MangaReaderView: View {
                         candidates: viewModel.imageURLs(for: page),
                         fitWidth: fitWidth,
                         doubleTapZoom: doubleTapZoom,
+                        doubleTapScale: 1.75,
                         onTap: { xFraction in handleReaderTap(xFraction) },
                         onZoomChanged: { zoomed in isCurrentPageZoomed = zoomed },
                         ringColor: UIColor(fg),
@@ -1651,6 +1652,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
     let candidates: [URL]
     let fitWidth: Bool
     let doubleTapZoom: Bool
+    var doubleTapScale: CGFloat = 2.5
     /// Одиночный тап: передаёт долю по X (0…1) — читалка сама решает
     /// листать/показать интерфейс (см. handleReaderTap).
     let onTap: (CGFloat) -> Void
@@ -1678,7 +1680,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
     /// это никак не использует и не меняет поведение.
     var onImageViewReady: ((UIImageView) -> Void)? = nil
 
-    func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap, fitWidth: fitWidth, doubleTapZoom: doubleTapZoom, onZoomChanged: onZoomChanged, onImageViewReady: onImageViewReady) }
+    func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap, fitWidth: fitWidth, doubleTapZoom: doubleTapZoom, doubleTapScale: doubleTapScale, onZoomChanged: onZoomChanged, onImageViewReady: onImageViewReady) }
 
     func makeUIView(context: Context) -> UIScrollView {
         let scroll = LayoutCallbackScrollView()
@@ -1726,6 +1728,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         context.coordinator.onZoomChanged = onZoomChanged
         context.coordinator.onImageViewReady = onImageViewReady
         context.coordinator.doubleTapZoom = doubleTapZoom
+        context.coordinator.doubleTapScale = doubleTapScale
         context.coordinator.ringView?.ringColor = ringColor
         context.coordinator.viewportHeight = viewportHeight
         if context.coordinator.fitWidth != fitWidth {
@@ -1747,15 +1750,17 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         var onImageViewReady: ((UIImageView) -> Void)?
         var fitWidth: Bool
         var doubleTapZoom: Bool
+        var doubleTapScale: CGFloat
         var currentKey: URL?
         private var loadTask: Task<Void, Never>?
         private var lastBounds: CGSize = .zero
         private var lastReportedZoomed = false
 
-        init(onTap: @escaping (CGFloat) -> Void, fitWidth: Bool, doubleTapZoom: Bool, onZoomChanged: ((Bool) -> Void)? = nil, onImageViewReady: ((UIImageView) -> Void)? = nil) {
+        init(onTap: @escaping (CGFloat) -> Void, fitWidth: Bool, doubleTapZoom: Bool, doubleTapScale: CGFloat, onZoomChanged: ((Bool) -> Void)? = nil, onImageViewReady: ((UIImageView) -> Void)? = nil) {
             self.onTap = onTap
             self.fitWidth = fitWidth
             self.doubleTapZoom = doubleTapZoom
+            self.doubleTapScale = doubleTapScale
             self.onZoomChanged = onZoomChanged
             self.onImageViewReady = onImageViewReady
         }
@@ -1810,7 +1815,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
                 scroll.setZoomScale(scroll.minimumZoomScale, animated: true)
             } else {
                 let point = g.location(in: imageView)
-                let newScale: CGFloat = min(2.5, scroll.maximumZoomScale)
+                let newScale = min(doubleTapScale, scroll.maximumZoomScale)
                 let w = scroll.bounds.width / newScale
                 let h = scroll.bounds.height / newScale
                 scroll.zoom(to: CGRect(x: point.x - w / 2, y: point.y - h / 2, width: w, height: h), animated: true)
