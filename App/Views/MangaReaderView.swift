@@ -485,6 +485,7 @@ struct MangaReaderView: View {
                     }
                 }
                 .frame(width: geo.size.width * vScale)
+                .background(ReaderScrollInertiaConfigurator(enabled: vScale == 1).frame(width: 0, height: 0))
             }
             .coordinateSpace(name: "verticalReaderScroll")
             // Номер страницы/главы для индикатора считаем по той странице,
@@ -670,6 +671,7 @@ struct MangaReaderView: View {
                         }
                     }
                 }
+                .background(ReaderScrollInertiaConfigurator(enabled: !isCurrentPageZoomed).frame(width: 0, height: 0))
             }
             .scrollDisabled(isCurrentPageZoomed)
             .scrollBounceBehavior(.basedOnSize)
