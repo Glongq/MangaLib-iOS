@@ -5,7 +5,7 @@ enum ReaderScrollInertia {
     static func increased(from rate: UIScrollView.DecelerationRate) -> UIScrollView.DecelerationRate {
         let original = rate.rawValue
         // Deceleration distance is proportional to rate / (1 - rate).
-        let adjusted = 2 * original / (1 + original)
+        let adjusted = 4 * original / (1 + 3 * original)
         return UIScrollView.DecelerationRate(rawValue: adjusted)
     }
 }
