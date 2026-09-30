@@ -29,15 +29,26 @@ struct ReaderScrollInertiaConfigurator: UIViewRepresentable {
         var enabled = true
         private weak var configuredScrollView: UIScrollView?
         private var originalRate: UIScrollView.DecelerationRate?
+        private var lastPanTranslation: CGFloat = 0
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            if window == nil, let configuredScrollView, let originalRate {
-                configuredScrollView.decelerationRate = originalRate
-                self.configuredScrollView = nil
-                self.originalRate = nil
+            if window == nil {
+                detachScrollView()
             }
             configureScrollView()
+        }
+
+        private func detachScrollView() {
+            if let configuredScrollView {
+                configuredScrollView.panGestureRecognizer.removeTarget(self, action: #selector(amplifyPan(_:)))
+                if let originalRate {
+                    configuredScrollView.decelerationRate = originalRate
+                }
+            }
+            configuredScrollView = nil
+            originalRate = nil
+            lastPanTranslation = 0
         }
 
         func configureScrollView() {
@@ -47,11 +58,10 @@ struct ReaderScrollInertiaConfigurator: UIViewRepresentable {
             while let view = ancestor {
                 if let scrollView = view as? UIScrollView {
                     if configuredScrollView !== scrollView {
-                        if let configuredScrollView, let originalRate {
-                            configuredScrollView.decelerationRate = originalRate
-                        }
+                        detachScrollView()
                         configuredScrollView = scrollView
                         originalRate = scrollView.decelerationRate
+                        scrollView.panGestureRecognizer.addTarget(self, action: #selector(amplifyPan(_:)))
                     }
                     if let originalRate {
                         let rate = enabled ? ReaderScrollInertia.increased(from: originalRate) : originalRate
@@ -62,6 +72,24 @@ struct ReaderScrollInertiaConfigurator: UIViewRepresentable {
                     return
                 }
                 ancestor = view.superview
+            }
+        }
+
+        @objc private func amplifyPan(_ gesture: UIPanGestureRecognizer) {
+            guard let scrollView = configuredScrollView else { return }
+
+            switch gesture.state {
+            case .began, .changed:
+                let translation = gesture.translation(in: scrollView.window).y
+                let delta = translation - lastPanTranslation
+                lastPanTranslation = translation
+                guard enabled, delta != 0 else { return }
+
+                let minOffset = -scrollView.adjustedContentInset.top
+                let maxOffset = max(minOffset, scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom)
+                scrollView.contentOffset.y = min(max(scrollView.contentOffset.y - delta, minOffset), maxOffset)
+            default:
+                lastPanTranslation = 0
             }
         }
     }
