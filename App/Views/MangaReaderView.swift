@@ -162,6 +162,7 @@ struct MangaReaderView: View {
     @AppStorage("reader_smooth_paging") private var smoothPaging = true
     /// Отступ между картинками в вертикальном (непрерывном) режиме, px.
     @AppStorage("reader_vertical_gap") private var verticalGap: Double = 0
+    @AppStorage("reader_scroll_inertia_multiplier") private var scrollInertiaMultiplier = ReaderScrollInertia.defaultMultiplier
 
     /// Текущая страница в вертикальном режиме (для номера/комментариев) —
     /// обновляется, когда очередная картинка попадает в область просмотра.
@@ -373,7 +374,8 @@ struct MangaReaderView: View {
                 hidePageNumber: $hidePageNumber,
                 disableSwipe: $disableSwipe,
                 smoothPaging: $smoothPaging,
-                verticalGap: $verticalGap
+                verticalGap: $verticalGap,
+                scrollInertiaMultiplier: $scrollInertiaMultiplier
             )
         }
         .sheet(item: $selectedTeam) { team in
@@ -485,7 +487,7 @@ struct MangaReaderView: View {
                     }
                 }
                 .frame(width: geo.size.width * vScale)
-                .background(ReaderScrollInertiaConfigurator(enabled: vScale == 1).frame(width: 0, height: 0))
+                .background(ReaderScrollInertiaConfigurator(enabled: vScale == 1, multiplier: scrollInertiaMultiplier).frame(width: 0, height: 0))
             }
             .coordinateSpace(name: "verticalReaderScroll")
             // Номер страницы/главы для индикатора считаем по той странице,
@@ -671,7 +673,7 @@ struct MangaReaderView: View {
                         }
                     }
                 }
-                .background(ReaderScrollInertiaConfigurator(enabled: !isCurrentPageZoomed).frame(width: 0, height: 0))
+                .background(ReaderScrollInertiaConfigurator(enabled: !isCurrentPageZoomed, multiplier: scrollInertiaMultiplier).frame(width: 0, height: 0))
             }
             .scrollDisabled(isCurrentPageZoomed)
             .scrollBounceBehavior(.basedOnSize)
@@ -1422,8 +1424,8 @@ struct ChapterListSheet: View {
     }
 }
 
-/// Настройки читалки. Порядок: тип листания → тема → сервер → вписывание →
-/// предзагрузка → переключение страниц (под-лист) → зум двойным → скрыть номер.
+/// Reader settings: page mode, theme, image server, fit, preload, paging,
+/// scroll inertia, double-tap zoom, and page number visibility.
 struct ReaderSettingsSheet: View {
     @Binding var fitWidth: Bool
     @Binding var preloadCount: Int
@@ -1434,11 +1436,14 @@ struct ReaderSettingsSheet: View {
     @Binding var disableSwipe: Bool
     @Binding var smoothPaging: Bool
     @Binding var verticalGap: Double
+    @Binding var scrollInertiaMultiplier: Double
 
     @AppStorage(ImageServerChoice.defaultsKey) private var serverChoice = 0
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme
     @State private var showPaging = false
+    @State private var inertiaInput = ""
+    @FocusState private var inertiaInputFocused: Bool
     /// Прогретый генератор вибрации для шага ползунка отступа.
     private let gapHaptic = UIImpactFeedbackGenerator(style: .light)
 
@@ -1526,10 +1531,12 @@ struct ReaderSettingsSheet: View {
                         .buttonStyle(.plain)
                     }
 
-                    // 6. Зум двойным нажатием (тумблер, своя подложка).
+                    inertiaField
+
+                    // Double-tap zoom.
                     toggleRow("Увеличить двойным нажатием", isOn: $doubleTapZoom)
 
-                    // 7. Скрыть номер страниц (тумблер, своя подложка).
+                    // Page number visibility.
                     toggleRow("Скрыть номер страниц", isOn: $hidePageNumber)
 
                     Spacer(minLength: 0)
@@ -1571,6 +1578,45 @@ struct ReaderSettingsSheet: View {
         .padding(.horizontal, 16)
         .frame(minHeight: 52)
         .background(palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var inertiaField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Инерция прокрутки").foregroundStyle(palette.foreground)
+                Spacer()
+                Text("×").foregroundStyle(palette.secondary)
+                TextField("8", text: $inertiaInput)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 64)
+                    .focused($inertiaInputFocused)
+                    .onChange(of: inertiaInput) { _, value in
+                        guard let multiplier = Double(value.replacingOccurrences(of: ",", with: ".")),
+                              ReaderScrollInertia.allowedMultipliers.contains(multiplier) else { return }
+                        scrollInertiaMultiplier = multiplier
+                    }
+                    .onChange(of: inertiaInputFocused) { _, focused in
+                        if !focused { inertiaInput = formattedInertiaMultiplier }
+                    }
+            }
+            caption("×1 — стандартная инерция iOS. ×1,5 — примерно на 50% больший путь после отпускания пальца при той же скорости. Диапазон: ×1–20.")
+            if !inertiaInput.isEmpty && !isInertiaInputValid {
+                caption("Введите число от 1 до 20.")
+            }
+        }
+        .padding(16)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .onAppear { inertiaInput = formattedInertiaMultiplier }
+    }
+
+    private var formattedInertiaMultiplier: String {
+        scrollInertiaMultiplier.formatted(.number.precision(.fractionLength(0...3)))
+    }
+
+    private var isInertiaInputValid: Bool {
+        guard let value = Double(inertiaInput.replacingOccurrences(of: ",", with: ".")) else { return false }
+        return ReaderScrollInertia.allowedMultipliers.contains(value)
     }
 
     /// Ползунок «Отступ между картинками» (только вертикальный режим) —
