@@ -5,7 +5,7 @@ enum ReaderScrollInertia {
     static func increased(from rate: UIScrollView.DecelerationRate) -> UIScrollView.DecelerationRate {
         let original = rate.rawValue
         // Deceleration distance is proportional to rate / (1 - rate).
-        let adjusted = 4 * original / (1 + 3 * original)
+        let adjusted = 8 * original / (1 + 7 * original)
         return UIScrollView.DecelerationRate(rawValue: adjusted)
     }
 }
@@ -29,7 +29,6 @@ struct ReaderScrollInertiaConfigurator: UIViewRepresentable {
         var enabled = true
         private weak var configuredScrollView: UIScrollView?
         private var originalRate: UIScrollView.DecelerationRate?
-        private var lastPanTranslation: CGFloat = 0
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
@@ -41,14 +40,12 @@ struct ReaderScrollInertiaConfigurator: UIViewRepresentable {
 
         private func detachScrollView() {
             if let configuredScrollView {
-                configuredScrollView.panGestureRecognizer.removeTarget(self, action: #selector(amplifyPan(_:)))
                 if let originalRate {
                     configuredScrollView.decelerationRate = originalRate
                 }
             }
             configuredScrollView = nil
             originalRate = nil
-            lastPanTranslation = 0
         }
 
         func configureScrollView() {
@@ -61,7 +58,6 @@ struct ReaderScrollInertiaConfigurator: UIViewRepresentable {
                         detachScrollView()
                         configuredScrollView = scrollView
                         originalRate = scrollView.decelerationRate
-                        scrollView.panGestureRecognizer.addTarget(self, action: #selector(amplifyPan(_:)))
                     }
                     if let originalRate {
                         let rate = enabled ? ReaderScrollInertia.increased(from: originalRate) : originalRate
@@ -72,24 +68,6 @@ struct ReaderScrollInertiaConfigurator: UIViewRepresentable {
                     return
                 }
                 ancestor = view.superview
-            }
-        }
-
-        @objc private func amplifyPan(_ gesture: UIPanGestureRecognizer) {
-            guard let scrollView = configuredScrollView else { return }
-
-            switch gesture.state {
-            case .began, .changed:
-                let translation = gesture.translation(in: scrollView.window).y
-                let delta = translation - lastPanTranslation
-                lastPanTranslation = translation
-                guard enabled, delta != 0 else { return }
-
-                let minOffset = -scrollView.adjustedContentInset.top
-                let maxOffset = max(minOffset, scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom)
-                scrollView.contentOffset.y = min(max(scrollView.contentOffset.y - delta, minOffset), maxOffset)
-            default:
-                lastPanTranslation = 0
             }
         }
     }
