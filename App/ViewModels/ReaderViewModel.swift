@@ -294,7 +294,6 @@ final class ReaderViewModel: ObservableObject {
         segments = []
         if let seg = await fetchSegment(for: index) {
             segments = [seg]
-            preloadAll(seg.pages)
         }
         isLoading = false
         prefetchNeighbors(of: index)
@@ -310,7 +309,6 @@ final class ReaderViewModel: ObservableObject {
         isAppending = true
         if let seg = await fetchSegment(for: next) {
             segments.append(seg)
-            preloadAll(seg.pages)
         }
         isAppending = false
         prefetchNeighbors(of: next)
@@ -342,14 +340,6 @@ final class ReaderViewModel: ObservableObject {
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             return nil
-        }
-    }
-
-    /// Предзагрузка ВСЕХ страниц сегмента (в вертикальном режиме тянем всё
-    /// заранее, чтобы лента листалась без подгрузок).
-    private func preloadAll(_ pages: [PageItem]) {
-        for p in pages {
-            RemoteImageLoader.preload(candidates: imageURLs(for: p))
         }
     }
 

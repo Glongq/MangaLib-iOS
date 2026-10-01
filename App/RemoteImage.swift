@@ -60,6 +60,16 @@ private final class ProgressDataTaskDelegate: NSObject, URLSessionDataDelegate {
 @MainActor
 final class RemoteImageLoader: ObservableObject {
 
+    private struct ImageRequest {
+        let id: UUID
+        let task: Task<UIImage?, Never>
+        var progressHandlers: [UUID: @Sendable (Double) -> Void]
+        var networkTask: URLSessionTask?
+        var requestedPriority: Float?
+    }
+
+    private static var inFlightImages: [URL: ImageRequest] = [:]
+
     enum State {
         case loading
         case success(UIImage)
@@ -165,7 +175,8 @@ final class RemoteImageLoader: ObservableObject {
     /// живым ассоциированным объектом НА САМОМ таске (тот и так жив, пока
     /// задача не завершится), без отдельного глобального реестра/лока.
     nonisolated private static func fetchDataWithProgress(
-        from url: URL, priority: Float?, onProgress: @escaping @Sendable (Double) -> Void
+        from url: URL, priority: Float?, onProgress: @escaping @Sendable (Double) -> Void,
+        onTaskCreated: (@Sendable (URLSessionTask) -> Void)? = nil
     ) async throws -> (Data, URLResponse) {
         try await withCheckedThrowingContinuation { continuation in
             let task = session.dataTask(with: url)
@@ -173,6 +184,7 @@ final class RemoteImageLoader: ObservableObject {
             objc_setAssociatedObject(task, &progressDelegateAssocKey, delegate, .OBJC_ASSOCIATION_RETAIN)
             task.delegate = delegate
             if let priority { task.priority = priority }
+            onTaskCreated?(task)
             task.resume()
         }
     }
@@ -237,15 +249,64 @@ final class RemoteImageLoader: ObservableObject {
     /// который на порядок очереди самой сети не влияет), из-за чего текущая
     /// страница могла ждать наравне с "про запас".
     ///
-    /// `onProgress` — РЕАЛЬНЫЙ прогресс скачивания (0...1) видимой страницы,
-    /// по прямой просьбе (вместо неопределённого спиннера, см.
-    /// MangaReaderView.ZoomableImageScrollView/VerticalPageImage). nil по
-    /// умолчанию — остальные вызовы (превью-загрузка/предзагрузка вперёд/
-    /// аватар в AccountInfoView) прогресс не показывают, им не нужен лишний
-    /// делегат на таск (см. fetchDataWithProgress).
+    /// Downloads for the same image share one task. A visible page can join an
+    /// active preload, receive its progress, and raise its network priority.
     static func fetchImage(candidates: [URL], priority: Float? = nil, onProgress: (@Sendable (Double) -> Void)? = nil) async -> UIImage? {
         guard let key = candidates.first else { return nil }
         if let cached = RemoteImageCache.shared.image(for: key) { return cached }
+
+        let handlerID = onProgress.map { _ in UUID() }
+        if var request = inFlightImages[key] {
+            if let handlerID, let onProgress {
+                request.progressHandlers[handlerID] = onProgress
+            }
+            if let priority {
+                request.requestedPriority = max(request.requestedPriority ?? priority, priority)
+                request.networkTask?.priority = request.requestedPriority ?? priority
+            }
+            inFlightImages[key] = request
+            let image = await request.task.value
+            if let handlerID, inFlightImages[key]?.id == request.id {
+                inFlightImages[key]?.progressHandlers.removeValue(forKey: handlerID)
+            }
+            return image
+        }
+
+        let requestID = UUID()
+        let task = Task(priority: priority == nil ? .utility : .userInitiated) {
+            await loadImage(
+                candidates: candidates,
+                priority: priority,
+                onProgress: { progress in
+                    Task { @MainActor in
+                        guard let request = inFlightImages[key], request.id == requestID else { return }
+                        for handler in request.progressHandlers.values { handler(progress) }
+                    }
+                },
+                onTaskCreated: { networkTask in
+                    Task { @MainActor in
+                        guard var request = inFlightImages[key], request.id == requestID else { return }
+                        request.networkTask = networkTask
+                        if let priority = request.requestedPriority { networkTask.priority = priority }
+                        inFlightImages[key] = request
+                    }
+                }
+            )
+        }
+        var request = ImageRequest(id: requestID, task: task, progressHandlers: [:], networkTask: nil, requestedPriority: priority)
+        if let handlerID, let onProgress { request.progressHandlers[handlerID] = onProgress }
+        inFlightImages[key] = request
+        let image = await task.value
+        if inFlightImages[key]?.id == requestID { inFlightImages.removeValue(forKey: key) }
+        return image
+    }
+
+    private static func loadImage(
+        candidates: [URL], priority: Float?,
+        onProgress: @escaping @Sendable (Double) -> Void,
+        onTaskCreated: @escaping @Sendable (URLSessionTask) -> Void
+    ) async -> UIImage? {
+        guard let key = candidates.first else { return nil }
         for url in candidates {
             if Task.isCancelled { return nil }
             if url.isFileURL {
@@ -256,12 +317,9 @@ final class RemoteImageLoader: ObservableObject {
                 continue
             }
             do {
-                let (data, response): (Data, URLResponse)
-                if let onProgress {
-                    (data, response) = try await fetchDataWithProgress(from: url, priority: priority, onProgress: onProgress)
-                } else {
-                    (data, response) = try await fetchData(from: url, priority: priority)
-                }
+                let (data, response) = try await fetchDataWithProgress(
+                    from: url, priority: priority, onProgress: onProgress, onTaskCreated: onTaskCreated
+                )
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { continue }
                 guard let img = await decodeImage(data: data) else { continue }
                 RemoteImageCache.shared.insert(img, for: key)
@@ -271,39 +329,13 @@ final class RemoteImageLoader: ObservableObject {
         return nil
     }
 
-    /// Тихая предзагрузка "про запас" — без создания View/State, просто качает
-    /// картинку и кладёт её в тот же RemoteImageCache/URLCache, которым потом
-    /// пользуется обычный RemoteImage. Нужна для настройки "Предзагрузка
-    /// страниц" в ридере (см. ReaderSettingsSheet/"reader_preload_count") —
-    /// когда пользователь долистает до страницы, она уже готова в кэше.
-    /// Тот же паттерн Task{...} (не detached), что и в load(candidates:) выше:
-    /// созданный в MainActor-контексте, он выполняется на MainActor между
-    /// await-точками, так что доступ к static session ниже безопасен.
+    /// Start a background request through the same in-flight registry used by
+    /// visible pages, so a page turn reuses the ongoing download.
     static func preload(candidates: [URL]) {
         guard let key = candidates.first else { return }
-        if RemoteImageCache.shared.image(for: key) != nil { return } // уже в кэше
+        if RemoteImageCache.shared.image(for: key) != nil { return }
         Task(priority: .utility) {
-            for url in candidates {
-                if Task.isCancelled { return }
-                if url.isFileURL {
-                    if let image = await decodeImage(contentsOfFile: url.path) {
-                        RemoteImageCache.shared.insert(image, for: key)
-                        return
-                    }
-                    continue
-                }
-                do {
-                    let (data, response) = try await session.data(from: url)
-                    if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                        continue
-                    }
-                    guard let image = await decodeImage(data: data) else { continue }
-                    RemoteImageCache.shared.insert(image, for: key)
-                    return
-                } catch {
-                    continue
-                }
-            }
+            _ = await fetchImage(candidates: candidates)
         }
     }
 }

@@ -167,6 +167,7 @@ struct MangaReaderView: View {
     /// Текущая страница в вертикальном режиме (для номера/комментариев) —
     /// обновляется, когда очередная картинка попадает в область просмотра.
     @State private var verticalPage = 1
+    @State private var verticalPreloadPosition: PagerSelection?
 
     /// Зум вертикальной ленты через РЕАЛЬНУЮ ширину колонки (не transform):
     /// колонка становится шире экрана → включается нативная горизонтальная
@@ -317,6 +318,7 @@ struct MangaReaderView: View {
         }
         // Живое переключение режима листания.
         .onChange(of: pageMode) { _, mode in
+            verticalPreloadPosition = nil
             Task {
                 if mode == 1 {
                     await viewModel.startVertical()
@@ -343,6 +345,10 @@ struct MangaReaderView: View {
         // срабатывает, когда pages наконец реально наполнились.
         .onChange(of: viewModel.pages.count) { _, _ in
             applyLandingIfNeeded()
+        }
+        .onChange(of: viewModel.segments.last?.index) { _, _ in
+            guard pageMode == 1, let segment = viewModel.segments.last else { return }
+            preloadUpcoming(in: segment.pages, from: -1)
         }
         .sheet(isPresented: $showChapters) {
             ChapterListSheet(
@@ -389,19 +395,21 @@ struct MangaReaderView: View {
         .preferredColorScheme(readerTheme == 2 ? nil : (readerIsLight ? .light : .dark))
     }
 
-    // MARK: Предзагрузка страниц
+    // MARK: Page preloading
 
-    /// Качает картинки следующих `preloadCount` страниц вперёд (относительно
-    /// `page`) в фоне — см. RemoteImageLoader.preload. Настройка всегда
-    /// включена, регулируется только сколько страниц вперёд (1/3/5).
-    private func preloadUpcoming(from page: Int) {
+    /// Preload the next `preloadCount` images after a zero-based page index.
+    private func preloadUpcoming(in pages: [PageItem], from page: Int) {
         guard preloadCount > 0 else { return }
         let start = page + 1
-        let end = min(start + preloadCount, viewModel.pages.count)
+        let end = min(start + preloadCount, pages.count)
         guard start < end else { return }
         for index in start..<end {
-            RemoteImageLoader.preload(candidates: viewModel.imageURLs(for: viewModel.pages[index]))
+            RemoteImageLoader.preload(candidates: viewModel.imageURLs(for: pages[index]))
         }
+    }
+
+    private func preloadUpcoming(from page: Int) {
+        preloadUpcoming(in: viewModel.pages, from: page)
     }
 
     // MARK: Контент (страницы)
@@ -503,6 +511,12 @@ struct MangaReaderView: View {
                 }
                 if verticalPage != nearest.pageIndex + 1 {
                     verticalPage = nearest.pageIndex + 1
+                }
+                let position = PagerSelection(chapterIndex: nearest.segIndex, page: nearest.pageIndex + 1)
+                if verticalPreloadPosition != position,
+                   let segment = viewModel.segments.first(where: { $0.index == nearest.segIndex }) {
+                    verticalPreloadPosition = position
+                    preloadUpcoming(in: segment.pages, from: nearest.pageIndex)
                 }
             }
             .scrollIndicators(.hidden)
@@ -722,6 +736,10 @@ struct MangaReaderView: View {
         guard previous.chapterIndex == selection.chapterIndex,
               pageMode != 1, !viewModel.isLoading, !viewModel.pages.isEmpty,
               pagesAppliedForIndex == selection.chapterIndex else { return }
+
+        if viewModel.pages.indices.contains(selection.page - 1) {
+            preloadUpcoming(from: selection.page - 1)
+        }
 
         let pageCount = viewModel.pages.count
         if previous.page == pageCount + 1, selection.page == pageCount + 2 {
@@ -971,7 +989,7 @@ struct MangaReaderView: View {
             page: pendingLandOnEnd ? viewModel.pages.count + 1 : 1
         )
         pendingLandOnEnd = false
-        preloadUpcoming(from: currentPage - 1)
+        if pageMode != 1 { preloadUpcoming(from: currentPage - 1) }
     }
 
     // MARK: Оверлей интерфейса
@@ -1816,6 +1834,12 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         func load(candidates: [URL]) {
             currentKey = candidates.first
             loadTask?.cancel()
+            if let key = currentKey, let cached = RemoteImageCache.shared.image(for: key) {
+                ringView?.isHidden = true
+                imageView?.image = cached
+                layoutImage(resetZoom: true)
+                return
+            }
             imageView?.image = nil
             ringView?.progress = 0
             ringView?.isHidden = false
