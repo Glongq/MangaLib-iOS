@@ -5,17 +5,18 @@ enum ReaderScrollInertia {
     static let defaultMultiplier = 8.0
     static let allowedMultipliers = 1.0...20.0
 
-    static func adjusted(
-        from rate: UIScrollView.DecelerationRate,
-        multiplier: Double
-    ) -> UIScrollView.DecelerationRate {
-        let original = Double(rate.rawValue)
+    static func destination(
+        current: CGFloat,
+        proposed: CGFloat,
+        multiplier: Double,
+        lowerBound: CGFloat,
+        upperBound: CGFloat
+    ) -> CGFloat {
         let validMultiplier = multiplier.isFinite
             ? min(max(multiplier, allowedMultipliers.lowerBound), allowedMultipliers.upperBound)
             : defaultMultiplier
-        // Deceleration distance is proportional to rate / (1 - rate).
-        let adjustedRate = validMultiplier * original / (1 + (validMultiplier - 1) * original)
-        return UIScrollView.DecelerationRate(rawValue: CGFloat(adjustedRate))
+        let destination = current + (proposed - current) * CGFloat(validMultiplier)
+        return min(max(destination, lowerBound), upperBound)
     }
 }
 
@@ -41,24 +42,23 @@ struct ReaderScrollInertiaConfigurator: UIViewRepresentable {
         var enabled = true
         var multiplier = ReaderScrollInertia.defaultMultiplier
         private weak var configuredScrollView: UIScrollView?
-        private var originalRate: UIScrollView.DecelerationRate?
+        private let delegateProxy = DelegateProxy()
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
             if window == nil {
                 detachScrollView()
+            } else {
+                configureScrollView()
             }
-            configureScrollView()
         }
 
         private func detachScrollView() {
             if let configuredScrollView {
-                if let originalRate {
-                    configuredScrollView.decelerationRate = originalRate
-                }
+                configuredScrollView.panGestureRecognizer.removeTarget(self, action: #selector(installDelegateForPan(_:)))
+                restoreOriginalDelegate(on: configuredScrollView)
             }
             configuredScrollView = nil
-            originalRate = nil
         }
 
         func configureScrollView() {
@@ -70,20 +70,84 @@ struct ReaderScrollInertiaConfigurator: UIViewRepresentable {
                     if configuredScrollView !== scrollView {
                         detachScrollView()
                         configuredScrollView = scrollView
-                        originalRate = scrollView.decelerationRate
+                        scrollView.panGestureRecognizer.addTarget(self, action: #selector(installDelegateForPan(_:)))
                     }
-                    if let originalRate {
-                        let rate = enabled
-                            ? ReaderScrollInertia.adjusted(from: originalRate, multiplier: multiplier)
-                            : originalRate
-                        if scrollView.decelerationRate.rawValue != rate.rawValue {
-                            scrollView.decelerationRate = rate
-                        }
+                    delegateProxy.enabled = enabled
+                    delegateProxy.multiplier = multiplier
+                    if enabled && multiplier > 1 {
+                        installDelegate(on: scrollView)
+                    } else {
+                        restoreOriginalDelegate(on: scrollView)
                     }
                     return
                 }
                 ancestor = view.superview
             }
+        }
+
+        private func installDelegate(on scrollView: UIScrollView) {
+            guard scrollView.delegate !== delegateProxy else { return }
+            delegateProxy.forwardedDelegate = scrollView.delegate
+            scrollView.delegate = delegateProxy
+        }
+
+        private func restoreOriginalDelegate(on scrollView: UIScrollView) {
+            if scrollView.delegate === delegateProxy {
+                scrollView.delegate = delegateProxy.forwardedDelegate
+            }
+            delegateProxy.forwardedDelegate = nil
+        }
+
+        @objc private func installDelegateForPan(_ gesture: UIPanGestureRecognizer) {
+            guard gesture.state == .began || gesture.state == .changed,
+                  enabled,
+                  multiplier > 1,
+                  let scrollView = configuredScrollView else { return }
+            installDelegate(on: scrollView)
+        }
+    }
+
+    final class DelegateProxy: NSObject, UIScrollViewDelegate {
+        // Forward every other callback to SwiftUI's delegate so reader behavior stays intact.
+        weak var forwardedDelegate: UIScrollViewDelegate?
+        var enabled = true
+        var multiplier = ReaderScrollInertia.defaultMultiplier
+
+        override func responds(to selector: Selector!) -> Bool {
+            super.responds(to: selector) || (forwardedDelegate?.responds(to: selector) ?? false)
+        }
+
+        override func forwardingTarget(for selector: Selector!) -> Any? {
+            if let forwardedDelegate, forwardedDelegate.responds(to: selector) {
+                return forwardedDelegate
+            }
+            return super.forwardingTarget(for: selector)
+        }
+
+        func scrollViewWillEndDragging(
+            _ scrollView: UIScrollView,
+            withVelocity velocity: CGPoint,
+            targetContentOffset: UnsafeMutablePointer<CGPoint>
+        ) {
+            forwardedDelegate?.scrollViewWillEndDragging?(
+                scrollView,
+                withVelocity: velocity,
+                targetContentOffset: targetContentOffset
+            )
+            guard enabled, abs(velocity.y) > 0.01 else { return }
+
+            let lowerBound = -scrollView.adjustedContentInset.top
+            let upperBound = max(
+                lowerBound,
+                scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom
+            )
+            targetContentOffset.pointee.y = ReaderScrollInertia.destination(
+                current: scrollView.contentOffset.y,
+                proposed: targetContentOffset.pointee.y,
+                multiplier: multiplier,
+                lowerBound: lowerBound,
+                upperBound: upperBound
+            )
         }
     }
 }
