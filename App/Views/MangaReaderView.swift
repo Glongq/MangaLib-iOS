@@ -44,6 +44,9 @@ struct MangaReaderView: View {
 
     @State private var selectedPage: PagerSelection
     private var currentPage: Int { selectedPage.page }
+    @State private var isPreparingImageServers = true
+    @State private var imageServerError: String?
+    @State private var loadedPageMode: Int?
 
     /// When moving backward, land on the previous chapter's end page.
     @State private var pendingLandOnEnd = false
@@ -201,25 +204,10 @@ struct MangaReaderView: View {
         .statusBarHidden(!showUI)
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .task {
-            if pageMode == 1 {
-                await viewModel.startVertical()
-            } else if viewModel.pages.isEmpty {
-                await viewModel.load()
-            }
-            applyLandingIfNeeded()
-        }
+        .task(id: pageMode) { await prepareAndLoadReader() }
         // Switch between reading modes without leaving the reader.
-        .onChange(of: pageMode) { _, mode in
+        .onChange(of: pageMode) { _, _ in
             verticalPreloadPosition = nil
-            Task {
-                if mode == 1 {
-                    await viewModel.startVertical()
-                } else {
-                    await viewModel.load()
-                }
-                applyLandingIfNeeded()
-            }
         }
         .onChange(of: viewModel.currentIndex) { _, _ in
             // Reset bookmark button fill for the new chapter.
@@ -283,6 +271,43 @@ struct MangaReaderView: View {
 
     // MARK: Page preloading
 
+    @MainActor
+    private func prepareAndLoadReader() async {
+        isPreparingImageServers = true
+        imageServerError = nil
+
+        if let chapter = viewModel.currentChapter {
+            let branchId = viewModel.preferredBranchId ?? chapter.primaryBranchId
+            let offlinePages = DownloadsManager.shared.localPageFiles(
+                slug: viewModel.slug, chapterId: chapter.id, branchId: branchId
+            )
+            let siteId = viewModel.siteId ?? SiteSession.shared.activeSite.rawValue
+            if offlinePages.isEmpty {
+                guard await ReaderImageServerConfiguration.ensureAvailable(for: siteId) else {
+                    guard !Task.isCancelled else { return }
+                    imageServerError = "Не удалось получить серверы изображений. Проверьте соединение и повторите попытку."
+                    isPreparingImageServers = false
+                    return
+                }
+            } else if !ReaderImageServerConfiguration.isAvailable(for: siteId) {
+                // Offline pages can open immediately while server discovery runs in the background.
+                Task { _ = await ReaderImageServerConfiguration.ensureAvailable(for: siteId) }
+            }
+        }
+
+        guard !Task.isCancelled else { return }
+        isPreparingImageServers = false
+        let mode = pageMode
+        if mode == 1 {
+            await viewModel.startVertical()
+        } else if viewModel.pages.isEmpty || loadedPageMode != mode {
+            await viewModel.load()
+        }
+        guard !Task.isCancelled else { return }
+        loadedPageMode = mode
+        applyLandingIfNeeded()
+    }
+
     /// Preload the next `preloadCount` images after a zero-based page index.
     private func preloadUpcoming(in pages: [PageItem], from page: Int) {
         guard preloadCount > 0 else { return }
@@ -302,7 +327,11 @@ struct MangaReaderView: View {
 
     @ViewBuilder
     private var content: some View {
-        if pageMode == 1 {
+        if isPreparingImageServers {
+            ProgressView().tint(fg)
+        } else if let imageServerError {
+            errorView(imageServerError) { Task { await prepareAndLoadReader() } }
+        } else if pageMode == 1 {
             verticalContent
         } else if viewModel.isLoading && viewModel.pages.isEmpty {
             ProgressView().tint(fg)
@@ -861,7 +890,7 @@ struct MangaReaderView: View {
     }
 
     // Measure the title capsule width from its two text lines so it stays centered without truncation.
-    private static let titleBadgeSideMargin: CGFloat = 84 // 48 (кнопка) + 16 (её отступ) + 20 (зазор, > порога слияния GlassEffectContainer)
+    private static let titleBadgeSideMargin: CGFloat = 84 // 48 for the button, 16 for its inset, and 20 to keep glass elements separate.
     private var titleBadgeMaxWidth: CGFloat {
         max(120, UIScreen.main.bounds.width - Self.titleBadgeSideMargin * 2)
     }
@@ -888,7 +917,7 @@ struct MangaReaderView: View {
         let subtitle = viewModel.currentChapter?.shortTitle ?? ""
         let titleWidth = Self.textWidth(title, font: Self.titleBadgeTitleFont)
         let subtitleWidth = Self.textWidth(subtitle, font: Self.titleBadgeSubtitleFont)
-        let contentWidth = max(titleWidth, subtitleWidth) + 32 // + .padding(.horizontal, 16) с двух сторон
+        let contentWidth = max(titleWidth, subtitleWidth) + 32 // Include 16 points of horizontal padding on each side.
         return min(contentWidth, titleBadgeMaxWidth)
     }
 
@@ -990,7 +1019,7 @@ struct ChapterListSheet: View {
     let onSelectTranslator: (Int?) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var descending = true   // true = новые сверху
+    @State private var descending = true   // Newest chapters appear first.
     /// Selected translation team filters the chapter list.
     @State private var selectedTeamId: Int?
 
@@ -1461,9 +1490,19 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         ring.ringColor = ringColor
         scroll.addSubview(ring)
 
+        let retryButton = UIButton(type: .system)
+        retryButton.setTitle("Не удалось загрузить страницу · Повторить", for: .normal)
+        retryButton.tintColor = ringColor
+        retryButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
+        retryButton.isHidden = true
+        retryButton.sizeToFit()
+        retryButton.addTarget(context.coordinator, action: #selector(Coordinator.retryLoad), for: .touchUpInside)
+        scroll.addSubview(retryButton)
+
         context.coordinator.scrollView = scroll
         context.coordinator.imageView = imageView
         context.coordinator.ringView = ring
+        context.coordinator.retryButton = retryButton
         context.coordinator.viewportHeight = viewportHeight
 
         let single = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
@@ -1487,6 +1526,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         context.coordinator.doubleTapZoom = doubleTapZoom
         context.coordinator.doubleTapScale = doubleTapScale
         context.coordinator.ringView?.ringColor = ringColor
+        context.coordinator.retryButton?.tintColor = ringColor
         context.coordinator.viewportHeight = viewportHeight
         if context.coordinator.fitWidth != fitWidth {
             context.coordinator.fitWidth = fitWidth
@@ -1501,6 +1541,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         weak var scrollView: UIScrollView?
         weak var imageView: UIImageView?
         weak var ringView: RingProgressView?
+        weak var retryButton: UIButton?
         var viewportHeight: CGFloat = 0
         var onTap: (CGFloat) -> Void
         var onZoomChanged: ((Bool) -> Void)?
@@ -1509,6 +1550,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         var doubleTapZoom: Bool
         var doubleTapScale: CGFloat
         var currentKey: URL?
+        private var currentCandidates: [URL] = []
         private var loadTask: Task<Void, Never>?
         private var lastBounds: CGSize = .zero
         private var lastReportedZoomed = false
@@ -1523,8 +1565,10 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         }
 
         func load(candidates: [URL]) {
+            currentCandidates = candidates
             currentKey = candidates.first
             loadTask?.cancel()
+            retryButton?.isHidden = true
             if let key = currentKey, let cached = RemoteImageCache.shared.image(for: key) {
                 ringView?.isHidden = true
                 imageView?.image = cached
@@ -1547,10 +1591,13 @@ struct ZoomableImageScrollView: UIViewRepresentable {
                     guard let self, self.currentKey == key else { return }
                     self.ringView?.isHidden = true
                     self.imageView?.image = img
+                    self.retryButton?.isHidden = img != nil
                     self.layoutImage(resetZoom: true)
                 }
             }
         }
+
+        @objc func retryLoad() { load(candidates: currentCandidates) }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
@@ -1569,7 +1616,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         }
 
         @objc func handleDoubleTap(_ g: UITapGestureRecognizer) {
-            guard doubleTapZoom else { return } // зум двойным нажатием отключён
+            guard doubleTapZoom else { return } // Double-tap zoom is disabled.
             guard let scroll = scrollView, let imageView, imageView.image != nil else { return }
             if scroll.zoomScale > scroll.minimumZoomScale + 0.01 {
                 scroll.setZoomScale(scroll.minimumZoomScale, animated: true)
@@ -1630,6 +1677,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
             guard let scroll = scrollView, let ringView else { return }
             let refHeight = viewportHeight > 0 ? min(scroll.bounds.height, viewportHeight) : scroll.bounds.height
             ringView.center = CGPoint(x: scroll.bounds.midX, y: refHeight / 2)
+            retryButton?.center = ringView.center
         }
     }
 }
@@ -1708,6 +1756,8 @@ struct VerticalPageImage: View {
     @State private var image: UIImage?
     /// Download progress drives the image loading ring.
     @State private var progress: Double = 0
+    @State private var failed = false
+    @State private var retryAttempt = 0
 
     // Use the current reader theme for image loading progress.
     @AppStorage("reader_theme") private var readerTheme = 0
@@ -1732,11 +1782,20 @@ struct VerticalPageImage: View {
                     .fill(Color.clear)
                     .frame(height: placeholderHeight)
                     .frame(maxWidth: .infinity)
-                    .overlay { pageProgressRing }
+                    .overlay {
+                        if failed {
+                            Button("Не удалось загрузить страницу · Повторить") { retryAttempt += 1 }
+                                .font(.footnote.weight(.medium))
+                                .foregroundStyle(palette.foreground)
+                        } else {
+                            pageProgressRing
+                        }
+                    }
             }
         }
-        .task(id: candidates.first) {
+        .task(id: "\(candidates.first?.absoluteString ?? "")-\(retryAttempt)") {
             progress = 0
+            failed = false
             image = candidates.lazy.compactMap { RemoteImageCache.shared.image(for: $0) }.first
             if let image {
                 onImageLoaded?(image)
@@ -1749,6 +1808,7 @@ struct VerticalPageImage: View {
             guard !Task.isCancelled else { return }
             image = loadedImage
             if let image { onImageLoaded?(image) }
+            else { failed = true }
         }
     }
 
