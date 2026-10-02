@@ -31,10 +31,23 @@ struct LossyArray<T: Decodable>: Decodable {
         // container.decode(_:) продвигает курсор массива независимо от того,
         // успешно ли декодировался элемент, поэтому try? здесь просто
         // пропускает битый элемент, не зацикливаясь и не роняя остальные.
+        //
+        // currentIndex-предохранитель: баг из фидбека ("Закладки бесконечно
+        // грузит") завёлся именно на элементе, ронявшем decode глубоко
+        // вложенным тип-мисматчем (см. MangaChapterMetadata.volume) — сам
+        // тип-мисматч уже исправлен там, но точно ли JSONDecoder ВСЕГДА
+        // продвигает курсор при ошибке на такой глубине вложенности —
+        // недокументированное поведение, а не гарантия. Если курсор
+        // когда-нибудь не продвинется, while остался бы бесконечным
+        // (зависший спиннер навсегда) — явно проверяем это и прерываемся,
+        // а не полагаемся молча на недокументированное поведение JSONDecoder.
+        var lastIndex = -1
         while !container.isAtEnd {
             if let value = try? container.decode(T.self) {
                 result.append(value)
             }
+            guard container.currentIndex != lastIndex else { break }
+            lastIndex = container.currentIndex
         }
         elements = result
     }
@@ -72,48 +85,153 @@ struct CurrentUser: Decodable {
 
 // MARK: - Профиль пользователя
 
-/// Профиль — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}?fields[]=about&gender&
-/// background&points…`: `{id, username, avatar{url}, background{url,filename},
-/// about, gender{label}, points_info{level,total_points,…}, …}`.
+/// Профиль — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}?fields[]=background&
+/// roles&points&ban_info&gender&created_at&about&teams&
+/// premium_background_id&login_streak&previous_usernames` (proxypin,
+/// 2026-08-26, полный набор полей): `{id, username, avatar{url},
+/// background{url,filename}, about, gender{id,label}, last_online_at,
+/// created_at, ban_info, points_info{level,total_points,
+/// current_level_points,max_level_points,point_percent_progress,top},
+/// teams[], roles[], login_streak{last_login_at,login_streak,
+/// max_login_streak}, previous_usernames[], premium{enabled}, …}`.
 struct UserProfile: Decodable {
     let id: Int
     let username: String
     let avatarURL: URL?
     let backgroundURL: URL?
+    /// "Сырые" имена файлов (не полный URL) — то, что сервер ждёт обратно в
+    /// PATCH /user/{id} при сохранении (см. ProfileInfoEditView). nil у
+    /// avatar/backgroundFilename при выставленной "заглушке" placeholder —
+    /// значит "аватара/фона реально нет" (ПОДТВЕРЖДЕНО пользователем).
+    let avatarFilename: String?
+    let backgroundFilename: String?
     let about: String?
     let genderLabel: String?
+    /// Числовой id пола (0=Не указан, 1=Женский, 2=Мужской — ПОДТВЕРЖДЕНО
+    /// перехватом) — нужен для редактирования (genderLabel — только для
+    /// отображения).
+    let genderId: Int?
     let level: Int?
     let totalPoints: Int?
+    /// Очки внутри ТЕКУЩЕГО уровня и порог для следующего — те же ключи
+    /// points_info.{current_level_points,max_level_points}, что ПОДТВЕРЖДЕНО
+    /// перехватом у TopActiveUserPoints (агрегат главной, «Топ активных
+    /// недели») — там это тот же points_info у другого пользовательского
+    /// ресурса. Здесь для /user/{id} отдельно НЕ перехватывались, но раз это
+    /// тот же вложенный объект под тем же именем — пробуем те же ключи
+    /// (decodeIfPresent, как и everywhere в этом файле): если сервер их не
+    /// отдаёт на этом эндпоинте, оба останутся nil и блок прогресса просто
+    /// не покажется, ничего не сломается.
+    let currentLevelPoints: Int?
+    let maxLevelPoints: Int?
+    /// Готовый процент прогресса до следующего уровня — ПОДТВЕРЖДЕНО
+    /// перехватом (`point_percent_progress`), считать самим по
+    /// current/max не нужно.
+    let pointPercentProgress: Double?
+    /// Дата регистрации — ПОДТВЕРЖДЕНО перехватом (proxypin, 2026-08-26).
+    let createdAt: Date?
+    /// Последняя активность ("online") — ПОДТВЕРЖДЁН перехватом ключ
+    /// "last_online_at" на этом же ресурсе — обновляется намного чаще
+    /// login_streak.lastLoginAt (в реальном перехвате отличались на
+    /// несколько часов), это скорее "последний раз что-то делал", а не
+    /// "последний раз логинился". См. lastLoginAt ниже — для UI "Последний
+    /// вход" используем именно его.
+    let lastOnlineAt: Date?
+    /// Последний ВХОД (не активность) — ПОДТВЕРЖДЕНО перехватом
+    /// `login_streak.last_login_at` (формат "yyyy-MM-dd HH:mm:ss", БЕЗ "T" —
+    /// другой формат даты, чем everywhere else в этом файле, отдельный
+    /// парсер ниже). Это и есть смысловой ответ на "когда был последний вход".
+    let lastLoginAt: Date?
+    /// Команды, в которых состоит пользователь — ПОДТВЕРЖДЕНО перехватом
+    /// (ключ "teams" в /user/{id} реально есть), но у перехваченного
+    /// пользователя массив был пуст — форма НЕПУСТОГО элемента не
+    /// подтверждена отдельно для ЭТОГО эндпоинта. Переиспользуем
+    /// ChapterTeam (та же форма ресурса "команда" — {id,name,cover,
+    /// slug_url} — подтверждена в /teams, у главы, в уведомлениях).
+    let teams: [ChapterTeam]
     /// Закрытый профиль/статистика — сервер отдаёт эти флаги; если профиль
     /// закрыт, показываем заглушку вместо содержимого.
     let canViewProfile: Bool
     let canViewStatistics: Bool
 
     private struct ImageRef: Decodable { let url: String?; let filename: String? }
-    private struct Labeled: Decodable { let label: String? }
-    private struct PointsInfo: Decodable { let total_points: Int?; let level: Int? }
+    private struct Labeled: Decodable { let id: Int?; let label: String? }
+    private struct PointsInfo: Decodable {
+        let total_points: Int?
+        let level: Int?
+        let current_level_points: Int?
+        let max_level_points: Int?
+        let point_percent_progress: Double?
+    }
+    private struct LoginStreak: Decodable { let last_login_at: String? }
 
     private enum CodingKeys: String, CodingKey {
-        case id, username, avatar, background, about, gender
+        case id, username, avatar, background, about, gender, teams
         case pointsInfo = "points_info"
         case canViewProfile = "can_view_profile"
         case canViewStatistics = "can_view_statistics"
+        case createdAt = "created_at"
+        case lastOnlineAt = "last_online_at"
+        case loginStreak = "login_streak"
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = (try? c.decode(Int.self, forKey: .id)) ?? 0
         username = (try? c.decode(String.self, forKey: .username)) ?? ""
-        avatarURL = Self.absoluteURL(((try? c.decodeIfPresent(ImageRef.self, forKey: .avatar)) ?? nil)?.url)
-        backgroundURL = Self.absoluteURL(((try? c.decodeIfPresent(ImageRef.self, forKey: .background)) ?? nil)?.url)
+        let avatarRef = (try? c.decodeIfPresent(ImageRef.self, forKey: .avatar)) ?? nil
+        let backgroundRef = (try? c.decodeIfPresent(ImageRef.self, forKey: .background)) ?? nil
+        avatarURL = Self.absoluteURL(avatarRef?.url)
+        backgroundURL = Self.absoluteURL(backgroundRef?.url)
+        avatarFilename = avatarRef?.filename
+        backgroundFilename = backgroundRef?.filename
         about = (try? c.decodeIfPresent(String.self, forKey: .about)) ?? nil
-        genderLabel = ((try? c.decodeIfPresent(Labeled.self, forKey: .gender)) ?? nil)?.label
+        let genderRef = (try? c.decodeIfPresent(Labeled.self, forKey: .gender)) ?? nil
+        genderLabel = genderRef?.label
+        genderId = genderRef?.id
         let p = (try? c.decodeIfPresent(PointsInfo.self, forKey: .pointsInfo)) ?? nil
         level = p?.level
         totalPoints = p?.total_points
+        currentLevelPoints = p?.current_level_points
+        maxLevelPoints = p?.max_level_points
+        pointPercentProgress = p?.point_percent_progress
+        teams = ((try? c.decodeIfPresent([ChapterTeam].self, forKey: .teams)) ?? nil) ?? []
         canViewProfile = ((try? c.decodeIfPresent(Bool.self, forKey: .canViewProfile)) ?? nil) ?? true
         canViewStatistics = ((try? c.decodeIfPresent(Bool.self, forKey: .canViewStatistics)) ?? nil) ?? true
+        if let raw = ((try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? nil), !raw.isEmpty {
+            createdAt = APIISODate.parse(raw)
+        } else {
+            createdAt = nil
+        }
+        if let raw = ((try? c.decodeIfPresent(String.self, forKey: .lastOnlineAt)) ?? nil), !raw.isEmpty {
+            lastOnlineAt = APIISODate.parse(raw)
+        } else {
+            lastOnlineAt = nil
+        }
+        let streak = (try? c.decodeIfPresent(LoginStreak.self, forKey: .loginStreak)) ?? nil
+        if let raw = streak?.last_login_at, !raw.isEmpty {
+            lastLoginAt = Self.loginDateFormatter.date(from: raw)
+        } else {
+            lastLoginAt = nil
+        }
     }
+
+    /// "2026-08-25 06:49:46" — ПОДТВЕРЖДЁН формат СТРОКИ login_streak.
+    /// last_login_at (пробел вместо "T", без миллисекунд/зоны — отличается
+    /// от ISO8601 остального API, свой форматтер). Часовой пояс этой строки
+    /// НЕ подтверждён (в отличие от остальных дат API, которые всегда
+    /// ISO8601 с явным "Z"=UTC) — предполагаем UTC как наиболее вероятный
+    /// вариант (общее соглашение для остального этого же API), но это
+    /// именно предположение: если после реального теста дата "Последний
+    /// вход" будет на несколько часов не совпадать с ожиданием — дело в
+    /// этом часовом поясе.
+    private static let loginDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return f
+    }()
 
     /// Относительные пути (плейсхолдер `/static/…` или кастомный) дополняем
     /// хостом обложек; абсолютные — как есть.
@@ -122,6 +240,16 @@ struct UserProfile: Decodable {
         if s.hasPrefix("http") { return URL(string: s) }
         return URL(string: "https://cover.cdnlibs.org" + (s.hasPrefix("/") ? s : "/" + s))
     }
+}
+
+/// Ответ загрузки картинки во временное хранилище — ПОДТВЕРЖДЕНО перехватом
+/// `POST /upload/image/avatar` → `{data:{name, extension, filename, url,
+/// path}}`. `filename` — то самое значение, которое потом уходит в PATCH
+/// /user/{id} как поле avatar/cover, чтобы реально привязать картинку к
+/// профилю (см. MangaNetworkService.uploadAvatarImage/updateProfileInfo).
+struct UploadedImage: Decodable {
+    let filename: String
+    let url: String?
 }
 
 /// Статистика профиля — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}/stats`:
@@ -259,6 +387,266 @@ struct UserComment: Decodable, Identifiable {
     }
 }
 
+// MARK: - Дружба (вкладка «Друзья» в профиле)
+
+/// Пользователь внутри записи дружбы — ПОДТВЕРЖДЕНО перехватом (proxypin,
+/// 2026-08-25): `GET /friendship/{userId}` и `GET /friendship?user_id=&
+/// status=1` отдают `user:{id,username,avatar{filename,url},last_online_at,
+/// can_view_profile,...}`.
+struct FriendUser: Decodable, Identifiable, Hashable {
+    let id: Int
+    let username: String
+    let avatarURL: URL?
+
+    /// Заглушка — на случай, если запись дружбы вдруг не прислала вложенного
+    /// "user" (см. FriendshipEntry.init), чтобы декодирование самой записи
+    /// не падало целиком.
+    init(id: Int, username: String, avatarURL: URL?) {
+        self.id = id; self.username = username; self.avatarURL = avatarURL
+    }
+
+    private struct ImageRef: Decodable { let url: String? }
+    private enum CodingKeys: String, CodingKey { case id, username, avatar }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        username = ((try? c.decodeIfPresent(String.self, forKey: .username)) ?? nil) ?? ""
+        let avatarRef = (try? c.decodeIfPresent(ImageRef.self, forKey: .avatar)) ?? nil
+        avatarURL = UserProfile.absoluteURL(avatarRef?.url)
+    }
+
+    static func == (l: FriendUser, r: FriendUser) -> Bool { l.id == r.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+/// Статус дружбы между текущим аккаунтом и `user` записи — ПОДТВЕРЖДЕНО
+/// перехватом: `status:{is_requested,is_awaiting_confirmation,is_friend}`.
+struct FriendshipStatus: Decodable, Hashable {
+    let isRequested: Bool
+    let isAwaitingConfirmation: Bool
+    let isFriend: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case isRequested = "is_requested"
+        case isAwaitingConfirmation = "is_awaiting_confirmation"
+        case isFriend = "is_friend"
+    }
+}
+
+/// Запись дружбы — ПОДТВЕРЖДЕНО перехватом на `GET /friendship/{userId}`,
+/// `GET /friendship?user_id=&status=1` (список друзей) и `PUT
+/// /friendship/{id}`: `{id, user, comment, created_at, status}`. `id` —
+/// id самой записи (нужен для PUT), НЕ id пользователя. Список «Общие
+/// друзья» (`GET /friendship/{userId}/mutual`) в перехваченной капче был
+/// пуст ("data":[]) — форма непустого элемента НЕ подтверждена отдельно,
+/// декодируем той же моделью (тот же ресурс "дружба", тот же путь
+/// /friendship/... — по конвенции этого API остальные его пути отдают
+/// ровно эту форму).
+struct FriendshipEntry: Decodable, Identifiable, Hashable {
+    let id: Int
+    let user: FriendUser
+    let comment: String?
+    let createdAt: Date?
+    let status: FriendshipStatus?
+
+    enum CodingKeys: String, CodingKey { case id, user, comment, status, createdAt = "created_at" }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        user = (try? c.decode(FriendUser.self, forKey: .user)) ?? FriendUser(id: 0, username: "", avatarURL: nil)
+        comment = (try? c.decodeIfPresent(String.self, forKey: .comment)) ?? nil
+        status = (try? c.decodeIfPresent(FriendshipStatus.self, forKey: .status)) ?? nil
+        if let raw = ((try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? nil), !raw.isEmpty {
+            createdAt = APIISODate.parse(raw)
+        } else {
+            createdAt = nil
+        }
+    }
+
+    static func == (l: FriendshipEntry, r: FriendshipEntry) -> Bool { l.id == r.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+// MARK: - Папки закладок другого пользователя («Списки тайтлов» в профиле)
+
+/// Папка закладок — ПОДТВЕРЖДЕНО перехватом `GET /bookmarks/folder/{userId}`:
+/// `{id,name,public,notify,color,textColor,order,count,site_ids}`. Та же
+/// форма и у ответа `POST /bookmarks/folder` (создание своей папки) —
+/// используется и как decode-target для MangaNetworkService.
+/// createBookmarkFolder. У ответа `PUT /bookmarks/folder/{id}` (переименование)
+/// поле `count` уже ОТСУТСТВУЕТ — для него этот тип НЕ подходит, см.
+/// updateBookmarkFolder (тело ответа там просто не разбирается).
+struct UserBookmarkFolder: Decodable, Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let count: Int
+    let colorHex: String?
+    /// Тумблер "уведомлять о новых главах в этой папке" — используется
+    /// экраном настроек уведомлений (см. NotificationSettingsView), сам
+    /// список закладок пользователя (UserBookmarksView) это поле не читает.
+    var notify: Bool
+    /// Приватность папки — ПОДТВЕРЖДЕНО перехватом: у 5 стандартных папок
+    /// всегда `true`, у ЛЮБОЙ новой кастомной (`POST /bookmarks/folder`) —
+    /// `false` по умолчанию. Нужно для BookmarksStore.updateFolder — `PUT
+    /// /bookmarks/folder/{id}` шлёт этот флаг ВМЕСТЕ с именем/цветом (весь
+    /// объект целиком), терять его при простом переименовании нельзя.
+    var isPublic: Bool
+    /// На каких сайтах сети видна эта папка — ПОДТВЕРЖДЕНО перехватом
+    /// (`GET /bookmarks/folder/{userId}` отдаёт ПОЛНЫЙ список аккаунта СРАЗУ
+    /// по всем сайтам, без учёта Site-Id запроса; фильтрация "какие папки
+    /// показывать" — целиком на фронтенде, по этому полю). 5 стандартных
+    /// папок — `[0,1,2,3,4]`; кастомные — сайт, на котором их создали. Нужно
+    /// BookmarksStore.syncFoldersFromServer(), чтобы вкладка «Закладки»
+    /// тоже фильтровала по активному сайту, как настоящий сайт.
+    var siteIds: [Int]
+    /// Позиция папки в общем порядке — ПОДТВЕРЖДЕНО перехватом (тот же
+    /// объект, что и в `PUT /bookmarks/folder/order`, см. BookmarksStore.
+    /// syncFoldersFromServer/moveFolders). Прямая жалоба: "не
+    /// синхронизируется порядок (номер) списка" — раньше это поле вообще не
+    /// читалось, локальный видимый порядок был просто "как в массиве"
+    /// (хардкод для 5 стандартных + порядок обнаружения для кастомных), не
+    /// РЕАЛЬНЫЙ порядок с сервера.
+    var order: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, count, colorHex = "color", notify, isPublic = "public", siteIds = "site_ids", order
+    }
+}
+
+// MARK: - Настройки уведомлений аккаунта
+
+/// `GET/PUT /user/settings/notifications` — ПОДТВЕРЖДЕНО реальным
+/// перехватом (несколько десятков пар запрос/ответ, все 17 полей
+/// присутствуют всегда). PUT шлёт ВЕСЬ объект целиком, не частичный патч —
+/// значит поля, не показанные в UI настроек (notify_anime,
+/// disable_card_drop_notif, push_*, reading/plan_read/on_hold/completed/
+/// favourites), нужно сохранять НЕИЗМЕНЁННЫМИ, взятыми из последнего GET
+/// (см. NotificationSettingsView).
+struct NotificationSettings: Codable, Equatable {
+    let userId: Int
+    var manga: Bool
+    var disableFriendsNotif: Bool
+    var mediaStatusFinished: Bool
+    var disableOldCommentsNotif: OldCommentsThreshold
+    var disableChapterEarlyAccessNotif: Bool
+    var disableCardDropNotif: Bool
+    var reading: Bool
+    var planRead: Bool
+    var onHold: Bool
+    var completed: Bool
+    var favourites: Bool
+    var pushChapter: Bool
+    var pushComments: Bool
+    var pushEpisode: Bool
+    var pushForum: Bool
+    var pushMessages: Bool
+    var notifyAnime: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case manga
+        case disableFriendsNotif = "disable_friends_notif"
+        case mediaStatusFinished = "media_status_finished"
+        case disableOldCommentsNotif = "disable_old_comments_notif"
+        case disableChapterEarlyAccessNotif = "disable_chapter_early_access_notif"
+        case disableCardDropNotif = "disable_card_drop_notif"
+        case reading
+        case planRead = "plan_read"
+        case onHold = "on_hold"
+        case completed
+        case favourites
+        case pushChapter = "push_chapter"
+        case pushComments = "push_comments"
+        case pushEpisode = "push_episode"
+        case pushForum = "push_forum"
+        case pushMessages = "push_messages"
+        case notifyAnime = "notify_anime"
+    }
+}
+
+/// `disable_old_comments_notif` — ЕДИНСТВЕННОЕ поле объекта со смешанным
+/// типом на проводе: на ЧТЕНИЕ (`GET`, значение только что созданного
+/// аккаунта/никогда не тронутая настройка) перехвачено как `false`; на
+/// ЗАПИСЬ (`PUT`, реальный клиент) — ТОЛЬКО `0` (Int, явно выключено) ИЛИ
+/// строка-число дней — `"7"`/`"14"`/`"30"`/`"180"`/`"360"` (выбран порог в
+/// Picker'е); `PUT` с буквальным `false` НИ РАЗУ не перехвачен, поэтому
+/// при сохранении шлём именно `0` для "выключено" — так делает реальный
+/// клиент.
+enum OldCommentsThreshold: Equatable, Codable {
+    case off
+    case days(Int)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let intValue = try? container.decode(Int.self) {
+            self = intValue > 0 ? .days(intValue) : .off
+            return
+        }
+        if let stringValue = try? container.decode(String.self), let intValue = Int(stringValue) {
+            self = intValue > 0 ? .days(intValue) : .off
+            return
+        }
+        // Bool(false, дефолт непотроганного аккаунта) или что-то
+        // непредвиденное — трактуем как "выключено".
+        self = .off
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .off: try container.encode(0)
+        case .days(let days): try container.encode(String(days))
+        }
+    }
+}
+
+// MARK: - Приватность (Меню → Настройки → Профиль → Приватность)
+
+/// Настройки приватности профиля — ПОДТВЕРЖДЕНО реальным перехватом:
+/// `GET /user/settings/privacy` → `{profile_visibility, statistics_visibility,
+/// statistics_site_ids, previous_usernames_visibility, previous_usernames}`;
+/// `PUT` тем же путём отправляет ВЕСЬ объект целиком (full-object write, как
+/// и у NotificationSettings) — ответ на PUT только тост "Настройки
+/// обновлены", без данных, поэтому после сохранения просто доверяем
+/// локальному состоянию. `previous_usernames` — похоже, список только для
+/// отображения (в перехвате пуст), сюда не редактируется.
+struct PrivacySettings: Codable, Equatable {
+    var profileVisibility: Int
+    var statisticsVisibility: Int
+    var statisticsSiteIds: [Int]
+    var previousUsernamesVisibility: Int
+    var previousUsernames: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case profileVisibility = "profile_visibility"
+        case statisticsVisibility = "statistics_visibility"
+        case statisticsSiteIds = "statistics_site_ids"
+        case previousUsernamesVisibility = "previous_usernames_visibility"
+        case previousUsernames = "previous_usernames"
+    }
+}
+
+/// Подписи вариантов — ПОДТВЕРЖДЕНО перехватом `GET /constants?fields[]=
+/// prefsProfileVisibility&fields[]=prefsPreviousUsernamesVisibility`.
+/// `statisticsVisibility` СВОЕГО отдельного /constants в перехвате не было —
+/// разумное предположение, что это тот же 4-вариантный набор, что и у
+/// profileOptions (те же 0..3), НЕ подтверждено напрямую отдельным перехватом.
+enum PrivacyVisibilityOptions {
+    /// 0 Публичный / 1 Только для друзей / 2 Для всех кроме игнор-листа / 3 Приватный.
+    static let profile: [(id: Int, label: String)] = [
+        (0, "Публичный"), (1, "Только для друзей"), (2, "Для всех кроме игнор листа"), (3, "Приватный")
+    ]
+    /// Та же форма — см. комментарий типа выше (НЕ подтверждено отдельно).
+    static let statistics: [(id: Int, label: String)] = profile
+    /// 0 Публичный / 1 Только для друзей / 3 Приватный — БЕЗ варианта "2",
+    /// это другой enum, не переиспользование profile.
+    static let previousUsernames: [(id: Int, label: String)] = [
+        (0, "Публичный"), (1, "Только для друзей"), (3, "Приватный")
+    ]
+}
+
 // MARK: - История чтения (реальный аккаунт)
 
 /// Одна запись реальной истории просмотров аккаунта —
@@ -370,6 +758,10 @@ struct MangaCover: Decodable {
     let thumbnail: String?
     let `default`: String?
     let md: String?
+    /// Полноразмерный оригинал — есть ТОЛЬКО в ответе /covers (доп. обложки,
+    /// см. MangaCoverGalleryItem ниже), у обычной MangaItem.cover его нет,
+    /// поэтому optional и не участвует в bestURL (не ломает остальные места).
+    let orig: String?
 
     /// Наиболее подходящий URL обложки для отображения в карточке.
     var bestURL: URL? {
@@ -380,6 +772,38 @@ struct MangaCover: Decodable {
         }
         return nil
     }
+
+    /// Маленькая, заранее сжатая версия (суффикс `_thumb` в реальных URL) —
+    /// для мелких превью в лентах (см. HomeView), где полноразмерная
+    /// default/md обложка (обычно = то же самое, что и md, см. комментарий
+    /// у bestURL) не нужна и только тратит трафик/время загрузки.
+    var thumbnailURL: URL? { thumbnail.flatMap(URL.init(string:)) }
+
+    /// Максимальное качество — для полноэкранной листалки (см.
+    /// MangaDetailView.coverGalleryViewer): orig, а если его нет — то же,
+    /// что и bestURL.
+    var fullResURL: URL? {
+        if let orig, let url = URL(string: orig) { return url }
+        return bestURL
+    }
+}
+
+// MARK: - Доп. обложки тайтла (GET /manga/{slug}/covers)
+
+/// Галерея пользовательских обложек — ПОДТВЕРЖДЕНО реальным перехваченным
+/// запросом (пользователь прислал полное тело ответа): `GET
+/// /manga/{slug}/covers` → `{"data":[{"id","cover":{...MangaCover-форма,
+/// включая "orig"...},"info","order","user":{...}}]}`. `user` (кто добавил
+/// обложку) в ответе есть, но пока нигде не отображается — если понадобится
+/// атрибуция ("добавил: ник"), можно добавить, декодер её просто
+/// проигнорирует, раз поле не описано здесь. `info` — судя по примеру,
+/// просто порядковый номер строкой (не подтверждённая содержательная
+/// подпись), не показываем как текст.
+struct MangaCoverGalleryItem: Decodable, Identifiable {
+    let id: Int
+    let cover: MangaCover
+    let info: String?
+    let order: Int
 }
 
 /// Фоновая картинка тайтла (MangaDetail.background) — ПОДТВЕРЖДЕНО реальным
@@ -407,12 +831,30 @@ struct MangaRating: Decodable {
     let average: String?
     let averageFormated: String?
     let votes: Int?
+    /// Оценка ТЕКУЩЕГО пользователя (1-10) — ПОДТВЕРЖДЕНО перехватом ответа
+    /// `POST /manga/rate` (`{"data":{"average","averageFormated","votes",
+    /// "user":8}}`), используется чтобы предзаполнить выбор в RatingSheet.
+    let user: Int?
 
     /// Числовое значение рейтинга (например, 8.5).
     var value: Double? {
         if let average, let d = Double(average) { return d }
         if let averageFormated, let d = Double(averageFormated) { return d }
         return nil
+    }
+
+    /// `user`, нормализованный под "реально оценил или нет". На карточке
+    /// тайтла (GET /manga/{slug}) сервер, судя по всему, присылает
+    /// `"user":0` дефолтом для ЕЩЁ НЕ оценённых тайтлов (не null и не
+    /// отсутствие поля) — сама шкала оценок 1-10 (см. RatingSheet), 0 в
+    /// принципе невозможно поставить руками. Без этой нормализации `if let
+    /// myScore = rating?.user` считал 0 "ты поставил 0" и рисовал звезду/
+    /// сохранял 0 в закладки, хотя пользователь ничего не оценивал —
+    /// используем ВЕЗДЕ вместо сырого `user`, где показываем/кэшируем
+    /// личную оценку.
+    var myScore: Int? {
+        guard let user, user > 0 else { return nil }
+        return user
     }
 }
 
@@ -499,6 +941,34 @@ struct MangaItem: Decodable, Identifiable, Hashable {
     /// каталоге/поиске/похожем/связанном. Нужен, чтобы карточку с ДРУГОГО сайта
     /// (напр. из «Похожего») запрашивать с правильным Site-Id, иначе 404.
     let site: Int?
+    /// Время последней главы (ISO8601, строкой — см. APIISODate.parse) и
+    /// её краткое описание — приходят у элементов главной страницы
+    /// (popular/newest/latest_updates, см. HomeFeed) при явном запросе
+    /// `fields[]=metadata` (MangaNetworkService.fetchLatestUpdates). В обычном
+    /// каталоге/поиске сервер их не присылает — оба поля Optional, остальной
+    /// код с MangaItem их не требует.
+    let lastItemAt: String?
+    let metadata: MangaItemMetadata?
+    /// Число просмотров за период — приходит ТОЛЬКО у элементов "Сейчас
+    /// читают" (см. MangaNetworkService.fetchTopViewsList), и только ОДНО
+    /// из трёх полей — то, что соответствует запрошенному `time=`
+    /// (день/неделя/месяц), сервер не присылает остальные два. Везде
+    /// больше эти поля отсутствуют (nil) — на остальной код с MangaItem не
+    /// влияет.
+    let viewsDay: Int?
+    let viewsWeek: Int?
+    let viewsMonth: Int?
+    /// Общее число глав тайтла (не путать с latestChapter — та номер
+    /// ПОСЛЕДНЕЙ вышедшей, эта — просто СКОЛЬКО их всего) — ПОДТВЕРЖДЕНО
+    /// реальным перехватом `GET /bookmarks` (БЕЗ каких-либо явных fields[]!):
+    /// `"items_count":{"uploaded":127,"total":0}` у тайтла с последней главой
+    /// номер "117" — "uploaded" и есть общее число. Раньше здесь по ошибке
+    /// стояло предположение про несуществующий `chap_count` (это поле в API
+    /// есть только как имя SORT/FILTER-параметра каталога, см. chap_count/
+    /// chap_count_min/max в MangaFilter.swift — к содержимому карточки
+    /// тайтла отношения не имеет). Нужен для "Начать 0/N" в Закладках
+    /// (плитка) — по прямой просьбе, эталон — реальный сайт.
+    let itemsCount: MangaItemsCount?
 
     /// Название для отображения: русское, если есть, иначе оригинальное.
     var displayTitle: String { rusName?.isEmpty == false ? rusName! : name }
@@ -509,16 +979,102 @@ struct MangaItem: Decodable, Identifiable, Hashable {
     /// URL обложки строкой (для сохранения в закладки).
     var coverURLString: String? { cover?.bestURL?.absoluteString }
 
+    /// Последняя глава для строки "Том X Глава Y" (см. HomeView) — сначала
+    /// ищет в metadata.latestItems (форма секции "latest_updates"), потом в
+    /// metadata.lastItem (форма секции "popular"/"newest").
+    var latestChapter: MangaChapterMetadata? { metadata?.latestItems?.items.first ?? metadata?.lastItem }
+    /// Сколько ЕЩЁ глав вышло, кроме показанной latestChapter (для "+ ещё N").
+    var extraLatestChaptersCount: Int { max(0, (metadata?.latestItems?.count ?? 1) - 1) }
+    var lastItemDate: Date? { lastItemAt.flatMap(APIISODate.parse) ?? latestChapter?.createdAt.flatMap(APIISODate.parse) }
+    /// Общее число вышедших глав — см. itemsCount выше.
+    var uploadedChaptersCount: Int? { itemsCount?.uploaded }
+    /// Число просмотров за выбранный период — первое непустое из трёх (см.
+    /// viewsDay/viewsWeek/viewsMonth).
+    var topViewsCount: Int? { viewsDay ?? viewsWeek ?? viewsMonth }
+
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, cover, rating, status, type, site
+        case id, name, slug, cover, rating, status, type, site, metadata
         case rusName = "rus_name"
         case engName = "eng_name"
         case slugURL = "slug_url"
         case ageRestriction = "ageRestriction"
+        case lastItemAt = "last_item_at"
+        case viewsDay = "views_day"
+        case viewsWeek = "views_week"
+        case viewsMonth = "views_month"
+        case itemsCount = "items_count"
     }
 
     static func == (lhs: MangaItem, rhs: MangaItem) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+/// `metadata` у элемента списка тайтлов — ДВЕ РАЗНЫЕ подтверждённые формы
+/// в перехваченном дампе агрегата главной страницы (пользователь прислал
+/// два файла): у "popular"/"newest" это одиночный `last_item`, у
+/// "latest_updates" — `latest_items: {count, items:[...]}`. Оба optional и
+/// оба декодируются здесь — MangaItem.latestChapter сам выбирает, какой есть.
+struct MangaItemMetadata: Decodable, Hashable {
+    let lastItem: MangaChapterMetadata?
+    let latestItems: MangaLatestItems?
+
+    enum CodingKeys: String, CodingKey {
+        case lastItem = "last_item"
+        case latestItems = "latest_items"
+    }
+}
+
+struct MangaLatestItems: Decodable, Hashable {
+    let count: Int
+    let items: [MangaChapterMetadata]
+}
+
+/// `items_count` у элемента списка тайтлов — ПОДТВЕРЖДЕНО реальным
+/// перехватом `GET /bookmarks` (см. MangaItem.itemsCount): `{"uploaded":127,
+/// "total":0}` — "uploaded" = общее число реально загруженных глав тайтла,
+/// "total" в подтверждённых примерах всегда встречался 0 (назначение не
+/// подтверждено, не используется).
+struct MangaItemsCount: Decodable, Hashable {
+    let uploaded: Int?
+    let total: Int?
+}
+
+/// Краткое описание главы внутри metadata (НЕ то же самое, что ChapterItem/
+/// HistoryChapterRef/NotificationChapter — своя, третья форма того же
+/// понятия "глава", подтверждено тем же дампом).
+struct MangaChapterMetadata: Decodable, Hashable {
+    let volume: String?
+    let number: String?
+    let name: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case volume, number, name
+        case createdAt = "created_at"
+    }
+
+    /// ПОДТВЕРЖДЕНО реальным перехватом (закладки аккаунта, `last_item.volume`):
+    /// сервер иногда отдаёт "volume" ЧИСЛОМ (`"volume":1`), а не строкой, как
+    /// в остальных местах (`"volume":"1"`). Обычный `String?` в этом случае
+    /// бросает DecodingError.typeMismatch — а поскольку MangaChapterMetadata
+    /// декодируется ВНУТРИ LossyArray (см. BookmarkListEntry/MangaItem), эта
+    /// одна нетипичная закладка тихо выкидывала из результата ВЕСЬ элемент
+    /// массива; на аккаунте, где так размечено большинство/все закладки,
+    /// itemы «Все обновления»/«Закладки» приходили пустым списком целиком.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        volume = try Self.flexibleString(c, .volume)
+        number = try Self.flexibleString(c, .number)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+    }
+
+    private static func flexibleString(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) throws -> String? {
+        if let value = try? c.decodeIfPresent(String.self, forKey: key) { return value }
+        if let value = try? c.decodeIfPresent(Int.self, forKey: key) { return String(value) }
+        if let value = try? c.decodeIfPresent(Double.self, forKey: key) { return String(value) }
+        return nil
+    }
 }
 
 // MARK: - "Похожее" (GET /manga/{slug}/similar)
@@ -601,17 +1157,65 @@ struct BookmarkListEntry: Decodable {
     /// (1=Читаю, 2=В планах, 3=Брошено, 4=Прочитано, 5=Любимые).
     let status: Int?
     let media: MangaItem
+    /// ТВОЯ личная оценка тайтла — ПОДТВЕРЖДЕНО перехватом `GET /bookmarks`:
+    /// поле лежит прямо в объекте закладки (рядом с id/status/media), НЕ
+    /// внутри media, `null` у неоценённых тайтлов (не 0-заглушка, как у
+    /// `GET /manga/{slug}`, см. MangaRating.myScore) — сервер уже отдаёт
+    /// актуальную оценку для ВСЕХ закладок одним запросом при синхронизации,
+    /// используем вместо того, чтобы ждать, пока пользователь сам откроет
+    /// карточку тайтла (см. BookmarksStore.syncFromServer).
+    let rating: Int?
+
+    /// На всякий случай та же нормализация 0→nil, что и у MangaRating.myScore
+    /// (сама шкала оценок 1-10) — здесь API уже подтверждённо шлёт null для
+    /// неоценённых, но 0 тоже не может быть настоящей оценкой.
+    var myScore: Int? {
+        guard let rating, rating > 0 else { return nil }
+        return rating
+    }
+
+    /// "Прочитано/перечитано N раз" + личный комментарий к закладке —
+    /// ПОДТВЕРЖДЕНО перехватом `POST /bookmarks` (то же тело, что и смена
+    /// папки — meta шлётся ВМЕСТЕ со status, целиком). Optional — старые
+    /// перехваченные ответы этот ключ вообще не содержали, если история
+    /// пуста (см. BookmarkMeta).
+    let meta: BookmarkMeta?
 }
 
-/// Ответ настоящего эндпоинта создания папки закладок — `POST /bookmarks/folder`
-/// (подтверждено перехватом: тело `{"name":"она"}` → 201 Created, `{"data":
-/// {"id":2717854,"name":"она","public":false,"notify":false,"color":"#b051ff",
-/// "textColor":"#fff","order":5,"count":0,"site_ids":[1]}}`). Нам нужен только
-/// числовой id — сохраняется как BookmarkFolder.serverId (см. BookmarksStore) —
-/// остальные поля сервер присваивает сам, локально нам их дублировать незачем.
-struct ServerBookmarkFolder: Decodable {
-    let id: Int
-    let name: String
+/// meta-объект закладки — ПОДТВЕРЖДЕНО перехватом двумя формами:
+/// `{"comment":false,"rewatches":null,"item_number":null}` (пусто) и
+/// `{"item_number":119,"rewatches":3,"rewatches_history":[{"start":
+/// "2026-08-01","end":"2026-08-07"},...,{"start":"2026-08-28","end":null}],
+/// "comment":"текст","notes":0}` (заполнено). `rewatches` — просто
+/// count(rewatches_history), сервер сам не хранит отдельно — мы его вообще
+/// не читаем, копируем только сам массив. `comment` — смешанный тип:
+/// `false` у пустых, строка у заполненных.
+struct BookmarkMeta: Decodable {
+    let comment: String?
+    let rewatchHistory: [RewatchPeriod]
+
+    private enum CodingKeys: String, CodingKey { case comment, rewatchHistory = "rewatches_history" }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let text = try? container.decode(String.self, forKey: .comment), !text.isEmpty {
+            comment = text
+        } else {
+            comment = nil
+        }
+        rewatchHistory = (try? container.decode([RewatchPeriod].self, forKey: .rewatchHistory)) ?? []
+    }
+}
+
+/// Один период перечитывания — ПОДТВЕРЖДЕНО перехватом:
+/// `{"start":"yyyy-MM-dd","end":"yyyy-MM-dd"|null}`. `end == nil` — период
+/// ещё не закрыт ("сейчас перечитывает"). Реального id у периода на
+/// сервере нет — это просто элемент массива, не отдельная сущность.
+struct RewatchPeriod: Codable, Identifiable, Hashable {
+    var start: String
+    var end: String?
+
+    var id: String { start + "_" + (end ?? "open") }
 }
 
 // MARK: - Summary rich-text (ProseMirror/TipTap)
@@ -735,7 +1339,12 @@ struct MangaDetail: Decodable, Identifiable {
     /// fields[]=background (см. fetchMangaDetail) — без этого сервер его не
     /// присылает вообще, как summary/genres/tags и т.п.
     let background: MangaBackgroundImage?
-    let rating: MangaRating?
+    /// `var`, а не `let` — единственное поле, которое мутируется ПОСЛЕ
+    /// декодирования: `MangaDetailViewModel.submitRating` подставляет сюда
+    /// свежий агрегат прямо из ответа `POST /manga/rate`, не дожидаясь
+    /// отдельного `GET /manga/{slug}` (см. там же — раньше "моя оценка"
+    /// появлялась с заметной задержкой именно из-за этого ожидания).
+    var rating: MangaRating?
     let status: MangaStatus?
     let type: MangaStatus?
     /// Возрастной рейтинг («18+»/«16+»/«12+»/«6+»/«Нет») — та же форма
@@ -752,7 +1361,13 @@ struct MangaDetail: Decodable, Identifiable {
     let summary: String?
     let genres: [NamedEntity]?
     let tags: [NamedEntity]?
-    let authors: [NamedEntity]?
+    /// Авторы/художники/издательство — ПОДТВЕРЖДЕНО перехватом: те же
+    /// объекты, что и в списках /people и /publisher (см. DirectoryEntity),
+    /// просто embedded прямо в ответ тайтла. artists/publisher требуют
+    /// явного fields[]=artists/fields[]=publisher (см. fetchMangaDetailRawData).
+    let authors: [DirectoryEntity]?
+    let artists: [DirectoryEntity]?
+    let publisher: [DirectoryEntity]?
     /// Альтернативные названия ("I Alone Level-Up", "Соло Левелинг", ...) —
     /// показываются в sheet по тапу на название (см. TitleNamesSheet).
     /// ЗАГЛУШКА/на будущее: точный ключ реальным перехватом НЕ подтверждён,
@@ -779,6 +1394,10 @@ struct MangaDetail: Decodable, Identifiable {
     /// isLicensed определяет, показывать ли вместо описания текст про
     /// удаление глав правообладателем/РКН.
     let moderated: MangaStatus?
+    /// Франшиза тайтла (чип-подкатегория на карточке, см.
+    /// MangaDetailView.franchiseChip) — ПОДТВЕРЖДЕНО перехватом, требует
+    /// явного fields[]=franchise (см. FranchiseRef/fetchMangaDetailRawData).
+    let franchise: FranchiseRef?
 
     var displayTitle: String { rusName?.isEmpty == false ? rusName! : name }
     var apiSlug: String { slugURL?.isEmpty == false ? slugURL! : slug }
@@ -824,7 +1443,7 @@ struct MangaDetail: Decodable, Identifiable {
     var backgroundURL: URL? { background?.bestURL ?? cover?.bestURL }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, cover, background, rating, status, type, site, summary, genres, tags, authors, views, format, moderated
+        case id, name, slug, cover, background, rating, status, type, site, summary, genres, tags, authors, artists, publisher, views, format, moderated, franchise
         case otherNames = "otherNames"
         case otherNamesSnake = "other_names"
         case ageRestriction = "ageRestriction"
@@ -858,6 +1477,7 @@ struct MangaDetail: Decodable, Identifiable {
         site = (try? c.decodeIfPresent(Int.self, forKey: .site)) ?? nil
         isLicensed = (try? c.decodeIfPresent(Bool.self, forKey: .isLicensed)) ?? false
         moderated = try? c.decodeIfPresent(MangaStatus.self, forKey: .moderated) ?? nil
+        franchise = ((try? c.decodeIfPresent([FranchiseRef].self, forKey: .franchise)) ?? nil)?.first
         // "summary"/"description" — оба ключа пробуем, ПЛЮС на случай, если
         // описание приходит не голой строкой, а вложенным объектом (напр.
         // {"ru": "...", "text": "..."}) — тоже не подтверждено перехватом,
@@ -867,7 +1487,9 @@ struct MangaDetail: Decodable, Identifiable {
         summary = [summaryValue, descriptionValue].compactMap { $0 }.first { !$0.isEmpty }
         genres = try? c.decodeIfPresent([NamedEntity].self, forKey: .genres) ?? nil
         tags = try? c.decodeIfPresent([NamedEntity].self, forKey: .tags) ?? nil
-        authors = try? c.decodeIfPresent([NamedEntity].self, forKey: .authors) ?? nil
+        authors = try? c.decodeIfPresent([DirectoryEntity].self, forKey: .authors) ?? nil
+        artists = try? c.decodeIfPresent([DirectoryEntity].self, forKey: .artists) ?? nil
+        publisher = try? c.decodeIfPresent([DirectoryEntity].self, forKey: .publisher) ?? nil
         otherNames = Self.decodeStringList(c, .otherNames, .otherNamesSnake)
         // Подтверждено реальным JSON: [{"id":6,"name":"Веб"}] — ключ "name",
         // как у жанров/тегов. FlexibleLabelEntity также пробует "label"
@@ -1076,17 +1698,460 @@ struct CharacterDetail: Decodable, Identifiable {
     }
 }
 
+// MARK: - Команда перевода (детальная страница)
+
+/// Одна метрика в шапке страницы переводчика — ПОДТВЕРЖДЕНО перехватом:
+/// сервер сам отдаёт готовые label ("Тайтлов"/"Лайков"/"Глава"/"Глав / мес"/
+/// "Подписчика") и короткое отображаемое значение (short, напр. "8.9 M") —
+/// в отличие от CharacterDetail (там подписи захардкожены в UI, потому что
+/// в перехвате персонажа было только 2 метрики без готовых русских label).
+/// Здесь label уже готовы и в том же порядке, что в перехвате, — используем
+/// как есть, не дублируя переводы вручную.
+struct TeamStat: Decodable, Identifiable {
+    let value: Int?
+    let short: String?
+    let label: String?
+    let tag: String?
+    var id: String { tag ?? label ?? UUID().uuidString }
+
+    enum CodingKeys: String, CodingKey { case value, short, label, tag }
+}
+
+/// Один участник команды с РЕАЛЬНЫМИ данными — ПОДТВЕРЖДЕНО перехватом
+/// ОТДЕЛЬНОГО эндпоинта `GET /teams/{slug_url}/users` (не путать с полем
+/// "users" внутри GET /teams/{slug_url} — там участники анонимны, только
+/// роль, без id/username/аватара вообще — decode того эндпоинта не делаем,
+/// раз этот, отдельный, отдаёт то же самое, но с реальными данными):
+/// `{data:[{user:{id,username,avatar:{filename,url},avatar_frame:{orig,lg,
+/// md,sm}}, roles:[{id,label}], roles_string, order}]}`. avatar_frame —
+/// ПОДТВЕРЖДЕНО перехватом (встречается у части участников; относительный
+/// путь, как и у плейсхолдера фона, — достраивается тем же
+/// UserProfile.absoluteURL) — декоративная рамка поверх аватара, см.
+/// TeamView.memberChip.
+struct TeamMemberEntry: Decodable, Identifiable {
+    let userId: Int
+    let username: String
+    let avatarURL: URL?
+    let avatarFrameURL: URL?
+    let rolesString: String?
+
+    private struct UserRef: Decodable {
+        let id: Int
+        let username: String
+        let avatar: AvatarRef?
+        let avatarFrame: FrameRef?
+        enum CodingKeys: String, CodingKey { case id, username, avatar, avatarFrame = "avatar_frame" }
+    }
+    private struct AvatarRef: Decodable { let url: String? }
+    private struct FrameRef: Decodable { let md: String?; let orig: String? }
+
+    enum CodingKeys: String, CodingKey { case user, rolesString = "roles_string" }
+
+    var id: Int { userId }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let user = (try? c.decodeIfPresent(UserRef.self, forKey: .user)) ?? nil
+        userId = user?.id ?? 0
+        username = user?.username ?? "Без имени"
+        avatarURL = UserProfile.absoluteURL(user?.avatar?.url)
+        avatarFrameURL = UserProfile.absoluteURL(user?.avatarFrame?.md ?? user?.avatarFrame?.orig)
+        rolesString = (try? c.decodeIfPresent(String.self, forKey: .rolesString)) ?? nil
+    }
+}
+
+/// Ответ подписки/отписки на команду-переводчика — ПОДТВЕРЖДЕНО перехватом
+/// `POST /favorites {source_id, source_type:"team"}` →
+/// `{data:{is_subscribed,source_type,source_id,relation},
+/// meta:{stats:{value,formated,short,label,tag}}}` — toggle подтверждён
+/// РАБОЧИМ в ОБЕ стороны новым перехватом (было под сомнением, теперь нет).
+/// Тот же тип переиспользован и для `GET /favorites/{source_type}/{id}`
+/// (проверка ТЕКУЩЕГО статуса без переключения, ПОДТВЕРЖДЕНО перехватом —
+/// ответ той же формы, просто без meta) — см.
+/// MangaNetworkService.fetchFavoriteStatus.
+struct FavoriteToggleResponse: Decodable {
+    let isSubscribed: Bool
+    let subscribersStat: TeamStat?
+
+    private struct DataPart: Decodable { let isSubscribed: Bool?; enum CodingKeys: String, CodingKey { case isSubscribed = "is_subscribed" } }
+    private struct MetaPart: Decodable { let stats: TeamStat? }
+
+    enum CodingKeys: String, CodingKey { case data, meta }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = (try? c.decodeIfPresent(DataPart.self, forKey: .data)) ?? nil
+        let m = (try? c.decodeIfPresent(MetaPart.self, forKey: .meta)) ?? nil
+        isSubscribed = d?.isSubscribed ?? false
+        subscribersStat = m?.stats
+    }
+}
+
+/// Детальная страница переводчика (команды) — ПОДТВЕРЖДЕНО реальным
+/// перехватом `GET /teams/{slug_url}?fields[]=chaptersPerMonth&
+/// fields[]=auto_moderation&fields[]=team_rating&fields[]=ignored_by_user`.
+/// team_rating/auto_moderation/ignored_by_user в перехвате ЕСТЬ, но здесь
+/// не декодируются — экран пока не реализует оценку/жалобы/модерацию (см.
+/// список "что уточнить" в чате), декодер их просто проигнорирует.
+struct TeamDetail: Decodable, Identifiable {
+    let id: Int
+    let slug: String
+    let slugURL: String
+    let name: String
+    let cover: MangaCover?
+    let background: MangaBackgroundImage?
+    let altName: String?
+    let vk: String?
+    let discord: String?
+    let website: String?
+    let description: String?
+    let stats: [TeamStat]
+    let titlesCountBySite: [Int: Int]
+
+    enum CodingKeys: String, CodingKey {
+        case id, slug, name, cover, background, vk, discord, website, stats, description
+        case slugURL = "slug_url"
+        case altName = "alt_name"
+        case titlesCountDetails = "titles_count_details"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        slug = (try? c.decode(String.self, forKey: .slug)) ?? ""
+        slugURL = ((try? c.decodeIfPresent(String.self, forKey: .slugURL)) ?? nil) ?? slug
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        cover = (try? c.decodeIfPresent(MangaCover.self, forKey: .cover)) ?? nil
+        background = (try? c.decodeIfPresent(MangaBackgroundImage.self, forKey: .background)) ?? nil
+        altName = (try? c.decodeIfPresent(String.self, forKey: .altName)) ?? nil
+        vk = (try? c.decodeIfPresent(String.self, forKey: .vk)) ?? nil
+        discord = (try? c.decodeIfPresent(String.self, forKey: .discord)) ?? nil
+        website = (try? c.decodeIfPresent(String.self, forKey: .website)) ?? nil
+
+        // "description" — тот же ProseMirror/doc, что и у персонажа/тайтла,
+        // но с активным использованием hardBreak между текстовыми узлами
+        // (см. реальный перехваченный пример) — SummaryDoc/SummaryNode.plainText
+        // склеивает детей БЕЗ разделителя и игнорирует hardBreak, из-за чего
+        // текст слипся бы в одну строку. AnyJSON.extractReadableText() же
+        // берёт каждый текстовый узел как отдельный абзац (разделяя "\n\n") —
+        // для этой формы результат читаемее, поэтому используется он один,
+        // без промежуточной попытки через SummaryDoc.
+        if let generic = (try? c.decodeIfPresent(AnyJSON.self, forKey: .description)) ?? nil {
+            let t = generic.extractReadableText()
+            description = t.isEmpty ? nil : t
+        } else {
+            description = nil
+        }
+
+        stats = ((try? c.decodeIfPresent([TeamStat].self, forKey: .stats)) ?? nil) ?? []
+
+        if let raw = ((try? c.decodeIfPresent([String: Int].self, forKey: .titlesCountDetails)) ?? nil) {
+            var m: [Int: Int] = [:]
+            for (k, v) in raw { if let ik = Int(k) { m[ik] = v } }
+            titlesCountBySite = m
+        } else {
+            titlesCountBySite = [:]
+        }
+    }
+}
+
+// MARK: - Обновления команды (вкладка "Обновления" у TeamView)
+
+/// Одна группа в ленте "Обновления" команды — ПОДТВЕРЖДЕНО перехватом
+/// `GET /teams/{id}/chapters?page=`: `data` — список групп ПО ТАЙТЛУ
+/// (обычно одна глава на группу, `chapters_count` совпадает с реальной
+/// длиной `chapters`, но группа может содержать несколько глав, если
+/// команда выложила их разом). `manga`/`media` в перехваченном ответе — два
+/// поля с ОДИНАКОВЫМ содержимым (та же форма, что и MangaItem: id/name/
+/// rus_name/eng_name/slug/slug_url/cover/ageRestriction/site/type/status),
+/// декодируем только `manga`.
+struct TeamChapterGroup: Decodable, Identifiable, Hashable {
+    let chaptersCount: Int
+    let chapters: [TeamChapterSummary]
+    let manga: MangaItem
+
+    /// Не просто manga.id — один тайтл теоретически может встретиться в
+    /// ленте дважды (разные партии глав), синтетический id разбивает такое
+    /// совпадение вместо того, чтобы ForEach молча схлопнул строки.
+    var id: String { "\(manga.id)_\(chapters.first?.id ?? 0)" }
+    var latest: TeamChapterSummary? { chapters.first }
+
+    enum CodingKeys: String, CodingKey {
+        case chaptersCount = "chapters_count"
+        case chapters, manga
+    }
+
+    static func == (lhs: TeamChapterGroup, rhs: TeamChapterGroup) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+/// Одна глава внутри группы — только поля, реально нужные строке ленты
+/// (том/номер/название/дата); полная форма главы (branch_id/teams/user/…)
+/// здесь не нужна, в отличие от ChapterItem (список глав самого тайтла).
+struct TeamChapterSummary: Decodable, Identifiable, Hashable {
+    let id: Int
+    let volume: String
+    let number: String
+    let name: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, volume, number
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        volume = try Self.flexibleString(c, .volume) ?? "1"
+        number = try Self.flexibleString(c, .number) ?? "0"
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        createdAt = try? c.decodeIfPresent(String.self, forKey: .createdAt) ?? nil
+    }
+
+    /// Тот же приём, что и ChapterItem.flexibleString (та же серверная
+    /// непоследовательность volume/number: то строка, то число) — копия, не
+    /// переиспользование: там private к своему типу.
+    private static func flexibleString(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) throws -> String? {
+        if let s = try? c.decodeIfPresent(String.self, forKey: key) { return s }
+        if let i = try? c.decodeIfPresent(Int.self, forKey: key) { return String(i) }
+        if let d = try? c.decodeIfPresent(Double.self, forKey: key) {
+            return d.rounded() == d ? String(Int(d)) : String(d)
+        }
+        return nil
+    }
+}
+
+// MARK: - Франшиза
+
+/// Франшиза — ПОДТВЕРЖДЕНО перехватом `GET /franchise` (список) и
+/// `GET /franchise/{id}--{slug}` (одна) — ОДНА И ТА ЖЕ форма в обоих:
+/// `{id, slug, slug_url, model:"franchise", name, alt_name, subscription:
+/// {is_subscribed,...}, stats:[{value,formated,short,label,tag}],
+/// titles_count_details:{site_id:count}}`. Общий на ВСЮ экосистему
+/// справочник (не завязан на активный сайт) — ПОДТВЕРЖДЕНО прямым
+/// сравнением перехватов MangaLib/HentaiLib: франшиза id 308 «Оригинальные
+/// работы» — с абсолютно тем же id/названием/titles_count_details на обоих
+/// сайтах. Без обложки/аватара — только текст и счётчики. stats — та же
+/// форма, что и у TeamStat (переиспользуется).
+struct Franchise: Decodable, Identifiable, Hashable {
+    let id: Int
+    let slug: String
+    let slugURL: String
+    let name: String
+    let altName: String?
+    var isSubscribed: Bool
+    let stats: [TeamStat]
+    /// site_id → число тайтлов (1=манга, 2=слэш, 3=новеллы, 4=хентай, 5=аниме).
+    let titlesCountBySite: [Int: Int]
+
+    var titlesCount: Int? { stats.first { $0.tag == "titles" }?.value }
+    var subscribersCount: Int? { stats.first { $0.tag == "subscribes" }?.value }
+
+    private struct Subscription: Decodable {
+        let isSubscribed: Bool?
+        enum CodingKeys: String, CodingKey { case isSubscribed = "is_subscribed" }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, slug, name, stats, subscription
+        case slugURL = "slug_url"
+        case altName = "alt_name"
+        case titlesCountDetails = "titles_count_details"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        slug = (try? c.decode(String.self, forKey: .slug)) ?? ""
+        slugURL = ((try? c.decodeIfPresent(String.self, forKey: .slugURL)) ?? nil) ?? slug
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        altName = (try? c.decodeIfPresent(String.self, forKey: .altName)) ?? nil
+        let subscription = (try? c.decodeIfPresent(Subscription.self, forKey: .subscription)) ?? nil
+        isSubscribed = subscription?.isSubscribed ?? false
+        stats = ((try? c.decodeIfPresent([TeamStat].self, forKey: .stats)) ?? nil) ?? []
+
+        if let raw = ((try? c.decodeIfPresent([String: Int].self, forKey: .titlesCountDetails)) ?? nil) {
+            var m: [Int: Int] = [:]
+            for (k, v) in raw { if let ik = Int(k) { m[ik] = v } }
+            titlesCountBySite = m
+        } else {
+            titlesCountBySite = [:]
+        }
+    }
+
+    static func == (lhs: Franchise, rhs: Franchise) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+// MARK: - Общие "каталожные" сущности (команды/персонажи/люди/издательства)
+
+/// Общая форма для команд/персонажей/людей(авторов)/издательств —
+/// ПОДТВЕРЖДЕНО перехватом на списках `GET /teams`, `GET /character`,
+/// `GET /people`, `GET /publisher`, А ТАКЖЕ как embedded-поля тайтла
+/// (`authors`/`artists`/`publisher` у `GET /manga/{slug}`, та же форма один
+/// в один). Не каждое поле есть у каждого вида: teams в списке БЕЗ
+/// subscription/titles_count_details/rus_name/alt_name (у них отдельный
+/// подтверждённый способ проверки подписки, см. TeamViewModel), publisher
+/// без alt_name — всё это Optional и просто отсутствует, где сервер не
+/// прислал. Персонаж — единственный, для кого фактическая подписка (POST
+/// /favorites) НЕ подтверждена перехватом, хотя поле subscription в его
+/// списке ЕСТЬ (см. DirectoryKind.character/sourceType == nil — сознательно
+/// не даём переключать то, что не проверено).
+struct DirectoryEntity: Decodable, Identifiable, Hashable {
+    let id: Int
+    let slugURL: String
+    let model: String
+    let name: String
+    let rusName: String?
+    let altName: String?
+    let coverURL: URL?
+    var isSubscribed: Bool
+    let stats: [TeamStat]
+    /// site_id → число тайтлов, где не пусто (1=манга,2=слэш,3=новеллы,4=хентай,5=аниме).
+    let titlesCountBySite: [Int: Int]
+    /// Описание ("dsc") — только в детальном ответе, тот же ProseMirror/
+    /// TipTap формат, что и у CharacterDetail.description (та же логика
+    /// разбора: сперва SummaryDoc, затем универсальный AnyJSON запасным
+    /// вариантом).
+    let description: String?
+
+    var displayName: String { rusName?.isEmpty == false ? rusName! : name }
+    var titlesCount: Int? { stats.first { $0.tag == "titles" }?.value }
+    var subscribersCount: Int? { stats.first { $0.tag == "subscribes" }?.value }
+
+    private struct Subscription: Decodable {
+        let isSubscribed: Bool?
+        enum CodingKeys: String, CodingKey { case isSubscribed = "is_subscribed" }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, slug, model, name, stats, subscription, cover, dsc
+        case slugURL = "slug_url"
+        case rusName = "rus_name"
+        case altName = "alt_name"
+        case titlesCountDetails = "titles_count_details"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        let slug = (try? c.decode(String.self, forKey: .slug)) ?? ""
+        slugURL = ((try? c.decodeIfPresent(String.self, forKey: .slugURL)) ?? nil) ?? slug
+        model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? ""
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        rusName = (try? c.decodeIfPresent(String.self, forKey: .rusName)) ?? nil
+        altName = (try? c.decodeIfPresent(String.self, forKey: .altName)) ?? nil
+        coverURL = ((try? c.decodeIfPresent(MangaCover.self, forKey: .cover)) ?? nil)?.bestURL
+        let subscription = (try? c.decodeIfPresent(Subscription.self, forKey: .subscription)) ?? nil
+        isSubscribed = subscription?.isSubscribed ?? false
+        stats = ((try? c.decodeIfPresent([TeamStat].self, forKey: .stats)) ?? nil) ?? []
+
+        if let raw = ((try? c.decodeIfPresent([String: Int].self, forKey: .titlesCountDetails)) ?? nil) {
+            var m: [Int: Int] = [:]
+            for (k, v) in raw { if let ik = Int(k) { m[ik] = v } }
+            titlesCountBySite = m
+        } else {
+            titlesCountBySite = [:]
+        }
+
+        var desc: String? = nil
+        if let doc = (try? c.decodeIfPresent(SummaryDoc.self, forKey: .dsc)) ?? nil {
+            let t = doc.plainText
+            if !t.isEmpty { desc = t }
+        }
+        if desc == nil, let generic = (try? c.decodeIfPresent(AnyJSON.self, forKey: .dsc)) ?? nil {
+            let t = generic.extractReadableText()
+            if !t.isEmpty { desc = t }
+        }
+        description = desc
+    }
+
+    static func == (lhs: DirectoryEntity, rhs: DirectoryEntity) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+/// Один элемент "Избранное" (см. MangaNetworkService.fetchFavorites) —
+/// ПОДТВЕРЖДЕНО перехватом для всех 5 категорий (source_type = team/people/
+/// character/franchise/publisher): `{is_subscribed, source_type, source_id,
+/// relation: {...}}`. `relation` — ТА ЖЕ форма, что и у обычных списков
+/// команд/персонажей/людей/издательств (см. DirectoryEntity — её lossy-
+/// декодер уже умеет и в форму франшизы: id/slug/model/name/stats/
+/// titles_count_details есть, cover/subscription просто отсутствуют → nil).
+struct FavoriteEntry: Decodable {
+    let relation: DirectoryEntity
+}
+
+/// meta у /favorites — own форма (current_page/last_page/total), БЕЗ
+/// has_next_page (в отличие от большинства других списковых эндпоинтов, см.
+/// APIMeta) — своя лёгкая структура вместо переиспользования APIMeta, чтобы
+/// не считать "есть следующая страница" по ложному фолбэку "непустой ответ".
+struct FavoritesMeta: Decodable {
+    let currentPage: Int?
+    let lastPage: Int?
+    enum CodingKeys: String, CodingKey {
+        case currentPage = "current_page"
+        case lastPage = "last_page"
+    }
+}
+
+struct FavoritesResponse: Decodable {
+    let data: [FavoriteEntry]
+    let meta: FavoritesMeta?
+}
+
+/// Один аккаунт в справочнике пользователей — ПОДТВЕРЖДЕНО перехватом
+/// `GET /user?page=&sort_by=id&sort_type=desc`: `{id, username, avatar:
+/// {filename,url}, last_online_at, can_view_profile, created_at,
+/// login_streak, premium}`. Совсем другая форма, чем у DirectoryEntity — это
+/// учётная запись, а не контент-сущность (нет model/subscription/stats).
+struct DirectoryUserEntry: Decodable, Identifiable, Hashable {
+    let id: Int
+    let username: String
+    let avatarURL: URL?
+    let isPremium: Bool
+
+    private struct ImageRef: Decodable { let url: String? }
+    private struct PremiumRef: Decodable { let enabled: Bool? }
+    private enum CodingKeys: String, CodingKey { case id, username, avatar, premium }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        username = ((try? c.decodeIfPresent(String.self, forKey: .username)) ?? nil) ?? ""
+        let avatarRef = (try? c.decodeIfPresent(ImageRef.self, forKey: .avatar)) ?? nil
+        avatarURL = UserProfile.absoluteURL(avatarRef?.url)
+        isPremium = ((try? c.decodeIfPresent(PremiumRef.self, forKey: .premium)) ?? nil)?.enabled ?? false
+    }
+}
+
+/// Ссылка на франшизу тайтла — ПОДТВЕРЖДЕНО перехватом `GET /manga/{slug}?
+/// fields[]=franchise`: `"franchise":[{"id","slug","slug_url","model":
+/// "franchise","name"}]` — массив (на практике из одного элемента), БЕЗ
+/// alt_name/подписки/статистики (те есть только в отдельном
+/// GET /franchise/{id}--{slug}, см. Franchise/MangaNetworkService.fetchFranchiseDetail).
+struct FranchiseRef: Decodable, Identifiable, Hashable {
+    let id: Int
+    let slugURL: String
+    let name: String
+
+    enum CodingKeys: String, CodingKey { case id, name, slugURL = "slug_url" }
+}
+
 // MARK: - Chapter
 
 /// Команда перевода (сканлейт-тим) — ПОДТВЕРЖДЕНО перехватом ветки:
 /// `{id, slug, slug_url, model:"team", name:"May Days", cover:{thumbnail,default,md}}`.
-/// cover — аватар команды (у некоторых плейсхолдер user_avatar.png).
+/// cover — аватар команды (у некоторых плейсхолдер user_avatar.png). slugURL
+/// нужен для перехода на страницу переводчика (см. TeamView) — раньше не
+/// декодировался, хотя в перехвате есть.
 struct ChapterTeam: Decodable, Identifiable {
     let id: Int
     let name: String
     let cover: MangaCover?
+    let slugURL: String?
     var avatarURL: URL? { cover?.bestURL }
-    enum CodingKeys: String, CodingKey { case id, name, cover }
+    enum CodingKeys: String, CodingKey { case id, name, cover, slugURL = "slug_url" }
 }
 
 /// Кто залил ветку — `{username, id}`. Запасная подпись, если у ветки нет team.
@@ -1241,10 +2306,86 @@ struct ChapterPagesData: Decodable {
     /// не сработает как быстрая проверка, и приложение всё равно отправит
     /// markChapterViewed как раньше).
     let isViewed: Bool?
+    /// Команда(ы), переводившие ИМЕННО эту главу — ПОДТВЕРЖДЕНО реальным
+    /// перехватом ("Над главой работали", см. MangaReaderView.endHeader) —
+    /// та же модель, что и у ChapterBranch.teams, просто здесь прямо в
+    /// ответе главы, без обёртки веткой.
+    let teams: [ChapterTeam]?
+    /// "Спасибо" переводчикам (лайк главы, см. MangaNetworkService.
+    /// likeChapter) — ПОДТВЕРЖДЕНО реальным перехватом: оба поля уже
+    /// приходят прямо в ответе главы, не нужно отдельного запроса, чтобы
+    /// узнать текущее состояние при открытии.
+    let likesCount: Int?
+    let isLiked: Bool?
+    /// Оценка перевода (см. MangaNetworkService.rateTranslation) —
+    /// ПОДТВЕРЖДЕНО реальным перехватом: агрегат + твоя предыдущая оценка
+    /// (если была) приходят прямо в ответе главы.
+    let translationRating: TranslationRating?
 
     enum CodingKeys: String, CodingKey {
-        case id, pages
+        case id, pages, teams
         case isViewed = "is_viewed"
+        case likesCount = "likes_count"
+        case isLiked = "is_liked"
+        case translationRating = "translation_quality_rating"
+    }
+}
+
+/// Оценка качества перевода главы по 3 категориям — ПОДТВЕРЖДЕНО реальным
+/// перехватом `POST /chapters/{id}/translation-rating` (см.
+/// MangaNetworkService.rateTranslation) и тем же форматом прямо внутри
+/// ответа главы (ChapterPagesData.translationRating). `categories` —
+/// средние ОБЩИЕ (всех проголосовавших) по каждой категории, `user` —
+/// ТВОИ предыдущие значения (если оценивал).
+struct TranslationRating: Decodable {
+    let average: String?
+    let averageFormated: String?
+    let votes: Int?
+    let ratedChapters: Int?
+    let canRate: Bool?
+    let categories: TranslationRatingCategories?
+    let user: TranslationRatingUser?
+
+    enum CodingKeys: String, CodingKey {
+        case average, averageFormated, votes, categories, user
+        case ratedChapters = "rated_chapters"
+        case canRate = "can_rate"
+    }
+}
+
+struct TranslationRatingCategories: Decodable {
+    let translationAccuracy: String?
+    let readabilityAdaptation: String?
+    let editingFormatting: String?
+
+    enum CodingKeys: String, CodingKey {
+        case translationAccuracy = "translation_accuracy"
+        case readabilityAdaptation = "readability_adaptation"
+        case editingFormatting = "editing_formatting"
+    }
+}
+
+/// Твои предыдущие оценки по 3 категориям — ПОДТВЕРЖДЕНО перехватом: у ещё
+/// не оценённой (тобой) главы сервер прислал ровно "0" в каждом поле (та же
+/// семантика 0 == "не оценено", что и у MangaRating.myScore — шкала 1-10,
+/// 0 руками не поставить), отсюда myScores.
+struct TranslationRatingUser: Decodable {
+    let translationAccuracy: Int?
+    let readabilityAdaptation: Int?
+    let editingFormatting: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case translationAccuracy = "translation_accuracy"
+        case readabilityAdaptation = "readability_adaptation"
+        case editingFormatting = "editing_formatting"
+    }
+
+    /// nil, если ещё не оценено (0 или отсутствует) — иначе (accuracy,
+    /// readability, editing), для предзаполнения RateTranslationSheet.
+    var myScores: (accuracy: Int, readability: Int, editing: Int)? {
+        guard let translationAccuracy, let readabilityAdaptation, let editingFormatting,
+              translationAccuracy > 0 || readabilityAdaptation > 0 || editingFormatting > 0 else { return nil }
+        return (translationAccuracy, readabilityAdaptation, editingFormatting)
     }
 }
 
@@ -1379,8 +2520,53 @@ struct Comment: Decodable, Identifiable, Hashable {
     /// HTML → читаемый плоский текст: сервер оборачивает комментарий в
     /// <p>...</p> (возможно, с <br> внутри для переносов) — простой безопасный
     /// стрип тегов, без NSAttributedString (полноценный rich-text не нужен).
+    /// Спойлеры (см. segments) тут тоже разворачиваются в открытый текст —
+    /// это поле только для мест, где сегменты не нужны (превью/ссылка и т.п.).
     var text: String {
-        var s = commentHTML
+        Self.htmlToPlainText(commentHTML)
+    }
+
+    /// Комментарий, разбитый на обычный текст и спойлеры — ПОДТВЕРЖДЕНО
+    /// реальным перехватом (см. MangaNetworkService.ProseMirrorInline):
+    /// `<span class="spoiler-node" data-spoiler-type="inline"
+    /// data-spoiler-text="<подпись>"><span class="spoiler-node__text">
+    /// <скрытый текст></span></span>`. Порядок сегментов сохраняется — так
+    /// собирается ряд Text/спойлер-чипов в UI (см. MangaDetailView.
+    /// CommentBodyView).
+    var segments: [CommentSegment] {
+        let html = commentHTML
+        guard let regex = Self.spoilerRegex, !html.isEmpty else {
+            let plain = Self.htmlToPlainText(html)
+            return plain.isEmpty ? [] : [.text(plain)]
+        }
+        let ns = html as NSString
+        var result: [CommentSegment] = []
+        var cursor = 0
+        for match in regex.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+            if match.range.location > cursor {
+                let before = ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+                let plain = Self.htmlToPlainText(before)
+                if !plain.isEmpty { result.append(.text(plain)) }
+            }
+            let label = Self.htmlToPlainText(ns.substring(with: match.range(at: 1)))
+            let content = Self.htmlToPlainText(ns.substring(with: match.range(at: 2)))
+            result.append(.spoiler(label: label, text: content))
+            cursor = match.range.location + match.range.length
+        }
+        if cursor < ns.length {
+            let after = ns.substring(with: NSRange(location: cursor, length: ns.length - cursor))
+            let plain = Self.htmlToPlainText(after)
+            if !plain.isEmpty { result.append(.text(plain)) }
+        }
+        return result
+    }
+
+    private static let spoilerRegex = try? NSRegularExpression(
+        pattern: #"<span class="spoiler-node"[^>]*data-spoiler-text="([^"]*)"[^>]*><span class="spoiler-node__text">([\s\S]*?)</span></span>"#
+    )
+
+    private static func htmlToPlainText(_ html: String) -> String {
+        var s = html
         for (tag, replacement) in [("</p><p>", "\n"), ("<br/>", "\n"), ("<br />", "\n"), ("<br>", "\n")] {
             s = s.replacingOccurrences(of: tag, with: replacement)
         }
@@ -1390,6 +2576,12 @@ struct Comment: Decodable, Identifiable, Hashable {
         }
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+}
+
+/// Один сегмент разобранного комментария — см. Comment.segments.
+enum CommentSegment: Hashable {
+    case text(String)
+    case spoiler(label: String, text: String)
 }
 
 extension Array where Element == Comment {
@@ -1513,6 +2705,13 @@ struct CommentsListResponse: Decodable {
 struct ChapterPagesResult {
     let pages: [PageItem]
     let isViewed: Bool
+    /// Команда(ы)/лайк/оценка перевода ИМЕННО этой главы — см.
+    /// ChapterPagesData. nil у офлайн (скачанных) глав — там своего ответа
+    /// сервера нет (см. ReaderViewModel.load/fetchSegment, ветка localFiles).
+    let teams: [ChapterTeam]
+    let likesCount: Int?
+    let isLiked: Bool?
+    let translationRating: TranslationRating?
 }
 
 /// Одна страница главы. `url` — относительный путь, дополняется базовым URL сервера картинок.
@@ -1575,6 +2774,29 @@ enum NotificationReadFilter: String, CaseIterable, Identifiable {
         case .unread: return "Непрочитанные"
         case .read: return "Прочитанные"
         case .all: return "Все"
+        }
+    }
+}
+
+/// `notification_type` для GET /notifications — "all" и "chapter"
+/// ПОДТВЕРЖДЕНЫ перехватом прямо в URL (proxypin, 2026-08-26). Остальные
+/// значения — та же таксономия категорий, что уже подтверждена на
+/// /notifications/count (см. NotificationCategoryCounts: chapter_player/
+/// episode/comments/message/card/other) — по аналогии по тому же ресурсу,
+/// не перехвачены отдельно как значения ИМЕННО этого параметра.
+enum NotificationTypeFilter: String, CaseIterable, Identifiable {
+    case all, chapter, chapter_player, episode, comments, message, card, other
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: return "Все"
+        case .chapter: return "Главы"
+        case .chapter_player: return "Плеер"
+        case .episode: return "Эпизоды"
+        case .comments: return "Ответы"
+        case .message: return "Личка"
+        case .card: return "Карточки"
+        case .other: return "Другое"
         }
     }
 }
@@ -1777,5 +2999,345 @@ struct NotificationCategoryCounts: Decodable {
     enum CodingKeys: String, CodingKey {
         case all, chapter, episode, comments, message, card, other
         case chapterPlayer = "chapter_player"
+    }
+}
+
+// MARK: - Главная / вкладка «Читают» (см. HomeView/HomeViewModel)
+
+/// «Сейчас читают» — три вкладки (виджет главной И полноэкранный список, см.
+/// MangaNetworkService.fetchTopViews/fetchTopViewsList). Заголовки и
+/// нумерация ("popularity"=1/2/3) — ТЕПЕРЬ ПОДТВЕРЖДЕНЫ перехватом
+/// полноэкранного списка: активная вкладка на скриншоте — "Новинки", и
+/// popularity=1 первым элементом даёт РОВНО тот же тайтл (id 267876, те же
+/// views), что показан на скриншоте под ней — однозначное совпадение, не
+/// догадка. "Набирающие популярность"/"Популярное" (2/3) — порядок вкладок
+/// тот же, что на скриншоте, тексты по нему же (третья вкладка на
+/// скриншоте не видна — перекрыта раскрытым списком сортировки).
+enum TopViewsSort: String, CaseIterable, Identifiable {
+    case newest, rising, popular
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .newest:  return "Новинки"
+        case .rising:  return "Набирающие популярность"
+        case .popular: return "Популярное"
+        }
+    }
+
+    /// Значение параметра `popularity` (полноэкранный список) И ключ группы
+    /// в `TopViewsPayload.items` ("1"/"2"/"3", виджет главной) — один и тот
+    /// же номер вкладки в обоих режимах одного эндпоинта (см.
+    /// MangaNetworkService.fetchTopViews/fetchTopViewsList).
+    var groupKey: String {
+        switch self {
+        case .newest:  return "1"
+        case .rising:  return "2"
+        case .popular: return "3"
+        }
+    }
+}
+
+/// Ответ `GET /media/top-views?time=` — ПОДТВЕРЖДЕНО реальным перехватом
+/// (пользователь прислал два полных тела ответа, time=week и time=month,
+/// оба 200): один запрос сразу возвращает все три категории, сгруппированные
+/// под items."1"/"2"/"3" (см. TopViewsSort.groupKey) — НЕ плоский список с
+/// пагинацией, как предполагалось раньше по обрывочному перехвату из первого
+/// файла (там же "page"/"popularity" тоже, судя по всему, относились к
+/// другому/устаревшему поведению этого эндпоинта). `page`/`sort_by` в
+/// подтверждённых 200-ответах не участвуют вообще.
+struct TopViewsPayload: Decodable {
+    let timeFilter: String?
+    let items: [String: [TopViewEntry]]?
+
+    enum CodingKeys: String, CodingKey {
+        case timeFilter = "time_filter"
+        case items
+    }
+}
+
+struct TopViewEntry: Decodable {
+    let views: Int
+    let media: MangaItem
+}
+
+/// Период для "Сейчас читают". Значение "day" и имя параметра "time" (см.
+/// MangaNetworkService.fetchTopViews) — ПОДТВЕРЖДЕНЫ реальным 422-ответом
+/// сервера при запросе без него; "week"/"month" — по аналогии с подписями на
+/// скриншоте (За день/За неделю/За месяц), сами эти два значения не
+/// перехвачены ни разу.
+enum TopViewsPeriod: String, CaseIterable, Identifiable {
+    case day, week, month
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .day:   return "За день"
+        case .week:  return "За неделю"
+        case .month: return "За месяц"
+        }
+    }
+}
+
+/// Подборка ("коллекция") — ПОДТВЕРЖДЕНО реальным перехватом (агрегат
+/// главной страницы, а также отдельным `GET /collections?limit=&page=&
+/// sort_by=newest` — proxypin, 2026-08-26, без user_id — общая лента
+/// коллекций сайта). `previews` — до трёх обложек тайтлов внутри подборки,
+/// та же форма, что MangaCover.
+/// Не Hashable: MangaCover (см. previews ниже) сам не Hashable, а нигде в
+/// HomeView коллекции не кладутся в Set/используются как значение таба —
+/// хватает Identifiable для ForEach.
+struct MangaCollection: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let views: Int?
+    let favoritesCount: Int?
+    let itemsCount: Int?
+    /// Комментариев к коллекции — ПОДТВЕРЖДЕНО перехватом (comments_count).
+    let commentsCount: Int?
+    /// 18+-пометка коллекции — ПОДТВЕРЖДЕНО перехватом (adult).
+    let adult: Bool?
+    let votes: MangaCollectionVotes?
+    let previews: [MangaCover]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, views, previews, votes, adult
+        case favoritesCount = "favorites_count"
+        case itemsCount = "items_count"
+        case commentsCount = "comments_count"
+    }
+}
+
+struct MangaCollectionVotes: Decodable, Hashable {
+    let up: Int
+    let down: Int
+}
+
+// MARK: - Детали коллекции (GET /collections/{id})
+
+/// Полная страница коллекции — ПОДТВЕРЖДЕНО реальным перехватом (proxypin,
+/// 2026-08-28): `{id, name, description:{ProseMirror}, attachments, type,
+/// views, favorites_count, items_count, comments_count, votes:{up,down,
+/// user}, user, user_id, site_id, created_at, updated_at, spoiler,
+/// interactive, adult, subscription:{is_subscribed,...}, blocks:[...]}`.
+/// `blocks` — тайтлы РАЗБИТЫ на именованные разделы (не единый список), см.
+/// CollectionBlock. `user` — автор, та же форма, что и в FriendshipEntry
+/// (переиспользуем FriendUser, лишние поля там просто игнорируются).
+struct CollectionDetail: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let description: String?
+    let user: FriendUser?
+    let isSubscribed: Bool
+    let votes: SimilarVotes?
+    let views: Int?
+    let favoritesCount: Int?
+    let itemsCount: Int?
+    let commentsCount: Int?
+    let adult: Bool?
+    let createdAt: Date?
+    let blocks: [CollectionBlock]
+
+    private struct Subscription: Decodable {
+        let isSubscribed: Bool?
+        enum CodingKeys: String, CodingKey { case isSubscribed = "is_subscribed" }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, votes, views, adult, user, blocks
+        case subscription
+        case favoritesCount = "favorites_count"
+        case itemsCount = "items_count"
+        case commentsCount = "comments_count"
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        user = (try? c.decodeIfPresent(FriendUser.self, forKey: .user)) ?? nil
+        votes = (try? c.decodeIfPresent(SimilarVotes.self, forKey: .votes)) ?? nil
+        views = (try? c.decodeIfPresent(Int.self, forKey: .views)) ?? nil
+        favoritesCount = (try? c.decodeIfPresent(Int.self, forKey: .favoritesCount)) ?? nil
+        itemsCount = (try? c.decodeIfPresent(Int.self, forKey: .itemsCount)) ?? nil
+        commentsCount = (try? c.decodeIfPresent(Int.self, forKey: .commentsCount)) ?? nil
+        adult = (try? c.decodeIfPresent(Bool.self, forKey: .adult)) ?? nil
+        let sub = (try? c.decodeIfPresent(Subscription.self, forKey: .subscription)) ?? nil
+        isSubscribed = sub?.isSubscribed ?? false
+        blocks = ((try? c.decodeIfPresent([CollectionBlock].self, forKey: .blocks)) ?? nil) ?? []
+        if let raw = ((try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? nil), !raw.isEmpty {
+            createdAt = APIISODate.parse(raw)
+        } else {
+            createdAt = nil
+        }
+
+        // ProseMirror-документ — та же логика разбора, что и у TeamDetail.
+        // description (см. её комментарий): AnyJSON.extractReadableText()
+        // сохраняет разбивку на абзацы.
+        if let generic = (try? c.decodeIfPresent(AnyJSON.self, forKey: .description)) ?? nil {
+            let t = generic.extractReadableText()
+            description = t.isEmpty ? nil : t
+        } else {
+            description = nil
+        }
+    }
+}
+
+/// Именованный раздел коллекции ("Гейши"/"Таю"/"Юдзё"/"Ойран" или "РАЗДЕЛ
+/// I..IV" — оба варианта реально встречены перехватом) — коллекция может
+/// содержать несколько таких блоков, каждый со своим списком тайтлов.
+struct CollectionBlock: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let items: [CollectionBlockItem]
+
+    enum CodingKeys: String, CodingKey {
+        case id = "uuid", name, items
+    }
+}
+
+/// Один тайтл внутри блока — ПОДТВЕРЖДЕНО перехватом для `item_type:
+/// "manga"` (related — полноценный объект в форме MangaItem). Другие
+/// item_type (например "character") перехватом не пойманы, но `related` в
+/// этой экосистеме везде использует одни и те же имена полей (id/name/
+/// slug/cover/...) — декодируем тем же MangaItem, лишние/недостающие поля
+/// не ломают декод (там всё, кроме id/name/slug, Optional). Если и это не
+/// подошло — try? отдаёт nil, и такая карточка просто не показывается,
+/// вместо падения декода всей коллекции.
+struct CollectionBlockItem: Decodable, Identifiable {
+    let id: Int
+    let itemType: String
+    let comment: String?
+    let related: MangaItem?
+
+    enum CodingKeys: String, CodingKey {
+        case itemId = "item_id", itemType = "item_type", comment, related
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .itemId)) ?? 0
+        itemType = (try? c.decodeIfPresent(String.self, forKey: .itemType)) ?? "manga"
+        comment = (try? c.decodeIfPresent(String.self, forKey: .comment)) ?? nil
+        related = (try? c.decodeIfPresent(MangaItem.self, forKey: .related)) ?? nil
+    }
+}
+
+// MARK: - Отзывы на тайтл (GET /reviews?reviewable_type=manga&reviewable_id=)
+
+/// Отзыв на тайтл — ПОДТВЕРЖДЕНО реальным перехватом (proxypin, 2026-08-26):
+/// `{id,model,title,content:{ProseMirror doc},views,comments_count,user,
+/// rating:[{label,value}],status,type,evaluation,votes:{up,down,user},
+/// metadata,site_id,created_at,updated_at}`. `content` — та же форма
+/// rich-текста, что и у описания тайтла (см. SummaryDoc).
+struct MangaReview: Decodable, Identifiable {
+    let id: Int
+    let title: String
+    let contentText: String
+    let views: Int
+    let commentsCount: Int
+    let user: FriendUser
+    let rating: [ReviewRatingEntry]
+    let votes: SimilarVotes?
+    let createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, content, views, user, rating, votes
+        case commentsCount = "comments_count"
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int.self, forKey: .id)) ?? 0
+        title = ((try? c.decodeIfPresent(String.self, forKey: .title)) ?? nil) ?? ""
+        let doc = (try? c.decodeIfPresent(SummaryDoc.self, forKey: .content)) ?? nil
+        contentText = doc?.plainText ?? ""
+        views = ((try? c.decodeIfPresent(Int.self, forKey: .views)) ?? nil) ?? 0
+        commentsCount = ((try? c.decodeIfPresent(Int.self, forKey: .commentsCount)) ?? nil) ?? 0
+        user = (try? c.decode(FriendUser.self, forKey: .user)) ?? FriendUser(id: 0, username: "", avatarURL: nil)
+        rating = ((try? c.decodeIfPresent([ReviewRatingEntry].self, forKey: .rating)) ?? nil) ?? []
+        votes = (try? c.decodeIfPresent(SimilarVotes.self, forKey: .votes)) ?? nil
+        if let raw = ((try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? nil), !raw.isEmpty {
+            createdAt = APIISODate.parse(raw)
+        } else {
+            createdAt = nil
+        }
+    }
+}
+
+struct ReviewRatingEntry: Decodable, Identifiable, Hashable {
+    let label: String
+    let value: Int
+    var id: String { label }
+}
+
+/// Участник «Топ активных недели» — ПОДТВЕРЖДЕНО реальным перехватом (тот же
+/// агрегат главной, что и MangaCollection выше — см. ту же оговорку про
+/// неподтверждённый отдельный путь).
+struct TopActiveUser: Decodable, Identifiable, Hashable {
+    let id: Int
+    let username: String
+    let avatarURL: URL?
+    let pointsInfo: TopActiveUserPoints?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, username, avatar, pointsInfo = "points_info"
+    }
+    private enum AvatarKeys: String, CodingKey { case url }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        username = ((try? c.decodeIfPresent(String.self, forKey: .username)) ?? nil) ?? ""
+        pointsInfo = (try? c.decodeIfPresent(TopActiveUserPoints.self, forKey: .pointsInfo)) ?? nil
+        if let avatarC = try? c.nestedContainer(keyedBy: AvatarKeys.self, forKey: .avatar) {
+            let urlString = (try? avatarC.decodeIfPresent(String.self, forKey: .url)) ?? nil
+            avatarURL = urlString.flatMap(URL.init(string:))
+        } else {
+            avatarURL = nil
+        }
+    }
+}
+
+struct TopActiveUserPoints: Decodable, Hashable {
+    let level: Int
+    let maxLevelPoints: Int
+    let currentLevelPoints: Int
+
+    enum CodingKeys: String, CodingKey {
+        case level
+        case maxLevelPoints = "max_level_points"
+        case currentLevelPoints = "current_level_points"
+    }
+}
+
+/// Полезная нагрузка агрегата главной страницы — из ВСЕГО перехваченного
+/// дампа (popular/collections/reviews/newest/latest_updates/currently_views/
+/// weekly_top_users/weekly_top_views_users/news/forum/slider) сюда взяты
+/// collections, weeklyTopUsers И popular (см. HomeView.popularSection —
+/// раздел "Обновление популярных тайтлов", ключ был в дампе с самого
+/// начала, просто раньше нигде не декодировался): остальное либо уже
+/// покрыто другими, подтверждёнными эндпоинтами (newest/latest_updates —
+/// см. fetchCatalog(sort:.added/.updated)), либо не нужно для экрана
+/// «Читают» (reviews/news/forum/slider). JSONDecoder тихо игнорирует
+/// лишние ключи верхнего уровня, которых нет в CodingKeys — остальные
+/// секции агрегата не мешают декодированию. `popular` — те же элементы
+/// формы MangaItem, что и `newest` (metadata.last_item, см. MangaItemMetadata) —
+/// "Глава X" на карточке означает ровно то же самое, что и в «Новинках»:
+/// номер последней главы тайтла, а не какой-то отдельный "ранг популярности".
+///
+/// ВАЖНО: путь самого этого эндпоинта НЕ ПОДТВЕРЖДЁН — см.
+/// MangaNetworkService.fetchHomeWidgets.
+struct HomeWidgetsPayload: Decodable {
+    let collections: [MangaCollection]?
+    let weeklyTopUsers: [TopActiveUser]?
+    let popular: [MangaItem]?
+
+    enum CodingKeys: String, CodingKey {
+        case collections
+        case weeklyTopUsers = "weekly_top_users"
+        case popular
     }
 }

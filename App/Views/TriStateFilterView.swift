@@ -1,5 +1,15 @@
 import SwiftUI
 
+extension Binding where Value == Bool {
+    /// Оборачивает non-optional Binding<Bool> в Binding<Bool?> — нужен, чтобы
+    /// прокидывать реальные (не спец-фильтровые) genresStrict/tagsStrict из
+    /// MangaFilter в TriStateFilterView.strict, у которого теперь optional-тип
+    /// (см. TriStateFilterView.strict).
+    var toOptional: Binding<Bool?> {
+        Binding<Bool?>(get: { self.wrappedValue }, set: { self.wrappedValue = $0 ?? false })
+    }
+}
+
 /// Экран трёхпозиционного выбора (Жанры / Теги).
 /// Каждый элемент циклически переключается: нейтрально → включить → исключить.
 struct TriStateFilterView: View {
@@ -8,13 +18,21 @@ struct TriStateFilterView: View {
     let options: [FilterOption]
 
     @Binding var selection: TriStateSelection
-    @Binding var strict: Bool
+    /// nil — экран используется вне обычного MangaFilter (например «Спец
+    /// фильтр» в настройках, см. SpecialFilterSettingsView), где отдельного
+    /// серверного параметра "строгое совпадение" нет и сам тумблер только
+    /// сбивал бы с толку — тогда строка тумблера просто не показывается.
+    @Binding var strict: Bool?
 
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var search = ""
+    /// Фокус поля поиска — показывает иконку "свернуть клавиатуру" слева от
+    /// легенды Включить/Исключить в подвале (см. footer), пока клавиатура
+    /// открыта; тап по иконке снимает фокус и убирает её саму.
+    @FocusState private var searchFocused: Bool
 
-    init(title: String, options: [FilterOption], selection: Binding<TriStateSelection>, strict: Binding<Bool>) {
+    init(title: String, options: [FilterOption], selection: Binding<TriStateSelection>, strict: Binding<Bool?> = .constant(nil)) {
         self.title = title
         self.options = options
         _selection = selection
@@ -53,6 +71,7 @@ struct TriStateFilterView: View {
                 TextField("", text: $search,
                           prompt: Text("Поиск по названию").foregroundColor(Theme.textSecondary))
                     .foregroundStyle(Theme.textPrimary)
+                    .focused($searchFocused)
                 if !search.isEmpty {
                     Button { search = "" } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary)
@@ -64,12 +83,14 @@ struct TriStateFilterView: View {
             .background(Theme.surfaceElevated, in: Capsule())
 
             HStack {
-                Toggle(isOn: $strict) {
-                    Text("Строгое совпадение")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textPrimary)
+                if let strictBinding = Binding($strict) {
+                    Toggle(isOn: strictBinding) {
+                        Text("Строгое совпадение")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.textPrimary)
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
                 }
-                .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
 
                 Spacer(minLength: 16)
 
@@ -103,12 +124,15 @@ struct TriStateFilterView: View {
                     .buttonStyle(.plain)
 
                     if index < filtered.count - 1 {
-                        Divider().overlay(Theme.separator).padding(.leading, 16)
+                        // 12 (padding строки) + 24 (ширина чекбокса, см. triBox) +
+                        // 12 (spacing до текста) — разделитель начинается ровно
+                        // там же, где текст, и не заходит под чекбокс.
+                        Divider().overlay(Theme.separator).padding(.leading, 12 + 24 + 12)
                     }
                 }
             }
             .padding(8)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
@@ -125,42 +149,49 @@ struct TriStateFilterView: View {
         }
         .padding(.horizontal, 12)
         .frame(minHeight: 44)
-        .background(fillColor(for: state), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(Rectangle())
-    }
-
-    /// Лёгкая цветная заливка строки в зависимости от трёхпозиционного состояния
-    /// (без собственного стекла — состояние подсвечивается на общей подложке списка).
-    private func fillColor(for state: TriState) -> Color {
-        switch state {
-        case .neutral: return .clear
-        case .include: return Color.green.opacity(0.18)
-        case .exclude: return Color.red.opacity(0.16)
-        }
     }
 
     @ViewBuilder
     private func triBox(_ state: TriState) -> some View {
-        switch state {
-        case .neutral:
-            Image(systemName: "square")
-                .font(.title3)
-                .foregroundStyle(Theme.textSecondary)
-        case .include:
-            Image(systemName: "plus.square.fill")
-                .font(.title3)
-                .foregroundStyle(.green)
-        case .exclude:
-            Image(systemName: "minus.square.fill")
-                .font(.title3)
-                .foregroundStyle(.red)
+        Group {
+            switch state {
+            case .neutral:
+                Image(systemName: "square")
+                    .foregroundStyle(Theme.textSecondary)
+            case .include:
+                Image(systemName: "plus.square.fill")
+                    .foregroundStyle(.green)
+            case .exclude:
+                Image(systemName: "minus.square.fill")
+                    .foregroundStyle(.red)
+            }
         }
+        .font(.title3)
+        .frame(width: 24)
     }
 
     // MARK: Подвал
 
     private var footer: some View {
         HStack {
+            // Иконка "свернуть клавиатуру" — показывается только пока
+            // реально открыта (поиск в фокусе), слева от легенды
+            // Включить/Исключить; тап по ней снимает фокус, сама иконка
+            // тут же пропадает вместе с клавиатурой.
+            if searchFocused {
+                Button {
+                    searchFocused = false
+                } label: {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.title3)
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 4)
+            }
+
             legend(color: .green, text: "Включить")
             legend(color: .red, text: "Исключить")
             Spacer()
@@ -182,7 +213,7 @@ struct TriStateFilterView: View {
 
     private func legend(color: Color, text: String) -> some View {
         HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 9, height: 9)
+            Circle().fill(color).frame(width: 13, height: 13)
             Text(text).font(.caption2).foregroundStyle(Theme.textSecondary)
         }
     }
@@ -193,8 +224,7 @@ struct TriStateFilterView: View {
         TriStateFilterView(
             title: "Жанры",
             options: FilterCatalog.genres,
-            selection: .constant(TriStateSelection()),
-            strict: .constant(false)
+            selection: .constant(TriStateSelection())
         )
     }
     .preferredColorScheme(.dark)

@@ -23,20 +23,23 @@ jobs:
           xcodebuild -version
 
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: brew install xcodegen cocoapods
 
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: List Xcode project targets and schemes
-        run: xcodebuild -list -project MangaLib.xcodeproj
+      - name: Install on-device ML Kit dependencies
+        run: pod install --repo-update
+
+      - name: List Xcode workspace targets and schemes
+        run: xcodebuild -list -workspace MangaLib.xcworkspace
 
       - name: Build for device (unsigned)
         run: |
           set -euo pipefail
           mkdir -p build
           xcodebuild \
-            -project MangaLib.xcodeproj \
+            -workspace MangaLib.xcworkspace \
             -scheme MangaLib \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
@@ -116,8 +119,18 @@ jobs:
           ls -la build/MangaLib.ipa
           unzip -l build/MangaLib.ipa | head -20
 
+      - name: Upload MangaLib.ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangaLib-ipa
+          path: build/MangaLib.ipa
+          if-no-files-found: error
+
       - name: Publish/update "latest" release
-        if: github.event_name != 'pull_request'
+        # Always publish for push/workflow_dispatch. For pull requests,
+        # publish only when the head belongs to this repository so an
+        # untrusted fork cannot replace the public latest release.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest

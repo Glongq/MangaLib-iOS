@@ -23,7 +23,9 @@ import SwiftUI
 /// сворачивание при скролле и т.п. рисует сама система, ровно по HIG.
 struct RootView: View {
 
-    @State private var tab = 1 // Каталог выбран по умолчанию
+    // «Читают» (см. HomeView) теперь открывается первой — по требованию:
+    // "По дефолту оно будет теперь открываться первым при заходе".
+    @State private var tab = 2
     @State private var showLogin = false
     @State private var showAccount = false
     @State private var stubRequest: StubRequest?
@@ -46,9 +48,9 @@ struct RootView: View {
             Tab("Каталог", systemImage: "magnifyingglass", value: 1) {
                 MangaCatalogView()
             }
-            // Заглушка — раздел в разработке (см. StubView).
+            // Главная лента приложения (см. HomeView) — открывается первой.
             Tab("Читают", systemImage: "book", value: 2) {
-                NavigationStack { StubView(title: "Читают") }
+                HomeView()
             }
             Tab("Новое", systemImage: "bell", value: 3) {
                 NotificationsView()
@@ -66,12 +68,15 @@ struct RootView: View {
                 )
             }
         }
-        // По умолчанию (.automatic) iOS 26 сворачивает панель при скролле
-        // контента в маленькую капсулу с ОДНОЙ активной вкладкой, прижатую к
-        // левому краю (см. `tabBarMinimizeBehavior` в HIG/WWDC25) — из-за
-        // этого любая вкладка при скролле "съезжала" влево вместо центра.
-        // .never держит панель всегда полностью развёрнутой, все 5 вкладок
-        // равномерно по центру.
+        // Пробовали .automatic как эксперимент против раздутого отступа под
+        // .large (гипотеза: .never мешает заголовку схлопываться) —
+        // подтверждено на устройстве, что отступ в покое не изменился,
+        // пользы ноль. Возвращено на .never: по умолчанию (.automatic) iOS
+        // 26 сворачивает панель при скролле контента в маленькую капсулу с
+        // ОДНОЙ активной вкладкой, прижатую к левому краю (см.
+        // `tabBarMinimizeBehavior` в HIG/WWDC25) — из-за этого любая вкладка
+        // при скролле "съезжала" влево вместо центра. .never держит панель
+        // всегда полностью развёрнутой, все 5 вкладок равномерно по центру.
         .tabBarMinimizeBehavior(.never)
         // Тост сверху: выезжает вниз из-под верхней кромки и уезжает обратно
         // вверх (transition .move(edge: .top)). Полупрозрачная стеклянная

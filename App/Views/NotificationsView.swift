@@ -12,43 +12,74 @@ import SwiftUI
 struct NotificationsView: View {
     @StateObject private var viewModel = NotificationsViewModel()
     @ObservedObject private var themeManager = ThemeManager.shared
+    /// «Другие сайты» (hitomi.la и далее) — см. App/ExternalSites/.
+    @ObservedObject private var externalSiteSession = ExternalSiteSession.shared
     @Environment(\.scenePhase) private var scenePhase
 
-    // Схлопывание шапки при скролле — тот же механизм, что в Каталоге/
-    // Закладках: вниз — заголовок "Уведомления" и кнопка сортировки прячутся;
-    // вверх (хоть чуть-чуть) — возвращаются.
+    // Схлопывание строки категорий при скролле вниз (вверх — хоть чуть-чуть
+    // — возвращается). Заголовок теперь родной .navigationTitle/.large (см.
+    // body) — как в Каталоге/Закладках — его эта логика больше не касается.
     @State private var headerCollapsed = false
     @State private var lastScrollOffset: CGFloat = 0
     @State private var isHeaderAnimating = false
+
+    /// "Настройки" в "..." — реальный экран (см. NotificationSettingsView),
+    /// собран по прямой просьбе после скриншота реального сайта — оба
+    /// эндпоинта (`GET/PUT /user/settings/notifications` и `PUT /bookmarks/
+    /// folder/notifications`) ПОДТВЕРЖДЕНЫ перехватом, подробности — в
+    /// комментариях самого NotificationSettingsView/NotificationSettings.
+    @State private var showSettings = false
+    /// Подтверждение перед "Удалить все уведомления" — сам эндпоинт
+    /// РЕАЛИЗОВАН (см. deleteAllTapped/NotificationsViewModel.
+    /// deleteAllInCurrentFilter) — диалог остаётся, т.к. действие
+    /// деструктивное и необратимое.
+    @State private var showDeleteAllConfirm = false
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Theme.background.ignoresSafeArea()
                 content
-                    .safeAreaInset(edge: .top, spacing: 0) { header }
             }
-            .toolbar(.hidden, for: .navigationBar)
+            // App Store-эталон (см. тот же приём в MangaCatalogView/
+            // BookmarksView): крупный заголовок без фона в покое, системный
+            // блюр проявляется при первом скролле, заголовок схлопывается в
+            // маленький — целиком системное поведение, доп. кода не нужно.
+            .navigationTitle("Уведомления")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                // Обе кнопки (фильтр "Все" + "...") в ОДНОЙ ToolbarItemGroup —
+                // система сама объединяет несколько элементов группы в один
+                // Liquid-Glass pill, без ручного .glassEffect (см. WWDC25
+                // Liquid Glass toolbars). Прошлая попытка (свой HStack +
+                // .glassEffect в одном ToolbarItem) давала задвоение:
+                // системный toolbar и так добавляет свой glass-фон вокруг
+                // содержимого ToolbarItem, а ручной .glassEffect накладывался
+                // вторым слоем ("призрачный" pill на скриншоте).
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    readFilterChip
+                    overflowMenu
+                }
+            }
             .navigationDestination(for: MangaItem.self) { item in
                 MangaDetailView(
                     slug: item.apiSlug, fallbackTitle: item.displayTitle,
                     coverURL: item.cover?.bestURL, item: item
                 )
             }
-            // Кнопка сортировки — снизу слева, над главной панелью. ВНУТРИ
-            // NavigationStack (на корневом контенте) — иначе она остаётся на
-            // экране поверх любого пуша (карточки тайтла из уведомления),
-            // потому что технически была бы соседом стека, а не частью его
-            // корневого экрана.
+            // Строка категорий — снизу, над главной панелью (была одна
+            // круглая кнопка-меню, теперь горизонтальная полоска чипов, как
+            // в Закладках — по прямой просьбе, "вместо того чтобы тянуть
+            // это всё в одну кнопку"). ВНУТРИ NavigationStack (на корневом
+            // контенте) — иначе она остаётся на экране поверх любого пуша
+            // (карточки тайтла из уведомления), потому что технически была
+            // бы соседом стека, а не частью его корневого экрана.
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !headerCollapsed {
-                    HStack {
-                        filterButton
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
-                    .transition(.blurFade)
+                    typeFilterRow
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
+                        .transition(.blurFade)
                 }
             }
         }
@@ -59,24 +90,21 @@ struct NotificationsView: View {
                 Task { await viewModel.refresh() }
             }
         }
+        .sheet(isPresented: $showSettings) {
+            NavigationStack { NotificationSettingsView() }
+        }
+        .alert("Удалить уведомления?", isPresented: $showDeleteAllConfirm) {
+            Button("Отмена", role: .cancel) {}
+            Button("Удалить", role: .destructive) { deleteAllTapped() }
+        } message: {
+            // Удаление реально ограничено текущей категорией и вкладкой
+            // прочитанности (см. deleteAllTapped) — так же ведёт себя и
+            // сам сайт, поэтому явно уточняем, а не "все уведомления".
+            Text("Будут удалены уведомления категории «\(viewModel.typeFilter.title)» (\(viewModel.readFilter.title.lowercased())). Действие необратимо.")
+        }
     }
 
     // MARK: Шапка
-
-    @ViewBuilder
-    private var header: some View {
-        // Заголовок крупнее (title3 20 → ×1.2 → ×1.2 ≈ 29pt) и прижат влево-вверх.
-        if !headerCollapsed {
-            Text("Уведомления")
-                .font(.system(size: 29, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 10)
-                .transition(.blurFade)
-        }
-    }
 
     private func setHeaderCollapsed(_ value: Bool) {
         guard headerCollapsed != value else { return }
@@ -85,13 +113,11 @@ struct NotificationsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isHeaderAnimating = false }
     }
 
-    /// Круглая кнопка сортировки/фильтра — раньше открывала
-    /// NotificationFilterSheet (шторка снизу), теперь обычное системное
-    /// глассовое `Menu` (тот же приём, что и Сортировка в Каталоге/
-    /// Комментариях) — не отдельный экран, а нативный поповер.
-    /// Бейдж — реальное число из GET /notifications/count (unread.all), не
-    /// посчитано на клиенте.
-    private var filterButton: some View {
+    /// Чип "Все"/"Непрочитанные"/"Прочитанные" (текущий readFilter) — тап
+    /// открывает меню с прочитанностью и, ниже, порядком сортировки
+    /// (сначала новые/старые). Бейдж — реальное число из
+    /// GET /notifications/count (unread.all), не посчитано на клиенте.
+    private var readFilterChip: some View {
         Menu {
             Picker("Прочитанность", selection: $viewModel.readFilter) {
                 ForEach(NotificationReadFilter.allCases) { option in
@@ -108,10 +134,22 @@ struct NotificationsView: View {
             .pickerStyle(.inline)
         } label: {
             ZStack(alignment: .topTrailing) {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: Theme.pillControlHeight, height: Theme.pillControlHeight)
+                // Отступ текста ("Непрочитанные"/...) от шеврона уменьшен —
+                // было 4, по прямой просьбе. Правый (внешний) паддинг тоже
+                // срезан — асимметрично, чтобы сократить именно видимое
+                // расстояние ДО "..." справа в этой же ToolbarItemGroup, не
+                // трогая левый край чипа.
+                HStack(spacing: 2) {
+                    Text(viewModel.readFilter.title)
+                        .font(.subheadline.weight(.medium))
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.leading, 14)
+                // Ещё чуть сократил (было 8) — по прямой повторной просьбе.
+                .padding(.trailing, 4)
+                .frame(height: Theme.pillControlHeight)
 
                 if let unread = viewModel.counts?.unread.all, unread > 0 {
                     Text(unread > 99 ? "99+" : "\(unread)")
@@ -120,18 +158,115 @@ struct NotificationsView: View {
                         .padding(.horizontal, 5)
                         .frame(minWidth: 16, minHeight: 16)
                         .background(Theme.accent, in: Capsule())
+                        // Без этого бейдж рендерится ВНУТРИ системного
+                        // Liquid-Glass слоя ToolbarItemGroup и частично
+                        // просвечивает (тот же приём, что уже спасал от
+                        // похожей ситуации в MangaDetailView) — сплющивает
+                        // подложку+цифру в один непрозрачный слой ДО того,
+                        // как toolbar применит своё стекло/вибрантность.
+                        .compositingGroup()
                         .offset(x: 6, y: -4)
                 }
             }
         }
-        .glassEffect(.regular.interactive(), in: Circle())
+    }
+
+    /// "..." — Настройки (см. NotificationSettingsView)/Отметить всё
+    /// прочитанным/Удалить все уведомления (красным).
+    private var overflowMenu: some View {
+        Menu {
+            Button { showSettings = true } label: {
+                Label("Настройки", systemImage: "gearshape")
+            }
+            Button { markAllReadTapped() } label: {
+                Label("Отметить всё прочитанным", systemImage: "checkmark.circle")
+            }
+            Button(role: .destructive) { showDeleteAllConfirm = true } label: {
+                Label("Удалить все уведомления", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: Theme.pillControlHeight, height: Theme.pillControlHeight)
+        }
+    }
+
+    /// "Отметить всё прочитанным" — ПОДТВЕРЖДЕНО реальным перехватом (см.
+    /// NotificationsViewModel.markAllRead/MangaNetworkService.
+    /// markAllNotificationsRead).
+    private func markAllReadTapped() {
+        Task {
+            do {
+                try await viewModel.markAllRead()
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                DownloadsManager.shared.showBanner(message)
+            }
+        }
+    }
+
+    /// См. showDeleteAllConfirm — ПОДТВЕРЖДЕНО реальным перехватом (см.
+    /// NotificationsViewModel.deleteAllInCurrentFilter/MangaNetworkService.
+    /// deleteAllNotifications) — удаляет в рамках текущей выбранной
+    /// категории и вкладки прочитанности, а не буквально все уведомления
+    /// аккаунта разом (так же ведёт себя и сам сайт).
+    private func deleteAllTapped() {
+        Task {
+            do {
+                try await viewModel.deleteAllInCurrentFilter()
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                DownloadsManager.shared.showBanner(message)
+            }
+        }
+    }
+
+    /// Строка категорий (было "Категория" внутри общего меню-кнопки —
+    /// теперь отдельная горизонтальная полоска чипов, тот же приём, что и
+    /// у папок в Закладках, см. BookmarksView.categoryMenu). Показаны не
+    /// ВСЕ 8 категорий taxonomy (см. NotificationTypeFilter), а отобранные
+    /// 6, которые реально попросили.
+    private static let typeFilterChips: [NotificationTypeFilter] = [.all, .chapter, .episode, .comments, .message, .other]
+
+    private var typeFilterRow: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(Self.typeFilterChips) { option in
+                    typeFilterChip(option)
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func typeFilterChip(_ option: NotificationTypeFilter) -> some View {
+        let active = viewModel.typeFilter == option
+        return Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { viewModel.typeFilter = option }
+        } label: {
+            Text(option.title)
+                .font(.subheadline.weight(active ? .semibold : .regular))
+                .foregroundStyle(active ? Theme.background : Theme.textPrimary)
+                .padding(.horizontal, 14)
+                .frame(minHeight: Theme.pillControlHeight)
+                .contentShape(Capsule())
+                // Тот же рецепт активного/обычного стекла, что и у чипов
+                // папок в Закладках (см. BookmarksView.categoryChip).
+                .glassEffect(active ? .regular.tint(Theme.accent).interactive() : .regular.interactive(), in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Контент
 
     @ViewBuilder
     private var content: some View {
-        if let error = viewModel.errorMessage, viewModel.items.isEmpty {
+        // Добавочная ветка (см. план внешних сайтов) — у hitomi.la и
+        // подобных нет аккаунтов, значит нет и уведомлений.
+        if externalSiteSession.isExternalModeActive {
+            ExternalScreenContent(site: externalSiteSession.activeExternalSite, featureTitle: "Новое")
+        } else if let error = viewModel.errorMessage, viewModel.items.isEmpty {
             errorState(error)
         } else if viewModel.items.isEmpty && viewModel.isLoading {
             ProgressView().tint(Theme.accent).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -153,8 +288,14 @@ struct NotificationsView: View {
                         }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
+            // Тот же эталон отступа от углов, что и в Закладках/Истории (см.
+            // BookmarksView.titlesList/HistoryView.list) — по прямой просьбе
+            // выровнять. Компенсация за отсутствующую строку поиска (была
+            // здесь как +56 к top) — убрана: на устройстве оказалась
+            // избыточной, роняла контент заметно ниже, чем в Закладках/
+            // Каталоге, а не выравнивала с ними.
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
             // Запас снизу — чтобы последняя карточка не оказалась под
             // кнопкой сортировки/главной панелью (тот же приём, что и в
             // Закладках, см. комментарий там: 90→120).
@@ -181,44 +322,40 @@ struct NotificationsView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView(
-            viewModel.readFilter == .unread ? "Нет новых уведомлений" : "Уведомлений нет",
-            systemImage: "bell",
-            description: Text("Здесь появятся новые главы, ответы и другие события.")
+        StateView(
+            icon: "bell",
+            title: viewModel.readFilter == .unread ? "Нет новых уведомлений" : "Уведомлений нет",
+            description: "Здесь появятся новые главы, ответы и другие события.",
+            fillScreen: true
         )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func errorState(_ message: String) -> some View {
-        VStack(spacing: 10) {
-            Text(message).font(.footnote).foregroundStyle(Theme.textSecondary)
-            Button {
-                Task { await viewModel.refresh() }
-            } label: {
-                Label("Повторить", systemImage: "arrow.clockwise")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: message, retry: { Task { await viewModel.refresh() } }, fillScreen: true)
     }
 
     // MARK: Строка уведомления
 
+    /// Размер подложки/обложки — тот же, что и в Закладках (см.
+    /// BookmarksView.bookmarkCoverWidth/Height, единый источник, чтобы не
+    /// разъехались) — по прямой просьбе "сделать таким же, как в закладках".
+    /// Структура текста (3 строки: текст/команды/дата) не менялась —
+    /// изменилось только выравнивание: HStack без alignment: .top (был
+    /// прижат к верху) — теперь центрируется по высоте подложки, как и
+    /// попросили ("выравнивание высоты к центру подложки").
     @ViewBuilder
     private func row(_ item: NotificationItem) -> some View {
-        let core = HStack(alignment: .top, spacing: 12) {
+        let core = HStack(spacing: 12) {
             RemoteImage(url: item.media?.cover?.bestURL) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surfaceElevated)
+                SkeletonBox()
             } failure: {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surfaceElevated)
-                    .overlay(Image(systemName: "bell.fill").foregroundStyle(Theme.textSecondary))
+                ZStack { Theme.surfaceElevated; Image(systemName: "bell.fill").foregroundStyle(Theme.textSecondary) }
             }
-            // Тот же размер обложки, что и в Истории (60×84) — единый вид карточек списка.
-            .frame(width: 60, height: 84)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .frame(width: BookmarksView.bookmarkCoverWidth, height: BookmarksView.bookmarkCoverHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipped()
 
             VStack(alignment: .leading, spacing: 4) {
                 // maxWidth: .infinity — иначе Text меряет себя по идеальной
@@ -245,7 +382,8 @@ struct NotificationsView: View {
                     .foregroundStyle(Theme.textSecondary)
             }
         }
-        .padding(12)
+        .padding(.trailing, 12)
+        .frame(height: BookmarksView.bookmarkCoverHeight)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
         if let media = item.media {

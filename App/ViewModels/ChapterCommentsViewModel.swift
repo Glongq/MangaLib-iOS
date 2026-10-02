@@ -18,12 +18,17 @@ final class ChapterCommentsViewModel: ObservableObject {
     private var page = 1
     private(set) var chapterId = 0
     private(set) var postPage = 1
+    /// Сайт тайтла главы — см. MangaNetworkService.fetchComments(siteId:).
+    private var siteId: Int?
 
     private var sortType: String { sort == .old ? "asc" : "desc" }
     private var sortBy: String { sort == .popular ? "votes_up" : "id" }
 
-    /// Задать главу/страницу. Если сменились — сбрасываем, чтобы перезагрузить.
-    func configure(chapterId: Int, postPage: Int) {
+    /// Задать главу/страницу/сайт. Если глава/страница сменились —
+    /// сбрасываем, чтобы перезагрузить (siteId обновляется в любом случае,
+    /// молча — он не должен сам по себе триггерить перезагрузку).
+    func configure(chapterId: Int, postPage: Int, siteId: Int?) {
+        self.siteId = siteId
         guard chapterId != self.chapterId || postPage != self.postPage else { return }
         self.chapterId = chapterId
         self.postPage = postPage
@@ -43,7 +48,7 @@ final class ChapterCommentsViewModel: ObservableObject {
         do {
             let r = try await service.fetchComments(
                 postId: chapterId, postType: "chapter", postPage: postPage,
-                sortBy: sortBy, sortType: sortType, page: 1
+                sortBy: sortBy, sortType: sortType, page: 1, siteId: siteId
             )
             comments = r.comments
             hasMore = r.hasNextPage
@@ -68,7 +73,7 @@ final class ChapterCommentsViewModel: ObservableObject {
         do {
             let r = try await service.fetchComments(
                 postId: chapterId, postType: "chapter", postPage: postPage,
-                sortBy: sortBy, sortType: sortType, page: next
+                sortBy: sortBy, sortType: sortType, page: next, siteId: siteId
             )
             comments.append(contentsOf: r.comments)
             hasMore = r.hasNextPage
@@ -86,7 +91,8 @@ final class ChapterCommentsViewModel: ObservableObject {
         do {
             let created = try await service.postComment(
                 postId: chapterId, postType: "chapter", postPage: postPage,
-                text: t, commentLevel: level, parentComment: replyingTo?.id
+                text: t, commentLevel: level, parentComment: replyingTo?.id,
+                siteId: siteId
             )
             comments.insert(created, at: 0)
             isPosting = false
@@ -103,7 +109,7 @@ final class ChapterCommentsViewModel: ObservableObject {
         guard AuthSession.shared.isLoggedIn,
               let idx = comments.firstIndex(where: { $0.id == comment.id }) else { return false }
         do {
-            let v = try await service.voteComment(id: comment.id, direction: isUp ? 1 : 0)
+            let v = try await service.voteComment(id: comment.id, direction: isUp ? 1 : 0, siteId: siteId)
             comments[idx].votesUp = v.up
             comments[idx].votesDown = v.down
             comments[idx].userVote = v.user

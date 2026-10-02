@@ -48,8 +48,11 @@ struct TitleNamesSheet: View {
                     Spacer(minLength: 8)
                     if showClose {
                         Button { dismiss() } label: {
+                            // 16→15 — тот же размер, что у CreditsSheet/
+                            // TeamMembersSheet/AdditionalInfoSheet и т.д.,
+                            // по прямой просьбе выровнять.
                             Image(systemName: "xmark")
-                                .font(.system(size: 16, weight: .semibold))
+                                .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(Theme.textSecondary)
                         }
                         .buttonStyle(.plain)

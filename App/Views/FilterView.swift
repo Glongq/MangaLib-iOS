@@ -69,7 +69,7 @@ struct FilterView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private func rangeRow(_ title: String, from: Binding<String>, to: Binding<String>) -> some View {
@@ -106,7 +106,7 @@ struct FilterView: View {
         VStack(spacing: 0) {
             NavigationLink {
                 TriStateFilterView(title: "Жанры", options: constants.genres,
-                                   selection: $filter.genres, strict: $filter.genresStrict)
+                                   selection: $filter.genres, strict: $filter.genresStrict.toOptional)
             } label: {
                 selectRow(title: "Жанры", selection: filter.genres)
             }
@@ -116,13 +116,13 @@ struct FilterView: View {
 
             NavigationLink {
                 TriStateFilterView(title: "Теги", options: constants.tags,
-                                   selection: $filter.tags, strict: $filter.tagsStrict)
+                                   selection: $filter.tags, strict: $filter.tagsStrict.toOptional)
             } label: {
                 selectRow(title: "Теги", selection: filter.tags)
             }
             .buttonStyle(.plain)
         }
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private func selectRow(title: String, selection: TriStateSelection) -> some View {
@@ -187,20 +187,9 @@ struct FilterView: View {
             }
             .padding(.horizontal, 10)
             .frame(minHeight: 44)
-            .background(fillColor(for: state), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    /// Лёгкая цветная заливка ячейки в зависимости от трёхпозиционного состояния
-    /// (не своё стекло — состояние подсвечивается прямо на общей подложке секции).
-    private func fillColor(for state: TriState) -> Color {
-        switch state {
-        case .neutral: return .clear
-        case .include: return Color.green.opacity(0.18)
-        case .exclude: return Color.red.opacity(0.16)
-        }
     }
 
     @ViewBuilder
@@ -218,7 +207,8 @@ struct FilterView: View {
     // MARK: Подвал
 
     // Одна общая стеклянная капсула на весь подвал; "Применить" выделяется
-    // акцентной заливкой поверх неё.
+    // акцентной заливкой поверх неё. "Сбросить" — слева, "Применить" —
+    // справа (поменяны местами по прямой просьбе).
     private var bottomBar: some View {
         HStack(spacing: 4) {
             Button {
@@ -257,7 +247,7 @@ struct FilterView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 }
 
