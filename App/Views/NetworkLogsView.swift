@@ -166,9 +166,18 @@ struct NetworkLogsView: View {
         }
         .padding(12)
         .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        // Долгое нажатие на запись (без необходимости сначала её раскрывать)
-        // — сразу скопировать именно её, как попросили. Уважает тумблер
-        // "Короткие логи" так же, как и остальные способы копирования.
+        .contentShape(Rectangle())
+        // Тап по карточке МИМО текста лога (заголовок — свой Button на
+        // схлопывание, тело лога — .textSelection(.enabled) в detailBlock,
+        // сам перехватывает тап на себе) — копирует запись целиком.
+        // Вложенные жесты (Button/textSelection) перехватывают тап раньше,
+        // чем он дойдёт досюда, поэтому конфликта с ними нет — сработает
+        // только там, где под пальцем ничего кликабельного/выделяемого нет
+        // (паддинги, подписи блоков).
+        .onTapGesture {
+            copyToClipboard(text: copyText(for: entry))
+        }
+        // Долгое нажатие — то же самое, но привычным жестом (было раньше).
         .contextMenu {
             Button {
                 copyToClipboard(text: copyText(for: entry))
@@ -178,6 +187,11 @@ struct NetworkLogsView: View {
         }
     }
 
+    /// По уточнению: именно текст ЛОГА (тело запроса/ответа/ошибки) должен
+    /// выделяться как обычный текст (драг + системное меню «Скопировать»),
+    /// а не копироваться целиком одним тапом — .textSelection(.enabled), а
+    /// не Button. Тап "мимо текста, но внутри карточки" (см. entryRow.
+    /// onTapGesture) по-прежнему копирует запись целиком.
     private func detailBlock(title: String, text: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)

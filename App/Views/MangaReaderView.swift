@@ -8,17 +8,28 @@ struct ReaderPalette {
     let isLight: Bool
     /// Фон под страницами: тёмный — чёрный, светлый — чуть серый (не чисто белый).
     var pageBackground: Color { isLight ? Color(white: 0.93) : .black }
-    /// Фон меню (главы/настройки): светлый — белый.
+    /// Фон меню (главы/настройки/комментарии).
     ///
     /// Тёмная ветка берёт цвета из Theme.Dark (ФИКСИРОВАННАЯ тёмная палитра),
     /// а не из Theme.xxx напрямую — тема читалки независима от белой/чёрной
     /// темы всего приложения (см. Theme.swift/ThemeManager), поэтому не
     /// должна меняться, если пользователь переключит тему приложения на белую.
-    var background: Color { isLight ? .white : Theme.Dark.background }
-    var foreground: Color { isLight ? Color(white: 0.12) : .white }
-    var secondary: Color { isLight ? Color(white: 0.45) : Theme.Dark.textSecondary }
-    var surface: Color { isLight ? Color(white: 0.94) : Theme.Dark.surfaceElevated }
-    var separator: Color { isLight ? Color.black.opacity(0.10) : Theme.Dark.separator }
+    ///
+    /// Светлая ветка — теперь буквально Theme.Light (было — отдельные
+    /// приблизительные серые: .white/Color(white: 0.12/0.45/0.94)/
+    /// black.opacity(0.10), на глаз чуть-чуть, "на пару тонов" отличались от
+    /// белой темы приложения) — по прямой просьбе: кнопки/поле ввода/
+    /// подложки комментариев в читалке должны выглядеть ТОЧНО как в карточке
+    /// тайтла. Независимость самого ПЕРЕКЛЮЧАТЕЛЯ темы читалки (см. doc-
+    /// comment выше про Theme.Dark) этим не нарушается — она про то, ЧТО
+    /// выбрано (свет/тьма/системная, отдельно от темы приложения), а не про
+    /// то, какие именно RGB у "светлого". pageBackground (сам холст страницы)
+    /// НЕ тронут — так и остаётся своим чуть серым, не белым, тоном.
+    var background: Color { isLight ? Theme.Light.background : Theme.Dark.background }
+    var foreground: Color { isLight ? Theme.Light.textPrimary : .white }
+    var secondary: Color { isLight ? Theme.Light.textSecondary : Theme.Dark.textSecondary }
+    var surface: Color { isLight ? Theme.Light.surfaceElevated : Theme.Dark.surfaceElevated }
+    var separator: Color { isLight ? Theme.Light.separator : Theme.Dark.separator }
 
     static func make(theme: Int, system: ColorScheme) -> ReaderPalette {
         switch theme {
@@ -46,17 +57,47 @@ private struct VerticalPagePositionKey: PreferenceKey {
     }
 }
 
+/// Команда для листа профиля (см. MangaReaderView.selectedTeam/teamsCreditChip) —
+/// облегчённая обёртка над ChapterTeam: slugURL там Optional (нужен
+/// non-optional для TeamView), .sheet(item:) нужен Identifiable.
+private struct SelectedTeam: Identifiable {
+    let id: Int
+    let slugURL: String
+    let name: String
+    let coverURL: URL?
+}
+
 /// Полноэкранная читалка: горизонтальное листание страниц, тап переключает интерфейс.
 struct MangaReaderView: View {
 
     @StateObject private var viewModel: ReaderViewModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var currentPage = 0
+    /// Тег 1 — первая РЕАЛЬНАЯ страница главы (тег 0 зарезервирован под
+    /// prevTriggerPage, см. pager/singlePageView ниже).
+    @State private var currentPage = 1
+    /// true — следующая успешно загруженная глава должна поставить
+    /// currentPage на её endPage (свайпнули НАЗАД, "Конец" прошлой главы), а
+    /// не на страницу 1 (обычный вход/переход вперёд/скачок из списка глав).
+    /// См. openPrevious()/applyLandingIfNeeded().
+    @State private var pendingLandOnEnd = false
+    /// currentIndex, для которого уже применена посадка currentPage (см.
+    /// applyLandingIfNeeded) — идемпотентность вместо расчёта "на изменение
+    /// pages.count": при переходе на главу с БЫСТРЫМ путём (уже в pageCache,
+    /// см. ReaderViewModel.goTo) новое число страниц может СЛУЧАЙНО совпасть
+    /// со старым, и тогда .onChange(of: pages.count) вообще не сработал бы —
+    /// сравнение "применяли ли уже для ЭТОГО currentIndex" работает всегда.
+    @State private var pagesAppliedForIndex: Int?
     @State private var showUI = true
     @State private var showChapters = false
     @State private var showSettings = false
     @State private var showComments = false
+    /// Команда, по чипу "Над главой работали" на экране конца главы (см.
+    /// teamsCreditChip) — открывает её профиль (TeamView) листом.
+    @State private var selectedTeam: SelectedTeam?
+    /// Лист "Оценить перевод" (см. chapterActionButtons/
+    /// TranslationRatingSheet).
+    @State private var showTranslationRating = false
     /// Индексы страниц (горизонтальный режим), для которых пользователь уже
     /// докрутил вниз до блока комментариев — сам блок ChapterCommentsSheet
     /// рендерится (и начинает грузить данные) только для них, а не для всех
@@ -189,7 +230,7 @@ struct MangaReaderView: View {
             // центру экрана (см. verticalReader/onPreferenceChange), а не
             // по первому появлению картинки.
             if !hidePageNumber, pageBubbleTotal > 0,
-               (pageMode == 1 || currentPage < viewModel.pages.count) {
+               (pageMode == 1 || (currentPage > 0 && currentPage <= viewModel.pages.count)) {
                 VStack {
                     Spacer()
                     pageBubble
@@ -226,10 +267,11 @@ struct MangaReaderView: View {
             if showComments, let ch = viewModel.currentChapter {
                 let pageNo = pageMode == 1
                     ? verticalPage
-                    : min(currentPage, max(viewModel.pages.count - 1, 0)) + 1
+                    : max(min(currentPage, viewModel.pages.count), 1)
                 ChapterCommentsSheet(
                     chapterId: ch.id,
                     postPage: pageNo,
+                    siteId: viewModel.siteId,
                     chapterNumber: ch.number,
                     onClose: { withAnimation(.easeInOut(duration: 0.25)) { showComments = false } }
                 )
@@ -252,10 +294,10 @@ struct MangaReaderView: View {
         .task {
             if pageMode == 1 {
                 await viewModel.startVertical()
-            } else {
-                if viewModel.pages.isEmpty { await viewModel.load() }
-                preloadUpcoming(from: currentPage)
+            } else if viewModel.pages.isEmpty {
+                await viewModel.load()
             }
+            applyLandingIfNeeded()
         }
         // Живое переключение режима листания.
         .onChange(of: pageMode) { _, mode in
@@ -263,31 +305,35 @@ struct MangaReaderView: View {
                 if mode == 1 {
                     await viewModel.startVertical()
                 } else {
-                    currentPage = 0
                     await viewModel.load()
                 }
+                applyLandingIfNeeded()
             }
         }
         .onChange(of: viewModel.currentIndex) { _, _ in
-            currentPage = 0
             // На новой главе заливка закладки возвращается «как была».
             withAnimation(.easeInOut(duration: 0.2)) { bookmarkFilled = false }
             // Индексы revealedCommentPages относились к pages ПРЕДЫДУЩЕЙ главы.
             revealedCommentPages.removeAll()
             endCommentsRevealed = false
             isCurrentPageZoomed = false
+            // Быстрый путь (кэш соседей/офлайн, см. ReaderViewModel.goTo) —
+            // pages уже готовы к этому моменту (goTo наполняет их СИНХРОННО,
+            // без await), можно применять посадку сразу. Сетевой путь ещё
+            // пуст — применится через onChange(pages.count) ниже.
+            applyLandingIfNeeded()
         }
         .onChange(of: currentPage) { _, page in
-            preloadUpcoming(from: page)
             isCurrentPageZoomed = false
-            // Долистали до страницы-триггера — открываем следующую главу
+            // Долистали до страницы-триггера — открываем след./прошлую главу
             // (работает и в режиме «выключить перелистывание», где листаем тапом).
-            if page == viewModel.pages.count + 1 { openNext() }
+            if page == viewModel.pages.count + 2 { openNext() }
+            else if page == 0 { openPrevious() }
         }
-        // Срабатывает и на первую загрузку страниц, и при переходе на
-        // следующую главу (goTo → load() заново наполняет pages).
-        .onChange(of: viewModel.pages.count) { _, count in
-            if count > 0 { preloadUpcoming(from: currentPage) }
+        // Подстраховка на сетевой путь (см. onChange(currentIndex) выше) —
+        // срабатывает, когда pages наконец реально наполнились.
+        .onChange(of: viewModel.pages.count) { _, _ in
+            applyLandingIfNeeded()
         }
         .sheet(isPresented: $showChapters) {
             ChapterListSheet(
@@ -296,6 +342,9 @@ struct MangaReaderView: View {
                 currentBranchId: viewModel.preferredBranchId,
                 onSelect: { index in
                     showChapters = false
+                    // Переход из списка глав — всегда на страницу 1, не на
+                    // "Конец" (см. pendingLandOnEnd/openPrevious).
+                    pendingLandOnEnd = false
                     Task {
                         if pageMode == 1 { await viewModel.goToVertical(index: index) }
                         else { await viewModel.goTo(index: index) }
@@ -318,6 +367,14 @@ struct MangaReaderView: View {
                 smoothPaging: $smoothPaging,
                 verticalGap: $verticalGap
             )
+        }
+        .sheet(item: $selectedTeam) { team in
+            NavigationStack {
+                TeamView(slugURL: team.slugURL, fallbackName: team.name, coverURL: team.coverURL)
+            }
+        }
+        .sheet(isPresented: $showTranslationRating) {
+            TranslationRatingSheet(viewModel: viewModel)
         }
         .preferredColorScheme(readerTheme == 2 ? nil : (readerIsLight ? .light : .dark))
     }
@@ -395,7 +452,7 @@ struct MangaReaderView: View {
                 LazyVStack(spacing: CGFloat(verticalGap)) {
                     ForEach(viewModel.segments) { seg in
                         ForEach(Array(seg.pages.enumerated()), id: \.offset) { pageIndex, page in
-                            VerticalPageImage(candidates: viewModel.imageURLs(for: page))
+                            VerticalPageImage(candidates: viewModel.imageURLs(for: page), width: page.width, height: page.height)
                                 .background(
                                     GeometryReader { pageGeo in
                                         Color.clear.preference(
@@ -488,12 +545,17 @@ struct MangaReaderView: View {
     }
 
     /// Одна текущая страница без пейджера (режим «выключить перелистывание»).
+    /// Схема тегов (та же, что и у pager ниже — общая currentPage): 0 —
+    /// prevTriggerPage, 1...pages.count — реальные страницы, pages.count+1 —
+    /// endPage, pages.count+2 — nextTriggerPage.
     @ViewBuilder
     private var singlePageView: some View {
-        if currentPage < viewModel.pages.count {
-            horizontalPage(index: currentPage, page: viewModel.pages[currentPage])
+        if currentPage == 0 {
+            prevTriggerPage
+        } else if currentPage <= viewModel.pages.count {
+            horizontalPage(index: currentPage - 1, page: viewModel.pages[currentPage - 1])
                 .id(currentPage)
-        } else if currentPage == viewModel.pages.count {
+        } else if currentPage == viewModel.pages.count + 1 {
             endPage
         } else {
             nextTriggerPage
@@ -507,17 +569,25 @@ struct MangaReaderView: View {
 
     private var pager: some View {
         TabView(selection: $currentPage) {
+            // Страница-триггер перехода к ПРОШЛОЙ главе — свайп дальше назад
+            // с первой страницы главы попадает сюда, а не упирается в край
+            // (см. ReaderViewModel.pageCache/prefetchNeighbors — обычно уже
+            // готова заранее, без сетевого спиннера).
+            if viewModel.hasPrevious {
+                prevTriggerPage.tag(0)
+            }
+
             ForEach(Array(viewModel.pages.enumerated()), id: \.offset) { index, page in
                 horizontalPage(index: index, page: page)
-                    .tag(index)
+                    .tag(index + 1)
             }
 
             // Страница-перелистывание в конце главы.
-            endPage.tag(viewModel.pages.count)
+            endPage.tag(viewModel.pages.count + 1)
 
             // Ещё одна страница-триггер: доведя свайп до неё, открываем следующую главу.
             if nextChapter != nil {
-                nextTriggerPage.tag(viewModel.pages.count + 1)
+                nextTriggerPage.tag(viewModel.pages.count + 2)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -533,6 +603,32 @@ struct MangaReaderView: View {
     /// см. её .task(id: postPage)) только когда докрутили ДО него — метка-
     /// маркер ниже картинки ловит .onAppear лишь при реальной прокрутке вниз,
     /// а не сразу при показе страницы.
+    ///
+    /// ВАЖНО (баг "нужно несколько раз докручивать до низа" + "после загрузки
+    /// длинной манхвы блок комментариев не в самом низу"): контейнер
+    /// ZoomableImageScrollView раньше был жёстко .frame(height: geo.size.
+    /// height) — ровно один экран, вне зависимости от реальной высоты
+    /// картинки. Для длинных манхва-страниц (fitWidth == true, картинка выше
+    /// экрана) это создавало ДВА независимых вертикальных скролла сразу:
+    /// внешний SwiftUI ScrollView (этот, раскрывающий комментарии) и
+    /// внутренний нативный UIScrollView (панорама самой картинки без зума,
+    /// см. ZoomableImageScrollView) — они конкурировали за один и тот же
+    /// жест, и на реальной высоте контейнер не совпадал с фактической
+    /// высотой контента, из-за чего позиция скролла после дозагрузки
+    /// картинки переставала соответствовать видимому. Теперь высота
+    /// контейнера СРАЗУ считается из page.width/height (те же метаданные,
+    /// что и у VerticalPageImage.placeholderHeight в вертикальном режиме —
+    /// приходят в ответе главы ДО самой картинки), поэтому внутреннему
+    /// UIScrollView при зуме 1× скроллить нечего — вся прокрутка (картинка +
+    /// комментарии) идёт ОДНИМ непрерывным внешним скроллом, без гонки.
+    /// Зум по-прежнему полностью работает — во время него внешний скролл
+    /// уже отключается через isCurrentPageZoomed (см. .scrollDisabled ниже).
+    private func horizontalPageHeight(geo: GeometryProxy, page: PageItem) -> CGFloat {
+        guard fitWidth, let w = page.width, let h = page.height, w > 0, h > 0 else { return geo.size.height }
+        let scaled = geo.size.width * CGFloat(h) / CGFloat(w)
+        return max(scaled, geo.size.height)
+    }
+
     private func horizontalPage(index: Int, page: PageItem) -> some View {
         GeometryReader { geo in
             ScrollView(.vertical, showsIndicators: false) {
@@ -542,9 +638,11 @@ struct MangaReaderView: View {
                         fitWidth: fitWidth,
                         doubleTapZoom: doubleTapZoom,
                         onTap: { xFraction in handleReaderTap(xFraction) },
-                        onZoomChanged: { zoomed in isCurrentPageZoomed = zoomed }
+                        onZoomChanged: { zoomed in isCurrentPageZoomed = zoomed },
+                        ringColor: UIColor(fg),
+                        viewportHeight: geo.size.height
                     )
-                    .frame(width: geo.size.width, height: geo.size.height)
+                    .frame(width: geo.size.width, height: horizontalPageHeight(geo: geo, page: page))
 
                     if let ch = viewModel.currentChapter {
                         Color.clear.frame(height: 1)
@@ -557,7 +655,7 @@ struct MangaReaderView: View {
                         // см. ChapterCommentsSheet.task(id:).
                         if revealedCommentPages.contains(index) {
                             Divider().overlay(fg.opacity(0.15))
-                            ChapterCommentsSheet(chapterId: ch.id, postPage: index + 1, embedded: true)
+                            ChapterCommentsSheet(chapterId: ch.id, postPage: index + 1, siteId: viewModel.siteId, embedded: true)
                                 .padding(.bottom, 40)
                         }
                     }
@@ -584,8 +682,9 @@ struct MangaReaderView: View {
     /// Перейти к странице по тапу: плавно (анимация) или мгновенно —
     /// по настройке «Плавное перелистывание».
     private func goToPage(_ target: Int) {
-        let maxTag = viewModel.pages.count + (nextChapter != nil ? 1 : 0)
-        let clamped = min(max(target, 0), maxTag)
+        let minTag = viewModel.hasPrevious ? 0 : 1
+        let maxTag = viewModel.pages.count + 1 + (nextChapter != nil ? 1 : 0)
+        let clamped = min(max(target, minTag), maxTag)
         guard clamped != currentPage else { return }
         if smoothPaging {
             // Ускорено ×1.5 (0.25 → ~0.167).
@@ -597,10 +696,40 @@ struct MangaReaderView: View {
         }
     }
 
-    // Невидимая страница-триггер (перехода к следующей главе).
+    // Невидимые страницы-триггеры перехода к следующей/прошлой главе — сама
+    // разница только в том, какую главу превью-догружает .task (см.
+    // ReaderViewModel.loadTransitionPreview).
     private var nextTriggerPage: some View {
         readerBackground
-            .overlay { ProgressView().tint(fg) }
+            .overlay { transitionSpinner }
+            .task { await viewModel.loadTransitionPreview(for: viewModel.currentIndex + 1) }
+    }
+
+    private var prevTriggerPage: some View {
+        readerBackground
+            .overlay { transitionSpinner }
+            .task { await viewModel.loadTransitionPreview(for: viewModel.currentIndex - 1) }
+    }
+
+    /// Кольцевой прогресс (тот же стиль рисования, что у спиннера скачивания
+    /// главы, см. MangaDetailView.chapterDownloadControl) пока известен
+    /// transitionImageProgress; иначе — обычный неопределённый спиннер
+    /// (кэш-хит без картинок для превью — редкий случай, переход почти
+    /// мгновенный).
+    @ViewBuilder
+    private var transitionSpinner: some View {
+        if let frac = viewModel.transitionImageProgress {
+            ZStack {
+                Circle().stroke(fg.opacity(0.25), lineWidth: 3)
+                Circle().trim(from: 0, to: max(0.02, frac))
+                    .stroke(Theme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 28, height: 28)
+            .animation(.linear(duration: 0.15), value: frac)
+        } else {
+            ProgressView().tint(fg)
+        }
     }
 
     // Экран конца главы: сверху «Конец…»/«Следующая глава» на всю высоту
@@ -632,6 +761,7 @@ struct MangaReaderView: View {
                             ChapterCommentsSheet(
                                 chapterId: ch.id,
                                 postPage: viewModel.pages.count,
+                                siteId: viewModel.siteId,
                                 embedded: true
                             )
                             .padding(.bottom, 40)
@@ -656,6 +786,10 @@ struct MangaReaderView: View {
                 .foregroundStyle(fg.opacity(0.85))
                 .padding(.top, 60)
 
+            if !viewModel.chapterTeams.isEmpty {
+                teamsCreditChip
+            }
+
             if let next = nextChapter {
                 Button {
                     openNext()
@@ -679,13 +813,125 @@ struct MangaReaderView: View {
                 Text("Это последняя доступная глава")
                     .font(.subheadline).foregroundStyle(fg.opacity(0.6))
             }
+
+            chapterActionButtons
         }
         .padding(.bottom, 18)
     }
 
+    /// "Над главой работали" — команда(ы) перевода ИМЕННО этой главы (см.
+    /// ReaderViewModel.chapterTeams/ChapterPagesResult.teams, приходят
+    /// прямо в ответе главы) — тап открывает профиль команды (см.
+    /// TeamView), по прямой просьбе рядом с "Спасибо" на экране конца главы.
+    private var teamsCreditChip: some View {
+        VStack(spacing: 6) {
+            Text("Над главой работали")
+                .font(.caption2)
+                .foregroundStyle(fg.opacity(0.5))
+            HStack(spacing: 8) {
+                ForEach(viewModel.chapterTeams) { team in
+                    Group {
+                        if let slugURL = team.slugURL {
+                            Button {
+                                selectedTeam = SelectedTeam(id: team.id, slugURL: slugURL, name: team.name, coverURL: team.avatarURL)
+                            } label: {
+                                teamChipLabel(team.name)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            // Нет slug_url — переход некуда, показываем как
+                            // обычную неинтерактивную подпись.
+                            teamChipLabel(team.name)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func teamChipLabel(_ name: String) -> some View {
+        Text(name)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(fg)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(fg.opacity(0.12), in: Capsule())
+    }
+
+    /// "Спасибо" (лайк главы) + "Оценить перевод" — обе по прямой просьбе,
+    /// на экране конца главы рядом с командой-переводчиком выше. "Спасибо"
+    /// заливается акцентным, когда уже лайкнуто (см. ReaderViewModel.
+    /// chapterIsLiked/toggleLike) — счётчик берём из того же места, что и
+    /// исходное состояние (приходит прямо в ответе главы).
+    private var chapterActionButtons: some View {
+        HStack(spacing: 10) {
+            Button { likeTapped() } label: {
+                Label(
+                    viewModel.chapterLikesCount.map { "Спасибо · \($0)" } ?? "Спасибо",
+                    systemImage: (viewModel.chapterIsLiked ?? false) ? "heart.fill" : "heart"
+                )
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle((viewModel.chapterIsLiked ?? false) ? Theme.background : fg)
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+            }
+            .background((viewModel.chapterIsLiked ?? false) ? Theme.accent : fg.opacity(0.12), in: Capsule())
+            .buttonStyle(.plain)
+
+            Button { showTranslationRating = true } label: {
+                Text("Оценить перевод")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(fg)
+                    .padding(.horizontal, 16)
+                    .frame(height: 44)
+            }
+            .background(fg.opacity(0.12), in: Capsule())
+            .buttonStyle(.plain)
+        }
+        .padding(.top, 4)
+    }
+
+    private func likeTapped() {
+        Task {
+            do {
+                try await viewModel.toggleLike()
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                DownloadsManager.shared.showBanner(message)
+            }
+        }
+    }
+
     private func openNext() {
         guard nextChapter != nil else { return }
+        pendingLandOnEnd = false
         Task { await viewModel.goTo(index: viewModel.currentIndex + 1) }
+    }
+
+    /// Свайпнули/дотапали до prevTriggerPage — переходим на ПРОШЛУЮ главу и
+    /// приземляемся на её "Конец" (endPage), а не на страницу 1 — зеркально
+    /// тому, как forward-переход всегда высаживает на первую страницу новой
+    /// главы (см. pendingLandOnEnd/onChange(of: viewModel.pages.count)).
+    private func openPrevious() {
+        guard viewModel.hasPrevious else { return }
+        pendingLandOnEnd = true
+        Task { await viewModel.goTo(index: viewModel.currentIndex - 1) }
+    }
+
+    /// Ставит currentPage на верную страницу ТЕКУЩЕЙ (уже загруженной)
+    /// главы — 1, либо, если ждали возврата назад (pendingLandOnEnd), на её
+    /// endPage. Идемпотентно (см. pagesAppliedForIndex) и безопасно вызывать
+    /// из нескольких мест (см. .task/.onChange(currentIndex)/.onChange(pages.
+    /// count) выше) — не полагается на факт "значение pages.count
+    /// ИЗМЕНИЛОСЬ" (при переходе по уже закэшированным соседям новое число
+    /// страниц может случайно совпасть со старым, и тогда обычный onChange
+    /// просто не сработал бы).
+    private func applyLandingIfNeeded() {
+        guard !viewModel.pages.isEmpty, pagesAppliedForIndex != viewModel.currentIndex else { return }
+        pagesAppliedForIndex = viewModel.currentIndex
+        currentPage = pendingLandOnEnd ? viewModel.pages.count + 1 : 1
+        pendingLandOnEnd = false
+        preloadUpcoming(from: currentPage - 1)
     }
 
     // MARK: Оверлей интерфейса
@@ -744,9 +990,71 @@ struct MangaReaderView: View {
         .padding(.top, 2)
     }
 
-    // Плашка названия — своя отдельная подложка, ширина по контенту
-    // (с потолком, чтобы очень длинные названия не упирались в кнопку),
-    // текст чуть меньше прежнего (subheadline→footnote, caption→caption2).
+    // Плашка названия — ширина ПО КОНТЕНТУ, но СЧИТАННАЯ ЯВНО через
+    // NSString.boundingRect (тот же приём, что и у MangaCardView.
+    // titleLineCount — точное измерение реального рендера шрифта, а не
+    // догадка), а НЕ доверена SwiftUI-автосайзингу.
+    //
+    // Было два подхода подряд, и оба не сработали на деле (видно по фото
+    // бага): сначала .frame(maxWidth: 260) — плашка стабильно рендерилась
+    // близко к потолку НЕЗАВИСИМО от длины текста, даже у короткого
+    // "FMTY"; затем добавленный следом .fixedSize(horizontal: true) тоже не
+    // помог — Text с .lineLimit(1) под fixedSize не отдаёт наверх честный
+    // "по контенту" размер, это известная нестыковка этих двух модификаторов
+    // в SwiftUI. Из-за того, что плашка была широкой всегда, она вплотную
+    // подходила к кнопке закрытия — а обе они внутри одного
+    // GlassEffectContainer (см. overlayUI), и когда стеклянные фигуры
+    // оказываются близко друг к другу, iOS 26 Liquid Glass АВТОМАТИЧЕСКИ
+    // сливает их в одну фигуру ("капля" на скриншоте) — это и есть
+    // системная причина видимого бага, а не просто "выглядит криво".
+    //
+    // Теперь размер задаётся явным .frame(width:) (не maxWidth — ТОЧНОЕ
+    // число) — гарантированно по тексту, без веры в то, как Text сам решит
+    // отрапортовать свой размер. Потолок (titleBadgeMaxWidth) — от реальной
+    // ширины экрана минус безопасная зона под кнопку закрытия с обеих
+    // сторон (симметрично — капсула центрирована через ZStack в topBar).
+    // Зазор — БЫЛ 8 (72 всего), из-за чего на максимальной ширине название
+    // всё ещё визуально сливалось с крестиком в одну фигуру ("капля" на
+    // фото): 8 МЕНЬШЕ порога слияния GlassEffectContainer(spacing: 16) в
+    // overlayUI — расстояние между двумя стеклянными фигурами меньше этого
+    // порога, и Liquid Glass их морфит вместе, порог сам по себе не
+    // учитывает наши намерения. Зазор увеличен до 20 (> 16), чтобы гарантированно
+    // быть НАД порогом слияния — по прямой просьбе "чуть больше отступ,
+    // чуть-чуть".
+    private static let titleBadgeSideMargin: CGFloat = 84 // 48 (кнопка) + 16 (её отступ) + 20 (зазор, > порога слияния GlassEffectContainer)
+    private var titleBadgeMaxWidth: CGFloat {
+        max(120, UIScreen.main.bounds.width - Self.titleBadgeSideMargin * 2)
+    }
+
+    private static var titleBadgeTitleFont: UIFont {
+        UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .semibold)
+    }
+    private static var titleBadgeSubtitleFont: UIFont { UIFont.preferredFont(forTextStyle: .caption2) }
+
+    private static func textWidth(_ text: String, font: UIFont) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let box = (text as NSString).boundingRect(
+            with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        )
+        return box.width.rounded(.up)
+    }
+
+    /// Реальная ширина капсулы: макс. из двух строк + горизонтальный паддинг
+    /// (16×2), с потолком titleBadgeMaxWidth. Пересчитывается на каждый
+    /// рендер (текст меняется при смене главы, см. .task(id:) у страниц) —
+    /// дёшево, boundingRect на две короткие строки, не список из сотен строк.
+    private var titleBadgeWidth: CGFloat {
+        let title = mangaTitle ?? viewModel.currentChapter?.name ?? "Глава"
+        let subtitle = viewModel.currentChapter?.shortTitle ?? ""
+        let titleWidth = Self.textWidth(title, font: Self.titleBadgeTitleFont)
+        let subtitleWidth = Self.textWidth(subtitle, font: Self.titleBadgeSubtitleFont)
+        let contentWidth = max(titleWidth, subtitleWidth) + 32 // + .padding(.horizontal, 16) с двух сторон
+        return min(contentWidth, titleBadgeMaxWidth)
+    }
+
     private var titleBadge: some View {
         VStack(alignment: .center, spacing: 2) {
             Text(mangaTitle ?? viewModel.currentChapter?.name ?? "Глава")
@@ -760,14 +1068,15 @@ struct MangaReaderView: View {
                 .lineLimit(1)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
-        .frame(maxWidth: 260)
+        .frame(width: titleBadgeWidth)
         .glassEffect(.regular, in: Capsule())
     }
 
     // Текущий номер страницы для бабла — в горизонтальном режиме это
-    // TabView-селекция (currentPage), в вертикальном — verticalPage,
-    // считаемый по центру экрана (см. verticalReader).
-    private var pageBubbleCurrent: Int { pageMode == 1 ? verticalPage : currentPage + 1 }
+    // TabView-селекция (currentPage — уже 1-based для реальных страниц, тег
+    // 0 зарезервирован под prevTriggerPage, см. pager), в вертикальном —
+    // verticalPage, считаемый по центру экрана (см. verticalReader).
+    private var pageBubbleCurrent: Int { pageMode == 1 ? verticalPage : currentPage }
 
     // Общее число страниц ТЕКУЩЕЙ главы для бабла — в вертикальном режиме
     // берём из segments (там же, откуда verticalPage), а не из pages
@@ -780,8 +1089,9 @@ struct MangaReaderView: View {
     }
 
     // Бабл с номером страницы. Скрыт на "виртуальных" страницах конца главы/
-    // перехода (currentPage >= pages.count) — иначе показывал бы, например,
-    // "3/2" на экране "Конец главы", вместо того чтобы просто пропасть.
+    // перехода (currentPage == 0 или > pages.count, см. видимость выше) —
+    // иначе показывал бы, например, "3/2" на экране "Конец главы", вместо
+    // того чтобы просто пропасть.
     private var pageBubble: some View {
         Text("\(pageBubbleCurrent)/\(pageBubbleTotal)")
             .font(.footnote.weight(.semibold))
@@ -1096,6 +1406,15 @@ struct ReaderSettingsSheet: View {
 
     private var palette: ReaderPalette { .make(theme: readerTheme, system: systemColorScheme) }
 
+    /// Высота под-листа «Переключение страниц» — РОВНО по содержимому
+    /// (заголовок + 2 тумблера с подписями), не системный .medium (был на
+    /// полэкрана с пустым хвостом снизу) — тот же приём, что и в
+    /// RatingSheet.ratingSheetHeight: фиксированное число, а не
+    /// GeometryReader+PreferenceKey (пересчёт детента постфактум — известная
+    /// хрупкая штука в SwiftUI, см. комментарий там). Реальная сумма
+    /// высот/паддингов ≈290-300, тут с запасом под крупный Dynamic Type.
+    private static let pagingSheetHeight: CGFloat = 340
+
     var body: some View {
         ZStack {
             palette.background.ignoresSafeArea()
@@ -1157,12 +1476,13 @@ struct ReaderSettingsSheet: View {
                     } else {
                         Button { showPaging = true } label: {
                             HStack {
-                                Text("Переключение страниц").font(.system(size: 17)).foregroundStyle(palette.foreground)
+                                Text("Переключение страниц").foregroundStyle(palette.foreground)
                                 Spacer()
                                 Image(systemName: "chevron.right").foregroundStyle(palette.secondary)
                             }
-                            .padding(14)
-                            .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 52)
+                            .background(palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -1176,7 +1496,9 @@ struct ReaderSettingsSheet: View {
 
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 20)
+                // Горизонтальный отступ — 16, тот же, что и в
+                // PersonalizationSettingsView (было 20).
+                .padding(.horizontal, 16)
                 .padding(.top, 40)
                 .padding(.bottom, 24)
             }
@@ -1194,26 +1516,35 @@ struct ReaderSettingsSheet: View {
     private func label(_ text: String) -> some View {
         Text(text).font(.system(size: 22.5, weight: .semibold)).foregroundStyle(palette.secondary)
     }
+    // footnote + отступ 4 — тот же стиль, что и у подписей под подложками в
+    // PersonalizationSettingsView (см. "Выключи для белой темы..." и т.д.).
     private func caption(_ text: String) -> some View {
-        Text(text).font(.caption).foregroundStyle(palette.secondary)
+        Text(text).font(.footnote).foregroundStyle(palette.secondary).padding(.horizontal, 4)
     }
+    // Без явного .font() — то же самое, что и у Toggle-строк в
+    // PersonalizationSettingsView (там текст тоже без своего размера,
+    // обычный системный), и те же паддинг/высота/закругление (16/52/24),
+    // что и у card()-подложек там же — по прямой просьбе выровнять.
     private func toggleRow(_ text: String, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) {
-            Text(text).font(.system(size: 17)).foregroundStyle(palette.foreground)
+            Text(text).foregroundStyle(palette.foreground)
         }
         .tint(Theme.accent)
-        .padding(14)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16)
+        .frame(minHeight: 52)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     /// Ползунок «Отступ между картинками» (только вертикальный режим) —
     /// оформление как у слайдера сворачивания комментариев: живая подпись
-    /// сверху + короткая вибрация на каждый шаг.
+    /// сверху + короткая вибрация на каждый шаг. Паддинг/закругление — как у
+    /// многострочных подложек в PersonalizationSettingsView (cardsPerRowSection
+    /// и т.д.): .padding(16) со всех сторон, cornerRadius 24.
     private var gapSlider: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Отступ между картинками")
-                    .font(.system(size: 17)).foregroundStyle(palette.foreground)
+                    .foregroundStyle(palette.foreground)
                 Spacer()
                 Text("\(Int(verticalGap)) px")
                     .font(.subheadline.weight(.semibold))
@@ -1231,8 +1562,8 @@ struct ReaderSettingsSheet: View {
                 Text("50 px").font(.caption2).foregroundStyle(palette.secondary)
             }
         }
-        .padding(14)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(16)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     /// Под-лист «Переключение страниц».
@@ -1252,9 +1583,11 @@ struct ReaderSettingsSheet: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 20)
+            // Горизонтальный отступ — 16, тот же, что и в основном шите
+            // настроек читалки/PersonalizationSettingsView (было 20).
+            .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 20)
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.height(Self.pagingSheetHeight)])
         .presentationDragIndicator(.visible)
         .presentationBackground(.thinMaterial)
         .preferredColorScheme(palette.isLight ? .light : .dark)
@@ -1269,8 +1602,12 @@ struct ReaderSettingsSheet: View {
 /// жесты давали резину; здесь весь зум делает UIKit.
 ///
 /// - `fitWidth == false`: страница вписана целиком по высоте (обычная манга).
-/// - `fitWidth == true`: страница по ширине, длинные страницы скроллятся вниз
-///   даже без зума (вебтун/манхва).
+/// - `fitWidth == true`: страница по ширине; для длинных страниц (вебтун/
+///   манхва) высоту САМОГО контейнера снаружи заранее считают из метаданных
+///   (см. MangaReaderView.horizontalPageHeight) — при зуме 1× этой вьюхе
+///   внутри скроллить нечего, вся прокрутка длинной страницы идёт внешним
+///   SwiftUI ScrollView вокруг (а не этим UIScrollView). Собственная
+///   прокрутка этой вьюхи включается только когда реально зашли в зум.
 /// Одиночный тап — `onSingleTap` (показать/скрыть интерфейс). Двойной тап —
 /// зум к точке / сброс. Горизонтальный свайп на масштабе 1 не перехватывается
 /// (контент вписан → не скроллится вбок), поэтому листание страниц TabView
@@ -1287,6 +1624,16 @@ struct ZoomableImageScrollView: UIViewRepresentable {
     /// см. MangaReaderView.horizontalPage), пока идёт панорама зума, и они не
     /// конкурировали за один и тот же вертикальный драг.
     var onZoomChanged: ((Bool) -> Void)? = nil
+    /// Цвет кольца загрузки (см. RingProgressView.ringColor) — под текущую
+    /// ReaderPalette.foreground, чтобы не терялось на светлой теме читалки.
+    var ringColor: UIColor = .white
+    /// Высота ОДНОГО экрана (geo.size.height у вызывающей стороны) — контейнер
+    /// этой вьюхи теперь бывает ВЫШЕ экрана (см. MangaReaderView.
+    /// horizontalPageHeight, длинные манхва-страницы), а кольцо загрузки,
+    /// пока картинка не пришла, должно оставаться в пределах ВИДИМОЙ (первой
+    /// экранной) части контейнера, а не по центру всей длинной страницы (см.
+    /// Coordinator.centerRing).
+    var viewportHeight: CGFloat = 0
 
     func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap, fitWidth: fitWidth, doubleTapZoom: doubleTapZoom, onZoomChanged: onZoomChanged) }
 
@@ -1308,15 +1655,14 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         imageView.isUserInteractionEnabled = true
         scroll.addSubview(imageView)
 
-        let spinner = UIActivityIndicatorView(style: .medium)
-        spinner.color = .white
-        spinner.hidesWhenStopped = true
-        spinner.startAnimating()
-        scroll.addSubview(spinner)
+        let ring = RingProgressView(frame: CGRect(x: 0, y: 0, width: 28, height: 28))
+        ring.ringColor = ringColor
+        scroll.addSubview(ring)
 
         context.coordinator.scrollView = scroll
         context.coordinator.imageView = imageView
-        context.coordinator.spinner = spinner
+        context.coordinator.ringView = ring
+        context.coordinator.viewportHeight = viewportHeight
 
         let single = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
         single.numberOfTapsRequired = 1
@@ -1336,6 +1682,8 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         context.coordinator.onTap = onTap
         context.coordinator.onZoomChanged = onZoomChanged
         context.coordinator.doubleTapZoom = doubleTapZoom
+        context.coordinator.ringView?.ringColor = ringColor
+        context.coordinator.viewportHeight = viewportHeight
         if context.coordinator.fitWidth != fitWidth {
             context.coordinator.fitWidth = fitWidth
             context.coordinator.layoutImage(resetZoom: true)
@@ -1348,7 +1696,8 @@ struct ZoomableImageScrollView: UIViewRepresentable {
     final class Coordinator: NSObject, UIScrollViewDelegate {
         weak var scrollView: UIScrollView?
         weak var imageView: UIImageView?
-        weak var spinner: UIActivityIndicatorView?
+        weak var ringView: RingProgressView?
+        var viewportHeight: CGFloat = 0
         var onTap: (CGFloat) -> Void
         var onZoomChanged: ((Bool) -> Void)?
         var fitWidth: Bool
@@ -1369,13 +1718,23 @@ struct ZoomableImageScrollView: UIViewRepresentable {
             currentKey = candidates.first
             loadTask?.cancel()
             imageView?.image = nil
-            spinner?.startAnimating()
+            ringView?.progress = 0
+            ringView?.isHidden = false
             let key = currentKey
             loadTask = Task { [weak self] in
-                let img = await RemoteImageLoader.fetchImage(candidates: candidates)
+                // Видимая страница — высокий сетевой приоритет, чтобы не
+                // ждать наравне с молча качающимися вперёд preload()-страницами.
+                // onProgress — реальный прогресс скачивания (0...1) для
+                // кольца вместо неопределённого спиннера, по прямой просьбе.
+                let img = await RemoteImageLoader.fetchImage(candidates: candidates, priority: URLSessionTask.highPriority) { [weak self] p in
+                    Task { @MainActor in
+                        guard let self, self.currentKey == key else { return }
+                        self.ringView?.progress = CGFloat(p)
+                    }
+                }
                 await MainActor.run {
                     guard let self, self.currentKey == key else { return }
-                    self.spinner?.stopAnimating()
+                    self.ringView?.isHidden = true
                     self.imageView?.image = img
                     self.layoutImage(resetZoom: true)
                 }
@@ -1422,8 +1781,8 @@ struct ZoomableImageScrollView: UIViewRepresentable {
         /// Вписывает картинку (по высоте или по ширине) и центрирует.
         func layoutImage(resetZoom: Bool) {
             guard let scroll = scrollView, let imageView, let image = imageView.image else {
-                // Нет картинки — центрируем спиннер.
-                centerSpinner()
+                // Нет картинки — центрируем кольцо прогресса.
+                centerRing()
                 return
             }
             let bounds = scroll.bounds.size
@@ -1442,7 +1801,7 @@ struct ZoomableImageScrollView: UIViewRepresentable {
             imageView.frame = CGRect(origin: .zero, size: size)
             scroll.contentSize = size
             centerImage()
-            centerSpinner()
+            centerRing()
         }
 
         private func centerImage() {
@@ -1454,9 +1813,17 @@ struct ZoomableImageScrollView: UIViewRepresentable {
             scroll.contentInset = UIEdgeInsets(top: insetY, left: insetX, bottom: insetY, right: insetX)
         }
 
-        private func centerSpinner() {
-            guard let scroll = scrollView, let spinner else { return }
-            spinner.center = CGPoint(x: scroll.bounds.midX, y: scroll.bounds.midY)
+        /// Кольцо центрируется в пределах ВИДИМОЙ (первой экранной) части
+        /// контейнера, не всей его высоты — контейнер теперь бывает выше
+        /// экрана (длинные манхва-страницы, см. MangaReaderView.
+        /// horizontalPageHeight), а координаты этой UIScrollView — локальные
+        /// для ВСЕГО контейнера целиком (внешний SwiftUI-скролл двигает его
+        /// как единое целое, bounds.origin этой вьюхи от этого не меняется),
+        /// поэтому центр по всей высоте оказался бы вне экрана до прокрутки.
+        private func centerRing() {
+            guard let scroll = scrollView, let ringView else { return }
+            let refHeight = viewportHeight > 0 ? min(scroll.bounds.height, viewportHeight) : scroll.bounds.height
+            ringView.center = CGPoint(x: scroll.bounds.midX, y: refHeight / 2)
         }
     }
 }
@@ -1471,13 +1838,108 @@ final class LayoutCallbackScrollView: UIScrollView {
     }
 }
 
+/// Кольцевой индикатор РЕАЛЬНОГО прогресса скачивания страницы (0...1) —
+/// вместо неопределённого UIActivityIndicatorView, по прямой просьбе. Тот же
+/// стиль отрисовки, что и у SwiftUI-кольца в VerticalPageImage.pageProgressRing/
+/// MangaDetailView.chapterDownloadControl (трек + дуга прогресса), просто
+/// нативным UIKit-слоем — читалка страниц целиком нативная (см.
+/// ZoomableImageScrollView).
+final class RingProgressView: UIView {
+    private let trackLayer = CAShapeLayer()
+    private let progressLayer = CAShapeLayer()
+
+    /// Минимум 0.02 — тонкий видимый штрих сразу, даже пока прогресс ещё
+    /// не начал реально расти (тот же приём, что и в SwiftUI-версии).
+    var progress: CGFloat = 0 {
+        didSet { progressLayer.strokeEnd = max(0.02, min(1, progress)) }
+    }
+
+    /// Цвет кольца — раньше был жёстко белым ("фон читалки тёмный вне
+    /// зависимости от темы" — на самом деле при светлой теме читалки фон
+    /// светлый, и белое кольцо на нём не видно); теперь задаётся снаружи
+    /// (см. ZoomableImageScrollView.ringColor) под текущую ReaderPalette.
+    var ringColor: UIColor = .white {
+        didSet {
+            trackLayer.strokeColor = ringColor.withAlphaComponent(0.25).cgColor
+            progressLayer.strokeColor = ringColor.cgColor
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+
+        trackLayer.fillColor = UIColor.clear.cgColor
+        trackLayer.strokeColor = UIColor.white.withAlphaComponent(0.25).cgColor
+        trackLayer.lineWidth = 3
+        layer.addSublayer(trackLayer)
+
+        progressLayer.fillColor = UIColor.clear.cgColor
+        progressLayer.strokeColor = UIColor.white.cgColor
+        progressLayer.lineWidth = 3
+        progressLayer.lineCap = .round
+        progressLayer.strokeEnd = 0.02
+        layer.addSublayer(progressLayer)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let radius = min(bounds.width, bounds.height) / 2 - trackLayer.lineWidth / 2
+        let path = UIBezierPath(
+            arcCenter: CGPoint(x: bounds.midX, y: bounds.midY),
+            radius: max(0, radius),
+            startAngle: -.pi / 2,
+            endAngle: .pi * 1.5,
+            clockwise: true
+        )
+        trackLayer.path = path.cgPath
+        progressLayer.path = path.cgPath
+    }
+}
+
 /// Одна страница в вертикальной (непрерывной) ленте: грузится через общий
 /// кэш (RemoteImageLoader), вписывается по ширине, высота — по соотношению
 /// сторон, чтобы LazyVStack корректно раскладывал ленту. Пока грузится —
 /// плейсхолдер фиксированной высоты со спиннером.
 struct VerticalPageImage: View {
     let candidates: [URL]
+    /// Реальные пиксельные размеры страницы с сервера (см. PageItem.width/
+    /// height, приходят в ответе главы ДО загрузки самой картинки) —
+    /// используются, чтобы placeholder СРАЗУ был нужных пропорций: высота
+    /// вебтун-страницы бывает в 10+ раз больше ширины, и с фиксированным
+    /// placeholder (было 480pt всегда) контент заметно "прыгал" при
+    /// подгрузке реальной картинки, особенно при быстрой прокрутке через
+    /// несколько ещё не загруженных страниц разом. nil/некорректные —
+    /// прежний фиксированный placeholder (сервер их не прислал).
+    let width: Int?
+    let height: Int?
     @State private var image: UIImage?
+    /// Реальный прогресс скачивания (0...1) — по прямой просьбе, кольцо
+    /// вместо неопределённого спиннера (см. RemoteImageLoader.fetchImage
+    /// onProgress). Сбрасывается на 0 в начале каждой новой загрузки.
+    @State private var progress: Double = 0
+
+    // Тема читалки — кольцо прогресса раньше было жёстко белым ("страница
+    // ещё не загрузилась, фон тёмный вне зависимости от темы" — было не так:
+    // при светлой теме читалки фон светлый, и белое кольцо на нём не видно).
+    // Берём цвет из той же ReaderPalette, что и весь остальной текст читалки.
+    @AppStorage("reader_theme") private var readerTheme = 0
+    @Environment(\.colorScheme) private var systemColorScheme
+    private var palette: ReaderPalette { .make(theme: readerTheme, system: systemColorScheme) }
+
+    /// Высота placeholder'а под реальную ширину экрана — та же логика
+    /// "по факту загрузки" (scaledToFit + maxWidth: .infinity) даёт финальную
+    /// картинку, просто заранее просчитанная. Не учитывает vScale (зум) —
+    /// он временное состояние жеста, не стоит того, чтобы тащить сюда лишний
+    /// параметр ради долей секунды, что кто-то одновременно и зумит, и
+    /// именно эта картинка ещё грузится.
+    private var placeholderHeight: CGFloat {
+        guard let width, let height, width > 0, height > 0 else { return 480 }
+        return UIScreen.main.bounds.width * CGFloat(height) / CGFloat(width)
+    }
 
     var body: some View {
         Group {
@@ -1489,13 +1951,35 @@ struct VerticalPageImage: View {
             } else {
                 Rectangle()
                     .fill(Color.clear)
-                    .frame(height: 480)
-                    .overlay { ProgressView().tint(.white) }
+                    .frame(height: placeholderHeight)
+                    .frame(maxWidth: .infinity)
+                    .overlay { pageProgressRing }
             }
         }
         .task(id: candidates.first) {
-            image = await RemoteImageLoader.fetchImage(candidates: candidates)
+            progress = 0
+            // Видимая страница — высокий сетевой приоритет (см. комментарий
+            // у fetchImage в RemoteImage.swift).
+            image = await RemoteImageLoader.fetchImage(candidates: candidates, priority: URLSessionTask.highPriority) { p in
+                Task { @MainActor in progress = p }
+            }
         }
+    }
+
+    /// Кольцо реального прогресса скачивания — тот же стиль отрисовки, что и
+    /// у MangaDetailView.chapterDownloadControl (трек + дуга), цвет — из
+    /// ReaderPalette.foreground (белый на тёмной теме читалки, тёмный на
+    /// светлой), а не жёстко белый.
+    private var pageProgressRing: some View {
+        let fg = palette.foreground
+        return ZStack {
+            Circle().stroke(fg.opacity(0.25), lineWidth: 3)
+            Circle().trim(from: 0, to: max(0.02, progress))
+                .stroke(fg, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 28, height: 28)
+        .animation(.linear(duration: 0.15), value: progress)
     }
 }
 

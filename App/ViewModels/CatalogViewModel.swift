@@ -32,6 +32,7 @@ final class CatalogViewModel: ObservableObject {
     private var hasNextPage = true
     private var siteCancellable: AnyCancellable?
     private var searchSitesCancellable: AnyCancellable?
+    private var specialFilterCancellable: AnyCancellable?
 
     init(service: MangaNetworkService = .shared, debounceMilliseconds: Int = 350) {
         self.service = service
@@ -62,6 +63,18 @@ final class CatalogViewModel: ObservableObject {
             .sink { [weak self] _ in
                 self?.reloadNow()
             }
+
+        // «Спец фильтр» (см. SpecialFilterStore/SpecialFilterEngine) —
+        // настройка уровня приложения, а не часть обычного MangaFilter:
+        // включили/выключили или поменяли выбор жанров/тегов в Настройках —
+        // каталог должен сразу пересчитаться, даже если сам экран каталога
+        // не открыт (objectWillChange реагирует на ЛЮБое @Published-поле
+        // стора, без надобности перечислять их по отдельности).
+        specialFilterCancellable = SpecialFilterStore.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.reloadNow()
+            }
     }
 
     // MARK: Точки входа
@@ -80,6 +93,19 @@ final class CatalogViewModel: ObservableObject {
         reloadNow()
     }
 
+    /// Точка входа для потянуть-обновить (.refreshable в MangaCatalogView) —
+    /// в отличие от retry()/reloadNow() (которые лишь ПЛАНИРУЮТ Task и сразу
+    /// возвращаются) реально дожидается конца reload(), иначе системный
+    /// спиннер pull-to-refresh пропал бы раньше, чем список успел бы
+    /// обновиться. Каталог и так не кэширует список постранично (в отличие
+    /// от MangaDetailCache у карточки тайтла) — reload() всегда бьёт по
+    /// сети, так что отдельной инвалидации кэша здесь не нужно.
+    func refreshPulled() async {
+        reloadTask?.cancel()
+        pageTask?.cancel()
+        await reload()
+    }
+
     func apply(filter newFilter: MangaFilter) {
         filter = newFilter
         reloadNow()
@@ -88,6 +114,13 @@ final class CatalogViewModel: ObservableObject {
     func resetFilters() {
         filter.reset()
         reloadNow()
+    }
+
+    /// «Спец фильтр» реально влияет на поиск только если включён флагом (см.
+    /// SpecialFilterStore) И в обычных Фильтрах каталога выбрано хотя бы 2
+    /// жанра/тега — с одним пунктом ранжировать нечего, это обычный фильтр.
+    var isSpecialFilterActive: Bool {
+        SpecialFilterStore.shared.isEnabled && filter.genres.included.count + filter.tags.included.count >= 2
     }
 
     /// Вызывается, когда на экране появляется один из последних элементов.
@@ -121,10 +154,24 @@ final class CatalogViewModel: ObservableObject {
         page = 1
         hasNextPage = true
         do {
-            let result = try await fetchPage(1)
-            guard !Task.isCancelled else { return }
-            results = result.items
-            hasNextPage = result.hasNextPage
+            if isSpecialFilterActive {
+                // «Спец фильтр» сам отдаёт готовый ранжированный список одним
+                // махом (см. SpecialFilterEngine) — не постранично с сервера,
+                // поэтому дальнейший бесконечный скролл (loadMore) в этом
+                // режиме просто не включается: hasNextPage = false.
+                let type = sortDescending ? "desc" : "asc"
+                let ranked = try await SpecialFilterEngine.search(
+                    service: service, query: query, sort: sort, sortType: type, baseFilter: filter
+                )
+                guard !Task.isCancelled else { return }
+                results = ranked.map(\.item)
+                hasNextPage = false
+            } else {
+                let result = try await fetchPage(1)
+                guard !Task.isCancelled else { return }
+                results = result.items
+                hasNextPage = result.hasNextPage
+            }
             didLoadOnce = true
         } catch is CancellationError {
         } catch NetworkError.cancelled {

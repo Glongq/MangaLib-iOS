@@ -6,48 +6,36 @@ import SwiftUI
 /// комментарию открывает тайтл; долгий тап — удалить свой комментарий.
 struct MyCommentsView: View {
     let embedded: Bool
+    /// false — встроен в ProfileView без своей шапки (см.
+    /// UserBookmarksView.showsOwnHeader). У этого экрана два входа —
+    /// из бокового меню (embedded: true, showsOwnHeader: true, своя шапка) и
+    /// из профиля (userId:, showsOwnHeader: false, общая "перетекающая"
+    /// шапка профиля).
+    var showsOwnHeader: Bool = true
 
     @StateObject private var vm: MyCommentsViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
-    @Environment(\.dismiss) private var dismiss
 
-    init(embedded: Bool = false, userId: Int? = nil) {
+    init(embedded: Bool = false, userId: Int? = nil, showsOwnHeader: Bool = true) {
         self.embedded = embedded
+        self.showsOwnHeader = showsOwnHeader
         _vm = StateObject(wrappedValue: MyCommentsViewModel(userId: userId))
     }
 
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            VStack(spacing: 0) {
-                header
-                content
-            }
+            content
         }
-        .toolbar(.hidden, for: .navigationBar)
+        // showsOwnHeader — обычный push из Меню: родной системный заголовок +
+        // системный back chevron, никакого своего кода (эталон — Настройки/
+        // Загрузки). Без него (встроен в ProfileView) — навбар по-прежнему
+        // скрыт, шапку рисует сам ProfileView.topBar (см. AccountInfoView).
+        .navigationTitle("Комментарии")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(showsOwnHeader ? .visible : .hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) { controlsBar }
         .task { await vm.loadIfNeeded() }
-    }
-
-    // MARK: Шапка
-
-    private var header: some View {
-        ZStack {
-            Text("Комментарии").font(.headline).foregroundStyle(Theme.textPrimary)
-            HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(width: 44, height: 44)
-                }
-                .glassEffect(.regular.interactive(), in: Circle())
-                Spacer()
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
     }
 
     // MARK: Контент
@@ -55,11 +43,29 @@ struct MyCommentsView: View {
     @ViewBuilder
     private var content: some View {
         if vm.isLoading && vm.comments.isEmpty {
-            Spacer(); ProgressView().tint(Theme.accent); Spacer()
+            skeletonList
+        } else if vm.needsLogin {
+            ScrollView {
+                StateView(icon: "person.crop.circle.badge.exclamationmark", title: "Нужно войти в аккаунт", fillScreen: true)
+                    .containerRelativeFrame(.vertical)
+            }
+            .scrollIndicators(.hidden)
         } else if let error = vm.errorMessage, vm.comments.isEmpty {
-            emptyState(icon: "wifi.exclamationmark", text: error) { Task { await vm.reload() } }
+            // ScrollView (не голый VStack) — иначе .refreshable ниже не от
+            // чего было бы тянуть при пустом/ошибочном списке.
+            ScrollView {
+                StateView(icon: "wifi.exclamationmark", title: "Не удалось загрузить", description: error, retry: { Task { await vm.reload() } }, fillScreen: true)
+                    .containerRelativeFrame(.vertical)
+            }
+            .scrollIndicators(.hidden)
+            .refreshable { await vm.reload() }
         } else if vm.visible.isEmpty && vm.didLoad {
-            emptyState(icon: "text.bubble", text: "Комментариев нет", retry: nil)
+            ScrollView {
+                StateView(icon: "text.bubble", title: "Комментариев пока нет", fillScreen: true)
+                    .containerRelativeFrame(.vertical)
+            }
+            .scrollIndicators(.hidden)
+            .refreshable { await vm.reload() }
         } else {
             ScrollView {
                 LazyVStack(spacing: 10) {
@@ -76,7 +82,44 @@ struct MyCommentsView: View {
                 .padding(.bottom, 90)
             }
             .scrollIndicators(.hidden)
+            .refreshable { await vm.reload() }
         }
+    }
+
+    /// Скелетон на первую загрузку — по прямой просьбе, вместо голого
+    /// спиннера. Форма строки повторяет commentCard ниже (обложка 60×84 +
+    /// пара строк текста), на плейсхолдерах SkeletonBox/SkeletonBar.
+    private var skeletonList: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                ForEach(0..<6, id: \.self) { _ in commentSkeletonRow }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+        }
+        .scrollIndicators(.hidden)
+        .allowsHitTesting(false)
+    }
+
+    /// Раньше без своей подложки/паддинга — во время загрузки список
+    /// выглядел плоским текстом, а не карточками (как в реальном
+    /// commentCard). Теперь 1-в-1 форма настоящей карточки.
+    private var commentSkeletonRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            SkeletonBox()
+                .frame(width: 60, height: 84)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 6) {
+                SkeletonBar(width: 140)
+                SkeletonBar(width: 220, height: 10)
+                SkeletonBar(width: 170, height: 10)
+                SkeletonBar(width: 70, height: 10)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     @ViewBuilder
@@ -156,21 +199,6 @@ struct MyCommentsView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private func emptyState(icon: String, text: String, retry: (() -> Void)?) -> some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: icon).font(.largeTitle).foregroundStyle(Theme.textSecondary)
-            Text(text).font(.subheadline).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
-            if let retry {
-                Button("Повторить", action: retry)
-                    .font(.subheadline.weight(.medium)).foregroundStyle(Theme.accent)
-            }
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-        .padding(32)
     }
 
     // MARK: Фильтр / сортировка (инлайн внизу, не sheet)
