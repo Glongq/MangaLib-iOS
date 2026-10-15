@@ -56,6 +56,7 @@ struct ExternalTranslationSettingsSheet: View {
                             Text("Google локально").tag(OCRRecognitionProvider.googleMLKit.rawValue)
                             Text("Google API").tag(OCRRecognitionProvider.googleCloudVision.rawValue)
                         }.pickerStyle(.segmented)
+                        .disabled(true)
                         caption(recognitionProviderCaption)
 
                         label("Первичный перевод")
@@ -64,6 +65,7 @@ struct ExternalTranslationSettingsSheet: View {
                             Text("Google локально").tag(OCRPrimaryTranslationProvider.googleMLKit.rawValue)
                             Text("Google API").tag(OCRPrimaryTranslationProvider.googleCloudTranslation.rawValue)
                         }.pickerStyle(.segmented)
+                        .disabled(true)
                         caption(translationProviderCaption)
 
                         if usesGoogleCloud {
@@ -134,7 +136,8 @@ struct ExternalTranslationSettingsSheet: View {
         .tint(Theme.accent)
         .onAppear {
             cloudAPIKey = Self.keychain.readString(Self.cloudAPIKeyAccount) ?? ""
-            googleAPIKey = OCRGoogleCloudCredentials.apiKey ?? ""
+            recognitionProvider = OCRRecognitionProvider.appleVision.rawValue
+            translationProvider = OCRPrimaryTranslationProvider.appleTranslation.rawValue
         }
         .onChange(of: cloudAPIKey) { _, newValue in
             if newValue.isEmpty {
@@ -142,14 +145,6 @@ struct ExternalTranslationSettingsSheet: View {
             } else {
                 Self.keychain.save(newValue, for: Self.cloudAPIKeyAccount)
             }
-        }
-        .onChange(of: googleAPIKey) { _, newValue in
-            if newValue.isEmpty {
-                OCRGoogleCloudCredentials.keychain.delete(OCRGoogleCloudCredentials.apiKeyAccount)
-            } else {
-                OCRGoogleCloudCredentials.keychain.save(newValue, for: OCRGoogleCloudCredentials.apiKeyAccount)
-            }
-            googleConnectionState = .idle
         }
     }
 
@@ -191,25 +186,11 @@ struct ExternalTranslationSettingsSheet: View {
     }
 
     private var recognitionProviderCaption: String {
-        switch OCRRecognitionProvider(rawValue: recognitionProvider) ?? .appleVision {
-        case .appleVision:
-            return "Apple Vision работает полностью на устройстве и остаётся резервным вариантом при любой ошибке Google."
-        case .googleMLKit:
-            return "Google ML Kit работает полностью на устройстве. Модели японского, китайского, корейского и латиницы встроены в приложение."
-        case .googleCloudVision:
-            return "Google Cloud Vision отправляет изображение страницы в Google Cloud и требует API-ключ."
-        }
+        "Apple Vision распознаёт текст на устройстве. Google OCR удалён из приложения."
     }
 
     private var translationProviderCaption: String {
-        switch OCRPrimaryTranslationProvider(rawValue: translationProvider) ?? .appleTranslation {
-        case .appleTranslation:
-            return "Встроенный перевод Apple работает на устройстве."
-        case .googleMLKit:
-            return "Google ML Kit работает без API-ключа. При первом запуске скачивает языковые модели около 30 МБ, затем переводит офлайн."
-        case .googleCloudTranslation:
-            return "Google Cloud Translation требует API-ключ и соединение с интернетом."
-        }
+        "Встроенный перевод Apple работает на устройстве. Google Translate удалён из приложения."
     }
 
     private var usesGoogleCloud: Bool {
@@ -221,7 +202,8 @@ struct ExternalTranslationSettingsSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             secureFieldRow("Google Cloud API-ключ", text: $googleAPIKey, placeholder: "AIza...")
             HStack(spacing: 12) {
-                Button("Проверить Google API") { testGoogleConnection() }
+                Button("Проверить Google API") {}
+                    .disabled(true)
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.accent)
                 switch googleConnectionState {
@@ -231,8 +213,9 @@ struct ExternalTranslationSettingsSheet: View {
                 case .failure: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
                 }
             }
-            caption("В Google Cloud должны быть включены Cloud Vision API и Cloud Translation API. Ключ хранится в Keychain.")
+            caption("Google OCR и Google Translate больше не подключены.")
         }
+        .disabled(true)
     }
 
     private var testConnectionRow: some View {
@@ -259,18 +242,6 @@ struct ExternalTranslationSettingsSheet: View {
         Task {
             let ok = await client.testConnection()
             await MainActor.run { connectionState = ok ? .success : .failure }
-        }
-    }
-
-    private func testGoogleConnection() {
-        guard !googleAPIKey.isEmpty else {
-            googleConnectionState = .failure
-            return
-        }
-        googleConnectionState = .testing
-        Task {
-            let ok = await GoogleCloudLanguageClient(apiKey: googleAPIKey).testConnection()
-            await MainActor.run { googleConnectionState = ok ? .success : .failure }
         }
     }
 

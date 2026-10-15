@@ -24,7 +24,7 @@ struct OCRCacheKey: Hashable {
     let translationProvider: Int
     let engineVersion: Int
 
-    static let currentEngineVersion = 9
+    static let currentEngineVersion = 10
 
     var diskFileName: String {
         "\(pageIndex)_\(sourceLanguage)_\(targetLanguage)_ocr\(recognitionProvider)_tr\(translationProvider)_v\(engineVersion).json"
@@ -49,9 +49,7 @@ struct CachedPageTranslation: Codable {
     /// (RecognizedTextBlock.characterBudget(imageSize:)) to hint the
     /// rephrase prompt toward text that fits.
     let imageSize: CGSize
-    /// Fallback results stay visible for the current page but are not
-    /// persisted, so a temporary Google outage is retried later instead
-    /// of silently pinning the Apple fallback to the Google cache key.
+    /// Retained for decoding earlier cache entries; the Apple-only pipeline sets this to false.
     var usedProviderFallback: Bool = false
 
     func text(for blockID: UUID) -> String? {

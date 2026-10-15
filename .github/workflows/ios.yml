@@ -23,23 +23,20 @@ jobs:
           xcodebuild -version
 
       - name: Install XcodeGen
-        run: brew install xcodegen cocoapods
+        run: brew install xcodegen
 
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Install on-device ML Kit dependencies
-        run: pod install --repo-update
-
-      - name: List Xcode workspace targets and schemes
-        run: xcodebuild -list -workspace MangaLib.xcworkspace
+      - name: List Xcode project targets and schemes
+        run: xcodebuild -list -project MangaLib.xcodeproj
 
       - name: Build for device (unsigned)
         run: |
           set -euo pipefail
           mkdir -p build
           xcodebuild \
-            -workspace MangaLib.xcworkspace \
+            -project MangaLib.xcodeproj \
             -scheme MangaLib \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \

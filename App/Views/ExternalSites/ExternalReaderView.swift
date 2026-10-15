@@ -83,8 +83,6 @@ struct ExternalReaderView: View {
     // App/OCRTranslation/) — off by default, zero effect on the core
     // app's own MangaReaderView.
     @AppStorage("external_reader_ocr_enabled") private var ocrEnabled = false
-    @AppStorage("external_reader_ocr_recognition_provider") private var ocrRecognitionProvider = 0
-    @AppStorage("external_reader_ocr_translation_provider") private var ocrTranslationProvider = 0
     @AppStorage("external_reader_ocr_source_lang") private var ocrSourceLang = "auto"
     @AppStorage("external_reader_ocr_target_lang") private var ocrTargetLang = "ru"
     @AppStorage("external_reader_ocr_style") private var ocrStyleRaw = 0
@@ -130,8 +128,8 @@ struct ExternalReaderView: View {
         OCRCacheKey(
             site: site, galleryId: detail.id, pageIndex: page.index, pageKey: page.key,
             sourceLanguage: ocrSourceLang, targetLanguage: ocrTargetLang,
-            recognitionProvider: ocrRecognitionProvider,
-            translationProvider: ocrTranslationProvider,
+            recognitionProvider: OCRRecognitionProvider.appleVision.rawValue,
+            translationProvider: OCRPrimaryTranslationProvider.appleTranslation.rawValue,
             engineVersion: OCRCacheKey.currentEngineVersion
         )
     }

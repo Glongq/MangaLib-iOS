@@ -13,25 +13,9 @@ enum OCRTextRecognizer {
         }.value
     }
 
-    /// Shared post-processing for alternative OCR engines that return text
-    /// plus normalized boxes but do not understand manga reading order.
+    /// Group Vision lines and their normalized boxes into manga reading order.
     static func blocks(from lines: [RecognizedTextLine]) -> [RecognizedTextBlock] {
         cluster(lines: lines)
-    }
-
-    /// Uses even a partial Apple OCR pass only to select the matching
-    /// on-device ML Kit script model when the user chose automatic input.
-    static func inferredLanguage(from blocks: [RecognizedTextBlock]) -> String {
-        let scalars = blocks.flatMap(\.text.unicodeScalars)
-        if scalars.contains(where: { (0x3040...0x30FF).contains($0.value) }) { return "ja" }
-        if scalars.contains(where: { (0xAC00...0xD7AF).contains($0.value) }) { return "ko" }
-        if scalars.contains(where: {
-            (0x3400...0x4DBF).contains($0.value) ||
-                (0x4E00...0x9FFF).contains($0.value) ||
-                (0xF900...0xFAFF).contains($0.value)
-        }) { return "zh" }
-        if scalars.contains(where: { CharacterSet.letters.contains($0) }) { return "en" }
-        return "ja"
     }
 
     private static func languages(for sourceLanguage: String) -> [String] {

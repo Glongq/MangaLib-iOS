@@ -16,54 +16,7 @@ enum OCRTranslationEngine {
             return cached
         }
 
-        let googleCloudClient = OCRGoogleCloudCredentials.apiKey.map(GoogleCloudLanguageClient.init(apiKey:))
-        var blocks: [RecognizedTextBlock] = []
-        var appleProbe: [RecognizedTextBlock] = []
-        var usedProviderFallback = false
-        switch OCRRecognitionProvider(rawValue: cacheKey.recognitionProvider) ?? .appleVision {
-        case .appleVision:
-            break
-        case .googleMLKit:
-            let sourceLanguage: String
-            if cacheKey.sourceLanguage == "auto" {
-                appleProbe = await OCRTextRecognizer.recognize(image: image, sourceLanguage: "auto")
-                sourceLanguage = OCRTextRecognizer.inferredLanguage(from: appleProbe)
-            } else {
-                sourceLanguage = cacheKey.sourceLanguage
-            }
-            if let lines = await GoogleMLKitLanguageClient.shared.recognize(
-                image: image,
-                sourceLanguage: sourceLanguage
-            ) {
-                blocks = OCRTextRecognizer.blocks(from: lines)
-            }
-            if blocks.isEmpty {
-                usedProviderFallback = true
-                await OCRProviderFallbackNotifier.post(
-                    "Локальный Google OCR не сработал — использован Apple Vision",
-                    cacheKey: cacheKey
-                )
-            }
-        case .googleCloudVision:
-            if let googleCloudClient,
-               let lines = await googleCloudClient.recognize(image: image, sourceLanguage: cacheKey.sourceLanguage) {
-                blocks = OCRTextRecognizer.blocks(from: lines)
-            }
-            if blocks.isEmpty {
-                usedProviderFallback = true
-                await OCRProviderFallbackNotifier.post(
-                    "Google OCR API недоступен — использован Apple Vision",
-                    cacheKey: cacheKey
-                )
-            }
-        }
-        if blocks.isEmpty {
-            if appleProbe.isEmpty {
-                blocks = await OCRTextRecognizer.recognize(image: image, sourceLanguage: cacheKey.sourceLanguage)
-            } else {
-                blocks = appleProbe
-            }
-        }
+        var blocks = await OCRTextRecognizer.recognize(image: image, sourceLanguage: cacheKey.sourceLanguage)
         guard !blocks.isEmpty else { return nil }
         // Always computed (cheap — small cropped regions, not the whole
         // page) so the optional "erase original text" overlay style can
@@ -72,42 +25,7 @@ enum OCRTranslationEngine {
         for index in blocks.indices {
             blocks[index].backgroundColor = OCRBackgroundSampler.sample(rect: blocks[index].rect, in: image)
         }
-        var stageA: [UUID: String]?
-        switch OCRPrimaryTranslationProvider(rawValue: cacheKey.translationProvider) ?? .appleTranslation {
-        case .appleTranslation:
-            break
-        case .googleMLKit:
-            stageA = await GoogleMLKitLanguageClient.shared.translate(
-                blocks: blocks,
-                sourceLanguage: cacheKey.sourceLanguage,
-                targetLanguage: cacheKey.targetLanguage
-            )
-            if stageA?.isEmpty != false {
-                usedProviderFallback = true
-                await OCRProviderFallbackNotifier.post(
-                    "Локальный Google Перевод не сработал — переключено на Apple",
-                    cacheKey: cacheKey
-                )
-            }
-        case .googleCloudTranslation:
-            if let googleCloudClient {
-                stageA = await googleCloudClient.translate(
-                    blocks: blocks,
-                    sourceLanguage: cacheKey.sourceLanguage,
-                    targetLanguage: cacheKey.targetLanguage
-                )
-            }
-            if stageA?.isEmpty != false {
-                usedProviderFallback = true
-                await OCRProviderFallbackNotifier.post(
-                    "Google Translate API недоступен — переключено на Apple",
-                    cacheKey: cacheKey
-                )
-            }
-        }
-        if stageA?.isEmpty != false {
-            stageA = await runtime.translate(blocks, targetLanguage: cacheKey.targetLanguage)
-        }
+        let stageA = await runtime.translate(blocks, targetLanguage: cacheKey.targetLanguage)
         guard let stageA, !stageA.isEmpty else { return nil }
 
         let result = CachedPageTranslation(
@@ -115,12 +33,10 @@ enum OCRTranslationEngine {
             stageAText: Dictionary(uniqueKeysWithValues: stageA.map { ($0.key.uuidString, $0.value) }),
             stageBText: [:],
             imageSize: image.size,
-            usedProviderFallback: usedProviderFallback
+            usedProviderFallback: false
         )
-        if !usedProviderFallback {
-            OCRTranslationMemoryCache.shared[cacheKey] = result
-            await OCRTranslationDiskCache.shared.save(cacheKey, result)
-        }
+        OCRTranslationMemoryCache.shared[cacheKey] = result
+        await OCRTranslationDiskCache.shared.save(cacheKey, result)
         return result
     }
 

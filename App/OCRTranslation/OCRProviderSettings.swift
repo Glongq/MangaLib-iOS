@@ -1,5 +1,6 @@
 import Foundation
 
+/// Legacy Google values remain only to preserve the inactive settings controls.
 enum OCRRecognitionProvider: Int, CaseIterable {
     case appleVision = 0
     case googleCloudVision = 1
@@ -10,16 +11,6 @@ enum OCRPrimaryTranslationProvider: Int, CaseIterable {
     case appleTranslation = 0
     case googleCloudTranslation = 1
     case googleMLKit = 2
-}
-
-enum OCRGoogleCloudCredentials {
-    static let keychain = KeychainHelper(service: "com.glongq.MangaLib.ocrTranslation")
-    static let apiKeyAccount = "googleCloudAPIKey"
-
-    static var apiKey: String? {
-        guard let value = keychain.readString(apiKeyAccount), !value.isEmpty else { return nil }
-        return value
-    }
 }
 
 enum OCRProviderFallbackNotifier {
