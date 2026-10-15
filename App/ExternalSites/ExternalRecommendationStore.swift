@@ -23,7 +23,7 @@ extension ExternalGalleryDetail {
         if !type.isEmpty { features.append(.init(kind: .format, value: type)) }
         var seen = Set<String>()
         features = features.filter { !ExternalRecommendationFeature.normalize($0.value).isEmpty && seen.insert($0.id).inserted }
-        let date = posted.flatMap { ISO8601DateFormatter().date(from: $0) }
+        let date = ExternalRecommendationDate.parse(posted)
         return ExternalRecommendationDocument(
             siteID: site.rawValue, galleryID: id, title: title, pageCount: pages.count,
             language: language, features: features, publishedAt: date
@@ -63,7 +63,7 @@ final class ExternalRecommendationStore: ObservableObject {
     }
 
     func recordExposure(_ document: ExternalRecommendationDocument, seconds: Double, pages: Int, incrementImpression: Bool = true) {
-        guard pages > 0, seconds >= 0.6 else { return }
+        guard pages >= 0, seconds >= 0.6 else { return }
         profile.recordExposure(document, seconds: seconds, pages: pages, at: Date(), incrementImpression: incrementImpression)
         save()
     }

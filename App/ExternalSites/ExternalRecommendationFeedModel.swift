@@ -49,6 +49,7 @@ private actor ExternalRecommendationRankingWorker {
     struct Result: Sendable {
         let ranked: [ExternalRecommendationDocument]
         let interests: [ExternalRecommendationFeature]
+        let topics: [[ExternalRecommendationFeature]]
     }
 
     private var cachedRevision: Int?
@@ -61,9 +62,9 @@ private actor ExternalRecommendationRankingWorker {
             cachedRevision = revision
         }
         let engine = cachedEngine!
-        guard !Task.isCancelled else { return Result(ranked: [], interests: []) }
+        guard !Task.isCancelled else { return Result(ranked: [], interests: [], topics: []) }
         return Result(ranked: engine.ranked(candidates, after: recent, offset: offset, limit: 16),
-                      interests: engine.interests())
+                      interests: engine.interests(), topics: engine.interestGroups())
     }
 }
 
@@ -86,6 +87,9 @@ final class ExternalRecommendationFeedModel: ObservableObject {
     private var displayed = Set<String>()
     private var displayedDuplicates = Set<String>()
     private var laneStates: [String: LaneState] = [:]
+    private var savedResolveKeys: [String: String] = [:]
+    private var discoveryScope = ""
+    private let discoveryStore: ExternalRecommendationDiscoveryStore
     private var loadTask: Task<Void, Never>?
     private var seedTask: Task<Void, Never>?
     private var detailTask: Task<Void, Never>?
@@ -103,11 +107,13 @@ final class ExternalRecommendationFeedModel: ObservableObject {
     private var isPaging = false
     private var retrievalInterests: [String] = []
     private var retrievalFeatures: [ExternalRecommendationFeature] = []
+    private var retrievalTopics: [[ExternalRecommendationFeature]] = []
     private var needsPersonalizedRetrieval = false
     private let store: ExternalRecommendationStore
 
-    init(store: ExternalRecommendationStore? = nil) {
+    init(store: ExternalRecommendationStore? = nil, discoveryStore: ExternalRecommendationDiscoveryStore? = nil) {
         self.store = store ?? .shared
+        self.discoveryStore = discoveryStore ?? ExternalRecommendationDiscoveryStore()
     }
 
     private struct Lane: Identifiable {
@@ -117,20 +123,21 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         var seedGalleryID: Int?
         var pixivWorkType: String = "illust"
         var sortKey: String?
-        var id: String { "\(site.rawValue)|\(feature?.id ?? "catalog")|\(secondFeature?.id ?? "")|\(pixivWorkType)|\(sortKey ?? "")" }
+        var depth: ExternalRecommendationDepth = .latest
+        var id: String { "\(site.rawValue)|\(feature?.id ?? "catalog")|\(secondFeature?.id ?? "")|\(pixivWorkType)|\(sortKey ?? "")|\(depth.rawValue)" }
+        var topicID: String { feature?.id ?? "catalog" }
     }
 
-    private struct LaneState {
-        var cursor: String?
-        var exhausted = false
-        var failedAt: Date?
-    }
+    private typealias LaneState = ExternalRecommendationDiscoveryState
 
     private struct ListingResult {
         let lane: Lane
         var ids: [Int] = []
         var nextCursor: String?
         var failed = false
+        var requestedPage: Int?
+        var resolveKeys: [Int: String] = [:]
+        var probeRejected = false
     }
 
     private struct CandidateResult {
@@ -159,7 +166,9 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             presentationCount = 0
             retrievalInterests = []
             retrievalFeatures = []
+            retrievalTopics = []
             needsPersonalizedRetrieval = false
+            restoreDiscoveryProgress()
         }
         isRunning = true
         synchronizeBookmarks()
@@ -193,6 +202,7 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         }
         leasedCandidates = [:]
         isRetrieving = false
+        persistDiscoveryProgress()
     }
 
     func activate(_ id: String) {
@@ -202,9 +212,7 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             displayedDuplicates.insert(item.document.duplicateKey)
             presentationCount += 1
         }
-        if let index = items.firstIndex(where: { $0.id == id }), index > 20 {
-            items.removeFirst(index - 10)
-        }
+        if !isPaging { trimVisitedItems() }
         if remainingCount < 6 { requestMore() }
         loadActivePagesIfNeeded()
         rerank()
@@ -217,7 +225,16 @@ final class ExternalRecommendationFeedModel: ObservableObject {
     func setPaging(_ paging: Bool) {
         guard isRunning else { return }
         isPaging = paging
-        if !paging && rankAgain { rerank() }
+        if !paging {
+            trimVisitedItems()
+            if rankAgain { rerank() }
+        }
+    }
+
+    private func trimVisitedItems() {
+        if let index = items.firstIndex(where: { $0.id == activeID }), index > 20 {
+            items.removeFirst(index - 10)
+        }
     }
 
     private func updateLoadingState() {
@@ -283,29 +300,66 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             let bits = filter.categoryBits
             await withTaskGroup(of: ListingResult.self) { group in
                 for lane in lanes {
-                    let cursor = laneStates[lane.id]?.cursor
-                    group.addTask { await Self.fetchListing(lane, cursor: cursor, excludedBits: bits[lane.site] ?? 0) }
+                    let state = laneStates[lane.id] ?? LaneState()
+                    group.addTask { await Self.fetchListing(lane, state: state, excludedBits: bits[lane.site] ?? 0) }
                 }
                 for await result in group {
                     guard !Task.isCancelled, generation == token else { group.cancelAll(); return }
                     if result.failed {
-                        laneStates[result.lane.id, default: LaneState()].failedAt = Date()
+                        var state = laneStates[result.lane.id] ?? LaneState()
+                        state.failedAt = Date()
+                        if result.probeRejected, let page = result.requestedPage {
+                            // Back off rejected deep probes without changing normal pagination or treating this as a known catalog size.
+                            state.upperPage = max(1, page / 2)
+                            state.probeUpdatedAt = Date()
+                            state.round = (state.round + 1) % 1_000_000
+                            state.windowDate = nil
+                            state.cursor = nil
+                            state.pagesInWindow = 0
+                        }
+                        laneStates[result.lane.id] = state
+                        persistDiscoveryProgress()
                         continue
                     }
-                    let oldCursor = laneStates[result.lane.id]?.cursor
-                    laneStates[result.lane.id] = LaneState(
-                        cursor: result.nextCursor,
-                        exhausted: result.nextCursor == nil || result.nextCursor == oldCursor
-                    )
+                    var state = laneStates[result.lane.id] ?? LaneState()
+                    let oldCursor = state.cursor
+                    state.fetchedAt = Date()
+                    if state.refreshedAt == nil { state.refreshedAt = state.fetchedAt }
+                    state.failedAt = nil
+                    state.cursor = result.nextCursor
+                    state.pagesInWindow += 1
+                    if result.lane.depth.samplesArchive {
+                        if result.ids.isEmpty, let page = result.requestedPage, page > 1 {
+                            // A valid empty deep page narrows the next probe; transport errors never do.
+                            state.upperPage = max(1, page / 2)
+                            state.probeUpdatedAt = Date()
+                        }
+                        if state.pagesInWindow >= 2 || result.nextCursor == nil || result.ids.isEmpty {
+                            state.round = (state.round + 1) % 1_000_000
+                            state.windowDate = nil
+                            state.cursor = nil
+                            state.pagesInWindow = 0
+                        }
+                        state.exhausted = false
+                    } else {
+                        state.exhausted = result.nextCursor == nil || result.nextCursor == oldCursor
+                    }
+                    laneStates[result.lane.id] = state
                     var received: [ExternalCatalogItem] = []
                     for id in result.ids {
                         let item = ExternalCatalogItem(site: result.lane.site, galleryId: id)
+                        let feedback = store.profile.feedback[item.id]
+                        let recentlySeen = feedback?.lastSeen.map { Date().timeIntervalSince($0) < 3 * 86_400 } ?? false
+                        if feedback?.vote != nil || feedback?.bookmarked == true || recentlySeen { continue }
                         if !requested.contains(item.id) && !pending.contains(where: { $0.id == item.id }) {
+                            if let key = result.resolveKeys[id] { savedResolveKeys[item.id] = key }
                             received.append(item)
                         }
                     }
                     if result.lane.feature != nil { pending.insert(contentsOf: received, at: 0) }
                     else { pending.append(contentsOf: received) }
+                    if pending.count > 360 { pending = Array(pending.prefix(360)) }
+                    persistDiscoveryProgress()
                     // Publish the first usable source immediately, while other sources finish.
                     if remainingCount < 8 {
                         await hydratePending(generation: token)
@@ -324,51 +378,87 @@ final class ExternalRecommendationFeedModel: ObservableObject {
     }
 
     private func nextLanes() -> [Lane] {
-        let interests = Array(retrievalFeatures.prefix(10))
+        let interests = retrievalFeatures
+        let availableSites = sites.filter { $0 != .pixiv || PixivAuthStore.shared.isLoggedIn }
         var discovery: [Lane] = []
-        var popular: [Lane] = []
         var personal: [Lane] = []
-        for site in sites {
-            if site == .pixiv && !PixivAuthStore.shared.isLoggedIn { continue }
-            discovery.append(Lane(site: site))
+        func variants(_ lane: Lane) -> [Lane] {
+            if lane.sortKey != nil { return [lane] }
+            let canSample = !(lane.site == .hentaiPill && lane.feature == nil)
+                && !(lane.site == .pixiv && lane.feature == nil)
+            let depths: [ExternalRecommendationDepth] = canSample
+                ? [.latest, .continuation, .middle, .archive] : [.latest, .continuation]
+            return depths.map { depth in var copy = lane; copy.depth = depth; return copy }
+        }
+        for site in availableSites {
+            discovery += variants(Lane(site: site))
             if site == .hitomi {
-                popular.append(Lane(site: site, sortKey: HitomiProvider.SortOption.popularWeek.rawValue))
-                popular.append(Lane(site: site, sortKey: HitomiProvider.SortOption.popularMonth.rawValue))
+                for sort in [HitomiProvider.SortOption.popularWeek, .popularYear] {
+                    discovery.append(Lane(site: site, sortKey: sort.rawValue, depth: .popular))
+                }
             }
-            let topics = interests.filter { [.tag, .female, .male].contains($0.kind) }
-            if topics.count >= 2 && [.ehentai, .imhentai, .threeHentai, .simplyHentai, .pixiv].contains(site) {
-                // These providers support conjunctions without fetching an entire tag index.
-                personal.append(Lane(site: site, feature: topics[0], secondFeature: topics[1]))
+            for group in retrievalTopics {
+                let topics = group.filter { [.tag, .female, .male].contains($0.kind) }
+                if topics.count >= 2 && [.ehentai, .imhentai, .threeHentai, .simplyHentai, .pixiv].contains(site) {
+                    personal += variants(Lane(site: site, feature: topics[0], secondFeature: topics[1]))
+                }
             }
             for feature in interests where feature.siteID == nil || feature.siteID == site.rawValue {
                 if site == .pixiv && ![.tag, .female, .male, .artist].contains(feature.kind) { continue }
                 let seed = feature.kind == .artist ? seedGalleryID(for: feature, site: site) : nil
                 if site == .pixiv && feature.kind == .artist {
                     guard let seed else { continue }
-                    personal += [Lane(site: site, feature: feature, seedGalleryID: seed, pixivWorkType: "illust"),
-                                 Lane(site: site, feature: feature, seedGalleryID: seed, pixivWorkType: "manga")]
+                    for type in ["illust", "manga"] {
+                        personal += variants(Lane(site: site, feature: feature, seedGalleryID: seed, pixivWorkType: type))
+                    }
                 } else {
-                    personal.append(Lane(site: site, feature: feature, seedGalleryID: seed))
+                    personal += variants(Lane(site: site, feature: feature, seedGalleryID: seed))
+                    if site == .threeHentai && [.tag, .female, .male].contains(feature.kind) {
+                        personal.append(Lane(site: site, feature: feature,
+                            sortKey: HitomiProvider.SortOption.popularYear.rawValue, depth: .popular))
+                    }
                 }
             }
         }
-        discovery += popular
         func available(_ lane: Lane) -> Bool {
-            let state = laneStates[lane.id] ?? LaneState()
-            return !state.exhausted && (state.failedAt.map { Date().timeIntervalSince($0) > 30 } ?? true)
+            var state = laneStates[lane.id] ?? LaneState()
+            state.refresh(for: lane.depth, now: Date())
+            laneStates[lane.id] = state
+            let retryDelay: TimeInterval = lane.depth.samplesArchive && state.upperPage != nil ? 3 : 30
+            return !state.exhausted && (state.failedAt.map { Date().timeIntervalSince($0) > retryDelay } ?? true)
         }
-        discovery = discovery.filter(available)
-        personal = personal.filter(available)
+        var used = Set<String>()
+        discovery = discovery.filter { used.insert($0.id).inserted && available($0) }
+        personal = personal.filter { used.insert($0.id).inserted && available($0) }
+        let schedule: [ExternalRecommendationDepth] = [.latest, .archive, .middle, .continuation, .archive, .middle, .popular, .continuation]
         var chosen: [Lane] = []
-        if !personal.isEmpty {
-            let start = laneRotation % personal.count
-            chosen += (0..<min(2, personal.count)).map { personal[(start + $0) % personal.count] }
+        for slot in 0..<3 {
+            let desiredSite = availableSites.isEmpty ? nil : availableSites[(laneRotation + slot) % availableSites.count]
+            let desiredDepth = schedule[(laneRotation + slot) % schedule.count]
+            var candidates = (slot < 2 && !personal.isEmpty ? personal : discovery)
+                .filter { lane in !chosen.contains(where: { $0.id == lane.id }) }
+            if candidates.isEmpty {
+                candidates = (discovery + personal).filter { lane in !chosen.contains(where: { $0.id == lane.id }) }
+            }
+            guard !candidates.isEmpty else { continue }
+            let sorted = candidates.sorted { left, right in
+                func priority(_ lane: Lane) -> Int {
+                    (lane.site == desiredSite ? 8 : 0) + (lane.depth == desiredDepth ? 4 : 0)
+                        + (chosen.contains(where: { $0.topicID == lane.topicID }) ? 0 : 2)
+                }
+                let a = priority(left), b = priority(right)
+                return a == b ? left.id < right.id : a > b
+            }
+            let highest = sorted.first!
+            let peers = sorted.filter { $0.site == highest.site && $0.depth == highest.depth }
+            let differentTopics = peers.filter { lane in !chosen.contains(where: { $0.topicID == lane.topicID }) }
+            let alternatives = differentTopics.isEmpty ? peers : differentTopics
+            chosen.append(alternatives[(laneRotation / max(1, availableSites.count)) % alternatives.count])
         }
-        let capacity = 3 - chosen.count
-        if !discovery.isEmpty {
-            chosen += (0..<min(capacity, discovery.count)).map { discovery[(laneRotation + $0) % discovery.count] }
+        laneRotation = (laneRotation + 1) % 1_000_000
+        for lane in chosen where lane.depth.samplesArchive && laneStates[lane.id]?.windowDate == nil {
+            laneStates[lane.id, default: LaneState()].windowDate = Date()
         }
-        laneRotation += 1
         return chosen
     }
 
@@ -381,45 +471,85 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         }?.document.galleryID
     }
 
-    nonisolated private static func fetchListing(_ lane: Lane, cursor: String?, excludedBits: Int) async -> ListingResult {
+    nonisolated private static func fetchListing(_ lane: Lane, state: LaneState, excludedBits: Int) async -> ListingResult {
         let provider = ExternalSiteRegistry.provider(for: lane.site)
+        var requestedPage: Int?
         do {
+            let seed = ExternalRecommendationDepth.seed(lane.id + "|" + String(state.round))
+            var cursor = state.cursor
+            let dateSearch = lane.site == .pixiv && lane.feature != nil && lane.feature?.kind != .artist
+            var namespace: ExternalTagNamespace?
+            if let feature = lane.feature {
+                switch feature.kind {
+                case .tag, .format: namespace = .tag
+                case .female: namespace = .female
+                case .male: namespace = .male
+                case .artist: namespace = .artist
+                case .group: namespace = .group
+                case .character: namespace = .character
+                case .series: namespace = .series
+                }
+            }
+            let value = lane.feature.map { lane.site == .pixiv ? $0.value : $0.alias ?? $0.value }
+            if cursor == nil && lane.depth.samplesArchive && !dateSearch {
+                if lane.site == .hitomi {
+                    cursor = try await provider.recommendationSampleCursor(namespace: namespace, value: value,
+                        fraction: lane.depth.fraction(seed: seed), limit: 24)
+                } else {
+                    let page = lane.depth.page(seed: seed, upperBound: state.upperPage)
+                    requestedPage = page
+                    cursor = provider.cursorForPage(page, limit: 24)
+                }
+            }
             let page: (ids: [Int], nextCursor: String?)
             if let feature = lane.feature {
-                if let second = lane.secondFeature {
-                    let query = combinationQuery([feature, second], for: lane.site)
-                    page = try await provider.fetchIdsBySearch(query: query, excludedCategoryBits: excludedBits, cursor: cursor, limit: 24)
-                } else if lane.site == .pixiv, feature.kind == .artist, let seed = lane.seedGalleryID {
-                    page = try await PixivProvider().fetchFeedAuthorGalleryIDs(seedGalleryID: seed, type: lane.pixivWorkType, cursor: cursor)
-                } else if lane.site == .pixiv {
-                    page = try await provider.fetchIdsBySearch(query: feature.value, cursor: cursor, limit: 24)
-                } else {
-                    let namespace: ExternalTagNamespace
-                    switch feature.kind {
-                    case .tag, .format: namespace = .tag
-                    case .female: namespace = .female
-                    case .male: namespace = .male
-                    case .artist: namespace = .artist
-                    case .group: namespace = .group
-                    case .character: namespace = .character
-                    case .series: namespace = .series
+                if lane.site == .pixiv, feature.kind == .artist, let seedID = lane.seedGalleryID {
+                    page = try await PixivProvider().fetchFeedAuthorGalleryIDs(seedGalleryID: seedID, type: lane.pixivWorkType, cursor: cursor)
+                } else if dateSearch {
+                    var query = PixivAdvancedQuery()
+                    query.search = ([feature] + (lane.secondFeature.map { [$0] } ?? [])).map(\.value).joined(separator: " ")
+                    let cycle = Int(ExternalRecommendationDepth.seed(lane.id) % 1_000) + state.round
+                    if let window = lane.depth.dateWindow(round: cycle, now: state.windowDate ?? Date()) {
+                        query.startDate = window.start
+                        query.endDate = window.end.addingTimeInterval(-1)
+                        query.sort = state.round.isMultiple(of: 2) ? .dateDesc : .dateAsc
                     }
-                    let value = feature.siteID == nil && lane.site != .pixiv ? feature.alias ?? feature.value : feature.value
-                    page = try await provider.fetchIdsByTag(namespace: namespace, value: value, cursor: cursor, limit: 24)
+                    page = try await provider.fetchIdsBySearch(query: query.encoded(), cursor: cursor, limit: 24)
+                } else if let second = lane.secondFeature {
+                    let query = combinationQuery([feature, second], for: lane.site)
+                    page = try await provider.fetchIdsBySearch(query: query, excludedCategoryBits: excludedBits, sortKey: lane.sortKey, cursor: cursor, limit: 24)
+                } else {
+                    page = try await provider.fetchIdsByTag(namespace: namespace!, value: value!, sortKey: lane.sortKey, cursor: cursor, limit: 24)
                 }
             } else {
                 page = try await provider.fetchIdsBySearch(query: "", excludedCategoryBits: excludedBits, sortKey: lane.sortKey, cursor: cursor, limit: 24)
             }
-            return ListingResult(lane: lane, ids: page.ids, nextCursor: page.nextCursor)
+            var keys: [Int: String] = [:]
+            if lane.site == .ehentai {
+                for id in page.ids {
+                    if let key = await provider.resolveKey(for: id) { keys[id] = key }
+                }
+            }
+            return ListingResult(lane: lane, ids: page.ids, nextCursor: page.nextCursor, requestedPage: requestedPage, resolveKeys: keys)
         } catch {
-            return ListingResult(lane: lane, failed: true)
+            let rejected = lane.depth.samplesArchive && requestedPage != nil && !(error is URLError) && !Task.isCancelled
+            return ListingResult(lane: lane, failed: true, requestedPage: requestedPage, probeRejected: rejected)
         }
     }
 
     private func hydratePending(generation token: UUID) async {
         // Every source retains its unconsumed IDs; native page sizes are never discarded.
-        let batch = Array(pending.prefix(9))
-        pending.removeFirst(batch.count)
+        var batch: [ExternalCatalogItem] = []
+        // Interleave sources before metadata hydration, independent of network completion order.
+        let start = sites.isEmpty ? 0 : laneRotation % sites.count
+        let order = Array(sites.dropFirst(start)) + Array(sites.prefix(start))
+        while batch.count < 9 && !pending.isEmpty {
+            let count = batch.count
+            for site in order where batch.count < 9 {
+                if let index = pending.firstIndex(where: { $0.site == site }) { batch.append(pending.remove(at: index)) }
+            }
+            if batch.count == count { break }
+        }
         for item in batch {
             requested.insert(item.id)
             leasedCandidates[item.id] = item
@@ -428,8 +558,9 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             var iterator = batch.makeIterator()
             func enqueue() {
                 guard let item = iterator.next() else { return }
+                let resolveKey = savedResolveKeys[item.id]
                 group.addTask {
-                    let candidate = Task.isCancelled ? nil : try? await Self.fetchPreview(site: item.site, id: item.galleryId)
+                    let candidate = Task.isCancelled ? nil : try? await Self.fetchPreview(site: item.site, id: item.galleryId, resolveKey: resolveKey)
                     return CandidateResult(source: item, item: candidate)
                 }
             }
@@ -452,6 +583,7 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             }
         }
         guard !Task.isCancelled, generation == token else { return }
+        persistDiscoveryProgress()
         rerank()
         if pool.count > 120 {
             let keep = Set(items.map(\.id))
@@ -493,10 +625,11 @@ final class ExternalRecommendationFeedModel: ObservableObject {
                 if items.map(\.id) != next.map(\.id) { items = next }
                 if activeID == nil, let first = items.first { activate(first.id) }
                 if remainingCount > 0 { errorMessage = nil }
-                let interests = result.interests.map(\.id)
+                let interests = result.interests.map(\.id) + result.topics.map { $0.map(\.id).joined(separator: ";") }
                 if interests != retrievalInterests {
                     retrievalInterests = interests
                     retrievalFeatures = result.interests
+                    retrievalTopics = result.topics
                     needsPersonalizedRetrieval = true
                     requestMore()
                 }
@@ -524,8 +657,9 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         didChangePreferences()
     }
 
-    nonisolated private static func fetchPreview(site: ExternalSite, id: Int) async throws -> ExternalRecommendationFeedItem {
+    nonisolated private static func fetchPreview(site: ExternalSite, id: Int, resolveKey: String? = nil) async throws -> ExternalRecommendationFeedItem {
         let provider = ExternalSiteRegistry.provider(for: site)
+        if let resolveKey { await provider.primeResolveKey(resolveKey, for: id) }
         if let ehentai = provider as? EHentaiProvider {
             let preview = try await ehentai.fetchRecommendationPreview(id: id)
             var document = preview.detail.recommendationDocument
@@ -559,6 +693,36 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         default:
             return values.joined(separator: " ")
         }
+    }
+
+    private func restoreDiscoveryProgress() {
+        var components = sites.map { "site=\($0.rawValue)" }.sorted()
+        components += filter.languages.map { "language=\($0.rawValue)" }.sorted()
+        for site in sites.sorted(by: { $0.rawValue < $1.rawValue }) {
+            components.append("\(site.rawValue):\(filter.categoryBits[site] ?? 0)")
+            components += (filter.excludedTypes[site] ?? []).sorted().map { "\(site.rawValue):type=\($0)" }
+            components += (filter.excludedLanguages[site] ?? []).sorted().map { "\(site.rawValue):language=\($0)" }
+        }
+        discoveryScope = components.joined(separator: "\u{1}")
+        let snapshot = discoveryStore.load(scope: discoveryScope)
+        laneStates = snapshot.lanes
+        laneRotation = max(0, min(999_999, snapshot.rotation))
+        pending = snapshot.pending.filter { sites.contains($0.site) }.map(\.item)
+        savedResolveKeys = Dictionary(snapshot.pending.compactMap { candidate in
+            candidate.resolveKey.map { (candidate.item.id, $0) }
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private func persistDiscoveryProgress() {
+        guard !discoveryScope.isEmpty else { return }
+        var used = Set<String>()
+        let unconsumed = Array(leasedCandidates.values) + pending
+        let saved = unconsumed.filter { used.insert($0.id).inserted }.prefix(360).map {
+            ExternalRecommendationSavedCandidate(site: $0.site, galleryID: $0.galleryId, resolveKey: savedResolveKeys[$0.id])
+        }
+        discoveryStore.save(.init(lanes: laneStates, pending: saved, rotation: laneRotation), scope: discoveryScope)
+        let retained = Set(saved.map { $0.item.id })
+        savedResolveKeys = savedResolveKeys.filter { retained.contains($0.key) }
     }
 
     private func loadActivePagesIfNeeded() {

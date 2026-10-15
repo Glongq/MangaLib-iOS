@@ -10,11 +10,12 @@ root = Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix="mangalib-recommendation-tests-") as temporary:
     workspace = Path(temporary)
     engine = root / "App/ExternalSites/ExternalRecommendationEngine.swift"
+    dates = root / "App/ExternalSites/ExternalRecommendationDate.swift"
     executable = workspace / "engine-tests"
     cache = workspace / "module-cache"
     subprocess.run([
         "swiftc", "-swift-version", "5", "-module-cache-path", str(cache),
-        str(engine), str(root / "Tests/ExternalRecommendationEngineTests.swift"),
+        str(dates), str(engine), str(root / "Tests/ExternalRecommendationEngineTests.swift"),
         "-o", str(executable),
     ], check=True)
     subprocess.run([str(executable)], check=True)
@@ -26,7 +27,8 @@ with tempfile.TemporaryDirectory(prefix="mangalib-recommendation-tests-") as tem
     executable = workspace / "feed-tests"
     subprocess.run([
         "swiftc", "-swift-version", "5", "-module-cache-path", str(cache),
-        str(root / "App/ExternalSites/ExternalSite.swift"), str(protocol), str(engine),
+        str(root / "App/ExternalSites/ExternalSite.swift"), str(protocol), str(dates), str(engine),
+        str(root / "App/ExternalSites/ExternalRecommendationDiscovery.swift"),
         str(root / "App/ExternalSites/ExternalRecommendationStore.swift"),
         str(root / "App/ExternalSites/ExternalRecommendationFeedModel.swift"),
         str(root / "Tests/ExternalRecommendationFeedTests.swift"),

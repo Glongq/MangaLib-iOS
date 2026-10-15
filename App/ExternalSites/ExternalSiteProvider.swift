@@ -279,6 +279,9 @@ protocol ExternalSiteProvider {
     /// wouldn't be picked up through `any ExternalSiteProvider`.
     func cursorForPage(_ page: Int, limit: Int) -> String?
 
+    /// Optional position sampling for providers with a measurable index, without guessing gallery IDs.
+    func recommendationSampleCursor(namespace: ExternalTagNamespace?, value: String?, fraction: Double, limit: Int) async throws -> String?
+
     /// Full title metadata — for the card and for reading.
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail
 
@@ -340,6 +343,8 @@ extension ExternalSiteProvider {
     }
 
     func cursorForPage(_ page: Int, limit: Int) -> String? { nil }
+
+    func recommendationSampleCursor(namespace: ExternalTagNamespace?, value: String?, fraction: Double, limit: Int) async throws -> String? { nil }
 
     func resolveKey(for id: Int) async -> String? { nil }
     func primeResolveKey(_ key: String, for id: Int) async {}

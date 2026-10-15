@@ -125,44 +125,37 @@ struct ExternalRecommendationFeedView: View {
     private func feed(size: CGSize) -> some View {
         let snapshot = model.items
         let currentID = selectedID ?? model.activeID
-        return ExternalRecommendationPagePager(
-            ids: snapshot.map(\.id),
-            selection: Binding(
-                get: { snapshot.firstIndex(where: { $0.id == currentID }) ?? 0 },
-                set: { index in
-                    guard snapshot.indices.contains(index) else { return }
-                    selectedID = snapshot[index].id
-                    model.activate(snapshot[index].id)
+        return ScrollView(.vertical) {
+            LazyVStack(spacing: 0) {
+                ForEach(snapshot) { item in
+                    let active = currentID == item.id
+                    ExternalRecommendationCard(
+                        item: item,
+                        isSelected: active,
+                        isReading: active && isReading,
+                        shouldPreload: isReading && active,
+                        loadingPages: model.loadingPagesID == item.id,
+                        pageListFailed: model.pageListErrorID == item.id,
+                        loadingNext: snapshot.last?.id == item.id && model.isLoading,
+                        canRetryNext: snapshot.last?.id == item.id && !model.isLoading && model.errorMessage != nil,
+                        onRetryPages: { model.retryActivePages() },
+                        onRetryNext: { model.retry() },
+                        onShowTags: { tagsItem = item },
+                        onOpenDetail: { detailItem = item },
+                        onZoom: { zoomed in if active { isZoomed = zoomed } }
+                    )
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
+                    .id(item.id)
                 }
-            ),
-            zoomed: isZoomed,
-            orientation: .vertical,
-            revision: ExternalRecommendationFeedRevision(
-                selectedID: currentID, reading: isReading, pageCounts: snapshot.map { $0.detail.pages.count },
-                loadingPagesID: model.loadingPagesID, pageListErrorID: model.pageListErrorID,
-                loading: model.isLoading, canRetry: model.errorMessage != nil
-            ),
-            onTransitionChange: { model.setPaging($0) }
-        ) { index in
-            let item = snapshot[index]
-            let active = currentID == item.id
-            ExternalRecommendationCard(
-                item: item,
-                isSelected: active,
-                isReading: active && isReading,
-                shouldPreload: isReading && active,
-                loadingPages: model.loadingPagesID == item.id,
-                pageListFailed: model.pageListErrorID == item.id,
-                loadingNext: snapshot.last?.id == item.id && model.isLoading,
-                canRetryNext: snapshot.last?.id == item.id && !model.isLoading && model.errorMessage != nil,
-                onRetryPages: { model.retryActivePages() },
-                onRetryNext: { model.retry() },
-                onShowTags: { tagsItem = item },
-                onOpenDetail: { detailItem = item },
-                onZoom: { zoomed in if active { isZoomed = zoomed } }
-            )
-            .id(item.id)
+            }
+            .scrollTargetLayout()
         }
+        .scrollIndicators(.hidden)
+        .scrollTargetBehavior(.paging)
+        .scrollPosition(id: $selectedID, anchor: .top)
+        .scrollDisabled(isZoomed)
+        .onScrollPhaseChange { _, phase in model.setPaging(phase != .idle) }
         .frame(width: size.width, height: size.height)
         .clipped()
     }
@@ -197,16 +190,6 @@ struct ExternalRecommendationFeedView: View {
     }
 }
 
-private struct ExternalRecommendationFeedRevision: Hashable {
-    let selectedID: String?
-    let reading: Bool
-    let pageCounts: [Int]
-    let loadingPagesID: String?
-    let pageListErrorID: String?
-    let loading: Bool
-    let canRetry: Bool
-}
-
 private struct ExternalRecommendationPagesRevision: Hashable {
     let selection: Int
     let selected: Bool
@@ -232,6 +215,8 @@ private struct ExternalRecommendationCard: View {
     @State private var readyPages = Set<Int>()
     @State private var readPages = Set<Int>()
     @State private var intervalStart: TimeInterval?
+    @State private var intervalPage: Int?
+    @State private var pageSeconds: [Int: Double] = [:]
     @State private var visibleSeconds = 0.0
     @State private var hasRecordedImpression = false
     @State private var zoomed = false
@@ -294,6 +279,7 @@ private struct ExternalRecommendationCard: View {
                 finishInterval()
                 visibleSeconds = 0
                 readPages = []
+                pageSeconds = [:]
                 hasRecordedImpression = false
                 updateExposure()
             } else {
@@ -405,27 +391,33 @@ private struct ExternalRecommendationCard: View {
 
     private func finishInterval() {
         if let start = intervalStart {
-            visibleSeconds += max(0, ProcessInfo.processInfo.systemUptime - start)
+            let elapsed = max(0, ProcessInfo.processInfo.systemUptime - start)
+            visibleSeconds += elapsed
+            if let page = intervalPage {
+                pageSeconds[page, default: 0] += elapsed
+                if pageSeconds[page, default: 0] >= 1.2 { readPages.insert(page) }
+            }
             intervalStart = nil
+            intervalPage = nil
         }
     }
 
     private func updateExposure() {
         finishInterval()
         if isReading && readyPages.contains(pageIndex) {
-            readPages.insert(pageIndex)
+            intervalPage = pageIndex
             intervalStart = ProcessInfo.processInfo.systemUptime
         }
     }
 
     private func commitExposure() {
-        guard !readPages.isEmpty, visibleSeconds >= 0.6 else { return }
+        guard visibleSeconds >= 0.6 else { return }
         store.recordExposure(item.document, seconds: visibleSeconds, pages: readPages.count, incrementImpression: !hasRecordedImpression)
         hasRecordedImpression = true
     }
 }
 
-/// Both axes use exact UIKit viewport bounds and retain only the current page and its neighbors.
+/// The horizontal image pager retains only the current page and its neighbors.
 private struct ExternalRecommendationPagePager<Content: View>: UIViewControllerRepresentable {
     let ids: [String]
     @Binding var selection: Int
@@ -645,7 +637,7 @@ private struct ExternalRecommendationTagsSheet: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(preference.feature.value)
-                                    Text(preference.value == .hide ? "Скрыто" : "Больше такого")
+                                    Text(preference.value == .hide ? "Реже" : "Больше такого")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -656,7 +648,7 @@ private struct ExternalRecommendationTagsSheet: View {
                     }
                 }
                 Section {
-                    Text("Лайки и закладки усиливают интерес к тегам и авторам. Дизлайк скрывает тайтл и снижает похожие рекомендации. «Скрыть» полностью исключает выбранный тег или автора.")
+                    Text("Лайки и закладки усиливают интерес к тегам и авторам. Дизлайк убирает тайтл, а повторные дизлайки снижают похожие рекомендации. «Реже» снижает приоритет тега или автора, но не запрещает их.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -678,11 +670,11 @@ private struct ExternalRecommendationTagsSheet: View {
                 Button(preference == .prefer ? "Убрать предпочтение" : "Больше такого", systemImage: "heart") {
                     store.setPreference(preference == .prefer ? nil : .prefer, for: feature)
                 }
-                Button(preference == .hide ? "Показывать снова" : "Скрыть", systemImage: "eye.slash") {
+                Button(preference == .hide ? "Убрать понижение" : "Реже", systemImage: "minus.circle") {
                     store.setPreference(preference == .hide ? nil : .hide, for: feature)
                 }
             } label: {
-                Image(systemName: preference == .hide ? "eye.slash.fill" : preference == .prefer ? "heart.fill" : "ellipsis")
+                Image(systemName: preference == .hide ? "minus.circle.fill" : preference == .prefer ? "heart.fill" : "ellipsis")
                     .foregroundStyle(preference == .prefer ? Color.pink : Color.secondary)
                     .frame(width: 44, height: 36)
                     .contentShape(Rectangle())

@@ -289,6 +289,33 @@ struct HitomiProvider: ExternalSiteProvider {
     /// one domain was tested, but a different one was left in the code.
     private static let apiDomain = "ltn.gold-usergeneratedcontent.net"
 
+    /// Sample the real index by position; gallery IDs themselves are sparse and are never guessed.
+    func recommendationSampleCursor(namespace: ExternalTagNamespace?, value: String?, fraction: Double, limit: Int) async throws -> String? {
+        let path: String
+        if let namespace, let value {
+            let prefixed = Self.prefixedValue(for: namespace, value: value).lowercased()
+            let encoded = prefixed.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? prefixed
+            path = "\(Self.nozomiPath(for: namespace))/\(encoded)-all.nozomi"
+        } else {
+            path = "index-all.nozomi"
+        }
+        guard let url = URL(string: "https://\(Self.apiDomain)/\(path)") else { throw HitomiError.badResponse }
+        let requestSession = session
+        let total = try await HitomiRecommendationIndexCache.shared.count(for: url) {
+            var request = URLRequest(url: url)
+            request.setValue("bytes=0-3", forHTTPHeaderField: "Range")
+            let (_, response) = try await requestSession.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw HitomiError.badResponse }
+            if http.statusCode == 404 { return 0 }
+            guard http.statusCode == 206,
+                  let range = http.value(forHTTPHeaderField: "Content-Range"),
+                  let bytes = Int(range.split(separator: "/").last ?? "") else { throw HitomiError.badResponse }
+            return bytes / 4
+        }
+        let offset = Int(Double(max(0, total - limit)) * min(1, max(0, fraction)))
+        return offset > 0 ? String(offset) : nil
+    }
+
     /// The shared byte-range request to a .nozomi file — used both by tag
     /// (fetchIdsByTag) and by the general "Recently" index (fetchIdsBySearch,
     /// empty query) — the same response format, only the URL differs.
@@ -849,6 +876,33 @@ actor HitomiSearchCache {
         let result = try await compute()
         cache[key] = result
         return result
+    }
+}
+
+/// Share small index-size probes across temporal lanes and concurrent requests.
+private actor HitomiRecommendationIndexCache {
+    static let shared = HitomiRecommendationIndexCache()
+    private var counts: [URL: (value: Int, measuredAt: Date)] = [:]
+    private var inFlight: [URL: Task<Int, Error>] = [:]
+
+    func count(for url: URL, fetch: @escaping () async throws -> Int) async throws -> Int {
+        if let cached = counts[url], Date().timeIntervalSince(cached.measuredAt) < 6 * 3_600 { return cached.value }
+        if let task = inFlight[url] { return try await task.value }
+        let task = Task { try await fetch() }
+        inFlight[url] = task
+        do {
+            let value = try await task.value
+            counts[url] = (value, Date())
+            inFlight[url] = nil
+            if counts.count > 100 {
+                let oldest = counts.min { $0.value.measuredAt < $1.value.measuredAt }?.key
+                if let oldest { counts.removeValue(forKey: oldest) }
+            }
+            return value
+        } catch {
+            inFlight[url] = nil
+            throw error
+        }
     }
 }
 
