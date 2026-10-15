@@ -70,7 +70,7 @@ struct MangaReaderView: View {
     @AppStorage private var fitWidth: Bool
 
     /// Number of upcoming images to preload across reader modes.
-    @AppStorage("reader_preload_count") private var preloadCount = 3
+    private static let preloadCount = 3
 
     /// Changing the image server recreates the page content.
     @AppStorage(ImageServerChoice.defaultsKey) private var serverChoice = 0
@@ -247,7 +247,6 @@ struct MangaReaderView: View {
         .sheet(isPresented: $showSettings) {
             ReaderSettingsSheet(
                 fitWidth: $fitWidth,
-                preloadCount: $preloadCount,
                 pageMode: $pageMode,
                 readerTheme: $readerTheme,
                 doubleTapZoom: $doubleTapZoom,
@@ -310,9 +309,8 @@ struct MangaReaderView: View {
 
     /// Preload the next `preloadCount` images after a zero-based page index.
     private func preloadUpcoming(in pages: [PageItem], from page: Int) {
-        guard preloadCount > 0 else { return }
         let start = page + 1
-        let end = min(start + preloadCount, pages.count)
+        let end = min(start + Self.preloadCount, pages.count)
         guard start < end else { return }
         for index in start..<end {
             RemoteImageLoader.preload(candidates: viewModel.imageURLs(for: pages[index]))
@@ -400,8 +398,11 @@ struct MangaReaderView: View {
             },
             onPrefetch: { positions in
                 for (chapterIndex, pageIndex) in positions {
-                    guard let segment = viewModel.segments.first(where: { $0.index == chapterIndex }) else { continue }
-                    preloadUpcoming(in: segment.pages, from: pageIndex - 1)
+                    guard chapterIndex == viewModel.currentIndex,
+                          pageIndex >= verticalPage, pageIndex < verticalPage + Self.preloadCount,
+                          let segment = viewModel.segments.first(where: { $0.index == chapterIndex }),
+                          segment.pages.indices.contains(pageIndex) else { continue }
+                    RemoteImageLoader.preload(candidates: viewModel.imageURLs(for: segment.pages[pageIndex]))
                 }
             },
             content: { item, width, onImageSize in
@@ -917,12 +918,12 @@ struct MangaReaderView: View {
         let subtitle = viewModel.currentChapter?.shortTitle ?? ""
         let titleWidth = Self.textWidth(title, font: Self.titleBadgeTitleFont)
         let subtitleWidth = Self.textWidth(subtitle, font: Self.titleBadgeSubtitleFont)
-        let contentWidth = max(titleWidth, subtitleWidth) + 32 // Include 16 points of horizontal padding on each side.
+        let contentWidth = max(titleWidth, subtitleWidth) + 16 // Include 8 points of horizontal padding on each side.
         return min(contentWidth, titleBadgeMaxWidth)
     }
 
     private var titleBadge: some View {
-        VStack(alignment: .center, spacing: 2) {
+        VStack(alignment: .center, spacing: 1) {
             Text(mangaTitle ?? viewModel.currentChapter?.name ?? "Глава")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(fg)
@@ -933,7 +934,7 @@ struct MangaReaderView: View {
                 .foregroundStyle(fg.opacity(0.7))
                 .lineLimit(1)
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
+        .padding(.horizontal, 8).padding(.vertical, 5)
         .frame(width: titleBadgeWidth)
         .glassEffect(.regular, in: Capsule())
     }
@@ -954,7 +955,7 @@ struct MangaReaderView: View {
         Text("\(pageBubbleCurrent)/\(pageBubbleTotal)")
             .font(.footnote.weight(.semibold))
             .foregroundStyle(fg)
-            .padding(.horizontal, 16).padding(.vertical, 8)
+            .padding(.horizontal, 8).padding(.vertical, 4)
             .glassEffect(.regular, in: Capsule())
     }
 
@@ -1214,7 +1215,6 @@ struct ChapterListSheet: View {
 /// scroll inertia, double-tap zoom, and page number visibility.
 struct ReaderSettingsSheet: View {
     @Binding var fitWidth: Bool
-    @Binding var preloadCount: Int
     @Binding var pageMode: Int
     @Binding var readerTheme: Int
     @Binding var doubleTapZoom: Bool
@@ -1287,9 +1287,9 @@ struct ReaderSettingsSheet: View {
 
                     // Upcoming image preloading setting.
                     label("Предзагрузка страниц")
-                    Picker("", selection: $preloadCount) {
-                        Text("1").tag(1); Text("3").tag(3); Text("5").tag(5)
-                    }.pickerStyle(.segmented)
+                    Text("3 следующие страницы")
+                        .font(.subheadline)
+                        .foregroundStyle(palette.secondary)
 
                     // Vertical image spacing setting.
                     if pageMode == 1 {

@@ -51,12 +51,7 @@ struct ExternalReaderView: View {
     /// is enough there, TabView switches to the target tag on its own).
     @State private var pendingJumpPage: Int?
     @State private var isCurrentPageZoomed = false
-    /// Indices of pages for which preloading has ALREADY been started
-    /// (see preloadPage) — without this, on every slight verticalPage
-    /// scroll the window (see preloadVerticalWindow) would get
-    /// recalculated and re-trigger the very same already-requested
-    /// pages.
-    @State private var preloadedIndices: Set<Int> = []
+    @StateObject private var pagePreloader = ExternalPagePrefetcher()
     @State private var vScale: CGFloat = 1
     @State private var vScaleBase: CGFloat = 1
     @State private var didScrollToInitial = false
@@ -73,7 +68,6 @@ struct ExternalReaderView: View {
     @AppStorage("reader_disable_swipe") private var disableSwipe = false
     @AppStorage("reader_smooth_paging") private var smoothPaging = true
     @AppStorage("reader_vertical_gap") private var verticalGap: Double = 0
-    @AppStorage("reader_preload_count") private var preloadCount = 3
     /// Its own key (not the shared "reader_fit_width_{type}" from
     /// MangaReaderView) — hitomi/e-hentai have no notion of
     /// manga/manhwa distinction with different defaults.
@@ -204,18 +198,19 @@ struct ExternalReaderView: View {
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .task {
-            if pageMode == 1 { preloadVerticalWindow(from: verticalPage) } else { preloadUpcoming(from: currentPage) }
+            preloadUpcoming(from: pageMode == 1 ? verticalPage : currentPage)
         }
         .onChange(of: currentPage) { _, page in
             isCurrentPageZoomed = false
             if pageMode != 1 { preloadUpcoming(from: page) }
         }
         .onChange(of: verticalPage) { _, page in
-            if pageMode == 1 { preloadVerticalWindow(from: page) }
+            if pageMode == 1 { preloadUpcoming(from: page) }
         }
         .onChange(of: pageMode) { _, mode in
-            if mode == 1 { preloadVerticalWindow(from: verticalPage) } else { preloadUpcoming(from: currentPage) }
+            preloadUpcoming(from: mode == 1 ? verticalPage : currentPage)
         }
+        .onDisappear { pagePreloader.cancel() }
         .onReceive(NotificationCenter.default.publisher(for: OCRProviderFallbackNotifier.notification)) { notification in
             guard let message = notification.userInfo?[OCRProviderFallbackNotifier.messageKey] as? String,
                   notification.userInfo?[OCRProviderFallbackNotifier.siteKey] as? String == site.rawValue,
@@ -234,7 +229,6 @@ struct ExternalReaderView: View {
         .sheet(isPresented: $showSettings) {
             ExternalReaderSettingsSheet(
                 fitWidth: $fitWidth,
-                preloadCount: $preloadCount,
                 pageMode: $pageMode,
                 readerTheme: $readerTheme,
                 doubleTapZoom: $doubleTapZoom,
@@ -448,59 +442,9 @@ struct ExternalReaderView: View {
 
     // MARK: Preloading
 
-    /// Resolving a page URL is asynchronous (for e-hentai it's a real
-    /// network request for the H@H link, see
-    /// EHentaiProvider.pageImageURL), so unlike
-    /// MangaReaderView.preloadUpcoming (a ready-made formula, synchronous)
-    /// here each page gets its own lightweight task.
+    /// Reader page numbers are one-based; the shared prefetch window uses array indices.
     private func preloadUpcoming(from page: Int) {
-        guard preloadCount > 0 else { return }
-        let start = page + 1
-        let end = min(start + preloadCount, detail.pages.count)
-        guard start < end else { return }
-        for index in start..<end {
-            preloadPage(detail.pages[index])
-        }
-    }
-
-    /// Vertical mode — a window ahead of the current page (per a direct
-    /// request — not ALL at once, but the next 50), recalculated as the
-    /// user scrolls (see .onChange(of: verticalPage)).
-    private static let verticalPreloadWindow = 50
-
-    private func preloadVerticalWindow(from page: Int) {
-        let start = page + 1
-        let end = min(start + Self.verticalPreloadWindow, detail.pages.count)
-        guard start < end else { return }
-        for index in start..<end {
-            preloadPage(detail.pages[index])
-        }
-    }
-
-    /// `preloadExternalImage` (ExternalImage.swift), NOT
-    /// RemoteImageLoader.preload — that one uses the Referer from
-    /// MangaNetworkService (the currently active MangaLib site), which
-    /// is wrong for
-    /// tn.gold-usergeneratedcontent.net/ehgt.org/*.hath.network — the CDN
-    /// responded with 404/403, and preloading silently did nothing
-    /// (complaint "I see seams", 08/30). See its doc-comment — the
-    /// image is stored in the same RemoteImageCache.shared that
-    /// ZoomableImageScrollView/VerticalPageImage check, so those
-    /// (reused from MangaReaderView.swift) views simply find it already
-    /// there.
-    private func preloadPage(_ page: ExternalGalleryPage) {
-        guard !preloadedIndices.contains(page.index) else { return }
-        preloadedIndices.insert(page.index)
-        let galleryId = detail.id
-        Task {
-            guard let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) else {
-                preloadedIndices.remove(page.index)
-                return
-            }
-            if await preloadExternalImage(url) == false {
-                preloadedIndices.remove(page.index)
-            }
-        }
+        pagePreloader.update(provider: provider, galleryID: detail.id, pages: detail.pages, currentIndex: page - 1)
     }
 
     // MARK: UI (top bar/bubble/bottom bar) — 1-to-1 style with
@@ -542,7 +486,7 @@ struct ExternalReaderView: View {
     }
 
     private var titleBadge: some View {
-        VStack(alignment: .center, spacing: 2) {
+        VStack(alignment: .center, spacing: 1) {
             Text(detail.title)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(fg)
@@ -555,7 +499,7 @@ struct ExternalReaderView: View {
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
+        .padding(.horizontal, 8).padding(.vertical, 5)
         .frame(maxWidth: titleBadgeMaxWidth)
         .glassEffect(.regular, in: Capsule())
     }
@@ -566,7 +510,7 @@ struct ExternalReaderView: View {
         Text("\(pageBubbleCurrent)/\(detail.pages.count)")
             .font(.footnote.weight(.semibold))
             .foregroundStyle(fg)
-            .padding(.horizontal, 16).padding(.vertical, 8)
+            .padding(.horizontal, 8).padding(.vertical, 4)
             .glassEffect(.regular, in: Capsule())
     }
 
@@ -595,38 +539,6 @@ struct ExternalReaderView: View {
                 .contentShape(Circle())
         }
     }
-}
-
-/// Resolves a page URL and downloads the visible image with the external
-/// site's own Referer before handing the URL to the shared reader views.
-/// Visible requests use a separate URLSession from background preloads,
-/// retry with cache bypass, and never fall through to RemoteImageLoader
-/// whose headers belong to the core MangaLib reader.
-private func resolveExternalPageURL(
-    provider: any ExternalSiteProvider,
-    galleryId: Int,
-    page: ExternalGalleryPage
-) async -> URL? {
-    for attempt in 0..<5 {
-        if Task.isCancelled { return nil }
-        if let url = try? await provider.pageImageURL(galleryId: galleryId, page: page) {
-            if await preloadExternalImage(
-                url,
-                bypassNetworkCache: attempt > 0,
-                readerPriority: true
-            ) {
-                return url
-            }
-            if !Task.isCancelled {
-                await provider.pageImageLoadFailed(galleryId: galleryId, page: page, url: url)
-            }
-        }
-        if attempt < 4 {
-            let delay = min(2_000_000_000, 350_000_000 * (1 << attempt))
-            try? await Task.sleep(nanoseconds: UInt64(delay))
-        }
-    }
-    return nil
 }
 
 private struct ExternalPageLoadOverlay: View {
@@ -890,7 +802,6 @@ private struct ExternalVerticalPagePositionKey: PreferenceKey {
 
 private struct ExternalReaderSettingsSheet: View {
     @Binding var fitWidth: Bool
-    @Binding var preloadCount: Int
     @Binding var pageMode: Int
     @Binding var readerTheme: Int
     @Binding var doubleTapZoom: Bool
@@ -946,9 +857,9 @@ private struct ExternalReaderSettingsSheet: View {
                     }
 
                     label("Предзагрузка страниц")
-                    Picker("", selection: $preloadCount) {
-                        Text("1").tag(1); Text("3").tag(3); Text("5").tag(5)
-                    }.pickerStyle(.segmented)
+                    Text("3 следующие страницы")
+                        .font(.subheadline)
+                        .foregroundStyle(palette.secondary)
 
                     if pageMode == 1 {
                         gapSlider

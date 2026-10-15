@@ -92,9 +92,8 @@ struct ExternalRecommendationFeedView: View {
         .task(id: isReading ? nextItem?.id : nil) {
             guard isReading, let nextItem, let page = nextItem.detail.pages.first else { return }
             let provider = ExternalSiteRegistry.provider(for: nextItem.detail.site)
-            guard let url = try? await provider.pageImageURL(galleryId: nextItem.detail.id, page: page), !Task.isCancelled else { return }
-            // Explicit preloading does not depend on LazyVStack mounting the next gallery.
-            await preloadExternalImage(url)
+            // Reuse the same resolved URL and image cache when this gallery becomes visible.
+            _ = await resolveExternalPageURL(provider: provider, galleryId: nextItem.detail.id, page: page, readerPriority: false)
         }
         .sheet(item: $tagsItem) { item in
             ExternalRecommendationTagsSheet(document: item.document)
@@ -211,6 +210,7 @@ private struct ExternalRecommendationCard: View {
     let onOpenDetail: () -> Void
     let onZoom: (Bool) -> Void
     @ObservedObject private var store = ExternalRecommendationStore.shared
+    @StateObject private var pagePreloader = ExternalPagePrefetcher()
     @State private var pageIndex = 0
     @State private var readyPages = Set<Int>()
     @State private var readPages = Set<Int>()
@@ -223,7 +223,15 @@ private struct ExternalRecommendationCard: View {
 
     private var vote: ExternalRecommendationVote? { store.vote(for: item.document) }
     private var summaryTags: [ExternalRecommendationFeature] {
-        item.document.features.filter { [.tag, .female, .male].contains($0.kind) }
+        let tags = item.document.features.filter { [.tag, .female, .male].contains($0.kind) }
+        return tags.filter { store.preference(for: $0) == .prefer }
+            + tags.filter { store.preference(for: $0) != .prefer }
+    }
+
+    private struct PrefetchRequest: Equatable {
+        let enabled: Bool
+        let pageIndex: Int
+        let pageCount: Int
     }
 
     var body: some View {
@@ -250,17 +258,24 @@ private struct ExternalRecommendationCard: View {
                 )
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.top, 12)
+            .padding(.top, 20)
 
             // Reserve space for controls so page text is never hidden underneath them.
             bottomControls
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 18)
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                .padding(.bottom, 9)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.black)
         }
         .background(.black)
+        .task(id: PrefetchRequest(enabled: isReading && shouldPreload, pageIndex: pageIndex, pageCount: item.detail.pages.count)) {
+            guard isReading && shouldPreload else { pagePreloader.cancel(); return }
+            pagePreloader.update(
+                provider: ExternalSiteRegistry.provider(for: item.detail.site),
+                galleryID: item.detail.id, pages: item.detail.pages, currentIndex: pageIndex
+            )
+        }
         .onChange(of: pageIndex) { _, _ in
             zoomed = false
             onZoom(false)
@@ -289,14 +304,15 @@ private struct ExternalRecommendationCard: View {
             }
         }
         .onDisappear {
+            pagePreloader.cancel()
             finishInterval()
             commitExposure()
         }
     }
 
     private var bottomControls: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
                 Text(item.detail.site.displayName)
                 Text("·")
                 Text("\(pageIndex + 1) / \(item.document.pageCount)")
@@ -339,8 +355,8 @@ private struct ExternalRecommendationCard: View {
                 .accessibilityHint("Предпочтения по авторам")
             }
 
-            HStack(spacing: 10) {
-                Text(summaryTags.map { "#\($0.alias ?? $0.value)" }.joined(separator: "  "))
+            HStack(spacing: 5) {
+                Text(summaryTags.map { "#\($0.alias ?? $0.value)" }.joined(separator: " "))
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.75))
                     .lineLimit(1)
@@ -591,26 +607,11 @@ private struct ExternalRecommendationImagePage: View {
             if url != nil { onLoaded(true); return }
             failed = false
             let provider = ExternalSiteRegistry.provider(for: site)
-            for retry in 0..<3 {
-                guard !Task.isCancelled else { return }
-                if let resolved = try? await provider.pageImageURL(galleryId: galleryID, page: page) {
-                    if await preloadExternalImage(resolved, bypassNetworkCache: retry > 0, readerPriority: isCurrent) {
-                        guard !Task.isCancelled else { return }
-                        url = resolved
-                        onLoaded(true)
-                        return
-                    }
-                    if !Task.isCancelled {
-                        await provider.pageImageLoadFailed(galleryId: galleryID, page: page, url: resolved)
-                    }
-                }
-                guard !Task.isCancelled else { return }
-                if retry < 2 {
-                    do { try await Task.sleep(for: .milliseconds(350 * (retry + 1))) }
-                    catch { return }
-                }
-            }
-            failed = true
+            let resolved = await resolveExternalPageURL(provider: provider, galleryId: galleryID, page: page, readerPriority: isCurrent)
+            guard !Task.isCancelled else { return }
+            url = resolved
+            failed = resolved == nil
+            onLoaded(resolved != nil)
         }
     }
 }

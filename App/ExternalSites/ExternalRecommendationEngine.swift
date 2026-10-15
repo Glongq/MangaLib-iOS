@@ -168,10 +168,14 @@ struct ExternalRecommendationEngine {
     private var knownCopies = Set<String>()
     private var recentCopies = Set<String>()
     private var topics: [Topic] = []
+    private var preferredTagIDs = Set<String>()
 
     init(profile: ExternalRecommendationProfile, now: Date = Date()) {
         self.profile = profile
         self.now = now
+        preferredTagIDs = Set(profile.preferences.values.filter {
+            $0.value == .prefer && [.tag, .female, .male].contains($0.feature.kind)
+        }.map(\.feature.id))
         let records = profile.feedback.values.sorted {
             $0.updatedAt == $1.updatedAt ? $0.document.id < $1.document.id : $0.updatedAt > $1.updatedAt
         }
@@ -242,7 +246,10 @@ struct ExternalRecommendationEngine {
         let learned = longTerm * 0.85 + session * 0.15
         guard let preference = profile.preferences[feature.id] else { return learned }
         // Keep the persisted "hide" value compatible, but make it a soft preference everywhere.
-        return preference.value == .hide ? max(-1, learned - 0.55) : max(learned, 0.8)
+        if preference.value == .hide { return max(-1, learned - 0.55) }
+        // Explicit tag preferences have a 25% stronger affinity floor than other preferences.
+        let preferredAffinity = preferredTagIDs.contains(feature.id) ? 1.0 : 0.8
+        return max(learned, preferredAffinity)
     }
 
     func isEligible(_ document: ExternalRecommendationDocument, ignoringSeen: Bool = false) -> Bool {
@@ -277,7 +284,10 @@ struct ExternalRecommendationEngine {
         }.max() ?? 0
         let discouraged = document.features.filter { profile.preferences[$0.id]?.value == .hide }
         let preferencePenalty = min(1.2, discouraged.reduce(0.0) { $0 + 0.25 * $1.kind.weight })
-        return 3 * sum / max(1, weight) + 0.45 * topicMatch - preferencePenalty - min(0.8, exposure * 0.15)
+        // Reward broader preference coverage without requiring every preferred tag to match.
+        let preferredCoverage = Double(ids.intersection(preferredTagIDs).count) / Double(max(1, preferredTagIDs.count))
+        return 3 * sum / max(1, weight) + 0.45 * topicMatch + 0.35 * preferredCoverage
+            - preferencePenalty - min(0.8, exposure * 0.15)
     }
 
     func interestGroups() -> [[ExternalRecommendationFeature]] {
