@@ -238,7 +238,7 @@ private struct ExternalRecommendationCard: View {
 
     private var vote: ExternalRecommendationVote? { store.vote(for: item.document) }
     private var summaryTags: [ExternalRecommendationFeature] {
-        Array(item.document.features.filter { [.tag, .female, .male].contains($0.kind) }.prefix(2))
+        item.document.features.filter { [.tag, .female, .male].contains($0.kind) }
     }
 
     var body: some View {
@@ -265,6 +265,7 @@ private struct ExternalRecommendationCard: View {
                 )
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top, 12)
 
             // Reserve space for controls so page text is never hidden underneath them.
             bottomControls
@@ -338,7 +339,8 @@ private struct ExternalRecommendationCard: View {
             Text(item.detail.title)
                 .font(.headline)
                 .foregroundStyle(.white)
-                .lineLimit(2)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             if !item.detail.artists.isEmpty {
                 Button(action: onShowTags) {
@@ -363,6 +365,7 @@ private struct ExternalRecommendationCard: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(.white.opacity(0.12), in: Capsule())
+                    .fixedSize()
                     .accessibilityLabel("Все теги и предпочтения")
             }
 
@@ -444,6 +447,7 @@ private struct ExternalRecommendationPagePager<Content: View>: UIViewControllerR
         if count > 0 {
             controller.setViewControllers([context.coordinator.host(for: min(selection, count - 1))], direction: .forward, animated: false)
         }
+        context.coordinator.presentedIDs = ids
         return controller
     }
 
@@ -451,7 +455,6 @@ private struct ExternalRecommendationPagePager<Content: View>: UIViewControllerR
         let coordinator = context.coordinator
         let refresh = coordinator.parent.revision != revision || coordinator.parent.ids != ids
         coordinator.parent = self
-        controller.dataSource = zoomed ? nil : coordinator
         for scroll in controller.view.subviews.compactMap({ $0 as? UIScrollView }) {
             scroll.isScrollEnabled = !zoomed
             scroll.isDirectionalLockEnabled = true
@@ -464,19 +467,15 @@ private struct ExternalRecommendationPagePager<Content: View>: UIViewControllerR
                 if let index = ids.firstIndex(of: id) { host.rootView = content(index) }
             }
         }
-        guard count > 0, !coordinator.transitioning else { return }
-        let target = min(max(0, selection), count - 1)
-        let current = controller.viewControllers?.first.flatMap { coordinator.index(of: $0) }
-        if target != current {
-            controller.setViewControllers([coordinator.host(for: target)], direction: target >= (current ?? target) ? .forward : .reverse, animated: false)
-        }
-        coordinator.trim(around: target)
+        coordinator.synchronize(controller)
     }
 
     final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
         var parent: ExternalRecommendationPagePager
         var hosts: [String: UIHostingController<Content>] = [:]
         var transitioning = false
+        var presentedIDs: [String] = []
+        var wasZoomed = false
 
         init(parent: ExternalRecommendationPagePager) { self.parent = parent }
 
@@ -498,6 +497,24 @@ private struct ExternalRecommendationPagePager<Content: View>: UIViewControllerR
         func trim(around index: Int) {
             let keep = Set(parent.ids.enumerated().filter { abs($0.offset - index) <= 1 }.map(\.element))
             for key in hosts.keys where !keep.contains(key) { hosts.removeValue(forKey: key) }
+        }
+
+        func synchronize(_ controller: UIPageViewController, selectedIndex: Int? = nil) {
+            guard parent.count > 0, !transitioning else { return }
+            let target = min(max(0, selectedIndex ?? parent.selection), parent.count - 1)
+            let current = controller.viewControllers?.first.flatMap { index(of: $0) }
+            let neighborsChanged = presentedIDs != parent.ids || wasZoomed != parent.zoomed
+            if neighborsChanged {
+                // UIKit caches absent neighbors too. Reload when asynchronous results change the page list.
+                controller.dataSource = nil
+            }
+            if neighborsChanged || target != current {
+                controller.setViewControllers([host(for: target)], direction: target >= (current ?? target) ? .forward : .reverse, animated: false)
+            }
+            controller.dataSource = parent.zoomed ? nil : self
+            presentedIDs = parent.ids
+            wasZoomed = parent.zoomed
+            trim(around: target)
         }
 
         func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore viewController: UIViewController) -> UIViewController? {
@@ -522,6 +539,10 @@ private struct ExternalRecommendationPagePager<Content: View>: UIViewControllerR
                 trim(around: index)
             }
             parent.onTransitionChange(false)
+            if presentedIDs != parent.ids || wasZoomed != parent.zoomed {
+                let current = pageViewController.viewControllers?.first.flatMap { index(of: $0) }
+                synchronize(pageViewController, selectedIndex: current)
+            }
         }
     }
 }
