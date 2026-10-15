@@ -149,10 +149,11 @@ enum ExternalSiteRegistry {
 @main
 struct ExternalRecommendationFeedTests {
     @MainActor
-    static func waitUntil(_ condition: () -> Bool, timeout: TimeInterval = 4) async {
+    static func waitUntil(_ condition: () -> Bool, timeout: TimeInterval = 4,
+                          file: StaticString = #file, line: UInt = #line) async {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() && Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
-        precondition(condition(), "Timed out waiting for the feed")
+        precondition(condition(), "Timed out waiting for the feed", file: file, line: line)
     }
 
     @MainActor
@@ -179,6 +180,20 @@ struct ExternalRecommendationFeedTests {
         model.didChangePreferences()
         precondition(Array(model.items.prefix(3).map(\.id)) == visited, "Returning to an earlier title must preserve already-visited forward positions")
         model.activate(original)
+        await waitUntil { !model.isLoading }
+        let upcoming = model.items[3]
+        let beforePaging = model.items.map(\.id)
+        model.setPaging(true)
+        store.toggleVote(.dislike, for: upcoming.document)
+        model.didChangePreferences()
+        try? await Task.sleep(for: .milliseconds(40))
+        precondition(model.items.map(\.id) == beforePaging, "Ranking must not replace a gallery during an interactive page transition")
+        model.setPaging(false)
+        await waitUntil { !model.isLoading }
+        precondition(!model.items.contains { $0.id == upcoming.id }, "Deferred ranking must apply after the gesture finishes")
+        store.toggleVote(.dislike, for: upcoming.document)
+        model.didChangePreferences()
+        await waitUntil { !model.isLoading }
         let current = model.items.first { $0.id == original }!
         store.toggleVote(.like, for: current.document)
         model.didChangePreferences()
@@ -224,6 +239,8 @@ struct ExternalRecommendationFeedTests {
         let initial = partial.items.first!
         precondition(initial.document.pageCount == 10 && initial.detail.pages.count == 2, "Preview metadata must preserve the real page count")
         await waitUntil { partial.items.first?.isComplete == true }
+        await waitUntil { !partial.isLoading }
+        precondition(partial.items.first?.isComplete == true, "Async ranking must not replace completed page metadata with an older preview")
         let detailCalls = await FixtureNetwork.shared.calls.filter { $0.kind == "detail" }
         precondition(detailCalls.count == 1, "Only the visible gallery should fetch its complete page list")
         precondition(partial.activeID == initial.id, "Completing page metadata must not change the active gallery")

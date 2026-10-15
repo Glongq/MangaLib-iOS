@@ -619,6 +619,9 @@ private func resolveExternalPageURL(
             ) {
                 return url
             }
+            if !Task.isCancelled {
+                await provider.pageImageLoadFailed(galleryId: galleryId, page: page, url: url)
+            }
         }
         if attempt < 4 {
             let delay = min(2_000_000_000, 350_000_000 * (1 << attempt))
@@ -705,20 +708,19 @@ private struct ExternalHorizontalPageImage: View {
 
     var body: some View {
         GeometryReader { geo in
-            ZoomableImageScrollView(
-                candidates: resolvedURL.map { [$0] } ?? [],
-                fitWidth: fitWidth,
-                doubleTapZoom: doubleTapZoom,
-                onTap: onTap,
-                onZoomChanged: onZoomChanged,
-                ringColor: ringColor,
-                viewportHeight: geo.size.height,
-                // Always attached (not gated on ocrEnabled): cheap/idempotent,
-                // and guarantees the overlay container already exists by the
-                // time translationController has data to render, regardless
-                // of whether OCR was enabled when the image first loaded.
-                onImageViewReady: { imageView in translationController.attach(to: imageView) }
-            )
+            if let resolvedURL {
+                ZoomableImageScrollView(
+                    candidates: [resolvedURL],
+                    fitWidth: fitWidth,
+                    doubleTapZoom: doubleTapZoom,
+                    onTap: onTap,
+                    onZoomChanged: onZoomChanged,
+                    ringColor: ringColor,
+                    viewportHeight: geo.size.height,
+                    // Attach overlays before OCR data arrives, even when OCR starts disabled.
+                    onImageViewReady: { imageView in translationController.attach(to: imageView) }
+                )
+            }
         }
         .overlay {
             if resolvedURL == nil {
@@ -804,16 +806,21 @@ private struct ExternalVerticalPageImage: View {
     }
 
     var body: some View {
-        VerticalPageImage(
-            candidates: resolvedURL.map { [$0] } ?? [],
-            width: page.width > 0 ? page.width : nil,
-            height: page.height > 0 ? page.height : nil,
-            // Always set (not gated on ocrEnabled) — otherwise enabling
-            // translation AFTER this page's image already finished
-            // decoding would never capture it (VerticalPageImage's own
-            // internal fetch .task only runs once per candidates.first).
-            onImageLoaded: { image in loadedImage = image }
-        )
+        Group {
+            if let resolvedURL {
+                VerticalPageImage(
+                    candidates: [resolvedURL],
+                    width: page.width > 0 ? page.width : nil,
+                    height: page.height > 0 ? page.height : nil,
+                    // Keep the image callback attached so enabling OCR can reuse a loaded image.
+                    onImageLoaded: { image in loadedImage = image }
+                )
+            } else if page.width > 0 && page.height > 0 {
+                Color.clear.aspectRatio(CGFloat(page.width) / CGFloat(page.height), contentMode: .fit)
+            } else {
+                Color.clear.frame(height: 480)
+            }
+        }
         .overlay {
             if resolvedURL == nil {
                 ExternalPageLoadOverlay(

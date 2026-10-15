@@ -1,23 +1,22 @@
 import Foundation
 
-/// A port of hitomi.la's gg.js (https://ltn.gold-usergeneratedcontent.net/gg.js) —
-/// used to build the URLs for full-size reader pages (see
-/// HitomiProvider.pageImageURL). NOT used for catalog grid thumbnails —
-/// those just use sharding based on the first characters of the hash (see
-/// HitomiProvider.coverURL), no dependency on this file.
-///
-/// IMPORTANT (Aug 30, second attempt — confirmed by COMPARING two live snapshots
-/// of gg.js, ~7 hours apart): BOTH `b` (the timestamp path) AND the entire set of
-/// `case` values in `m()` are NOT static — both actually change over
-/// time (both snapshots had 2112 values, but a DIFFERENT set — the site really
-/// does regenerate the table wholesale, not just append to it). This file used
-/// to hardcode a SINGLE snapshot as a `static let` — because of that, reading
-/// full-size pages would sooner or later silently break (the URL would be built
-/// from an already-stale path/wrong CDN subdomain bucket). Now b/
-/// caseSet are loaded LIVE and cached in memory via HitomiGGCache — exactly
-/// what the site itself does (it also refetches `gg.js` on every
-/// load of the reader).
+/// Reader CDN routing extracted from Hitomi's current gg.js without executing remote code.
 enum HitomiGG {
+    struct Configuration: Sendable {
+        let b: String
+        let caseSet: Set<Int>
+        let defaultValue: Int
+        let caseValue: Int
+
+        func imageURL(for hash: String) -> URL? {
+            guard hash.count == 64, hash.allSatisfy({ $0.isHexDigit }) else { return nil }
+            let bucket = HitomiGG.s(hash)
+            guard let value = Int(bucket) else { return nil }
+            let host = (caseSet.contains(value) ? caseValue : defaultValue) + 1
+            return URL(string: "https://a\(host).gold-usergeneratedcontent.net/\(b)\(bucket)/\(hash).avif")
+        }
+    }
+
     /// `gg.s(h)` — takes the last 3 characters of the hash, swaps the
     /// last character with the preceding two, parses it as hex → a decimal
     /// string (used both as the numeric bucket path and as input to `m`).
@@ -32,24 +31,29 @@ enum HitomiGG {
         return String(Int(hex, radix: 16) ?? 0)
     }
 
-    /// `gg.m(g)` — the real gg.js body is `var o = 0; switch (g) { case
-    /// ...: o = 1; break; } return o;`: default 0, flipped to 1 ONLY for
-    /// `g` values in the LIVE (not hardcoded) `case` set (see
-    /// HitomiGGCache). This was INVERTED here for who knows how long
-    /// (`caseSet.contains(g) ? 0 : 1`) — confirmed live (Sep 17): for a
-    /// real gallery's page hash, `g` fell inside gg.js's live case set (so
-    /// the real site returns `m=1` → host `a2`), the inverted formula
-    /// picked `m=0` → host `a1`, and `a1` 404s while `a2` returns the
-    /// actual image. Since this function decides EVERY reader page's CDN
-    /// subdomain (see HitomiProvider.pageImageURL) and was backwards for
-    /// every hash, every single full-size page 404s this way (thumbnails
-    /// use a separate, unaffected formula — HitomiProvider.
-    /// thumbnailShard/coverURL/pageThumbnailURL never call this) —
-    /// matching a report of "spinner forever, black screen" for every
-    /// page in the reader while the catalog/preview grid's covers and
-    /// thumbnails load fine.
-    static func m(_ g: Int, caseSet: Set<Int>) -> Int {
-        caseSet.contains(g) ? 1 : 0
+    /// Both assignment values rotate along with the bucket set; neither polarity is fixed.
+    static func parse(_ text: String) -> Configuration? {
+        guard let path = captures(in: text, pattern: #"\bb\s*:\s*['"]([0-9]+/)['"]"#)?.first,
+              let body = captures(in: text, pattern: #"\bm\s*:\s*function\s*\([^)]*\)\s*\{([\s\S]*?)\},\s*s\s*:"#)?.first,
+              let initial = captures(in: body, pattern: #"\bvar\s+([A-Za-z_$][\w$]*)\s*=\s*([01])\s*;"#),
+              let defaultValue = Int(initial[1]),
+              let assigned = captures(in: body, pattern: "\\b" + NSRegularExpression.escapedPattern(for: initial[0]) + #"\s*=\s*([01])\s*;\s*break\s*;"#)?.first,
+              let caseValue = Int(assigned), defaultValue != caseValue,
+              let regex = try? NSRegularExpression(pattern: #"\bcase\s+(\d+)\s*:"#) else { return nil }
+        let cases = Set(regex.matches(in: body, range: NSRange(body.startIndex..., in: body)).compactMap { match -> Int? in
+            guard let range = Range(match.range(at: 1), in: body) else { return nil }
+            return Int(body[range])
+        })
+        guard !cases.isEmpty, cases.allSatisfy({ (0..<4096).contains($0) }) else { return nil }
+        return Configuration(b: path, caseSet: cases, defaultValue: defaultValue, caseValue: caseValue)
+    }
+
+    private static func captures(in text: String, pattern: String) -> [String]? {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
+        return (1..<match.numberOfRanges).compactMap { index in
+            Range(match.range(at: index), in: text).map { String(text[$0]) }
+        }
     }
 }
 
@@ -61,15 +65,13 @@ enum HitomiGG {
 actor HitomiGGCache {
     static let shared = HitomiGGCache()
 
-    private var cached: (b: String, caseSet: Set<Int>)?
+    private var cached: HitomiGG.Configuration?
     private var fetchedAt: Date?
-    private var inFlight: Task<(b: String, caseSet: Set<Int>), Error>?
+    private var inFlight: Task<HitomiGG.Configuration, Error>?
 
-    /// No more than once an hour — the two real snapshots taken in this session were
-    /// about 7 hours apart, so there's no reason to hit the network on EVERY page.
-    private static let ttl: TimeInterval = 3600
+    private static let ttl: TimeInterval = 300
 
-    func current(session: URLSession) async throws -> (b: String, caseSet: Set<Int>) {
+    func current(session: URLSession) async throws -> HitomiGG.Configuration {
         if let cached, let fetchedAt, Date().timeIntervalSince(fetchedAt) < Self.ttl {
             return cached
         }
@@ -85,35 +87,26 @@ actor HitomiGGCache {
         return result
     }
 
-    private static func fetchLive(session: URLSession) async throws -> (b: String, caseSet: Set<Int>) {
+    /// Concurrent failures of an old URL must not discard a newer configuration.
+    func invalidate(failedURL: URL, hash: String) {
+        guard cached?.imageURL(for: hash) == failedURL else { return }
+        cached = nil
+        fetchedAt = nil
+    }
+
+    private static func fetchLive(session: URLSession) async throws -> HitomiGG.Configuration {
         guard let url = URL(string: "https://ltn.gold-usergeneratedcontent.net/gg.js") else {
             throw HitomiError.badResponse
         }
-        let (data, response) = try await session.data(from: url)
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200,
               let text = String(data: data, encoding: .utf8) else {
             throw HitomiError.badResponse
         }
-        guard let b = firstMatch(in: text, pattern: #"b:\s*'([^']+)'"#) else {
+        guard let configuration = HitomiGG.parse(text) else {
             throw HitomiError.decodingFailed
         }
-        var caseSet: Set<Int> = []
-        if let regex = try? NSRegularExpression(pattern: #"case (\d+):"#) {
-            let range = NSRange(text.startIndex..., in: text)
-            regex.enumerateMatches(in: text, range: range) { match, _, _ in
-                guard let match, let r = Range(match.range(at: 1), in: text), let value = Int(text[r]) else { return }
-                caseSet.insert(value)
-            }
-        }
-        guard !caseSet.isEmpty else { throw HitomiError.decodingFailed }
-        return (b, caseSet)
-    }
-
-    private static func firstMatch(in text: String, pattern: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let range = NSRange(text.startIndex..., in: text)
-        guard let match = regex.firstMatch(in: text, range: range), match.numberOfRanges == 2,
-              let r = Range(match.range(at: 1), in: text) else { return nil }
-        return String(text[r])
+        return configuration
     }
 }

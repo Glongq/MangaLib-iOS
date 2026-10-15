@@ -366,8 +366,8 @@ struct HitomiProvider: ExternalSiteProvider {
     /// WITH A SPACE IN IT ("anal horse") — hitomi tag values never
     /// contain a literal space (a multi-word tag uses an underscore, e.g.
     /// "big_breasts"), so every candidate (.tag/.female/.male) 404'd and
-    /// the search silently came back with 0 results — the "поиск выпадает
-    /// при 2+ словах" complaint. The REAL hitomi.la search field
+    /// the search silently returned no results for multi-word queries.
+    /// The real hitomi.la search field
     /// (confirmed live: `search.html?anal%20horse` in a fresh HAR capture,
     /// which triggers the site's own `/galleriesindex/` B-tree lookups)
     /// treats a space as a separator between INDEPENDENT terms and ANDs
@@ -739,33 +739,17 @@ struct HitomiProvider: ExternalSiteProvider {
         return URL(string: "https://tn.gold-usergeneratedcontent.net/webpsmalltn/\(shard.dir)/\(shard.subdir)/\(hash).webp")
     }
 
-    /// The full-size reader page — the gg.js formula: host = "a" (avif) +
-    /// (gg.m(Int(gg.s(hash))) + 1), path = gg.b + gg.s(hash) + "/" + hash +
-    /// ".avif". `b`/the set of `case` values in `m()` are loaded LIVE via HitomiGGCache
-    /// (see its doc comment — both actually change over time). The host prefix
-    /// "a"/the ".avif" extension — FIXED (Aug 30, third attempt): this used to
-    /// be "w"/".webp" here — an assumption based on the general convention of public
-    /// hitomi clients, NOT confirmed by live traffic; fresh HAR data captured
-    /// REAL reader URLs (`a1.../*.avif`, `a2.../*.avif`, status 200).
-    /// `gg.m()` ITSELF turned out to separately have an inverted 0/1 (see
-    /// HitomiGG.m's doc comment, fixed Sep 17 — every full-size page was
-    /// 404ing to the wrong `a1`/`a2` host, confirmed live), so "the
-    /// bucket/host-selection formula was correct" below no longer holds —
-    /// only the host LETTER/extension were right at the time. Verified
-    /// with a live curl test on several hashes from the fresh HAR plus one
-    /// more title separately — all 200
-    /// image/avif (Referer: hitomi.la is required — already set in session).
+    /// The timestamp, bucket set and both routing values come from the current gg.js.
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL {
-        let hash = page.key
-        let (b, caseSet) = try await HitomiGGCache.shared.current(session: session)
-        let bucket = HitomiGG.s(hash)
-        let g = Int(bucket) ?? 0
-        let hostNumber = HitomiGG.m(g, caseSet: caseSet) + 1
-        let host = "a\(hostNumber).gold-usergeneratedcontent.net"
-        guard let url = URL(string: "https://\(host)/\(b)\(bucket)/\(hash).avif") else {
+        let configuration = try await HitomiGGCache.shared.current(session: session)
+        guard let url = configuration.imageURL(for: page.key) else {
             throw HitomiError.badResponse
         }
         return url
+    }
+
+    func pageImageLoadFailed(galleryId: Int, page: ExternalGalleryPage, url: URL) async {
+        await HitomiGGCache.shared.invalidate(failedURL: url, hash: page.key)
     }
 }
 

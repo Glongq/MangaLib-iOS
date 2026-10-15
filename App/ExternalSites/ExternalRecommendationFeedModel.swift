@@ -44,6 +44,29 @@ struct ExternalRecommendationFeedItem: Identifiable {
     var id: String { document.id }
 }
 
+/// Ranking never runs on the main actor, including profile evidence construction.
+private actor ExternalRecommendationRankingWorker {
+    struct Result: Sendable {
+        let ranked: [ExternalRecommendationDocument]
+        let interests: [ExternalRecommendationFeature]
+    }
+
+    private var cachedRevision: Int?
+    private var cachedEngine: ExternalRecommendationEngine?
+
+    func rank(profile: ExternalRecommendationProfile, revision: Int,
+              candidates: [ExternalRecommendationDocument], recent: [ExternalRecommendationDocument], offset: Int) -> Result {
+        if cachedRevision != revision || cachedEngine.map({ Date().timeIntervalSince($0.now) > 60 }) != false {
+            cachedEngine = ExternalRecommendationEngine(profile: profile)
+            cachedRevision = revision
+        }
+        let engine = cachedEngine!
+        guard !Task.isCancelled else { return Result(ranked: [], interests: []) }
+        return Result(ranked: engine.ranked(candidates, after: recent, offset: offset, limit: 16),
+                      interests: engine.interests())
+    }
+}
+
 /// Retrieval, pagination and queue management live outside the paging views.
 @MainActor
 final class ExternalRecommendationFeedModel: ObservableObject {
@@ -66,12 +89,20 @@ final class ExternalRecommendationFeedModel: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var seedTask: Task<Void, Never>?
     private var detailTask: Task<Void, Never>?
+    private var rankingTask: Task<Void, Never>?
+    private let rankingWorker = ExternalRecommendationRankingWorker()
+    private var rankingRevision = 0
+    private var rankAgain = false
+    private var isRetrieving = false { didSet { updateLoadingState() } }
+    private var isRanking = false { didSet { updateLoadingState() } }
     private var detailLoadToken = UUID()
     private var generation = UUID()
     private var laneRotation = 0
     private var presentationCount = 0
     private var isRunning = false
+    private var isPaging = false
     private var retrievalInterests: [String] = []
+    private var retrievalFeatures: [ExternalRecommendationFeature] = []
     private var needsPersonalizedRetrieval = false
     private let store: ExternalRecommendationStore
 
@@ -127,10 +158,12 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             laneRotation = 0
             presentationCount = 0
             retrievalInterests = []
+            retrievalFeatures = []
             needsPersonalizedRetrieval = false
         }
         isRunning = true
         synchronizeBookmarks()
+        rerank()
         requestMore()
         loadActivePagesIfNeeded()
         let token = generation
@@ -147,6 +180,11 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         seedTask = nil
         detailTask?.cancel()
         detailTask = nil
+        rankingTask?.cancel()
+        rankingTask = nil
+        rankAgain = false
+        isPaging = false
+        isRanking = false
         loadingPagesID = nil
         pageListErrorID = nil
         for item in leasedCandidates.values {
@@ -154,7 +192,7 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             if !pending.contains(where: { $0.id == item.id }) { pending.insert(item, at: 0) }
         }
         leasedCandidates = [:]
-        isLoading = false
+        isRetrieving = false
     }
 
     func activate(_ id: String) {
@@ -169,16 +207,22 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         }
         if remainingCount < 6 { requestMore() }
         loadActivePagesIfNeeded()
+        rerank()
     }
 
     func didChangePreferences() {
-        let interests = ExternalRecommendationEngine(profile: store.profile).interests().map(\.id)
-        if interests != retrievalInterests {
-            retrievalInterests = interests
-            needsPersonalizedRetrieval = true
-        }
         rerank()
-        if needsPersonalizedRetrieval || remainingCount < 8 || pool.count < 24 { requestMore() }
+    }
+
+    func setPaging(_ paging: Bool) {
+        guard isRunning else { return }
+        isPaging = paging
+        if !paging && rankAgain { rerank() }
+    }
+
+    private func updateLoadingState() {
+        let loading = isRetrieving || isRanking
+        if isLoading != loading { isLoading = loading }
     }
 
     func synchronizeBookmarks() {
@@ -212,7 +256,7 @@ final class ExternalRecommendationFeedModel: ObservableObject {
 
     private func requestMore() {
         guard isRunning, loadTask == nil, !sites.isEmpty else { return }
-        isLoading = true
+        isRetrieving = true
         let token = generation
         loadTask = Task { [weak self] in
             guard let self else { return }
@@ -220,7 +264,7 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             guard generation == token else { return }
             loadTask = nil
             if needsPersonalizedRetrieval { requestMore() }
-            else { isLoading = false }
+            else { isRetrieving = false }
         }
     }
 
@@ -232,7 +276,6 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             guard !Task.isCancelled, generation == token else { return }
             if !pending.isEmpty && !(personalizing && round == 0) {
                 await hydratePending(generation: token)
-                rerank()
                 if remainingCount >= 12 && pool.count >= 24 { break }
             }
             let lanes = nextLanes()
@@ -266,13 +309,11 @@ final class ExternalRecommendationFeedModel: ObservableObject {
                     // Publish the first usable source immediately, while other sources finish.
                     if remainingCount < 8 {
                         await hydratePending(generation: token)
-                        rerank()
                     }
                 }
             }
             guard !Task.isCancelled, generation == token else { return }
             await hydratePending(generation: token)
-            rerank()
             if remainingCount >= 12 { break }
         }
         if remainingCount == 0 {
@@ -283,8 +324,7 @@ final class ExternalRecommendationFeedModel: ObservableObject {
     }
 
     private func nextLanes() -> [Lane] {
-        let engine = ExternalRecommendationEngine(profile: store.profile)
-        let interests = engine.interests(limit: 10)
+        let interests = Array(retrievalFeatures.prefix(10))
         var discovery: [Lane] = []
         var popular: [Lane] = []
         var personal: [Lane] = []
@@ -406,11 +446,13 @@ final class ExternalRecommendationFeedModel: ObservableObject {
                     if !displayedDuplicates.contains(document.duplicateKey) {
                         pool[document.id] = candidate
                     }
-                    rerank()
+                    if items.isEmpty { rerank() }
                 }
                 enqueue()
             }
         }
+        guard !Task.isCancelled, generation == token else { return }
+        rerank()
         if pool.count > 120 {
             let keep = Set(items.map(\.id))
             let removable = pool.keys.filter { !keep.contains($0) }
@@ -419,20 +461,50 @@ final class ExternalRecommendationFeedModel: ObservableObject {
     }
 
     private func rerank() {
-        let engine = ExternalRecommendationEngine(profile: store.profile)
-        let prefix: [ExternalRecommendationFeedItem]
-        if let index = items.lastIndex(where: { displayed.contains($0.id) }) {
-            // Going back must preserve every already-visited position, including forward navigation.
-            prefix = Array(items.prefix(index + 1))
-        } else {
-            prefix = []
+        guard isRunning else { return }
+        rankingRevision &+= 1
+        rankAgain = true
+        guard rankingTask == nil, !isPaging else { return }
+        isRanking = true
+        let token = generation
+        rankingTask = Task { [weak self] in
+            guard let self else { return }
+            while rankAgain, isRunning, !isPaging, generation == token, !Task.isCancelled {
+                rankAgain = false
+                let revision = rankingRevision
+                let prefix: [ExternalRecommendationFeedItem]
+                if let index = items.lastIndex(where: { self.displayed.contains($0.id) }) {
+                    // Returning to an earlier title preserves already-visited forward positions.
+                    prefix = Array(items.prefix(index + 1))
+                } else { prefix = [] }
+                let candidates = pool.values.filter {
+                    !self.displayed.contains($0.id) && !self.displayedDuplicates.contains($0.document.duplicateKey) && self.filter.allows($0.detail)
+                }.map(\.document)
+                let result = await rankingWorker.rank(
+                    profile: store.profile, revision: store.revision, candidates: candidates,
+                    recent: prefix.map(\.document), offset: presentationCount
+                )
+                guard !Task.isCancelled, isRunning, generation == token else { return }
+                if isPaging { rankAgain = true; break }
+                guard revision == rankingRevision else { continue }
+                // A complete page list may arrive while ranking the older metadata snapshot.
+                let preserved = prefix.map { self.pool[$0.id] ?? $0 }
+                let next = preserved + result.ranked.compactMap { self.pool[$0.id] }
+                if items.map(\.id) != next.map(\.id) { items = next }
+                if activeID == nil, let first = items.first { activate(first.id) }
+                if remainingCount > 0 { errorMessage = nil }
+                let interests = result.interests.map(\.id)
+                if interests != retrievalInterests {
+                    retrievalInterests = interests
+                    retrievalFeatures = result.interests
+                    needsPersonalizedRetrieval = true
+                    requestMore()
+                }
+            }
+            guard generation == token else { return }
+            rankingTask = nil
+            isRanking = false
         }
-        let candidates = pool.values.filter {
-            !displayed.contains($0.id) && !displayedDuplicates.contains($0.document.duplicateKey) && filter.allows($0.detail)
-        }.map(\.document)
-        let ranked = engine.ranked(candidates, after: prefix.map(\.document), offset: presentationCount, limit: 16)
-        items = prefix + ranked.compactMap { pool[$0.id] }
-        if activeID == nil, let first = items.first { activate(first.id) }
     }
 
     private func seedBookmarks(generation token: UUID) async {

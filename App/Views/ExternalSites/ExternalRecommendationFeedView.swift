@@ -123,40 +123,48 @@ struct ExternalRecommendationFeedView: View {
     }
 
     private func feed(size: CGSize) -> some View {
-        ScrollView(.vertical) {
-            LazyVStack(spacing: 0) {
-                ForEach(model.items) { item in
-                    let active = (selectedID ?? model.activeID) == item.id
-                    ExternalRecommendationCard(
-                        item: item,
-                        isSelected: active,
-                        isReading: active && isReading,
-                        shouldPreload: isReading && active,
-                        loadingPages: model.loadingPagesID == item.id,
-                        pageListFailed: model.pageListErrorID == item.id,
-                        loadingNext: model.items.last?.id == item.id && model.isLoading,
-                        canRetryNext: model.items.last?.id == item.id && !model.isLoading && model.errorMessage != nil,
-                        onRetryPages: { model.retryActivePages() },
-                        onRetryNext: { model.retry() },
-                        onShowTags: { tagsItem = item },
-                        onOpenDetail: { detailItem = item },
-                        onZoom: { zoomed in if active { isZoomed = zoomed } }
-                    )
-                    .frame(width: size.width, height: size.height)
-                    .clipped()
-                    .id(item.id)
+        let snapshot = model.items
+        let currentID = selectedID ?? model.activeID
+        return ExternalRecommendationPagePager(
+            ids: snapshot.map(\.id),
+            selection: Binding(
+                get: { snapshot.firstIndex(where: { $0.id == currentID }) ?? 0 },
+                set: { index in
+                    guard snapshot.indices.contains(index) else { return }
+                    selectedID = snapshot[index].id
+                    model.activate(snapshot[index].id)
                 }
-            }
-            .scrollTargetLayout()
+            ),
+            zoomed: isZoomed,
+            orientation: .vertical,
+            revision: ExternalRecommendationFeedRevision(
+                selectedID: currentID, reading: isReading, pageCounts: snapshot.map { $0.detail.pages.count },
+                loadingPagesID: model.loadingPagesID, pageListErrorID: model.pageListErrorID,
+                loading: model.isLoading, canRetry: model.errorMessage != nil
+            ),
+            onTransitionChange: { model.setPaging($0) }
+        ) { index in
+            let item = snapshot[index]
+            let active = currentID == item.id
+            ExternalRecommendationCard(
+                item: item,
+                isSelected: active,
+                isReading: active && isReading,
+                shouldPreload: isReading && active,
+                loadingPages: model.loadingPagesID == item.id,
+                pageListFailed: model.pageListErrorID == item.id,
+                loadingNext: snapshot.last?.id == item.id && model.isLoading,
+                canRetryNext: snapshot.last?.id == item.id && !model.isLoading && model.errorMessage != nil,
+                onRetryPages: { model.retryActivePages() },
+                onRetryNext: { model.retry() },
+                onShowTags: { tagsItem = item },
+                onOpenDetail: { detailItem = item },
+                onZoom: { zoomed in if active { isZoomed = zoomed } }
+            )
+            .id(item.id)
         }
-        .scrollIndicators(.hidden)
-        .scrollTargetBehavior(.paging)
-        .scrollPosition(id: $selectedID)
-        .scrollDisabled(isZoomed)
-        .scrollBounceBehavior(.basedOnSize)
-        .onScrollPhaseChange { _, phase in
-            if phase == .idle { model.loadMoreIfNeeded() }
-        }
+        .frame(width: size.width, height: size.height)
+        .clipped()
     }
 
     @ViewBuilder
@@ -189,6 +197,22 @@ struct ExternalRecommendationFeedView: View {
     }
 }
 
+private struct ExternalRecommendationFeedRevision: Hashable {
+    let selectedID: String?
+    let reading: Bool
+    let pageCounts: [Int]
+    let loadingPagesID: String?
+    let pageListErrorID: String?
+    let loading: Bool
+    let canRetry: Bool
+}
+
+private struct ExternalRecommendationPagesRevision: Hashable {
+    let selection: Int
+    let selected: Bool
+    let preload: Bool
+}
+
 private struct ExternalRecommendationCard: View {
     let item: ExternalRecommendationFeedItem
     let isSelected: Bool
@@ -219,7 +243,10 @@ private struct ExternalRecommendationCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ExternalRecommendationPagePager(count: item.detail.pages.count, selection: $pageIndex, zoomed: zoomed) { index in
+            ExternalRecommendationPagePager(
+                ids: item.detail.pages.map { String($0.index) }, selection: $pageIndex, zoomed: zoomed,
+                revision: ExternalRecommendationPagesRevision(selection: pageIndex, selected: isSelected, preload: shouldPreload)
+            ) { index in
                 ExternalRecommendationImagePage(
                         site: item.detail.site, galleryID: item.detail.id, page: item.detail.pages[index],
                         shouldLoad: shouldPreload && abs(index - pageIndex) <= (isSelected ? 1 : 0),
@@ -395,18 +422,23 @@ private struct ExternalRecommendationCard: View {
     }
 }
 
-/// UIPageViewController creates only neighboring pages, even for very large galleries.
+/// Both axes use exact UIKit viewport bounds and retain only the current page and its neighbors.
 private struct ExternalRecommendationPagePager<Content: View>: UIViewControllerRepresentable {
-    let count: Int
+    let ids: [String]
     @Binding var selection: Int
     let zoomed: Bool
+    var orientation: UIPageViewController.NavigationOrientation = .horizontal
+    let revision: AnyHashable
+    var onTransitionChange: (Bool) -> Void = { _ in }
     @ViewBuilder let content: (Int) -> Content
+    private var count: Int { ids.count }
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
     func makeUIViewController(context: Context) -> UIPageViewController {
-        let controller = UIPageViewController(transitionStyle: .scroll, navigationOrientation: .horizontal)
+        let controller = UIPageViewController(transitionStyle: .scroll, navigationOrientation: orientation)
         controller.view.backgroundColor = .clear
+        controller.view.clipsToBounds = true
         controller.dataSource = context.coordinator
         controller.delegate = context.coordinator
         if count > 0 {
@@ -417,45 +449,55 @@ private struct ExternalRecommendationPagePager<Content: View>: UIViewControllerR
 
     func updateUIViewController(_ controller: UIPageViewController, context: Context) {
         let coordinator = context.coordinator
+        let refresh = coordinator.parent.revision != revision || coordinator.parent.ids != ids
         coordinator.parent = self
         controller.dataSource = zoomed ? nil : coordinator
         for scroll in controller.view.subviews.compactMap({ $0 as? UIScrollView }) {
             scroll.isScrollEnabled = !zoomed
             scroll.isDirectionalLockEnabled = true
             scroll.alwaysBounceVertical = false
+            scroll.contentInsetAdjustmentBehavior = .never
+            scroll.clipsToBounds = true
         }
-        for (index, host) in coordinator.hosts where index < count { host.rootView = content(index) }
+        if refresh {
+            for (id, host) in coordinator.hosts {
+                if let index = ids.firstIndex(of: id) { host.rootView = content(index) }
+            }
+        }
         guard count > 0, !coordinator.transitioning else { return }
         let target = min(max(0, selection), count - 1)
-        let current = controller.viewControllers?.first.flatMap { coordinator.index(of: $0) } ?? 0
+        let current = controller.viewControllers?.first.flatMap { coordinator.index(of: $0) }
         if target != current {
-            controller.setViewControllers([coordinator.host(for: target)], direction: target > current ? .forward : .reverse, animated: false)
+            controller.setViewControllers([coordinator.host(for: target)], direction: target >= (current ?? target) ? .forward : .reverse, animated: false)
         }
         coordinator.trim(around: target)
     }
 
     final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
         var parent: ExternalRecommendationPagePager
-        var hosts: [Int: UIHostingController<Content>] = [:]
+        var hosts: [String: UIHostingController<Content>] = [:]
         var transitioning = false
 
         init(parent: ExternalRecommendationPagePager) { self.parent = parent }
 
         func host(for index: Int) -> UIHostingController<Content> {
-            if let host = hosts[index] { return host }
+            let id = parent.ids[index]
+            if let host = hosts[id] { return host }
             let host = UIHostingController(rootView: parent.content(index))
             host.view.backgroundColor = .clear
             host.safeAreaRegions = []
-            hosts[index] = host
+            hosts[id] = host
             return host
         }
 
         func index(of controller: UIViewController) -> Int? {
-            hosts.first(where: { $0.value === controller })?.key
+            guard let id = hosts.first(where: { $0.value === controller })?.key else { return nil }
+            return parent.ids.firstIndex(of: id)
         }
 
         func trim(around index: Int) {
-            for key in hosts.keys where abs(key - index) > 1 { hosts.removeValue(forKey: key) }
+            let keep = Set(parent.ids.enumerated().filter { abs($0.offset - index) <= 1 }.map(\.element))
+            for key in hosts.keys where !keep.contains(key) { hosts.removeValue(forKey: key) }
         }
 
         func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore viewController: UIViewController) -> UIViewController? {
@@ -470,6 +512,7 @@ private struct ExternalRecommendationPagePager<Content: View>: UIViewControllerR
 
         func pageViewController(_ pageViewController: UIPageViewController, willTransitionTo pendingViewControllers: [UIViewController]) {
             transitioning = true
+            parent.onTransitionChange(true)
         }
 
         func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
@@ -478,6 +521,7 @@ private struct ExternalRecommendationPagePager<Content: View>: UIViewControllerR
                 parent.selection = index
                 trim(around: index)
             }
+            parent.onTransitionChange(false)
         }
     }
 }
@@ -536,12 +580,16 @@ private struct ExternalRecommendationImagePage: View {
             let provider = ExternalSiteRegistry.provider(for: site)
             for retry in 0..<3 {
                 guard !Task.isCancelled else { return }
-                if let resolved = try? await provider.pageImageURL(galleryId: galleryID, page: page),
-                   await preloadExternalImage(resolved, bypassNetworkCache: retry > 0, readerPriority: isCurrent) {
-                    guard !Task.isCancelled else { return }
-                    url = resolved
-                    onLoaded(true)
-                    return
+                if let resolved = try? await provider.pageImageURL(galleryId: galleryID, page: page) {
+                    if await preloadExternalImage(resolved, bypassNetworkCache: retry > 0, readerPriority: isCurrent) {
+                        guard !Task.isCancelled else { return }
+                        url = resolved
+                        onLoaded(true)
+                        return
+                    }
+                    if !Task.isCancelled {
+                        await provider.pageImageLoadFailed(galleryId: galleryID, page: page, url: resolved)
+                    }
                 }
                 guard !Task.isCancelled else { return }
                 if retry < 2 {

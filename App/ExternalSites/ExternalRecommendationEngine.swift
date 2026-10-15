@@ -1,8 +1,8 @@
 import Foundation
 
 /// A namespaced interest. Creator identities stay scoped to their source site.
-struct ExternalRecommendationFeature: Codable, Hashable, Identifiable {
-    enum Kind: String, Codable, CaseIterable {
+struct ExternalRecommendationFeature: Codable, Hashable, Identifiable, Sendable {
+    enum Kind: String, Codable, CaseIterable, Sendable {
         case tag, female, male, artist, group, character, series, format
 
         var weight: Double {
@@ -34,7 +34,7 @@ struct ExternalRecommendationFeature: Codable, Hashable, Identifiable {
 }
 
 /// Compact metadata used for learning; full page lists and images are never persisted here.
-struct ExternalRecommendationDocument: Codable, Identifiable {
+struct ExternalRecommendationDocument: Codable, Identifiable, Sendable {
     let siteID: String
     let galleryID: Int
     let title: String
@@ -55,11 +55,11 @@ struct ExternalRecommendationDocument: Codable, Identifiable {
     }
 }
 
-enum ExternalRecommendationVote: String, Codable {
+enum ExternalRecommendationVote: String, Codable, Sendable {
     case like, dislike
 }
 
-struct ExternalRecommendationFeedback: Codable {
+struct ExternalRecommendationFeedback: Codable, Sendable {
     var document: ExternalRecommendationDocument
     var vote: ExternalRecommendationVote?
     var bookmarked = false
@@ -90,14 +90,14 @@ struct ExternalRecommendationFeedback: Codable {
     }
 }
 
-struct ExternalRecommendationPreference: Codable {
-    enum Value: String, Codable { case prefer, hide }
+struct ExternalRecommendationPreference: Codable, Sendable {
+    enum Value: String, Codable, Sendable { case prefer, hide }
     let feature: ExternalRecommendationFeature
     let value: Value
 }
 
 /// Feedback is stored as current facts, so changing a vote reverses its old contribution.
-struct ExternalRecommendationProfile: Codable {
+struct ExternalRecommendationProfile: Codable, Sendable {
     var feedback: [String: ExternalRecommendationFeedback] = [:]
     var preferences: [String: ExternalRecommendationPreference] = [:]
 
@@ -235,42 +235,62 @@ struct ExternalRecommendationEngine {
         var seenKeys = Set<String>()
         var pool = candidates.sorted { $0.id < $1.id }
             .filter { isEligible($0) && seenKeys.insert($0.duplicateKey).inserted }
+            .map(prepare)
+        var history = recent.suffix(4).map(prepare)
         var result: [ExternalRecommendationDocument] = []
         while !pool.isEmpty && result.count < limit {
-            let history = Array((recent + result).suffix(4))
+            guard !Task.isCancelled else { return [] }
             let exploring = (offset + result.count + 1).isMultiple(of: 5)
             let winner = pool.indices.max { left, right in
                 let a = rankingValue(pool[left], history: history, exploring: exploring)
                 let b = rankingValue(pool[right], history: history, exploring: exploring)
-                return a == b ? pool[left].id > pool[right].id : a < b
+                return a == b ? pool[left].document.id > pool[right].document.id : a < b
             }!
-            result.append(pool.remove(at: winner))
+            let selected = pool.remove(at: winner)
+            result.append(selected.document)
+            history.append(selected)
+            if history.count > 4 { history.removeFirst() }
         }
         return result
     }
 
-    private func rankingValue(_ document: ExternalRecommendationDocument, history: [ExternalRecommendationDocument], exploring: Bool) -> Double {
-        let featureIDs = Set(document.features.filter { $0.kind != .format }.map(\.id))
-        let creators = Set(document.features.filter { $0.kind == .artist }.map(\.id))
-        var penalty = 0.0
-        for (index, item) in history.reversed().enumerated() {
-            let decay = 1 / Double(index + 1)
-            let otherCreators = Set(item.features.filter { $0.kind == .artist }.map(\.id))
-            if !creators.isDisjoint(with: otherCreators) { penalty += 0.8 * decay }
-            let other = Set(item.features.filter { $0.kind != .format }.map(\.id))
-            let union = featureIDs.union(other).count
-            if union > 0 { penalty += 0.45 * Double(featureIDs.intersection(other).count) / Double(union) * decay }
-        }
-        if history.suffix(2).count == 2 && history.suffix(2).allSatisfy({ $0.siteID == document.siteID }) {
-            penalty += 0.2
-        }
+    private struct PreparedCandidate {
+        let document: ExternalRecommendationDocument
+        let featureIDs: Set<String>
+        let creators: Set<String>
+        let score: Double
+        let novelty: Double
+        let jitter: Double
+    }
+
+    /// Normalize metadata and compute invariant scores once, outside pairwise comparisons.
+    private func prepare(_ document: ExternalRecommendationDocument) -> PreparedCandidate {
         let novelty = document.features.isEmpty ? 1 : document.features.reduce(0.0) {
             $0 + 1 / (1 + (evidence[$1.id]?.mass ?? 0))
         } / Double(document.features.count)
-        // Stable daily variation avoids a permanently identical cold-start ordering.
         let day = Int(now.timeIntervalSince1970 / 86_400)
         let hash = "\(day)|\(document.id)".utf8.reduce(UInt64(14695981039346656037)) { ($0 ^ UInt64($1)) &* 1099511628211 }
-        let jitter = Double(hash % 1_000) / 20_000
-        return (exploring ? novelty + score(document) * 0.25 : score(document)) - penalty + jitter
+        return PreparedCandidate(
+            document: document,
+            featureIDs: Set(document.features.filter { $0.kind != .format }.map(\.id)),
+            creators: Set(document.features.filter { $0.kind == .artist }.map(\.id)),
+            score: score(document), novelty: novelty, jitter: Double(hash % 1_000) / 20_000
+        )
+    }
+
+    private func rankingValue(_ candidate: PreparedCandidate, history: [PreparedCandidate], exploring: Bool) -> Double {
+        var penalty = 0.0
+        for (index, item) in history.reversed().enumerated() {
+            let decay = 1 / Double(index + 1)
+            if !candidate.creators.isDisjoint(with: item.creators) { penalty += 0.8 * decay }
+            let union = candidate.featureIDs.union(item.featureIDs).count
+            if union > 0 {
+                penalty += 0.45 * Double(candidate.featureIDs.intersection(item.featureIDs).count) / Double(union) * decay
+            }
+        }
+        if history.suffix(2).count == 2 && history.suffix(2).allSatisfy({ $0.document.siteID == candidate.document.siteID }) {
+            penalty += 0.2
+        }
+        return (exploring ? candidate.novelty + candidate.score * 0.25 : candidate.score) - penalty + candidate.jitter
     }
 }

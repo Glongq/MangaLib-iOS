@@ -320,9 +320,13 @@ protocol ExternalSiteProvider {
     /// temporary, with an expiring keystamp — it can't be computed ahead of time and
     /// can't be cached for long).
     func pageImageURL(galleryId: Int, page: ExternalGalleryPage) async throws -> URL
+
+    /// Let a provider refresh expiring CDN routing after an actual image request fails.
+    func pageImageLoadFailed(galleryId: Int, page: ExternalGalleryPage, url: URL) async
 }
 
 extension ExternalSiteProvider {
+    func pageImageLoadFailed(galleryId: Int, page: ExternalGalleryPage, url: URL) async {}
     func fetchIdsByTag(namespace: ExternalTagNamespace, value: String, sortKey: String?, cursor: String?, limit: Int) async throws -> (ids: [Int], nextCursor: String?) {
         try await fetchIdsByTag(namespace: namespace, value: value, cursor: cursor, limit: limit)
     }
