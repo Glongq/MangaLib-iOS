@@ -554,11 +554,12 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             requested.insert(item.id)
             leasedCandidates[item.id] = item
         }
+        let resolveKeys = savedResolveKeys
         await withTaskGroup(of: CandidateResult.self) { group in
             var iterator = batch.makeIterator()
             func enqueue() {
                 guard let item = iterator.next() else { return }
-                let resolveKey = savedResolveKeys[item.id]
+                let resolveKey = resolveKeys[item.id]
                 group.addTask {
                     let candidate = Task.isCancelled ? nil : try? await Self.fetchPreview(site: item.site, id: item.galleryId, resolveKey: resolveKey)
                     return CandidateResult(source: item, item: candidate)
