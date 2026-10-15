@@ -9,7 +9,12 @@ import SwiftUI
 /// simple loader (just an in-memory NSCache, no disk cache — images are
 /// already cached at the HTTP level by the session's system URLCache).
 private enum ExternalImageCache {
-    static let shared = NSCache<NSURL, UIImage>()
+    static let shared: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.countLimit = 60
+        cache.totalCostLimit = 80 * 1024 * 1024
+        return cache
+    }()
 }
 
 /// Referer — PER-HOST for the specific image, not one single value for the
@@ -100,7 +105,8 @@ private func fetchExternalImage(
     guard let (data, response) = try? await session.data(for: request),
           (response as? HTTPURLResponse).map({ (200...299).contains($0.statusCode) }) ?? true,
           let decoded = UIImage(data: data) else { return nil }
-    ExternalImageCache.shared.setObject(decoded, forKey: url as NSURL)
+    let cost = decoded.cgImage.map { $0.bytesPerRow * $0.height } ?? data.count
+    ExternalImageCache.shared.setObject(decoded, forKey: url as NSURL, cost: cost)
     return decoded
 }
 

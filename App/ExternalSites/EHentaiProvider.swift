@@ -363,6 +363,15 @@ actor EHentaiProvider: ExternalSiteProvider {
     func lastKnownEstimatedTotal() async -> Int? { lastEstimatedTotal }
 
     func fetchGalleryDetail(id: Int) async throws -> ExternalGalleryDetail {
+        try await fetchGallery(id: id, includeAllPages: true).detail
+    }
+
+    /// Ranking needs one metadata request, not every thumbnail page of every candidate.
+    func fetchRecommendationPreview(id: Int) async throws -> (detail: ExternalGalleryDetail, totalPages: Int) {
+        try await fetchGallery(id: id, includeAllPages: false)
+    }
+
+    private func fetchGallery(id: Int, includeAllPages: Bool) async throws -> (detail: ExternalGalleryDetail, totalPages: Int) {
         guard let token = tokenCache[id] else { throw EHentaiError.missingToken }
         let html = try await fetchHTML(urlString: "https://e-hentai.org/g/\(id)/\(token)/")
         let metadata = Self.parseMetadata(html: html)
@@ -376,7 +385,8 @@ actor EHentaiProvider: ExternalSiteProvider {
         // Without this follow-up fetching, reading would silently break off at page 20 for
         // any sufficiently long gallery.
         var pageIndex = 1
-        while pages.count < metadata.totalPages, pageIndex < 64 {
+        while includeAllPages, pages.count < metadata.totalPages, pageIndex < 64 {
+            try Task.checkCancellation()
             guard let moreHTML = try? await fetchHTML(urlString: "https://e-hentai.org/g/\(id)/\(token)/?p=\(pageIndex)") else { break }
             let morePages = Self.parsePages(from: moreHTML)
             guard !morePages.isEmpty else { break }
@@ -388,7 +398,7 @@ actor EHentaiProvider: ExternalSiteProvider {
         }
         pages.sort { $0.index < $1.index }
 
-        return ExternalGalleryDetail(
+        let detail = ExternalGalleryDetail(
             id: id,
             site: .ehentai,
             title: metadata.title,
@@ -414,6 +424,7 @@ actor EHentaiProvider: ExternalSiteProvider {
             ratingCount: metadata.ratingCount,
             comments: metadata.comments
         )
+        return (detail, max(metadata.totalPages, pages.count))
     }
 
     private func fetchHTML(urlString: String) async throws -> String {

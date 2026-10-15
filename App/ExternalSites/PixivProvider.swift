@@ -650,6 +650,38 @@ struct PixivProvider: ExternalSiteProvider {
         page <= 1 ? nil : String((page - 1) * limit)
     }
 
+    /// Retrieve a known creator by their numeric identity, never by an ambiguous display-name search.
+    /// Endpoint and pagination follow PixivPy's AppPixivAPI.user_illusts implementation.
+    func fetchFeedAuthorGalleryIDs(seedGalleryID: Int, type: String, cursor: String?) async throws -> (ids: [Int], nextCursor: String?) {
+        if Self.detailCache.illust(for: seedGalleryID) == nil { _ = try await fetchGalleryDetail(id: seedGalleryID) }
+        guard let creator = Self.detailCache.illust(for: seedGalleryID)?.user else { throw PixivError.badResponse }
+        let offset = cursor.flatMap(Int.init) ?? 0
+        var components = URLComponents(string: "https://app-api.pixiv.net/v1/user/illusts")!
+        components.queryItems = [
+            URLQueryItem(name: "user_id", value: String(creator.id)),
+            URLQueryItem(name: "type", value: type),
+            URLQueryItem(name: "filter", value: "for_ios"),
+            URLQueryItem(name: "offset", value: String(offset))
+        ]
+        guard let url = components.url else { throw PixivError.badResponse }
+        let request = try await authorizedRequest(url)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw PixivError.badResponse }
+        struct Response: Decodable {
+            let illusts: [PixivIllust]
+            let next_url: String?
+        }
+        let decoded = try JSONDecoder().decode(Response.self, from: data)
+        Self.detailCache.store(decoded.illusts)
+        let ids = decoded.illusts.map(\.id)
+        let next = decoded.next_url.flatMap { URLComponents(string: $0)?.queryItems?.first(where: { $0.name == "offset" })?.value }
+        return (ids, ids.isEmpty ? nil : next)
+    }
+
+    static func feedArtistID(for galleryID: Int) -> Int? {
+        detailCache.illust(for: galleryID)?.user.id
+    }
+
     /// Full detail — pixiv's search/related/user-illusts responses already
     /// return the FULL illust object (see PixivIllust — no separate "detail"
     /// endpoint the way scraped sites need one), so this is normally served
