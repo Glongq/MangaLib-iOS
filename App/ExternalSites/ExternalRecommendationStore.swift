@@ -45,7 +45,9 @@ final class ExternalRecommendationStore: ObservableObject {
         profile = defaults.data(forKey: Self.storageKey)
             .flatMap { try? JSONDecoder().decode(ExternalRecommendationProfile.self, from: $0) }
             ?? ExternalRecommendationProfile()
-        if profile.mergeSharedTagPreferences(), let data = try? JSONEncoder().encode(profile) {
+        let mergedTags = profile.mergeSharedTagPreferences()
+        let migratedLikes = profile.migrateLikeDates()
+        if mergedTags || migratedLikes, let data = try? JSONEncoder().encode(profile) {
             defaults.set(data, forKey: Self.storageKey)
         }
     }
@@ -54,8 +56,13 @@ final class ExternalRecommendationStore: ObservableObject {
         profile.feedback[document.id]?.vote
     }
 
-    func toggleVote(_ vote: ExternalRecommendationVote, for document: ExternalRecommendationDocument) {
-        profile.setVote(self.vote(for: document) == vote ? nil : vote, for: document, at: Date())
+    func toggleVote(_ vote: ExternalRecommendationVote, for document: ExternalRecommendationDocument,
+                    detail: ExternalGalleryDetail? = nil, resolveKey: String? = nil) {
+        let newVote = self.vote(for: document) == vote ? nil : vote
+        profile.setVote(newVote, for: document, at: Date())
+        if newVote == .like {
+            ExternalHistoryStore.shared.record(document: document, detail: detail, resolveKey: resolveKey)
+        }
         save()
     }
 

@@ -83,6 +83,7 @@ enum ExternalRecommendationVote: String, Codable, Sendable {
 struct ExternalRecommendationFeedback: Codable, Sendable {
     var document: ExternalRecommendationDocument
     var vote: ExternalRecommendationVote?
+    var likedAt: Date?
     var bookmarked = false
     var visibleSeconds: Double = 0
     var pagesRead = 0
@@ -125,6 +126,11 @@ struct ExternalRecommendationProfile: Codable, Sendable {
     mutating func setVote(_ vote: ExternalRecommendationVote?, for document: ExternalRecommendationDocument, at now: Date) {
         var record = feedback[document.id] ?? ExternalRecommendationFeedback(document: document, updatedAt: now)
         record.document = document
+        if vote == .like {
+            if record.vote != .like { record.likedAt = now }
+        } else {
+            record.likedAt = nil
+        }
         record.vote = vote
         record.updatedAt = now
         feedback[document.id] = record
@@ -173,6 +179,17 @@ struct ExternalRecommendationProfile: Codable, Sendable {
         return changed
     }
 
+    /// Freeze the best available date for legacy likes before later bookmark updates can change it.
+    @discardableResult
+    mutating func migrateLikeDates() -> Bool {
+        var changed = false
+        for (id, record) in feedback where record.vote == .like && record.likedAt == nil {
+            feedback[id]?.likedAt = record.updatedAt
+            changed = true
+        }
+        return changed
+    }
+
     mutating func prune(limit: Int = 800) {
         guard feedback.count > limit else { return }
         let ordered = feedback.sorted {
@@ -181,7 +198,10 @@ struct ExternalRecommendationProfile: Codable, Sendable {
             if left != right { return left > right }
             return ($0.value.lastSeen ?? $0.value.updatedAt) > ($1.value.lastSeen ?? $1.value.updatedAt)
         }
-        feedback = Dictionary(uniqueKeysWithValues: ordered.prefix(limit).map { ($0.key, $0.value) })
+        // Likes are durable user data; the cache budget applies only to other records.
+        let likes = ordered.filter { $0.value.vote == .like }
+        let remaining = ordered.filter { $0.value.vote != .like }.prefix(limit)
+        feedback = Dictionary(uniqueKeysWithValues: (likes + Array(remaining)).map { ($0.key, $0.value) })
     }
 }
 

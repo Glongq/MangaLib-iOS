@@ -27,6 +27,8 @@ struct ExternalGalleryDetailView: View {
     /// nil for every other entry point (catalog card, tag browser, ...) —
     /// there the cache is already fresh from just having listed this id.
     var resolveKey: String?
+    /// History opens the reader at its latest saved position; thumbnail taps still choose a page explicitly.
+    var resumeFromHistory = false
 
     /// Local bookmarks (see the ExternalBookmarksStore doc-comment — external
     /// sites have no accounts, so there are no server-side bookmarks either,
@@ -359,7 +361,10 @@ struct ExternalGalleryDetailView: View {
             // hand-rolled Capsule). A Button, not a NavigationLink — it
             // opens a `.fullScreenCover` (see readerOpen).
             Button {
-                readerOpen = ReaderOpen(initialPage: nil)
+                let savedPage = resumeFromHistory
+                    ? ExternalHistoryStore.shared.entries.first(where: { $0.site == site && $0.galleryID == id })?.page
+                    : nil
+                readerOpen = ReaderOpen(initialPage: savedPage)
             } label: {
                 Text("Читать (\(detail.pages.count) стр.)")
                     .frame(maxWidth: .infinity, minHeight: 44)

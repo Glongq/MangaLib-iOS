@@ -31,6 +31,7 @@ struct ExternalReaderView: View {
     let site: ExternalSite
     let detail: ExternalGalleryDetail
 
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme
 
@@ -52,6 +53,7 @@ struct ExternalReaderView: View {
     @State private var pendingJumpPage: Int?
     @State private var isCurrentPageZoomed = false
     @StateObject private var pagePreloader = ExternalPagePrefetcher()
+    @State private var historyResolveKey: String?
     @State private var vScale: CGFloat = 1
     @State private var vScaleBase: CGFloat = 1
     @State private var didScrollToInitial = false
@@ -199,18 +201,34 @@ struct ExternalReaderView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task {
             preloadUpcoming(from: pageMode == 1 ? verticalPage : currentPage)
+            historyResolveKey = await provider.resolveKey(for: detail.id)
+            guard !Task.isCancelled else { return }
+            recordHistory()
         }
         .onChange(of: currentPage) { _, page in
             isCurrentPageZoomed = false
-            if pageMode != 1 { preloadUpcoming(from: page) }
+            if pageMode != 1 {
+                preloadUpcoming(from: page)
+                recordHistory()
+            }
         }
         .onChange(of: verticalPage) { _, page in
-            if pageMode == 1 { preloadUpcoming(from: page) }
+            if pageMode == 1 {
+                preloadUpcoming(from: page)
+                recordHistory()
+            }
         }
         .onChange(of: pageMode) { _, mode in
             preloadUpcoming(from: mode == 1 ? verticalPage : currentPage)
         }
-        .onDisappear { pagePreloader.cancel() }
+        .onDisappear {
+            pagePreloader.cancel()
+            ExternalHistoryStore.shared.flush()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { recordHistory() }
+            else { ExternalHistoryStore.shared.flush() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: OCRProviderFallbackNotifier.notification)) { notification in
             guard let message = notification.userInfo?[OCRProviderFallbackNotifier.messageKey] as? String,
                   notification.userInfo?[OCRProviderFallbackNotifier.siteKey] as? String == site.rawValue,
@@ -438,6 +456,12 @@ struct ExternalReaderView: View {
             .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showUI.toggle() } }
         }
         .ignoresSafeArea()
+    }
+
+    private func recordHistory() {
+        guard scenePhase == .active, !detail.pages.isEmpty else { return }
+        ExternalHistoryStore.shared.record(detail, page: pageMode == 1 ? verticalPage : currentPage,
+                                           resolveKey: historyResolveKey)
     }
 
     // MARK: Preloading

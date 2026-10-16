@@ -218,6 +218,9 @@ private struct ExternalRecommendationCard: View {
     @State private var intervalPage: Int?
     @State private var pageSeconds: [Int: Double] = [:]
     @State private var visibleSeconds = 0.0
+    @State private var historyReady = false
+    @State private var historyResolveKey: String?
+    @State private var lastHistoryPage: Int?
     @State private var hasRecordedImpression = false
     @State private var zoomed = false
 
@@ -276,6 +279,14 @@ private struct ExternalRecommendationCard: View {
                 galleryID: item.detail.id, pages: item.detail.pages, currentIndex: pageIndex
             )
         }
+        .task(id: isReading) {
+            guard isReading else { return }
+            let key = await ExternalSiteRegistry.provider(for: item.detail.site).resolveKey(for: item.detail.id)
+            guard !Task.isCancelled else { return }
+            historyResolveKey = key
+            historyReady = true
+            recordHistoryIfNeeded()
+        }
         .onChange(of: pageIndex) { _, _ in
             zoomed = false
             onZoom(false)
@@ -285,6 +296,8 @@ private struct ExternalRecommendationCard: View {
             updateExposure()
             if !isReading {
                 commitExposure()
+                lastHistoryPage = nil
+                ExternalHistoryStore.shared.flush()
                 zoomed = false
                 onZoom(false)
             }
@@ -307,6 +320,7 @@ private struct ExternalRecommendationCard: View {
             pagePreloader.cancel()
             finishInterval()
             commitExposure()
+            ExternalHistoryStore.shared.flush()
         }
     }
 
@@ -373,10 +387,10 @@ private struct ExternalRecommendationCard: View {
 
             HStack(spacing: 12) {
                 reactionButton(symbol: vote == .like ? "heart.fill" : "heart", label: "Нравится", selected: vote == .like, color: .pink) {
-                    store.toggleVote(.like, for: item.document)
+                    store.toggleVote(.like, for: item.document, detail: item.detail, resolveKey: historyResolveKey)
                 }
                 reactionButton(symbol: vote == .dislike ? "hand.thumbsdown.fill" : "hand.thumbsdown", label: "Не нравится", selected: vote == .dislike, color: .white) {
-                    store.toggleVote(.dislike, for: item.document)
+                    store.toggleVote(.dislike, for: item.document, detail: item.detail, resolveKey: historyResolveKey)
                 }
                 Button(action: onOpenDetail) {
                     Text("Читать")
@@ -423,7 +437,15 @@ private struct ExternalRecommendationCard: View {
         if isReading && readyPages.contains(pageIndex) {
             intervalPage = pageIndex
             intervalStart = ProcessInfo.processInfo.systemUptime
+            recordHistoryIfNeeded()
         }
+    }
+
+    private func recordHistoryIfNeeded() {
+        guard isReading, historyReady, readyPages.contains(pageIndex), lastHistoryPage != pageIndex else { return }
+        lastHistoryPage = pageIndex
+        ExternalHistoryStore.shared.record(item.detail, page: pageIndex + 1,
+                                           pageCount: item.document.pageCount, resolveKey: historyResolveKey)
     }
 
     private func commitExposure() {
