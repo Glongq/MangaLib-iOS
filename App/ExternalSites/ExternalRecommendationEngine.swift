@@ -84,12 +84,31 @@ struct ExternalRecommendationFeedback: Codable, Sendable {
     var document: ExternalRecommendationDocument
     var vote: ExternalRecommendationVote?
     var likedAt: Date?
+    var voteUpdatedAt: Date?
     var bookmarked = false
     var visibleSeconds: Double = 0
     var pagesRead = 0
     var impressions = 0
     var lastSeen: Date?
+    var qualifiedReadAt: Date?
+    var readingFactsVersion: Int?
     var updatedAt: Date
+
+    var hasQualifiedReading: Bool {
+        qualifiedReadAt != nil || (readingFactsVersion == nil
+            && RecommendationExposure.qualityReading(seconds: visibleSeconds, pages: pagesRead, total: document.pageCount))
+    }
+
+    static func currentExplicit(in records: [Self]) -> Self? {
+        let voted = records.filter { $0.vote != nil }.sorted {
+            let left = $0.voteUpdatedAt ?? $0.updatedAt, right = $1.voteUpdatedAt ?? $1.updatedAt
+            return left == right ? $0.document.id < $1.document.id : left > right
+        }
+        if let vote = voted.first { return vote }
+        return records.filter(\.bookmarked).sorted {
+            $0.updatedAt == $1.updatedAt ? $0.document.id < $1.document.id : $0.updatedAt > $1.updatedAt
+        }.first
+    }
 
     /// Explicit rejection takes precedence over every positive implicit signal.
     func signal(at now: Date) -> Double {
@@ -99,14 +118,10 @@ struct ExternalRecommendationFeedback: Codable, Sendable {
         var result = ((vote == .like ? 4.0 : 0) + (bookmarked ? 3.0 : 0)) * explicitDecay
         let implicitAge = max(0, now.timeIntervalSince(lastSeen ?? updatedAt)) / 86_400
         let implicitDecay = pow(0.5, implicitAge / 30)
-        if visibleSeconds >= 3 {
+        if hasQualifiedReading {
             result += min(0.5, visibleSeconds / 40) * implicitDecay
-        }
-        if pagesRead > 0 {
             let fraction = min(1, Double(pagesRead) / Double(max(1, document.pageCount)))
             result += 1.5 * pow(fraction, 0.65) * min(1, visibleSeconds / 6) * implicitDecay
-        } else if visibleSeconds >= 0.6 && visibleSeconds < 2 && vote == nil && !bookmarked {
-            result -= 0.1 * implicitDecay
         }
         return result
     }
@@ -132,6 +147,7 @@ struct ExternalRecommendationProfile: Codable, Sendable {
             record.likedAt = nil
         }
         record.vote = vote
+        record.voteUpdatedAt = now
         record.updatedAt = now
         feedback[document.id] = record
     }
@@ -148,6 +164,12 @@ struct ExternalRecommendationProfile: Codable, Sendable {
         guard seconds.isFinite, seconds >= 0, pages >= 0 else { return }
         var record = feedback[document.id] ?? ExternalRecommendationFeedback(document: document, updatedAt: now)
         record.document = document
+        // Preserve eligible legacy reading once; new visits must qualify with their own metrics.
+        if record.readingFactsVersion == nil && record.hasQualifiedReading { record.qualifiedReadAt = record.lastSeen ?? now }
+        record.readingFactsVersion = 1
+        if RecommendationExposure.qualityReading(seconds: seconds, pages: pages, total: document.pageCount) {
+            record.qualifiedReadAt = now
+        }
         record.visibleSeconds = max(record.visibleSeconds, min(120, seconds))
         record.pagesRead = max(record.pagesRead, min(document.pageCount, pages))
         if incrementImpression { record.impressions = min(100, record.impressions + 1) }
@@ -198,10 +220,10 @@ struct ExternalRecommendationProfile: Codable, Sendable {
             if left != right { return left > right }
             return ($0.value.lastSeen ?? $0.value.updatedAt) > ($1.value.lastSeen ?? $1.value.updatedAt)
         }
-        // Likes are durable user data; the cache budget applies only to other records.
-        let likes = ordered.filter { $0.value.vote == .like }
-        let remaining = ordered.filter { $0.value.vote != .like }.prefix(limit)
-        feedback = Dictionary(uniqueKeysWithValues: (likes + Array(remaining)).map { ($0.key, $0.value) })
+        // Explicit facts are durable; only implicit cache entries have a storage budget.
+        let explicit = ordered.filter { $0.value.vote != nil || $0.value.bookmarked }
+        let remaining = ordered.filter { $0.value.vote == nil && !$0.value.bookmarked }.prefix(limit)
+        feedback = Dictionary(uniqueKeysWithValues: (explicit + Array(remaining)).map { ($0.key, $0.value) })
     }
 }
 
@@ -214,25 +236,24 @@ struct ExternalRecommendationEngine {
         var negativeSigned: Double = 0
         var negativeMass: Double = 0
         var negativeCopies = Set<String>()
-        var sessionSigned: Double = 0
-        var sessionMass: Double = 0
     }
 
     private struct Topic {
         let features: [ExternalRecommendationFeature]
-        let ids: Set<String>
     }
 
     let profile: ExternalRecommendationProfile
     let now: Date
+    let learning: ExternalRecommendationLearningModel
     private var evidence: [String: Evidence] = [:]
     private var knownCopies = Set<String>()
     private var recentCopies = Set<String>()
     private var topics: [Topic] = []
     private var preferredTagIDs = Set<String>()
 
-    init(profile: ExternalRecommendationProfile, now: Date = Date()) {
+    init(profile: ExternalRecommendationProfile, learning: ExternalRecommendationLearningModel, now: Date = Date()) {
         self.profile = profile
+        self.learning = learning
         self.now = now
         preferredTagIDs = Set(profile.preferences.values.filter {
             $0.value == .prefer && $0.feature.kind.isTag
@@ -245,65 +266,40 @@ struct ExternalRecommendationEngine {
             if let seen = record.lastSeen, now.timeIntervalSince(seen) < 3 * 86_400 {
                 recentCopies.insert(record.document.duplicateKey)
             }
-            let signal = record.signal(at: now)
-            guard abs(signal) > 0.001 else { continue }
-            let groups = Dictionary(grouping: record.document.uniqueFeatures, by: { $0.kind.sharedKind })
+        }
+        for example in learning.examples {
+            let signal = example.weight == 1 ? (example.positive ? 4.0 : -5.0) : 0.8
+            let record = example.document
+            let groups = Dictionary(grouping: record.uniqueFeatures, by: { $0.kind.sharedKind })
             for features in groups.values {
                 let contribution = signal / sqrt(Double(max(1, features.count)))
                 for feature in features {
                     var value = evidence[feature.id] ?? Evidence(feature: feature)
                     if signal < 0 {
                         // A rejection excludes the work immediately, but generalizes only after repeated evidence.
-                        if value.negativeCopies.insert(record.document.duplicateKey).inserted {
+                        if value.negativeCopies.insert(record.duplicateKey).inserted {
                             value.negativeSigned += contribution
                             value.negativeMass += abs(contribution)
                         }
                     } else {
                         value.signed += contribution
                         value.mass += abs(contribution)
-                        if let seen = record.lastSeen, now.timeIntervalSince(seen) < 7 * 86_400 {
-                            value.sessionSigned += contribution
-                            value.sessionMass += abs(contribution)
-                        }
                     }
                     evidence[feature.id] = value
                 }
             }
         }
-        let anchors = profile.feedback.values.filter { $0.signal(at: now) > 0.35 }
-            .sorted {
-                let left = $0.signal(at: now)
-                let right = $1.signal(at: now)
-                return left == right ? $0.document.id < $1.document.id : left > right
-            }
-        for anchor in anchors {
-            let features = anchor.document.uniqueFeatures.filter {
-                $0.kind != .format && affinity(for: $0) > 0.12
-            }.sorted {
-                let left = affinity(for: $0) * $0.kind.weight
-                let right = affinity(for: $1) * $1.kind.weight
-                return left == right ? $0.id < $1.id : left > right
-            }
-            let selected = Array(features.prefix(4))
-            let ids = Set(selected.map(\.id))
-            guard !ids.isEmpty else { continue }
-            let overlaps = topics.contains { topic in
-                Double(ids.intersection(topic.ids).count) / Double(max(1, ids.union(topic.ids).count)) > 0.5
-            }
-            if !overlaps { topics.append(Topic(features: selected, ids: ids)) }
-            if topics.count == 6 { break }
-        }
+        topics = learning.interests.map { Topic(features: $0.features) }
     }
 
-    /// Long-term evidence dominates; this week's reading can gently shift the ordering.
+    /// Explicit preferences remain positive even when their tags are common in the catalog.
     func affinity(for feature: ExternalRecommendationFeature) -> Double {
         let value = evidence[feature.id]
         let negativeScale = value.map { $0.negativeCopies.count >= 3 ? min(1, Double($0.negativeCopies.count - 2) / 3) : 0 } ?? 0
         let signed = (value?.signed ?? 0) + (value?.negativeSigned ?? 0) * negativeScale
         let mass = (value?.mass ?? 0) + (value?.negativeMass ?? 0) * negativeScale
         let longTerm = signed / (2 + mass)
-        let session = (value?.sessionSigned ?? 0) / (4 + (value?.sessionMass ?? 0))
-        let learned = longTerm * 0.85 + session * 0.15
+        let learned = longTerm
         guard let preference = profile.preferences[feature.id] else { return learned }
         // Keep the persisted "hide" value compatible, but make it a soft preference everywhere.
         if preference.value == .hide { return max(-1, learned - 0.55) }
@@ -329,7 +325,7 @@ struct ExternalRecommendationEngine {
         var sum = 0.0
         var weight = 0.0
         for (kind, features) in groups {
-            let values = features.map { affinity(for: $0) }
+            let values = features.map { affinity(for: $0) * learning.importance($0) }
             let average = values.reduce(0, +) / Double(max(1, values.count))
             // Strong matching interests survive a long list of unrelated metadata.
             let best = values.max() ?? 0
@@ -338,16 +334,17 @@ struct ExternalRecommendationEngine {
         }
         let exposure = Double(profile.feedback[document.id]?.impressions ?? 0)
         let ids = Set(features.filter { $0.kind != .format }.map(\.id))
-        let topicMatch = topics.map { topic in
-            let overlap = topic.features.filter { ids.contains($0.id) }.reduce(0.0) { $0 + $1.kind.weight }
-            let total = topic.features.reduce(0.0) { $0 + $1.kind.weight }
-            return overlap / max(1, total)
-        }.max() ?? 0
+        let match = learning.bestInterest(document)
+        let topicMatch = match?.1 ?? 0
         let discouraged = features.filter { profile.preferences[$0.id]?.value == .hide }
         let preferencePenalty = min(1.2, discouraged.reduce(0.0) { $0 + 0.25 * $1.kind.weight })
-        // Reward broader preference coverage without requiring every preferred tag to match.
-        let preferredCoverage = Double(ids.intersection(preferredTagIDs).count) / Double(max(1, preferredTagIDs.count))
-        return 3 * sum / max(1, weight) + 0.45 * topicMatch + 0.35 * preferredCoverage
+        // Coverage belongs to the matching direction, not to an impossible union of every taste.
+        let direction = match.map { Set($0.0.features.map(\.id)).intersection(preferredTagIDs) } ?? []
+        let relevantPreferences = direction.isEmpty ? ids.intersection(preferredTagIDs) : direction
+        let preferredCoverage = Double(ids.intersection(relevantPreferences).count) / Double(max(1, relevantPreferences.count))
+        let stable = 3 * sum / max(1, weight) + 0.45 * topicMatch
+        let personalized = learning.session.isEmpty ? stable : 0.85 * stable + 0.15 * 3 * learning.sessionMatch(document)
+        return personalized + 0.35 * preferredCoverage + learning.pairCorrection(document)
             - preferencePenalty - min(0.8, exposure * 0.15)
     }
 
@@ -355,14 +352,27 @@ struct ExternalRecommendationEngine {
         let preferred = profile.preferences.values.filter { $0.value == .prefer }
             .sorted { $0.feature.id < $1.feature.id }.map(\.feature)
         let preferredGroups = preferred.map { [$0] }
-        return Array((preferredGroups + topics.map(\.features)).prefix(12))
+        return topics.map(\.features) + preferredGroups
     }
 
     /// Round-robin the topics so one strong theme cannot consume every retrieval request.
-    func interests(limit: Int = 16) -> [ExternalRecommendationFeature] {
+    func interests(limit: Int = 16, rotation: Int = 0) -> [ExternalRecommendationFeature] {
         let groups = interestGroups()
         var result: [ExternalRecommendationFeature] = []
         var used = Set<String>()
+        let favorites = profile.preferences.values.filter { $0.value == .prefer }.map(\.feature).sorted { $0.id < $1.id }
+        if !favorites.isEmpty {
+            for step in 0..<min(8, favorites.count) {
+                let feature = favorites[(rotation + step) % favorites.count]
+                if used.insert(feature.id).inserted { result.append(feature) }
+            }
+        }
+        let creators = evidence.values.map(\.feature).filter { $0.kind == .artist && affinity(for: $0) > 0.12 }
+            .sorted {
+                let left = affinity(for: $0), right = affinity(for: $1)
+                return left == right ? $0.id < $1.id : left > right
+            }
+        for feature in creators.prefix(2) where used.insert(feature.id).inserted { result.append(feature) }
         for index in 0..<4 {
             for group in groups where group.indices.contains(index) {
                 if used.insert(group[index].id).inserted { result.append(group[index]) }
@@ -382,19 +392,29 @@ struct ExternalRecommendationEngine {
         return result
     }
 
-    func ranked(_ candidates: [ExternalRecommendationDocument], after recent: [ExternalRecommendationDocument], offset: Int, limit: Int) -> [ExternalRecommendationDocument] {
+    func ranked(_ candidates: [ExternalRecommendationDocument], origins: [String: [RecommendationOrigin]],
+                after recent: [ExternalRecommendationDocument], offset: Int, seed: UInt64, limit: Int) -> [RecommendationSelection] {
         var seenKeys = Set<String>()
         var pool = candidates.sorted { $0.id < $1.id }
             .filter { isEligible($0) && seenKeys.insert($0.duplicateKey).inserted }
             .map(prepare)
         var history = recent.suffix(4).map(prepare)
-        var result: [ExternalRecommendationDocument] = []
+        var result: [RecommendationSelection] = []
+        var random = RecommendationRandom(state: seed &+ UInt64(max(0, offset)))
         var periods = Dictionary(grouping: recent.suffix(20).map { ExternalRecommendationPeriod.of($0.publishedAt, at: now) }, by: { $0 }).mapValues(\.count)
         periods.removeValue(forKey: .unknown)
         while !pool.isEmpty && result.count < limit {
             guard !Task.isCancelled else { return [] }
-            let exploring = (offset + result.count + 1).isMultiple(of: 5)
             let bestRelevance = pool.map(\.score).max() ?? 0
+            // Exploration and diversity remain relevant; an empty arm never consumes a feed slot.
+            let relevant = pool.indices.filter { pool[$0].score >= bestRelevance - 1.25 }
+            func channels(_ index: Int) -> [RecommendationChannel] {
+                let found = origins[pool[index].document.id] ?? []
+                return found.isEmpty ? [RecommendationChannel(kind: .catalog)] : found.map(\.channel)
+            }
+            let channel = learning.policy.choose(relevant.flatMap(channels), random: &random)
+            let eligible = relevant.filter { index in channel.map { channels(index).contains($0) } ?? true }
+            let exploring = channel?.isExploratory ?? false
             let datedCount = periods.values.reduce(0, +)
             func value(_ candidate: PreparedCandidate) -> Double {
                 // Missing periods never force irrelevant titles or block a partially available source.
@@ -403,13 +423,14 @@ struct ExternalRecommendationEngine {
                     ? min(0.5, max(-0.35, deficit * 0.22)) : 0
                 return rankingValue(candidate, history: history, exploring: exploring) + ageBalance
             }
-            let winner = pool.indices.max { left, right in
+            let winner = eligible.max { left, right in
                 let a = value(pool[left])
                 let b = value(pool[right])
                 return a == b ? pool[left].document.id > pool[right].document.id : a < b
             }!
             let selected = pool.remove(at: winner)
-            result.append(selected.document)
+            let origin = (origins[selected.document.id] ?? []).filter { $0.channel == channel }.sorted { $0.queryID < $1.queryID }.first
+            result.append(RecommendationSelection(document: selected.document, origin: origin))
             if selected.period != .unknown { periods[selected.period, default: 0] += 1 }
             history.append(selected)
             if history.count > 4 { history.removeFirst() }

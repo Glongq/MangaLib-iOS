@@ -37,11 +37,13 @@ final class ExternalRecommendationStore: ObservableObject {
     static let shared = ExternalRecommendationStore()
     @Published private(set) var revision = 0
     private(set) var profile: ExternalRecommendationProfile
+    let learning: ExternalRecommendationLearningStore
     private let defaults: UserDefaults
     private static let storageKey = "external_recommendation_profile_v1"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        learning = ExternalRecommendationLearningStore(defaults: defaults)
         profile = defaults.data(forKey: Self.storageKey)
             .flatMap { try? JSONDecoder().decode(ExternalRecommendationProfile.self, from: $0) }
             ?? ExternalRecommendationProfile()
@@ -60,6 +62,7 @@ final class ExternalRecommendationStore: ObservableObject {
                     detail: ExternalGalleryDetail? = nil, resolveKey: String? = nil) {
         let newVote = self.vote(for: document) == vote ? nil : vote
         profile.setVote(newVote, for: document, at: Date())
+        if newVote != nil { learning.qualifyExplicit(document) }
         if newVote == .like {
             ExternalHistoryStore.shared.record(document: document, detail: detail, resolveKey: resolveKey)
         }
@@ -69,6 +72,7 @@ final class ExternalRecommendationStore: ObservableObject {
     func setBookmark(_ saved: Bool, for document: ExternalRecommendationDocument) {
         guard profile.feedback[document.id]?.bookmarked != saved else { return }
         profile.setBookmark(saved, for: document, at: Date())
+        if saved { learning.qualifyExplicit(document) }
         save()
     }
 
@@ -76,6 +80,11 @@ final class ExternalRecommendationStore: ObservableObject {
         guard pages >= 0, seconds >= 0.6 else { return }
         profile.recordExposure(document, seconds: seconds, pages: pages, at: Date(), incrementImpression: incrementImpression)
         save()
+    }
+
+    func recordPresentation(_ exposure: RecommendationExposure) {
+        let fact = profile.feedback[exposure.document.id]
+        learning.record(exposure, explicit: fact?.vote != nil || fact?.bookmarked == true)
     }
 
     func preference(for feature: ExternalRecommendationFeature) -> ExternalRecommendationPreference.Value? {
@@ -92,6 +101,7 @@ final class ExternalRecommendationStore: ObservableObject {
         var changed = false
         for (id, record) in profile.feedback where record.bookmarked != saved.contains(id) {
             profile.setBookmark(saved.contains(id), for: record.document, at: Date())
+            if saved.contains(id) { learning.qualifyExplicit(record.document) }
             changed = true
         }
         if changed { save() }

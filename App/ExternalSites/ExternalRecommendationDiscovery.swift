@@ -30,6 +30,7 @@ struct ExternalRecommendationSavedCandidate: Codable {
     let site: ExternalSite
     let galleryID: Int
     var resolveKey: String?
+    var origins: [RecommendationOrigin]? = nil
     var item: ExternalCatalogItem { .init(site: site, galleryId: galleryID) }
 }
 

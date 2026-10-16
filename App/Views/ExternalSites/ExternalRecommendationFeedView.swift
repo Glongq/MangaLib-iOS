@@ -222,6 +222,8 @@ private struct ExternalRecommendationCard: View {
     @State private var historyResolveKey: String?
     @State private var lastHistoryPage: Int?
     @State private var hasRecordedImpression = false
+    @State private var exposureID = UUID()
+    @State private var exposureStartedAt: Date?
     @State private var zoomed = false
 
     private var vote: ExternalRecommendationVote? { store.vote(for: item.document) }
@@ -296,6 +298,7 @@ private struct ExternalRecommendationCard: View {
             updateExposure()
             if !isReading {
                 commitExposure()
+                store.learning.flush()
                 lastHistoryPage = nil
                 ExternalHistoryStore.shared.flush()
                 zoomed = false
@@ -309,6 +312,8 @@ private struct ExternalRecommendationCard: View {
                 readPages = []
                 pageSeconds = [:]
                 hasRecordedImpression = false
+                exposureID = UUID()
+                exposureStartedAt = nil
                 updateExposure()
             } else {
                 updateExposure()
@@ -320,6 +325,7 @@ private struct ExternalRecommendationCard: View {
             pagePreloader.cancel()
             finishInterval()
             commitExposure()
+            store.learning.flush()
             ExternalHistoryStore.shared.flush()
         }
     }
@@ -387,10 +393,14 @@ private struct ExternalRecommendationCard: View {
 
             HStack(spacing: 12) {
                 reactionButton(symbol: vote == .like ? "heart.fill" : "heart", label: "Нравится", selected: vote == .like, color: .pink) {
+                    updateExposure()
                     store.toggleVote(.like, for: item.document, detail: item.detail, resolveKey: historyResolveKey)
+                    commitExposure()
                 }
                 reactionButton(symbol: vote == .dislike ? "hand.thumbsdown.fill" : "hand.thumbsdown", label: "Не нравится", selected: vote == .dislike, color: .white) {
+                    updateExposure()
                     store.toggleVote(.dislike, for: item.document, detail: item.detail, resolveKey: historyResolveKey)
+                    commitExposure()
                 }
                 Button(action: onOpenDetail) {
                     Text("Читать")
@@ -435,9 +445,11 @@ private struct ExternalRecommendationCard: View {
     private func updateExposure() {
         finishInterval()
         if isReading && readyPages.contains(pageIndex) {
+            if exposureStartedAt == nil { exposureStartedAt = Date() }
             intervalPage = pageIndex
             intervalStart = ProcessInfo.processInfo.systemUptime
             recordHistoryIfNeeded()
+            recordPresentation()
         }
     }
 
@@ -449,9 +461,17 @@ private struct ExternalRecommendationCard: View {
     }
 
     private func commitExposure() {
+        recordPresentation()
         guard visibleSeconds >= 0.6 else { return }
         store.recordExposure(item.document, seconds: visibleSeconds, pages: readPages.count, incrementImpression: !hasRecordedImpression)
         hasRecordedImpression = true
+    }
+
+    private func recordPresentation() {
+        guard let origin = item.selectedOrigin, let exposureStartedAt,
+              isSelected || visibleSeconds > 0 else { return }
+        store.recordPresentation(RecommendationExposure(id: exposureID, document: item.document,
+            origin: origin, shownAt: exposureStartedAt, seconds: visibleSeconds, pages: readPages.count, imageLoaded: true))
     }
 }
 

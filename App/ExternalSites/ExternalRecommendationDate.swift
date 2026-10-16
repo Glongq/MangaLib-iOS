@@ -64,7 +64,7 @@ enum ExternalRecommendationPeriod: String, Codable, CaseIterable, Sendable {
 }
 
 /// A depth is a retrieval strategy, never a claim about a title's actual age.
-enum ExternalRecommendationDepth: String, Codable, Sendable {
+enum ExternalRecommendationDepth: String, Codable, Hashable, Sendable {
     case latest, continuation, middle, archive, popular
 
     var samplesArchive: Bool { self == .middle || self == .archive }

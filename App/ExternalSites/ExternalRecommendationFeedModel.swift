@@ -41,30 +41,47 @@ struct ExternalRecommendationFeedItem: Identifiable {
     let detail: ExternalGalleryDetail
     let document: ExternalRecommendationDocument
     var isComplete = true
+    var origins: [RecommendationOrigin] = []
+    var selectedOrigin: RecommendationOrigin?
     var id: String { document.id }
 }
 
 /// Ranking never runs on the main actor, including profile evidence construction.
 private actor ExternalRecommendationRankingWorker {
     struct Result: Sendable {
-        let ranked: [ExternalRecommendationDocument]
+        let ranked: [RecommendationSelection]
         let interests: [ExternalRecommendationFeature]
         let topics: [[ExternalRecommendationFeature]]
+        let groups: [RecommendationInterest]
+        let policy: RecommendationChannelPolicy
+        let interestAssignments: [String: String]
+        static var empty: Self {
+            Self(ranked: [], interests: [], topics: [], groups: [], policy: .init(), interestAssignments: [:])
+        }
     }
 
-    private var cachedRevision: Int?
+    private var cachedKey: String?
     private var cachedEngine: ExternalRecommendationEngine?
 
-    func rank(profile: ExternalRecommendationProfile, revision: Int,
-              candidates: [ExternalRecommendationDocument], recent: [ExternalRecommendationDocument], offset: Int) -> Result {
-        if cachedRevision != revision || cachedEngine.map({ Date().timeIntervalSince($0.now) > 60 }) != false {
-            cachedEngine = ExternalRecommendationEngine(profile: profile)
-            cachedRevision = revision
+    func rank(profile: ExternalRecommendationProfile, revision: Int, snapshot: LearningSnapshot, learningRevision: Int,
+              candidates: [ExternalRecommendationDocument], origins: [String: [RecommendationOrigin]],
+              recent: [ExternalRecommendationDocument], offset: Int) -> Result {
+        guard !Task.isCancelled else { return .empty }
+        let key = "\(revision)|\(learningRevision)|\(LearningSnapshot.algorithmVersion)"
+        if cachedKey != key || cachedEngine.map({ Date().timeIntervalSince($0.now) > 60 }) != false {
+            let now = Date()
+            let learning = ExternalRecommendationLearningModel(profile: profile, snapshot: snapshot, now: now)
+            guard !Task.isCancelled else { return .empty }
+            cachedEngine = ExternalRecommendationEngine(profile: profile, learning: learning, now: now)
+            cachedKey = key
         }
         let engine = cachedEngine!
-        guard !Task.isCancelled else { return Result(ranked: [], interests: [], topics: []) }
-        return Result(ranked: engine.ranked(candidates, after: recent, offset: offset, limit: 16),
-                      interests: engine.interests(), topics: engine.interestGroups())
+        let ranked = Task.isCancelled ? [] : engine.ranked(candidates, origins: origins, after: recent, offset: offset,
+                                                          seed: RecommendationMath.hash(key), limit: 16)
+        let interests = engine.interests(rotation: offset)
+        let assignments = Dictionary(uniqueKeysWithValues: interests.map { ($0.id, engine.learning.interestID(for: [$0])) })
+        return Result(ranked: ranked, interests: interests, topics: engine.interestGroups(),
+                      groups: engine.learning.interests, policy: engine.learning.policy, interestAssignments: assignments)
     }
 }
 
@@ -88,6 +105,7 @@ final class ExternalRecommendationFeedModel: ObservableObject {
     private var displayedDuplicates = Set<String>()
     private var laneStates: [String: LaneState] = [:]
     private var savedResolveKeys: [String: String] = [:]
+    private var candidateOrigins: [String: [RecommendationOrigin]] = [:]
     private var discoveryScope = ""
     private let discoveryStore: ExternalRecommendationDiscoveryStore
     private var loadTask: Task<Void, Never>?
@@ -108,6 +126,9 @@ final class ExternalRecommendationFeedModel: ObservableObject {
     private var retrievalInterests: [String] = []
     private var retrievalFeatures: [ExternalRecommendationFeature] = []
     private var retrievalTopics: [[ExternalRecommendationFeature]] = []
+    private var retrievalGroups: [RecommendationInterest] = []
+    private var retrievalAssignments: [String: String] = [:]
+    private var channelPolicy = RecommendationChannelPolicy()
     private var needsPersonalizedRetrieval = false
     private let store: ExternalRecommendationStore
 
@@ -124,6 +145,8 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         var pixivWorkType: String = "illust"
         var sortKey: String?
         var depth: ExternalRecommendationDepth = .latest
+        var channel = RecommendationChannel(kind: .catalog)
+        var samplesCorpus = false
         var id: String { "\(site.rawValue)|\(queryKey(feature, fallback: "catalog"))|\(queryKey(secondFeature, fallback: ""))|\(pixivWorkType)|\(sortKey ?? "")|\(depth.rawValue)" }
 
         private func queryKey(_ feature: ExternalRecommendationFeature?, fallback: String) -> String {
@@ -133,6 +156,10 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         }
 
         var topicID: String { feature?.id ?? "catalog" }
+        var origin: RecommendationOrigin {
+            RecommendationOrigin(queryID: id, siteID: site.rawValue, depth: depth,
+                                 channel: channel, samplesCorpus: samplesCorpus)
+        }
     }
 
     private typealias LaneState = ExternalRecommendationDiscoveryState
@@ -162,6 +189,7 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             items = []
             activeID = nil
             pool = [:]
+            candidateOrigins = [:]
             pending = []
             requested = []
             leasedCandidates = [:]
@@ -174,6 +202,9 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             retrievalInterests = []
             retrievalFeatures = []
             retrievalTopics = []
+            retrievalGroups = []
+            retrievalAssignments = [:]
+            channelPolicy = RecommendationChannelPolicy()
             needsPersonalizedRetrieval = false
             restoreDiscoveryProgress()
         }
@@ -210,11 +241,13 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         leasedCandidates = [:]
         isRetrieving = false
         persistDiscoveryProgress()
+        store.learning.flush()
     }
 
     func activate(_ id: String) {
         guard activeID != id, let item = items.first(where: { $0.id == id }) else { return }
         activeID = id
+        pool[id]?.selectedOrigin = item.selectedOrigin
         if displayed.insert(id).inserted {
             displayedDuplicates.insert(item.document.duplicateKey)
             presentationCount += 1
@@ -356,6 +389,22 @@ final class ExternalRecommendationFeedModel: ObservableObject {
                     for id in result.ids {
                         let item = ExternalCatalogItem(site: result.lane.site, galleryId: id)
                         let feedback = store.profile.feedback[item.id]
+                        if result.lane.samplesCorpus, let document = feedback?.document {
+                            store.learning.sample(document)
+                        }
+                        if result.lane.samplesCorpus, let document = pool[item.id]?.document {
+                            store.learning.sample(document)
+                        }
+                        // Capture provenance before excluding known works from the visible queue.
+                        var origins = candidateOrigins[item.id] ?? pool[item.id]?.origins ?? []
+                        let origin = result.lane.origin
+                        if let index = origins.firstIndex(where: { $0.queryID == origin.queryID && $0.channel == origin.channel }) {
+                            origins[index].samplesCorpus = origins[index].samplesCorpus || origin.samplesCorpus
+                        } else { origins.append(origin) }
+                        let neutral = origins.first(where: \.samplesCorpus)
+                        let rest = origins.filter { $0 != neutral }.suffix(neutral == nil ? 8 : 7)
+                        candidateOrigins[item.id] = neutral.map { [$0] + Array(rest) } ?? Array(rest)
+                        if pool[item.id] != nil { pool[item.id]?.origins = candidateOrigins[item.id] ?? [] }
                         let recentlySeen = feedback?.lastSeen.map { Date().timeIntervalSince($0) < 3 * 86_400 } ?? false
                         if feedback?.vote != nil || feedback?.bookmarked == true || recentlySeen { continue }
                         if !requested.contains(item.id) && !pending.contains(where: { $0.id == item.id }) {
@@ -365,12 +414,9 @@ final class ExternalRecommendationFeedModel: ObservableObject {
                     }
                     if result.lane.feature != nil { pending.insert(contentsOf: received, at: 0) }
                     else { pending.append(contentsOf: received) }
-                    if pending.count > 360 { pending = Array(pending.prefix(360)) }
+                    trimPending()
                     persistDiscoveryProgress()
-                    // Publish the first usable source immediately, while other sources finish.
-                    if remainingCount < 8 {
-                        await hydratePending(generation: token)
-                    }
+                    // Hydration begins after this bounded search packet, reserving neutral sample slots.
                 }
             }
             guard !Task.isCancelled, generation == token else { return }
@@ -446,17 +492,47 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         var used = Set<String>()
         discovery = discovery.filter { used.insert($0.id).inserted && available($0) }
         personal = personal.filter { used.insert($0.id).inserted && available($0) }
+        personal = personal.map { lane in
+            var copy = lane
+            let features = [lane.feature, lane.secondFeature].compactMap { $0 }
+            let ids = Set(features.map(\.id))
+            let match = retrievalGroups.map { group in
+                (group.id, group.center.reduce(0.0) { $0 + (ids.contains($1.key) ? $1.value : 0) })
+            }.max { $0.1 < $1.1 }
+            let interest = match.flatMap { $0.1 > 0 ? $0.0 : nil }
+                ?? features.first.flatMap { retrievalAssignments[$0.id] }
+                ?? "favorite:\(features.first?.id ?? "global")"
+            let kind: RecommendationChannel.Kind = lane.secondFeature != nil ? .tagPair
+                : lane.feature?.kind == .artist ? .author : .singleTag
+            copy.channel = RecommendationChannel(kind: kind, interestID: interest)
+            return copy
+        }
+        discovery = discovery.map { lane in
+            var copy = lane
+            copy.channel = RecommendationChannel(kind: lane.sortKey == nil ? .catalog : .popular)
+            return copy
+        }
         let schedule: [ExternalRecommendationDepth] = [.latest, .archive, .middle, .continuation, .archive, .middle, .popular, .continuation]
         var chosen: [Lane] = []
+        var random = RecommendationRandom(state: RecommendationMath.hash("retrieval|\(laneRotation)|\(store.revision)|\(store.learning.revision)"))
         for slot in 0..<3 {
             let desiredSite = availableSites.isEmpty ? nil : availableSites[(laneRotation + slot) % availableSites.count]
             let desiredDepth = schedule[(laneRotation + slot) % schedule.count]
-            var candidates = (slot < 2 && !personal.isEmpty ? personal : discovery)
-                .filter { lane in !chosen.contains(where: { $0.id == lane.id }) }
-            if candidates.isEmpty {
-                candidates = (discovery + personal).filter { lane in !chosen.contains(where: { $0.id == lane.id }) }
+            var candidates = (discovery + personal).filter { lane in !chosen.contains(where: { $0.id == lane.id }) }
+            // The third request supplies an independent catalog sample, never a favorite-tag query.
+            if slot == 2 {
+                let neutral = candidates.filter { $0.channel.kind == .catalog }
+                if !neutral.isEmpty { candidates = neutral }
             }
             guard !candidates.isEmpty else { continue }
+            // Choose among the balanced source/depth frontier before sampling the semantic channel.
+            let source = candidates.filter { $0.site == desiredSite }
+            if !source.isEmpty { candidates = source }
+            let period = candidates.filter { $0.depth == desiredDepth }
+            if !period.isEmpty { candidates = period }
+            if let channel = channelPolicy.choose(candidates.map(\.channel), random: &random, forceCatalog: slot == 2) {
+                candidates = candidates.filter { $0.channel == channel }
+            }
             let sorted = candidates.sorted { left, right in
                 func priority(_ lane: Lane) -> Int {
                     (lane.site == desiredSite ? 8 : 0) + (lane.depth == desiredDepth ? 4 : 0)
@@ -469,7 +545,9 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             let peers = sorted.filter { $0.site == highest.site && $0.depth == highest.depth }
             let differentTopics = peers.filter { lane in !chosen.contains(where: { $0.topicID == lane.topicID }) }
             let alternatives = differentTopics.isEmpty ? peers : differentTopics
-            chosen.append(alternatives[(laneRotation / max(1, availableSites.count)) % alternatives.count])
+            var selected = alternatives[(laneRotation / max(1, availableSites.count)) % alternatives.count]
+            selected.samplesCorpus = slot == 2 && selected.channel.kind == .catalog
+            chosen.append(selected)
         }
         laneRotation = (laneRotation + 1) % 1_000_000
         for lane in chosen where lane.depth.samplesArchive && laneStates[lane.id]?.windowDate == nil {
@@ -570,6 +648,21 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         // Interleave sources before metadata hydration, independent of network completion order.
         let start = sites.isEmpty ? 0 : laneRotation % sites.count
         let order = Array(sites.dropFirst(start)) + Array(sites.prefix(start))
+        func neutralIndex(site: ExternalSite? = nil) -> Int? {
+            pending.indices.filter { index in
+                (site == nil || pending[index].site == site)
+                    && candidateOrigins[pending[index].id]?.contains(where: \.samplesCorpus) == true
+            }.min { RecommendationMath.hash(pending[$0].id) < RecommendationMath.hash(pending[$1].id) }
+        }
+        // Up to three of the existing nine metadata slots belong to neutral catalog documents.
+        for site in order where batch.count < 3 {
+            if let index = neutralIndex(site: site) {
+                batch.append(pending.remove(at: index))
+            }
+        }
+        while batch.count < 3, let index = neutralIndex() {
+            batch.append(pending.remove(at: index))
+        }
         while batch.count < 9 && !pending.isEmpty {
             let count = batch.count
             for site in order where batch.count < 9 {
@@ -597,7 +690,10 @@ final class ExternalRecommendationFeedModel: ObservableObject {
                 guard !Task.isCancelled, generation == token else { group.cancelAll(); return }
                 leasedCandidates.removeValue(forKey: result.source.id)
                 if result.item == nil { failedCandidates[result.source.id] = result.source }
-                if let candidate = result.item, filter.allows(candidate.detail), !candidate.detail.pages.isEmpty {
+                if var candidate = result.item {
+                    candidate.origins = candidateOrigins[result.source.id] ?? []
+                    if candidate.origins.contains(where: \.samplesCorpus) { store.learning.sample(candidate.document) }
+                    guard filter.allows(candidate.detail), !candidate.detail.pages.isEmpty else { enqueue(); continue }
                     let detail = candidate.detail
                     let document = candidate.document
                     let saved = ExternalBookmarksStore.shared.isBookmarked(site: detail.site, id: detail.id)
@@ -620,6 +716,17 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         }
     }
 
+    private func trimPending() {
+        guard pending.count > 360 else { return }
+        let neutral = pending.filter { candidateOrigins[$0.id]?.contains(where: \.samplesCorpus) == true }
+        let personal = pending.filter { candidateOrigins[$0.id]?.contains(where: \.samplesCorpus) != true }
+        let reserved = min(120, neutral.count)
+        let selectedPersonal = Array(personal.prefix(360 - reserved))
+        let selectedNeutral = Array(neutral.prefix(360 - selectedPersonal.count))
+        let retained = Set((selectedPersonal + selectedNeutral).map(\.id))
+        pending.removeAll { !retained.contains($0.id) }
+    }
+
     private func rerank() {
         guard isRunning else { return }
         rankingRevision &+= 1
@@ -632,6 +739,8 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             while rankAgain, isRunning, !isPaging, generation == token, !Task.isCancelled {
                 rankAgain = false
                 let revision = rankingRevision
+                let profileRevision = store.revision
+                let learningRevision = store.learning.revision
                 let prefix: [ExternalRecommendationFeedItem]
                 if let index = items.lastIndex(where: { self.displayed.contains($0.id) }) {
                     // Returning to an earlier title preserves already-visited forward positions.
@@ -641,16 +750,32 @@ final class ExternalRecommendationFeedModel: ObservableObject {
                     !self.displayed.contains($0.id) && !self.displayedDuplicates.contains($0.document.duplicateKey) && self.filter.allows($0.detail)
                 }.map(\.document)
                 let result = await rankingWorker.rank(
-                    profile: store.profile, revision: store.revision, candidates: candidates,
+                    profile: store.profile, revision: profileRevision, snapshot: store.learning.snapshot,
+                    learningRevision: learningRevision, candidates: candidates,
+                    origins: pool.mapValues(\.origins),
                     recent: prefix.map(\.document), offset: presentationCount
                 )
                 guard !Task.isCancelled, isRunning, generation == token else { return }
                 if isPaging { rankAgain = true; break }
-                guard revision == rankingRevision else { continue }
+                guard revision == rankingRevision, profileRevision == store.revision,
+                      learningRevision == store.learning.revision else { rankAgain = true; continue }
+                store.learning.accept(result.groups)
+                retrievalGroups = result.groups
+                retrievalAssignments = result.interestAssignments
+                channelPolicy = result.policy
                 // A complete page list may arrive while ranking the older metadata snapshot.
-                let preserved = prefix.map { self.pool[$0.id] ?? $0 }
-                let next = preserved + result.ranked.compactMap { self.pool[$0.id] }
-                if items.map(\.id) != next.map(\.id) { items = next }
+                let preserved = prefix.map { old -> ExternalRecommendationFeedItem in
+                    var item = self.pool[old.id] ?? old
+                    item.selectedOrigin = old.selectedOrigin
+                    return item
+                }
+                let next = preserved + result.ranked.compactMap { selection -> ExternalRecommendationFeedItem? in
+                    guard var item = self.pool[selection.document.id] else { return nil }
+                    item.selectedOrigin = selection.origin
+                    return item
+                }
+                if items.map(\.id) != next.map(\.id)
+                    || items.map(\.selectedOrigin) != next.map(\.selectedOrigin) { items = next }
                 if activeID == nil, let first = items.first { activate(first.id) }
                 if remainingCount > 0 { errorMessage = nil }
                 let interests = result.interests.map(\.id) + result.topics.map { $0.map(\.id).joined(separator: ";") }
@@ -739,6 +864,9 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         savedResolveKeys = Dictionary(snapshot.pending.compactMap { candidate in
             candidate.resolveKey.map { (candidate.item.id, $0) }
         }, uniquingKeysWith: { first, _ in first })
+        candidateOrigins = Dictionary(snapshot.pending.compactMap { candidate in
+            candidate.origins.map { (candidate.item.id, $0) }
+        }, uniquingKeysWith: { first, _ in first })
     }
 
     private func persistDiscoveryProgress() {
@@ -746,11 +874,13 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         var used = Set<String>()
         let unconsumed = Array(leasedCandidates.values) + pending
         let saved = unconsumed.filter { used.insert($0.id).inserted }.prefix(360).map {
-            ExternalRecommendationSavedCandidate(site: $0.site, galleryID: $0.galleryId, resolveKey: savedResolveKeys[$0.id])
+            ExternalRecommendationSavedCandidate(site: $0.site, galleryID: $0.galleryId, resolveKey: savedResolveKeys[$0.id],
+                                                  origins: candidateOrigins[$0.id])
         }
         discoveryStore.save(.init(lanes: laneStates, pending: saved, rotation: laneRotation), scope: discoveryScope)
         let retained = Set(saved.map { $0.item.id })
         savedResolveKeys = savedResolveKeys.filter { retained.contains($0.key) }
+        candidateOrigins = candidateOrigins.filter { retained.contains($0.key) || pool[$0.key] != nil }
     }
 
     private func loadActivePagesIfNeeded() {
@@ -769,7 +899,8 @@ final class ExternalRecommendationFeedModel: ObservableObject {
             guard !Task.isCancelled, let self, generation == token, detailLoadToken == request, activeID == item.id else { return }
             loadingPagesID = nil
             guard let detail else { pageListErrorID = item.id; return }
-            let full = ExternalRecommendationFeedItem(detail: detail, document: item.document, isComplete: detail.pages.count >= item.document.pageCount)
+            let full = ExternalRecommendationFeedItem(detail: detail, document: item.document,
+                isComplete: detail.pages.count >= item.document.pageCount, origins: item.origins, selectedOrigin: item.selectedOrigin)
             if !full.isComplete { pageListErrorID = item.id }
             pool[item.id] = full
             if let index = items.firstIndex(where: { $0.id == item.id }) { items[index] = full }
