@@ -212,11 +212,22 @@ struct ExternalRecommendationLearningModel {
         }
         var assignments: [Int: String] = [:]
         var used = Set<String>()
-        let matches = centers.indices.flatMap { index in previous.map { (index, $0.id, RecommendationMath.dot(centers[index], $0.center)) } }
-            .sorted { $0.2 == $1.2 ? "\($0.0)|\($0.1)" < "\($1.0)|\($1.1)" : $0.2 > $1.2 }
-        for (index, id, similarity) in matches where similarity >= 0.65 && assignments[index] == nil && !used.contains(id) {
-            assignments[index] = id
-            used.insert(id)
+        var matches: [(index: Int, id: String, similarity: Double)] = []
+        for index in centers.indices {
+            for interest in previous {
+                let similarity = RecommendationMath.dot(centers[index], interest.center)
+                matches.append((index: index, id: interest.id, similarity: similarity))
+            }
+        }
+        matches.sort { left, right in
+            if left.similarity != right.similarity { return left.similarity > right.similarity }
+            if left.index != right.index { return left.index < right.index }
+            return left.id < right.id
+        }
+        for match in matches where match.similarity >= 0.65 {
+            guard assignments[match.index] == nil, !used.contains(match.id) else { continue }
+            assignments[match.index] = match.id
+            used.insert(match.id)
         }
         return centers.indices.map { index in
             let keys = centers[index].sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.prefix(12).map(\.key)
