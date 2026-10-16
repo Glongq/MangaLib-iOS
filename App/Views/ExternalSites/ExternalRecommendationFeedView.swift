@@ -223,7 +223,7 @@ private struct ExternalRecommendationCard: View {
 
     private var vote: ExternalRecommendationVote? { store.vote(for: item.document) }
     private var summaryTags: [ExternalRecommendationFeature] {
-        let tags = item.document.features.filter { [.tag, .female, .male].contains($0.kind) }
+        let tags = item.document.uniqueFeatures.filter { $0.kind.isTag }
         return tags.filter { store.preference(for: $0) == .prefer }
             + tags.filter { store.preference(for: $0) != .prefer }
     }
@@ -356,7 +356,7 @@ private struct ExternalRecommendationCard: View {
             }
 
             HStack(spacing: 5) {
-                Text(summaryTags.map { "#\($0.alias ?? $0.value)" }.joined(separator: " "))
+                Text(summaryTags.map { "#\($0.sharedValue)" }.joined(separator: " "))
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.75))
                     .lineLimit(1)
@@ -624,8 +624,8 @@ private struct ExternalRecommendationTagsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(ExternalRecommendationFeature.Kind.allCases.filter { $0 != .format }, id: \.self) { kind in
-                    let features = (document?.features ?? []).filter { $0.kind == kind }
+                ForEach(ExternalRecommendationFeature.Kind.allCases.filter { $0.sharedKind == $0 && $0 != .format }, id: \.self) { kind in
+                    let features = (document?.uniqueFeatures ?? []).filter { $0.kind.sharedKind == kind }
                     if !features.isEmpty {
                         Section(sectionTitle(kind)) {
                             ForEach(features) { feature in featureRow(feature) }
@@ -686,9 +686,7 @@ private struct ExternalRecommendationTagsSheet: View {
 
     private func sectionTitle(_ kind: ExternalRecommendationFeature.Kind) -> String {
         switch kind {
-        case .tag: return "Теги"
-        case .female: return "Женские теги"
-        case .male: return "Мужские теги"
+        case .tag, .female, .male: return "Теги"
         case .artist: return "Авторы"
         case .group: return "Группы"
         case .character: return "Персонажи"

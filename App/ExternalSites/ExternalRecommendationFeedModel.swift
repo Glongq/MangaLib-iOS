@@ -124,7 +124,14 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         var pixivWorkType: String = "illust"
         var sortKey: String?
         var depth: ExternalRecommendationDepth = .latest
-        var id: String { "\(site.rawValue)|\(feature?.id ?? "catalog")|\(secondFeature?.id ?? "")|\(pixivWorkType)|\(sortKey ?? "")|\(depth.rawValue)" }
+        var id: String { "\(site.rawValue)|\(queryKey(feature, fallback: "catalog"))|\(queryKey(secondFeature, fallback: ""))|\(pixivWorkType)|\(sortKey ?? "")|\(depth.rawValue)" }
+
+        private func queryKey(_ feature: ExternalRecommendationFeature?, fallback: String) -> String {
+            guard let feature else { return fallback }
+            // Pixiv searches the original label, even when its translated alias is shared elsewhere.
+            return site == .pixiv ? "\(feature.retrievalID)|\(ExternalRecommendationFeature.normalize(feature.value))" : feature.retrievalID
+        }
+
         var topicID: String { feature?.id ?? "catalog" }
     }
 
@@ -398,12 +405,19 @@ final class ExternalRecommendationFeedModel: ObservableObject {
                 }
             }
             for group in retrievalTopics {
-                let topics = group.filter { [.tag, .female, .male].contains($0.kind) }
+                let topics = group.filter { $0.kind.isTag }
                 if topics.count >= 2 && [.ehentai, .imhentai, .threeHentai, .simplyHentai, .pixiv].contains(site) {
-                    personal += variants(Lane(site: site, feature: topics[0], secondFeature: topics[1]))
+                    let first = Self.tagSearchVariants(topics[0], for: site)
+                    let second = Self.tagSearchVariants(topics[1], for: site)
+                    // Only E-Hentai's combined queries encode gender namespaces.
+                    for left in site == .ehentai ? first : Array(first.prefix(1)) {
+                        for right in site == .ehentai ? second : Array(second.prefix(1)) {
+                            personal += variants(Lane(site: site, feature: left, secondFeature: right))
+                        }
+                    }
                 }
             }
-            for feature in interests where feature.siteID == nil || feature.siteID == site.rawValue {
+            for feature in interests where feature.kind.isTag || feature.siteID == nil || feature.siteID == site.rawValue {
                 if site == .pixiv && ![.tag, .female, .male, .artist].contains(feature.kind) { continue }
                 let seed = feature.kind == .artist ? seedGalleryID(for: feature, site: site) : nil
                 if site == .pixiv && feature.kind == .artist {
@@ -412,10 +426,12 @@ final class ExternalRecommendationFeedModel: ObservableObject {
                         personal += variants(Lane(site: site, feature: feature, seedGalleryID: seed, pixivWorkType: type))
                     }
                 } else {
-                    personal += variants(Lane(site: site, feature: feature, seedGalleryID: seed))
-                    if site == .threeHentai && [.tag, .female, .male].contains(feature.kind) {
-                        personal.append(Lane(site: site, feature: feature,
-                            sortKey: HitomiProvider.SortOption.popularYear.rawValue, depth: .popular))
+                    for queryFeature in Self.tagSearchVariants(feature, for: site) {
+                        personal += variants(Lane(site: site, feature: queryFeature, seedGalleryID: seed))
+                        if site == .threeHentai && queryFeature.kind.isTag {
+                            personal.append(Lane(site: site, feature: queryFeature,
+                                sortKey: HitomiProvider.SortOption.popularYear.rawValue, depth: .popular))
+                        }
                     }
                 }
             }
@@ -462,6 +478,17 @@ final class ExternalRecommendationFeedModel: ObservableObject {
         return chosen
     }
 
+    /// Shared preferences still need native tag routes on sites that separate gender namespaces.
+    nonisolated private static func tagSearchVariants(_ feature: ExternalRecommendationFeature, for site: ExternalSite) -> [ExternalRecommendationFeature] {
+        guard feature.kind.isTag else { return [feature] }
+        let kinds: [ExternalRecommendationFeature.Kind]
+        switch site {
+        case .hitomi, .ehentai, .threeHentai, .hentaiPill: kinds = [.tag, .female, .male]
+        default: kinds = [.tag]
+        }
+        return kinds.map { .init(kind: $0, value: feature.value, alias: feature.alias) }
+    }
+
     private func seedGalleryID(for feature: ExternalRecommendationFeature, site: ExternalSite) -> Int? {
         if let item = pool.values.first(where: { $0.detail.site == site && $0.document.features.contains(where: { $0.id == feature.id }) }) {
             return item.detail.id
@@ -490,7 +517,7 @@ final class ExternalRecommendationFeedModel: ObservableObject {
                 case .series: namespace = .series
                 }
             }
-            let value = lane.feature.map { lane.site == .pixiv ? $0.value : $0.alias ?? $0.value }
+            let value = lane.feature.map { lane.site == .pixiv ? $0.value : $0.sharedValue }
             if cursor == nil && lane.depth.samplesArchive && !dateSearch {
                 if lane.site == .hitomi {
                     cursor = try await provider.recommendationSampleCursor(namespace: namespace, value: value,
@@ -672,7 +699,7 @@ final class ExternalRecommendationFeedModel: ObservableObject {
     }
 
     nonisolated private static func combinationQuery(_ features: [ExternalRecommendationFeature], for site: ExternalSite) -> String {
-        let values = features.map { site == .pixiv ? $0.value : $0.alias ?? $0.value }
+        let values = features.map { site == .pixiv ? $0.value : $0.sharedValue }
         switch site {
         case .ehentai:
             return zip(features, values).map { feature, value in

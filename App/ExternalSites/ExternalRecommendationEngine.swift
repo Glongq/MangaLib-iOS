@@ -1,9 +1,12 @@
 import Foundation
 
-/// A namespaced interest. Creator identities stay scoped to their source site.
+/// Tags share one identity across sites; creators retain their source-specific identities.
 struct ExternalRecommendationFeature: Codable, Hashable, Identifiable, Sendable {
     enum Kind: String, Codable, CaseIterable, Sendable {
         case tag, female, male, artist, group, character, series, format
+
+        var isTag: Bool { self == .tag || self == .female || self == .male }
+        var sharedKind: Kind { isTag ? .tag : self }
 
         var weight: Double {
             switch self {
@@ -23,7 +26,19 @@ struct ExternalRecommendationFeature: Codable, Hashable, Identifiable, Sendable 
     var siteID: String? = nil
     var entityID: String? = nil
 
-    var id: String { "\(siteID ?? "*")|\(kind.rawValue)|\(entityID ?? Self.normalize(alias ?? value))" }
+    /// A site's gender namespace or local entity ID must not create another tag preference.
+    var id: String {
+        guard kind.isTag else { return retrievalID }
+        return "*|tag|\(Self.normalize(sharedValue))"
+    }
+
+    var sharedValue: String {
+        guard let alias, !Self.normalize(alias).isEmpty else { return value }
+        return alias
+    }
+
+    /// Preserve the native namespace for searches and their pagination cursors.
+    var retrievalID: String { "\(siteID ?? "*")|\(kind.rawValue)|\(entityID ?? Self.normalize(sharedValue))" }
 
     static func normalize(_ value: String) -> String {
         value.folding(options: [.caseInsensitive, .widthInsensitive], locale: Locale(identifier: "en_US_POSIX"))
@@ -44,6 +59,12 @@ struct ExternalRecommendationDocument: Codable, Identifiable, Sendable {
     var publishedAt: Date? = nil
 
     var id: String { "\(siteID)#\(galleryID)" }
+
+    /// Keep native metadata for retrieval, but show and score each shared interest once.
+    var uniqueFeatures: [ExternalRecommendationFeature] {
+        var seen = Set<String>()
+        return features.filter { seen.insert($0.id).inserted }
+    }
 
     /// Only exact metadata matches are collapsed across sites. Translations remain separate.
     var duplicateKey: String {
@@ -132,6 +153,26 @@ struct ExternalRecommendationProfile: Codable, Sendable {
         preferences[feature.id] = value.map { ExternalRecommendationPreference(feature: feature, value: $0) }
     }
 
+    /// Re-key existing preferences without losing feedback or multiplying a shared tag's weight.
+    @discardableResult
+    mutating func mergeSharedTagPreferences() -> Bool {
+        var merged: [String: ExternalRecommendationPreference] = [:]
+        var changed = false
+        for (oldKey, preference) in preferences.sorted(by: { $0.key < $1.key }) {
+            let key = preference.feature.id
+            if oldKey != key { changed = true }
+            if let existing = merged[key] {
+                changed = true
+                // Legacy preferences have no timestamps; preserve an explicit like on conflict.
+                if existing.value != .prefer && preference.value == .prefer { merged[key] = preference }
+            } else {
+                merged[key] = preference
+            }
+        }
+        if changed { preferences = merged }
+        return changed
+    }
+
     mutating func prune(limit: Int = 800) {
         guard feedback.count > limit else { return }
         let ordered = feedback.sorted {
@@ -174,7 +215,7 @@ struct ExternalRecommendationEngine {
         self.profile = profile
         self.now = now
         preferredTagIDs = Set(profile.preferences.values.filter {
-            $0.value == .prefer && [.tag, .female, .male].contains($0.feature.kind)
+            $0.value == .prefer && $0.feature.kind.isTag
         }.map(\.feature.id))
         let records = profile.feedback.values.sorted {
             $0.updatedAt == $1.updatedAt ? $0.document.id < $1.document.id : $0.updatedAt > $1.updatedAt
@@ -186,11 +227,10 @@ struct ExternalRecommendationEngine {
             }
             let signal = record.signal(at: now)
             guard abs(signal) > 0.001 else { continue }
-            let groups = Dictionary(grouping: record.document.features, by: \.kind)
+            let groups = Dictionary(grouping: record.document.uniqueFeatures, by: { $0.kind.sharedKind })
             for features in groups.values {
-                let unique = Dictionary(features.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-                let contribution = signal / sqrt(Double(max(1, unique.count)))
-                for feature in unique.values {
+                let contribution = signal / sqrt(Double(max(1, features.count)))
+                for feature in features {
                     var value = evidence[feature.id] ?? Evidence(feature: feature)
                     if signal < 0 {
                         // A rejection excludes the work immediately, but generalizes only after repeated evidence.
@@ -217,7 +257,7 @@ struct ExternalRecommendationEngine {
                 return left == right ? $0.document.id < $1.document.id : left > right
             }
         for anchor in anchors {
-            let features = anchor.document.features.filter {
+            let features = anchor.document.uniqueFeatures.filter {
                 $0.kind != .format && affinity(for: $0) > 0.12
             }.sorted {
                 let left = affinity(for: $0) * $0.kind.weight
@@ -264,7 +304,8 @@ struct ExternalRecommendationEngine {
     }
 
     func score(_ document: ExternalRecommendationDocument) -> Double {
-        let groups = Dictionary(grouping: document.features, by: \.kind)
+        let features = document.uniqueFeatures
+        let groups = Dictionary(grouping: features, by: { $0.kind.sharedKind })
         var sum = 0.0
         var weight = 0.0
         for (kind, features) in groups {
@@ -276,13 +317,13 @@ struct ExternalRecommendationEngine {
             weight += kind.weight
         }
         let exposure = Double(profile.feedback[document.id]?.impressions ?? 0)
-        let ids = Set(document.features.filter { $0.kind != .format }.map(\.id))
+        let ids = Set(features.filter { $0.kind != .format }.map(\.id))
         let topicMatch = topics.map { topic in
             let overlap = topic.features.filter { ids.contains($0.id) }.reduce(0.0) { $0 + $1.kind.weight }
             let total = topic.features.reduce(0.0) { $0 + $1.kind.weight }
             return overlap / max(1, total)
         }.max() ?? 0
-        let discouraged = document.features.filter { profile.preferences[$0.id]?.value == .hide }
+        let discouraged = features.filter { profile.preferences[$0.id]?.value == .hide }
         let preferencePenalty = min(1.2, discouraged.reduce(0.0) { $0 + 0.25 * $1.kind.weight })
         // Reward broader preference coverage without requiring every preferred tag to match.
         let preferredCoverage = Double(ids.intersection(preferredTagIDs).count) / Double(max(1, preferredTagIDs.count))
@@ -369,18 +410,19 @@ struct ExternalRecommendationEngine {
 
     /// Normalize metadata and compute invariant scores once, outside pairwise comparisons.
     private func prepare(_ document: ExternalRecommendationDocument) -> PreparedCandidate {
-        let novelty = document.features.isEmpty ? 1 : document.features.reduce(0.0) {
+        let features = document.uniqueFeatures
+        let novelty = features.isEmpty ? 1 : features.reduce(0.0) {
             $0 + 1 / (1 + (evidence[$1.id]?.mass ?? 0))
-        } / Double(document.features.count)
+        } / Double(features.count)
         let day = Int(now.timeIntervalSince1970 / 86_400)
         let hash = "\(day)|\(document.id)".utf8.reduce(UInt64(14695981039346656037)) { ($0 ^ UInt64($1)) &* 1099511628211 }
         return PreparedCandidate(
             document: document,
-            featureIDs: Set(document.features.filter { $0.kind != .format }.map(\.id)),
-            creators: Set(document.features.filter { $0.kind == .artist }.map(\.id)),
+            featureIDs: Set(features.filter { $0.kind != .format }.map(\.id)),
+            creators: Set(features.filter { $0.kind == .artist }.map(\.id)),
             score: score(document), novelty: novelty, jitter: Double(hash % 1_000) / 20_000,
             period: .of(document.publishedAt, at: now),
-            unfamiliarCreator: document.features.contains { $0.kind == .artist && (evidence[$0.id]?.mass ?? 0) < 0.5 }
+            unfamiliarCreator: features.contains { $0.kind == .artist && (evidence[$0.id]?.mass ?? 0) < 0.5 }
         )
     }
 

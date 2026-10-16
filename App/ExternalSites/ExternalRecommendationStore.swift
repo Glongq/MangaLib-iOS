@@ -22,7 +22,7 @@ extension ExternalGalleryDetail {
         features += series.map { .init(kind: .series, value: $0) }
         if !type.isEmpty { features.append(.init(kind: .format, value: type)) }
         var seen = Set<String>()
-        features = features.filter { !ExternalRecommendationFeature.normalize($0.value).isEmpty && seen.insert($0.id).inserted }
+        features = features.filter { !ExternalRecommendationFeature.normalize($0.value).isEmpty && seen.insert($0.retrievalID).inserted }
         let date = ExternalRecommendationDate.parse(posted)
         return ExternalRecommendationDocument(
             siteID: site.rawValue, galleryID: id, title: title, pageCount: pages.count,
@@ -45,6 +45,9 @@ final class ExternalRecommendationStore: ObservableObject {
         profile = defaults.data(forKey: Self.storageKey)
             .flatMap { try? JSONDecoder().decode(ExternalRecommendationProfile.self, from: $0) }
             ?? ExternalRecommendationProfile()
+        if profile.mergeSharedTagPreferences(), let data = try? JSONEncoder().encode(profile) {
+            defaults.set(data, forKey: Self.storageKey)
+        }
     }
 
     func vote(for document: ExternalRecommendationDocument) -> ExternalRecommendationVote? {
