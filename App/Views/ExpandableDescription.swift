@@ -39,8 +39,11 @@ struct ExpandableDescription: View {
         }
     }
 
+    // Обычный основной цвет текста (было textSecondary — приглушённый,
+    // серый) — по прямой просьбе: описание тайтла не должно выглядеть
+    // затемнённым/второстепенным, это основной контент карточки.
     private var textView: some View {
-        Text(text).font(.subheadline).foregroundStyle(Theme.textSecondary)
+        Text(text).font(.subheadline).foregroundStyle(Theme.textPrimary)
     }
 
     /// Два невидимых замера ТОЙ ЖЕ ширины, что и видимый текст (background

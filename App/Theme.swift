@@ -22,10 +22,32 @@ final class ThemeManager: ObservableObject {
         }
     }
 
+    /// Второй, независимый тумблер (см. PersonalizationSettingsView) — делает
+    /// УЖЕ тёмную тему ещё темнее (фон почти чистый чёрный, экономия
+    /// заряда/выше контраст на OLED-экранах), а не альтернативу тёмной/белой
+    /// теме. На белой теме визуально ничего не меняет (см. Theme.background и
+    /// т.д. — OLED-палитра подставляется только когда isDark == true).
+    @Published var isOLEDTheme: Bool {
+        didSet {
+            Theme.isOLED = isOLEDTheme
+            defaults.set(isOLEDTheme, forKey: Keys.isOLEDTheme)
+        }
+    }
+
     private let defaults = UserDefaults.standard
     private enum Keys {
         static let isDarkTheme = "app_is_dark_theme"
+        static let isOLEDTheme = "app_is_oled_theme"
     }
+
+    /// Ретранслятор смены активного сайта (см. Theme.accent — теперь зависит
+    /// от SiteSession.shared.activeSite). Экраны по всему приложению уже
+    /// объявляют `@ObservedObject private var themeManager = ThemeManager.
+    /// shared` именно ради пересчёта body при изменении Theme.* (см.
+    /// комментарий над классом) — подписавшись здесь ОДИН раз и вручную
+    /// рассылая objectWillChange, получаем реактивность акцентного цвета
+    /// везде бесплатно, без правки каждого экрана по отдельности.
+    private var siteCancellable: AnyCancellable?
 
     private init() {
         if let stored = defaults.object(forKey: Keys.isDarkTheme) as? Bool {
@@ -33,7 +55,16 @@ final class ThemeManager: ObservableObject {
         } else {
             isDarkTheme = true // по умолчанию тёмная тема
         }
+        isOLEDTheme = defaults.bool(forKey: Keys.isOLEDTheme) // по умолчанию выключено
         Theme.isDark = isDarkTheme
+        Theme.isOLED = isOLEDTheme
+
+        siteCancellable = SiteSession.shared.$activeSite
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
     }
 }
 
@@ -43,15 +74,31 @@ enum Theme {
     /// Текущий режим — синхронизируется с ThemeManager.shared.isDarkTheme при
     /// каждом изменении настройки, а также при старте приложения.
     static var isDark: Bool = true
+    /// Второй, независимый флаг (см. ThemeManager.isOLEDTheme) — "ещё темнее"
+    /// поверх тёмной темы. Ни на что не влияет, пока isDark == false (см.
+    /// background/surface/surfaceElevated ниже — OLED-палитра подставляется
+    /// только внутри ветки isDark).
+    static var isOLED: Bool = false
 
     /// Основной фон приложения.
-    static var background: Color { isDark ? Dark.background : Light.background }
+    static var background: Color { isDark ? (isOLED ? OLED.background : Dark.background) : Light.background }
     /// Фон поверхностей (карточки, панели, бары).
-    static var surface: Color { isDark ? Dark.surface : Light.surface }
+    static var surface: Color { isDark ? (isOLED ? OLED.surface : Dark.surface) : Light.surface }
     /// Фон приподнятых элементов (поля ввода, чипсы).
-    static var surfaceElevated: Color { isDark ? Dark.surfaceElevated : Light.surfaceElevated }
-    /// Акцентный цвет (кнопки, активные иконки) — один и тот же в обеих темах.
-    static let accent = Color(red: 1.0, green: 0.55, blue: 0.12)             // #FF8C1F (оранжевый)
+    static var surfaceElevated: Color { isDark ? (isOLED ? OLED.surfaceElevated : Dark.surfaceElevated) : Light.surfaceElevated }
+    /// Акцентный цвет (кнопки, активные иконки) — свой на каждый сайт
+    /// экосистемы (по прямой просьбе), один и тот же в обеих темах
+    /// оформления (тёмная/светлая). AnimeLib сознательно не поддержан этим
+    /// приложением (см. LibSite.swift), поэтому её цвет (#7E58C2) сюда не
+    /// добавлен — просто нет соответствующего case.
+    static var accent: Color {
+        switch SiteSession.shared.activeSite {
+        case .mangalib:  return Color(red: 1.0000, green: 0.5647, blue: 0.0000)  // #FF9000
+        case .slashlib:  return Color(red: 0.8471, green: 0.1059, blue: 0.3725)  // #D81B5F
+        case .hentailib: return Color(red: 0.9569, green: 0.2627, blue: 0.2118)  // #F44336
+        case .ranobelib: return Color(red: 0.1216, green: 0.5922, blue: 0.9569)  // #1F97F4
+        }
+    }
     /// Основной текст.
     static var textPrimary: Color { isDark ? Dark.textPrimary : Light.textPrimary }
     /// Второстепенный текст.
@@ -65,6 +112,28 @@ enum Theme {
     /// одинаковой высоты, независимо от разницы в шрифтах/паддингах между
     /// экранами.
     static let pillControlHeight: CGFloat = 44
+    /// ЭТАЛОН обложки тайтла на будущее — соотношение сторон 2:3 (высота =
+    /// ширина × 1.5) и радиус скругления 16, как в Каталоге/Новинках (см.
+    /// MangaCardView.cover — там `frame(width:, height: (width*3/2).rounded())`
+    /// + `RoundedRectangle(cornerRadius: 16)`). По просьбе зафиксировано
+    /// здесь как справочная константа — реального рефакторинга ПОКА нет,
+    /// сделаем отдельным проходом позже. Закладки/Новое уже приведены (см.
+    /// BookmarksView.bookmarkCoverWidth/Height, NotificationsView.row).
+    ///
+    /// Инвентаризация мест с ДРУГИМ радиусом у обложки тайтла (снятая
+    /// grep'ом по .clipShape(RoundedRectangle(cornerRadius:)) сразу после
+    /// RemoteImage(url:) — возможно неполная, но как отправная точка):
+    /// - CharacterView.swift:74 — 18
+    /// - DownloadTitleSheet.swift:146, HistoryView.swift:178,
+    ///   MangaDetailView.swift:325, MyCommentsView.swift:118 — 12
+    /// - DownloadsView.swift:93, HomeView.swift:567 (collectionPreviewStack) — 8
+    /// - HomeView.swift:438 (currentlyReadingRow), MangaDetailView.swift:845 — 14
+    /// - HomeView.swift:617 (topActiveUserCard, аватарка — не обложка тайтла,
+    ///   под этот эталон не подпадает) — 12
+    /// Уже на эталоне (16): AccountInfoView:166, BookmarksView:324,
+    /// HomeView:266/790, MangaDetailView:921/1073, NotificationsView:226.
+    static let coverCornerRadius: CGFloat = 16
+    static let coverAspectRatio: CGFloat = 1.5 // height / width
 
     /// Фиксированная тёмная палитра (в стиле MangaLib) — значения НЕ меняются
     /// в зависимости от Theme.isDark. Кроме самого Theme (когда isDark ==
@@ -79,6 +148,17 @@ enum Theme {
         static let textSecondary = Color(red: 0.596, green: 0.615, blue: 0.667)   // #989DAA
         static let separator = Color.white.opacity(0.08)
         static let skeleton = Color.white.opacity(0.06)
+    }
+
+    /// OLED-вариант тёмной палитры (см. ThemeManager.isOLEDTheme) — только
+    /// фоны/подложки СИЛЬНО темнее (background — чистый чёрный, а не
+    /// #0E0F13/#191B21/#25272F, как в Dark), текст/разделители/скелетон —
+    /// те же, что и в Dark (см. Theme.textPrimary и т.д. — они читают только
+    /// isDark, не isOLED, значит остаются общими для обоих тёмных вариантов).
+    enum OLED {
+        static let background = Color.black                                      // #000000
+        static let surface = Color(red: 0.043, green: 0.043, blue: 0.051)        // #0B0B0D
+        static let surfaceElevated = Color(red: 0.078, green: 0.078, blue: 0.090) // #141417
     }
 
     /// Белая палитра.
@@ -100,9 +180,15 @@ extension AnyTransition {
     /// "Закладки"/"Уведомления", панели Фильтры/Сортировка), а не просто
     /// переключают модификатор на уже присутствующей вьюхе, поэтому нужен
     /// настоящий AnyTransition, а не .blur() напрямую.
-    static var blurFade: AnyTransition {
+    static var blurFade: AnyTransition { blurFade() }
+
+    /// Та же анимация с настраиваемым радиусом — по умолчанию 12 (как было
+    /// у всех существующих мест), но, например, у мелких элементов шапки
+    /// профиля (см. AccountInfoView.topBar) полный радиус выглядел слишком
+    /// тяжело при частом переключении — там используется меньший.
+    static func blurFade(radius: CGFloat = 12) -> AnyTransition {
         .modifier(
-            active: BlurFadeModifier(blur: 12, opacity: 0),
+            active: BlurFadeModifier(blur: radius, opacity: 0),
             identity: BlurFadeModifier(blur: 0, opacity: 1)
         )
     }

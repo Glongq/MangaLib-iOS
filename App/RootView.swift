@@ -1,42 +1,21 @@
 import SwiftUI
 
-/// Корень приложения — настоящий системный SwiftUI `TabView` + `Tab` (не
-/// UIKit `UITabBarController`, не самодельная капсула).
-///
-/// ИСТОРИЯ: сначала была самодельная SwiftUI-панель, имитирующая Liquid
-/// Glass вручную (см. неиспользуемый `BottomBar.swift`). Потом попробовали
-/// настоящий `UITabBarController` + `UITab` (см. неиспользуемый
-/// `TabBarController.swift`) — сам таббар работал отлично, но кнопка
-/// аватарки РЯДОМ с ним (акцессуар сбоку) — нет: семь техник ручной
-/// подгонки frame/constraints не дали стабильного результата, боролись с
-/// недокументированным поведением приватного системного слоя. Вернулись к
-/// самодельному `HStack` (капсула + кружок аватарки рядом) как к компромиссу.
-///
-/// Теперь кнопку аватарки убрали из этой панели совсем (доступ к профилю —
-/// через раздел «Меню», см. `SideMenuView`) — ровно та причина, из-за
-/// которой в прошлый раз отказались от системного таббара, больше не
-/// применима. Поэтому здесь снова настоящий системный компонент — чистый
-/// SwiftUI `TabView`/`Tab` (доступен с iOS 18, автоматически получает
-/// Liquid Glass на iOS 26 — деплоймент-таргет проекта и так уже 26.0 из-за
-/// `.glassEffect`, используемого по всему приложению). Никаких вручную
-/// подобранных отступов/высот — весь внешний вид, отступы от края экрана,
-/// сворачивание при скролле и т.п. рисует сама система, ровно по HIG.
+/// Native tab navigation. External discovery occupies the Reading tab in external mode.
 struct RootView: View {
 
-    @State private var tab = 1 // Каталог выбран по умолчанию
+    // Reading is the user's requested launch tab.
+    @State private var tab = 2
     @State private var showLogin = false
     @State private var showAccount = false
     @State private var stubRequest: StubRequest?
 
-    // Для всплывающего тоста «Загрузка начата» и т.п. (см. DownloadsManager.banner).
+    // Shared download notifications are displayed above the active tab.
     @ObservedObject private var downloads = DownloadsManager.shared
-    // Запрос «открыть каталог по жанру/тегу» из карточки тайтла (см. CatalogNavigator).
+    // Catalog navigation requests originate from title and menu screens.
     @ObservedObject private var catalogNav = CatalogNavigator.shared
-    // Тёмная/белая тема всего приложения (настройка в AppSettingsView),
-    // независима от темы читалки. Подписка здесь нужна для .preferredColorScheme
-    // ниже — без неё системные элементы (клавиатура, алерты и т.п.) не
-    // подхватили бы переключение темы.
+    // System controls follow changes to the app's preferred theme.
     @ObservedObject private var themeManager = ThemeManager.shared
+    @ObservedObject private var externalSites = ExternalSiteSession.shared
 
     var body: some View {
         TabView(selection: $tab) {
@@ -46,9 +25,12 @@ struct RootView: View {
             Tab("Каталог", systemImage: "magnifyingglass", value: 1) {
                 MangaCatalogView()
             }
-            // Заглушка — раздел в разработке (см. StubView).
             Tab("Читают", systemImage: "book", value: 2) {
-                NavigationStack { StubView(title: "Читают") }
+                if externalSites.isExternalModeActive {
+                    ExternalRecommendationFeedView(onBack: { tab = 4 })
+                } else {
+                    HomeView()
+                }
             }
             Tab("Новое", systemImage: "bell", value: 3) {
                 NotificationsView()
@@ -59,23 +41,16 @@ struct RootView: View {
                     onOpenLogin: { showLogin = true },
                     onOpenAccount: { showAccount = true },
                     onOpenCatalog: { typeId in
-                        // Меню «Тайтлы» → тип: кладём фильтр и уходим на Каталог.
+                        // Apply the selected type before switching to the catalog.
                         CatalogNavigator.shared.pendingTypeId = typeId
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 1 }
                     }
                 )
             }
         }
-        // По умолчанию (.automatic) iOS 26 сворачивает панель при скролле
-        // контента в маленькую капсулу с ОДНОЙ активной вкладкой, прижатую к
-        // левому краю (см. `tabBarMinimizeBehavior` в HIG/WWDC25) — из-за
-        // этого любая вкладка при скролле "съезжала" влево вместо центра.
-        // .never держит панель всегда полностью развёрнутой, все 5 вкладок
-        // равномерно по центру.
+        // Keep all five tabs expanded instead of collapsing them to one side.
         .tabBarMinimizeBehavior(.never)
-        // Тост сверху: выезжает вниз из-под верхней кромки и уезжает обратно
-        // вверх (transition .move(edge: .top)). Полупрозрачная стеклянная
-        // подложка (glassEffect), как у остальных элементов приложения.
+        // Present the shared toast above the active screen.
         .overlay(alignment: .top) {
             if let banner = downloads.banner {
                 DownloadToast(text: banner.text)
@@ -84,8 +59,7 @@ struct RootView: View {
             }
         }
         .animation(.spring(response: 0.42, dampingFraction: 0.82), value: downloads.banner)
-        // Тап по жанру/тегу в карточке → переключаемся на вкладку Каталог
-        // (сам фильтр применяется в MangaCatalogView.onAppear).
+        // The catalog applies pending genre/tag filters when it appears.
         .onChange(of: catalogNav.switchRequest) { _, req in
             if req != nil { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 1 } }
         }
@@ -95,7 +69,7 @@ struct RootView: View {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = 0 }
             }
         }
-        .preferredColorScheme(themeManager.isDarkTheme ? .dark : .light)
+        .preferredColorScheme((tab == 2 && externalSites.isExternalModeActive) || themeManager.isDarkTheme ? .dark : .light)
         .tint(Theme.accent)
         .sheet(isPresented: $showLogin) { LoginView() }
         .sheet(isPresented: $showAccount) { AccountInfoView() }
@@ -110,9 +84,7 @@ private struct StubRequest: Identifiable {
     let title: String
 }
 
-/// Небольшой тост со стеклянной полупрозрачной подложкой — короткий текст
-/// вроде «Загрузка начата». Анимация появления/исчезновения задаётся снаружи
-/// (см. RootView.overlay).
+/// Shared glass toast; its presentation animation belongs to RootView.
 private struct DownloadToast: View {
     let text: String
     var body: some View {

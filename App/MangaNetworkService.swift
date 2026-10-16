@@ -11,6 +11,12 @@ enum NetworkError: LocalizedError {
     case decoding(Error)
     case transport(Error)
     case cancelled
+    /// Сервер ответил ошибкой, но с человекочитаемым сообщением в
+    /// `{"data":{"toast":{"message":...}}}` — ПОДТВЕРЖДЕНО перехватом на
+    /// `POST /friendship` (403, антиспам: "Вы недавно отклонили заявку,
+    /// следующую можно отправить через 30 минут"). Показываем как есть,
+    /// вместо общего "Доступ запрещён".
+    case apiMessage(String)
 
     var errorDescription: String? {
         switch self {
@@ -19,9 +25,35 @@ enum NetworkError: LocalizedError {
         case .notFound:              return "Ресурс не найден (404)."
         case .rateLimited:           return "Слишком много запросов (429). Попробуйте позже."
         case .server(let status):    return "Ошибка сервера (\(status))."
-        case .decoding(let error):   return "Ошибка разбора ответа: \(error.localizedDescription)"
-        case .transport(let error):  return "Сетевая ошибка: \(error.localizedDescription)"
+        // Раньше сюда подставлялся error.localizedDescription — у
+        // DecodingError он НЕ локализован (всегда на английском, вне
+        // зависимости от языка системы), поэтому пользователь видел
+        // смешанный русско-английский текст. Технические подробности парсинга
+        // всё равно не несут для юзера смысла — просто нейтральное сообщение.
+        case .decoding:               return "Ошибка разбора ответа сервера."
+        // URLError.localizedDescription следует языку системы — на
+        // английской локали устройства утекал английский текст ("нет сети"
+        // и т.п. приходили как есть от системы). Разбираем самые частые коды
+        // сами (по-русски, всегда), реже встречающиеся — нейтральный фолбэк.
+        case .transport(let error):  return Self.transportDescription(error)
         case .cancelled:             return "Запрос отменён."
+        case .apiMessage(let message): return message
+        }
+    }
+
+    private static func transportDescription(_ error: Error) -> String {
+        guard let urlError = error as? URLError else { return "Сетевая ошибка." }
+        switch urlError.code {
+        case .notConnectedToInternet, .networkConnectionLost:
+            return "Нет соединения с интернетом."
+        case .timedOut:
+            return "Превышено время ожидания ответа."
+        case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+            return "Не удалось подключиться к серверу."
+        case .secureConnectionFailed, .serverCertificateUntrusted:
+            return "Ошибка безопасного соединения."
+        default:
+            return "Сетевая ошибка."
         }
     }
 }
@@ -34,8 +66,40 @@ final class MangaNetworkService {
 
     static let shared = MangaNetworkService()
 
-    /// Базовый URL API. Согласно правилам MangaLib — `https://api.cdnlibs.org/api`.
-    private let baseURL = URL(string: "https://api.cdnlibs.org/api")!
+    /// Хост API — НЕ один общий на всю экосистему, как считалось раньше:
+    /// ПОДТВЕРЖДЕНО двумя независимыми перехватами (proxypin, 2026-08-26),
+    /// что "безопасные" сайты (MangaLib=1, RanobeLib=3) реально ходят на
+    /// `api.cdnlibs.org`, а 18+-сайты (SlashLib=2, HentaiLib=4) — на СОВСЕМ
+    /// ДРУГОЙ хост, `hapi.hentaicdn.org`. Первая капча — полный набор вызовов
+    /// HentaiLib (Site-Id: 4, Origin: hentailib.me): комментарии, глава,
+    /// статистика, похожее, закладка, карточка тайтла, каталог, /constants,
+    /// папки закладок, уведомления — ВСЁ на hapi.hentaicdn.org. Вторая,
+    /// более ранняя капча (Site-Id: 2, v2.shlib.life) — туда же. До этого
+    /// момента ВСЕ запросы для активного сайта HentaiLib/SlashLib уходили на
+    /// api.cdnlibs.org, который эти site_id, судя по всему, не обслуживает —
+    /// то есть каталог/карточка/закладки на этих двух сайтах были
+    /// фактически сломаны в приложении.
+    ///
+    /// Картинки отдельно подменять не нужно: URL обложки приходит прямо в
+    /// JSON-ответе (см. MangaCover.bestURL) — раз ответ пришёл с
+    /// hapi.hentaicdn.org, там уже правильный хост картинок
+    /// (cover.hentaicdn.org, тоже подтверждено перехватом).
+    private static func apiHost(forSite siteId: Int) -> String {
+        switch siteId {
+        case 2, 4: return "hapi.hentaicdn.org"
+        default:   return "api.cdnlibs.org"
+        }
+    }
+
+    /// `siteId` — эффективный сайт ЭТОГО запроса (явный override у
+    /// makeRequest, см. его комментарий про Site-Id) либо активный сайт
+    /// (SiteSession), если override не передан — та же логика, что уже
+    /// применяется к заголовку Site-Id в defaultHeaders/makeRequest, просто
+    /// теперь она же определяет ХОСТ, а не только заголовок.
+    private func baseURL(siteId: Int? = nil) -> URL {
+        let site = siteId ?? SiteSession.shared.activeSite.rawValue
+        return URL(string: "https://\(Self.apiHost(forSite: site))/api")!
+    }
 
     private let session: URLSession
     private let decoder: JSONDecoder
@@ -115,9 +179,27 @@ final class MangaNetworkService {
     /// (страница персонажа фильтрует по одному типу контента). `targetId`+
     /// `targetModel` — фильтр «тайтлы, где есть эта сущность» (персонаж и т.п.),
     /// ПОДТВЕРЖДЕНО перехватом `?target_id=1221&target_model=character`.
+    /// `siteId` — ПЕРЕОПРЕДЕЛЯЕТ хост+заголовок Site-Id (как и у fetchCharacters/
+    /// fetchMangaStats/etc, см. makeRequest(siteId:)), а НЕ просто фильтр
+    /// query-параметра `site_id[]` (тот — `siteIds`, отдельный параметр).
+    /// Раньше здесь такого не было: экраны франшизы/персонажа/команды/
+    /// каталожной сущности (FranchiseView/CharacterView/TeamView/
+    /// DirectoryDetailView), у которых есть СВОЙ локальный выбор сайта
+    /// (siteFilter), передавали через siteIds ТОЛЬКО query-фильтр — а
+    /// реальный HTTP-запрос всё равно уходил на хост+Site-Id ГЛОБАЛЬНОГО
+    /// активного сайта (см. baseURL/defaultHeaders). Из-за этого выбор,
+    /// например, Хентай(4)/СлэшLib(2) при глобально активном МангаLib(1)
+    /// реально бил в `api.cdnlibs.org` (хост МангаLib/РанобэLib) с
+    /// Site-Id:1 вместо `hapi.hentaicdn.org` с Site-Id:4 — сервер отвечал
+    /// 403/404 ("доступ"/"не найдено"), а не отдавал контент другого сайта.
+    /// Передавайте siteId ТОЛЬКО когда выбран ОДИН конкретный сайт (см.
+    /// *ViewModel.overrideSiteId) — при "Все" (несколько сайтов сразу,
+    /// возможно на РАЗНЫХ хостах) переопределять нечем, один HTTP-запрос
+    /// физически не может одновременно бить в два разных хоста — остаётся
+    /// прежнее поведение (глобальный активный сайт).
     func fetchCatalog(query: String, sort: SortOption, filter: MangaFilter, page: Int = 1,
                       sortByOverride: String? = nil, sortType: String = "desc",
-                      siteIds: [Int]? = nil,
+                      siteIds: [Int]? = nil, siteId: Int? = nil,
                       targetId: Int? = nil, targetModel: String? = nil) async throws -> CatalogPage {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "fields[]", value: "rate"),
@@ -162,23 +244,124 @@ final class MangaNetworkService {
         appendTri(&items, "genres", filter.genres)
         appendTri(&items, "tags", filter.tags)
 
-        // «Строгое совпадение» = AND по выбранным жанрам/тегам (по умолчанию сервер даёт OR).
-        // Имя параметра — предположительное; сервер игнорирует неизвестные параметры.
-        if filter.genresStrict && !filter.genres.included.isEmpty {
-            items.append(URLQueryItem(name: "genres_and", value: "true"))
-        }
-        if filter.tagsStrict && !filter.tags.included.isEmpty {
-            items.append(URLQueryItem(name: "tags_and", value: "true"))
-        }
+        // «Строгое совпадение» — ключи genres_soft_search/tags_soft_search
+        // РЕАЛЬНЫЕ (в отличие от прежней чистой догадки genres_and/tags_and,
+        // которая ни разу не встретилась ни в одной капче), но связь именно
+        // со "Строгим совпадением" ОПРОВЕРГНУТА прямым сравнением (proxypin,
+        // 2026-08-26): та же пара тегов (tags[0]=13&tags[1]=120) отправлена
+        // подряд ДЕСЯТЬЮ разными запросами (все варианты сортировки в
+        // каталоге) — параметр отсутствует ВСЕГДА. Другая пара тегов в этой
+        // же сессии (356+286) — параметр присутствует ВСЕГДА. То есть это не
+        // тумблер, переключаемый пользователем на лету (иначе он бы то
+        // появлялся, то исчезал в рамках одной и той же пары тегов при
+        // смене сортировки) — похоже на побочный эффект ТОГО, как именно
+        // сайт добавил тег в выборку (через текстовый поиск по названию —
+        // тогда soft/нечёткое совпадение остаётся приклеенным к тегу — или
+        // напрямую кликом по списку). У нашего приложения такого различия
+        // нет (мы всегда просто передаём id тега), так что осмысленно
+        // повторить это поведение нечем — и раз реального эффекта параметра
+        // на результаты мы тоже не видели, безопаснее его вообще не слать.
+        // "Строгое совпадение" в фильтрах сейчас ничего на сервер не шлёт —
+        // считать нерабочим до новых данных.
         appendTri(&items, "caution", filter.ageRatings)
         appendTri(&items, "types", filter.types)
         appendTri(&items, "format", filter.formats)
         appendTri(&items, "status", filter.titleStatuses)
         appendTri(&items, "scanlate_status", filter.translationStatuses)
 
-        let request = try makeRequest(path: "/manga", queryItems: items)
+        let request = try makeRequest(path: "/manga", queryItems: items, siteId: siteId)
         let response: APIListResponse<MangaItem> = try await perform(request)
         return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// «Все обновления» на вкладке «Читают» (см. HomeView).
+    ///
+    /// ПОДТВЕРЖДЕНО реальным перехватом (пользователь прислал полное тело
+    /// ответа, page=2): `GET /latest-updates?page=` — отдельный эндпоинт,
+    /// НЕ привязанный к аккаунту (общая лента обновлений по всему сайту,
+    /// не путать с /user-latest-updates у "Мои обновления" и не путать с
+    /// /notifications — та личная, там были бы только свои закладки).
+    /// Форма ответа — обычный MangaItem, с уже включённым по умолчанию
+    /// metadata.latest_items (volume/number/name/created_at) — никакого
+    /// fields[]=metadata не нужно (в отличие от каталога, где это поле
+    /// принимается, но означает другое — только anilist/shiki-синхронизацию,
+    /// без last_item/latest_items вообще). meta.has_next_page присутствует
+    /// и работает как положено (в отличие от /bookmarks, где его нет вообще).
+    func fetchLatestUpdates(page: Int = 1) async throws -> CatalogPage {
+        let items: [URLQueryItem] = [URLQueryItem(name: "page", value: String(max(page, 1)))]
+        let request = try makeRequest(path: "/latest-updates", queryItems: items)
+        let response: APIListResponse<MangaItem> = try await perform(request)
+        return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// «Мои обновления» на вкладке «Читают» — ПОДТВЕРЖДЕНО реальным
+    /// перехватом (пользователь прислал полное тело ответа): `GET
+    /// /user-latest-updates?page=`, форма элемента и пагинация — та же, что
+    /// у fetchLatestUpdates (MangaItem + meta.has_next_page), просто с
+    /// заранее включённым metadata.latest_items — без нашего fields[]=
+    /// metadata и без риска 422. Судя по названию пути — обновления по
+    /// тайтлам аккаунта (закладки/подписки), а не весь каталог, поэтому,
+    /// как и /auth/me, скорее всего требует авторизации.
+    func fetchUserLatestUpdates(page: Int = 1) async throws -> CatalogPage {
+        let items: [URLQueryItem] = [URLQueryItem(name: "page", value: String(max(page, 1)))]
+        let request = try makeRequest(path: "/user-latest-updates", queryItems: items)
+        let response: APIListResponse<MangaItem> = try await perform(request)
+        return CatalogPage(items: response.data, hasNextPage: response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// «Сейчас читают» — КОМПАКТНЫЙ виджет на главной (см. HomeView), ОДИН
+    /// запрос сразу отдаёт все три категории (без page/popularity — тот же
+    /// путь БЕЗ этих параметров возвращает сгруппированную форму, см.
+    /// TopViewsPayload). ПОДТВЕРЖДЕНО перехватом (`time=week`/`time=month`,
+    /// оба 200).
+    ///
+    /// ИСПРАВЛЕНИЕ прежнего комментария здесь ("page/popularity нет вообще")
+    /// — был неправ: более полный перехват (см. fetchTopViewsList ниже)
+    /// подтвердил, что ТОТ ЖЕ путь С этими параметрами отдаёт СОВСЕМ другую,
+    /// постраничную форму ответа — это тот же эндпоинт в двух режимах
+    /// (виджет vs полноэкранный список), не опечатка/устаревшее поведение.
+    func fetchTopViews(period: TopViewsPeriod = .day) async throws -> TopViewsPayload {
+        let items: [URLQueryItem] = [URLQueryItem(name: "time", value: period.rawValue)]
+        let request = try makeRequest(path: "/media/top-views", queryItems: items)
+        let response: APIObjectResponse<TopViewsPayload> = try await perform(request)
+        return response.data
+    }
+
+    /// «Сейчас читают» — ПОЛНЫЙ постраничный экран (Меню → Каталог → Сейчас
+    /// читают, см. TopViewsListView), В ОТЛИЧИЕ от компактного виджета
+    /// главной (fetchTopViews(period:) выше). ПОДТВЕРЖДЕНО перехватом (более
+    /// полный дамп, все 9 комбинаций time×popularity встречены): `GET
+    /// /media/top-views?time=day|week|month&popularity=1|2|3&page=N` — тот
+    /// же путь, что и у виджета, но с этими тремя параметрами отдаёт
+    /// ПЛОСКИЙ постраничный список (`data:[MangaItem]`, `meta.has_next_page`),
+    /// а не сгруппированный `items."1"/"2"/"3"`. `popularity` — та же
+    /// нумерация вкладок, что и `TopViewsSort.groupKey` (см. там же:
+    /// 1=Новинки/2=Набирающее популярность/3=Популярное — сверено с реальным
+    /// скриншотом: popularity=1 первым элементом даёт ровно тот тайтл,
+    /// что показан на активной вкладке "Новинки").
+    func fetchTopViewsList(sort: TopViewsSort, period: TopViewsPeriod, page: Int) async throws -> (items: [MangaItem], hasNextPage: Bool) {
+        let queryItems = [
+            URLQueryItem(name: "time", value: period.rawValue),
+            URLQueryItem(name: "popularity", value: sort.groupKey),
+            URLQueryItem(name: "page", value: String(max(page, 1)))
+        ]
+        let request = try makeRequest(path: "/media/top-views", queryItems: queryItems)
+        let response: LossyListResponse<MangaItem> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// Виджеты главной страницы (коллекции + топ активных читателей недели,
+    /// см. HomeWidgetsPayload) — ПУТЬ ПОДТВЕРЖДЁН реальным перехватом
+    /// (дважды, два разных дампа): буквально корень API, `GET
+    /// https://api.cdnlibs.org/api/` — то есть baseURL вообще без
+    /// дополнительного сегмента. Раньше здесь была догадка "/home", которая
+    /// на практике давала настоящий 404 (см. лог пользователя) — теперь
+    /// путь настоящий, "/" даёт `makeRequest` итоговый URL "…/api/" (см.
+    /// normalizedPath ниже: "/" уже начинается со слэша, второй не добавится).
+    func fetchHomeWidgets() async throws -> HomeWidgetsPayload {
+        let request = try makeRequest(path: "/", queryItems: [])
+        let response: APIObjectResponse<HomeWidgetsPayload> = try await perform(request)
+        return response.data
     }
 
     /// Профиль текущего пользователя (ник + аватар) — только когда есть токен
@@ -211,12 +394,78 @@ final class MangaNetworkService {
     }
 
     /// Профиль пользователя — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}?fields[]=…`.
+    /// Список полей — объединение двух реальных перехватов: изначального
+    /// (about/gender/background/avatar_frame_id/premium_background_id/points)
+    /// и более полного (proxypin, 2026-08-26: background/roles/points/
+    /// ban_info/gender/created_at/about/teams/premium_background_id/
+    /// login_streak/previous_usernames) — добавлены created_at/teams/
+    /// login_streak (нужны UserProfile.createdAt/teams/lastLoginAt), roles/
+    /// ban_info/previous_usernames тоже реальные поля, но пока не
+    /// декодируются — сервер их просто вернёт, лишним не помешает.
     func fetchUserProfile(id: Int) async throws -> UserProfile {
-        let items = ["about", "gender", "background", "avatar_frame_id", "premium_background_id", "points"]
+        let items = [
+            "about", "gender", "background", "avatar_frame_id", "premium_background_id", "points",
+            "created_at", "teams", "login_streak", "roles", "ban_info", "previous_usernames"
+        ]
             .map { URLQueryItem(name: "fields[]", value: $0) }
         let request = try makeRequest(path: "/user/\(id)", queryItems: items)
         let response: APIObjectResponse<UserProfile> = try await perform(request)
         return response.data
+    }
+
+    /// Загрузка картинки во временное хранилище перед сохранением профиля —
+    /// ПОДТВЕРЖДЕНО перехватом `POST /upload/image/avatar` (URL и ФОРМАТ
+    /// ОТВЕТА подтверждены; поле имени файла в самом multipart-запросе —
+    /// НЕТ, перехвачен был только ответ, не тело запроса). "image" — по
+    /// распространённой конвенции таких API, требует проверки на реальном
+    /// устройстве: если сервер вернёт ошибку валидации, значит имя поля
+    /// другое и его нужно поправить здесь.
+    func uploadAvatarImage(_ data: Data, filename: String, mimeType: String) async throws -> UploadedImage {
+        let request = makeMultipartRequest(path: "/upload/image/avatar", fieldName: "image",
+                                            filename: filename, mimeType: mimeType, data: data)
+        let response: APIObjectResponse<UploadedImage> = try await perform(request)
+        return response.data
+    }
+
+    /// Сохранение блока "Информация" профиля — ПОДТВЕРЖДЕНО перехватом
+    /// `PUT /user/{id}` (не PATCH — метод уточнён более свежим перехватом) с
+    /// телом `{update_type:"info", avatar, cover, username, gender, about}`.
+    /// avatar/cover — либо filename из uploadAvatarImage(_:filename:mimeType:)
+    /// выше (новая картинка), либо НЕИЗМЕНЁННОЕ текущее значение (чтобы не
+    /// затереть его null), либо nil (явно убрать — ПОДТВЕРЖДЕНО, null = "без
+    /// аватара/фона"). gender — ПОДТВЕРЖДЕНО перехватом 0/1/2 (0 = "Не
+    /// указан", 1 = "Женский", 2 = "Мужской", см. /constants?fields[]=genders).
+    func updateProfileInfo(userId: Int, avatarFilename: String?, coverFilename: String?,
+                            username: String, genderId: Int, about: String) async throws -> UserProfile {
+        let body = ProfileInfoUpdateBody(avatar: avatarFilename, cover: coverFilename,
+                                          username: username, gender: genderId, about: about)
+        let request = try makeJSONRequest(path: "/user/\(userId)", method: "PUT", body: body)
+        let response: APIObjectResponse<UserProfile> = try await perform(request)
+        return response.data
+    }
+
+    /// Ручное Encodable (не синтезированное) — важно: `encode(_:forKey:)`, а
+    /// НЕ `encodeIfPresent`, иначе nil у avatar/cover пропал бы из JSON
+    /// целиком вместо того, чтобы попасть туда как явный `null` — а именно
+    /// такой формат зафиксирован перехватом настоящего запроса.
+    private struct ProfileInfoUpdateBody: Encodable {
+        let avatar: String?
+        let cover: String?
+        let username: String
+        let gender: Int
+        let about: String
+
+        private enum CodingKeys: String, CodingKey { case updateType = "update_type", avatar, cover, username, gender, about }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode("info", forKey: .updateType)
+            try c.encode(avatar, forKey: .avatar)
+            try c.encode(cover, forKey: .cover)
+            try c.encode(username, forKey: .username)
+            try c.encode(gender, forKey: .gender)
+            try c.encode(about, forKey: .about)
+        }
     }
 
     /// Статистика профиля — ПОДТВЕРЖДЕНО перехватом `GET /user/{id}/stats`.
@@ -224,6 +473,219 @@ final class MangaNetworkService {
         let request = try makeRequest(path: "/user/\(id)/stats", queryItems: [])
         let response: APIObjectResponse<UserStats> = try await perform(request)
         return response.data
+    }
+
+    // MARK: Дружба (вкладка «Друзья» в профиле)
+
+    /// Статус дружбы текущего аккаунта с пользователем `userId` — ПОДТВЕРЖДЕНО
+    /// перехватом `GET /friendship/{userId}`.
+    func fetchFriendshipStatus(userId: Int) async throws -> FriendshipEntry {
+        let request = try makeRequest(path: "/friendship/\(userId)", queryItems: [])
+        let response: APIObjectResponse<FriendshipEntry> = try await perform(request)
+        return response.data
+    }
+
+    /// Отправить заявку в друзья — ПОДТВЕРЖДЕНО перехватом `POST /friendship`
+    /// `{"recipient_id": N}`. В капче оба раза словил 403 с антиспам-тостом
+    /// (см. NetworkError.apiMessage) — тело УСПЕШНОГО ответа не перехвачено,
+    /// декодируем его как FriendshipEntry по аналогии с остальными путями
+    /// /friendship/... (везде одна и та же форма записи).
+    @discardableResult
+    func sendFriendRequest(recipientId: Int) async throws -> FriendshipEntry {
+        let request = try makeJSONRequest(path: "/friendship", method: "POST",
+                                           body: FriendRequestPayload(recipient_id: recipientId))
+        let response: APIObjectResponse<FriendshipEntry> = try await performToastAware(request)
+        return response.data
+    }
+
+    private struct FriendRequestPayload: Encodable { let recipient_id: Int }
+
+    /// Разорвать дружбу — ПОДТВЕРЖДЕНО перехватом `DELETE /friendship/{id}`,
+    /// где id — id САМОЙ ЗАПИСИ дружбы (FriendshipEntry.id), НЕ id
+    /// пользователя (более ранняя догадка "по id пользователя" была не
+    /// подтверждена и, судя по этому перехвату, неверна — поправлено).
+    /// Отмена ЕЩЁ НЕ принятой исходящей заявки прямым перехватом не поймана,
+    /// но это тот же REST-ресурс и тот же метод — по аналогии тоже должен
+    /// работать через id записи.
+    func cancelFriendRequest(friendshipId: Int) async throws {
+        let request = try makeRequest(path: "/friendship/\(friendshipId)", queryItems: [], method: "DELETE")
+        try await performVoid(request)
+    }
+
+    /// Принять/отклонить входящую заявку в друзья — ПОДТВЕРЖДЕНО перехватом
+    /// `PUT /friendship/{id} {"status":2}` → отклонение (в ответе
+    /// `is_friend/is_requested/is_awaiting_confirmation` все false). Именно
+    /// этот код ранее был неизвестен (см. историю в AccountInfoView.
+    /// friendshipRow — раньше принять/отклонить было НЕ реализовано из-за
+    /// этого). `status:1` = принять — напрямую для ОДИНОЧНОЙ заявки в
+    /// перехвате не поймано, но `PUT /friendship/bulk {"status":1}` (см.
+    /// acceptAllFriendRequests) с тем же полем `status` и тем же значением
+    /// массово ПРИНИМАЕТ все заявки — по аналогии то же значение работает и
+    /// здесь для одной записи.
+    @discardableResult
+    func respondToFriendRequest(id: Int, accept: Bool) async throws -> FriendshipEntry {
+        let request = try makeJSONRequest(path: "/friendship/\(id)", method: "PUT",
+                                           body: FriendshipStatusPayload(status: accept ? 1 : 2))
+        let response: APIObjectResponse<FriendshipEntry> = try await perform(request)
+        return response.data
+    }
+
+    private struct FriendshipStatusPayload: Encodable { let status: Int }
+
+    /// Принять ВСЕ входящие заявки разом — ПОДТВЕРЖДЕНО перехватом
+    /// `PUT /friendship/bulk {"status":1}` → `{"data":{"toast":{"type":
+    /// "success","message":"Все ваши заявки были успешно приняты"}}}`, тело
+    /// ответа не несёт списка записей — после успеха вызывающий код
+    /// перезагружает список входящих сам.
+    func acceptAllFriendRequests() async throws {
+        let request = try makeJSONRequest(path: "/friendship/bulk", method: "PUT",
+                                           body: FriendshipStatusPayload(status: 1))
+        try await performVoid(request)
+    }
+
+    /// Добавить пользователя в игнор-лист (перестать видеть его комментарии) —
+    /// НЕ подтверждено перехватом (ни один захваченный запрос не содержал
+    /// такого действия, только `fields[]=ignored_by_user` в ответе команд).
+    /// Путь и метод — по аналогии с `/friendship/{userId}` выше; если сервер
+    /// ожидает другую форму, поправить по факту первого реального перехвата.
+    func addToIgnoreList(userId: Int) async throws {
+        let request = try makeRequest(path: "/ignore/\(userId)", queryItems: [], method: "POST")
+        try await performVoid(request)
+    }
+
+    /// Список друзей пользователя — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /friendship?page=&user_id=&status=1`, поиск по имени — тем же
+    /// перехватом с `&q=` (поле "Поиск по имени" на реальном сайте).
+    func fetchFriends(userId: Int, page: Int = 1, query: String = "") async throws -> (friends: [FriendshipEntry], hasNextPage: Bool) {
+        var items = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "user_id", value: String(userId)),
+            URLQueryItem(name: "status", value: "1")
+        ]
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
+        let request = try makeRequest(path: "/friendship", queryItems: items)
+        let response: LossyListResponse<FriendshipEntry> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// Входящие/исходящие заявки в друзья (свои — этот запрос имеет смысл
+    /// только для СВОЕГО аккаунта, не для чужого профиля) — ПОДТВЕРЖДЕНО
+    /// перехватом `GET /friendship?user_id=&status=0&sender=0` (входящие —
+    /// заявки, отправленные МНЕ) и `&sender=1` (исходящие — отправленные
+    /// МНОЙ), поиск — тем же `&q=`, что и у fetchFriends.
+    func fetchFriendRequests(userId: Int, incoming: Bool, page: Int = 1, query: String = "") async throws -> (requests: [FriendshipEntry], hasNextPage: Bool) {
+        var items = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "user_id", value: String(userId)),
+            URLQueryItem(name: "status", value: "0"),
+            URLQueryItem(name: "sender", value: incoming ? "0" : "1")
+        ]
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
+        let request = try makeRequest(path: "/friendship", queryItems: items)
+        let response: LossyListResponse<FriendshipEntry> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// Общие друзья с пользователем `userId` — ПОДТВЕРЖДЕНО перехватом пути
+    /// `GET /friendship/{userId}/mutual?page=` (сам список в капче был пуст,
+    /// см. FriendshipEntry).
+    func fetchMutualFriends(userId: Int, page: Int = 1) async throws -> (friends: [FriendshipEntry], hasNextPage: Bool) {
+        let items = [URLQueryItem(name: "page", value: String(max(page, 1)))]
+        let request = try makeRequest(path: "/friendship/\(userId)/mutual", queryItems: items)
+        let response: LossyListResponse<FriendshipEntry> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    // MARK: Коллекции
+
+    /// Коллекции, созданные пользователем — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /collections?page=&sort_by=newest&sort_type=desc&subscriptions=0&
+    /// user_id=&limit=12` (путь и пустой список — да, форма непустого
+    /// элемента — НЕТ; используем уже подтверждённую на другом эндпоинте
+    /// форму MangaCollection, см. её комментарий).
+    func fetchUserCollections(userId: Int, page: Int = 1) async throws -> (collections: [MangaCollection], hasNextPage: Bool) {
+        let items = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "sort_by", value: "newest"),
+            URLQueryItem(name: "sort_type", value: "desc"),
+            URLQueryItem(name: "subscriptions", value: "0"),
+            URLQueryItem(name: "user_id", value: String(userId)),
+            URLQueryItem(name: "limit", value: "12")
+        ]
+        let request = try makeRequest(path: "/collections", queryItems: items)
+        let response: LossyListResponse<MangaCollection> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// Общая лента коллекций сайта (экран "Коллекции" в Каталоге, без
+    /// привязки к пользователю) — ПОДТВЕРЖДЕНО перехватом `GET /collections
+    /// ?limit=15&page=1&sort_by=newest` (путь и полная форма непустого
+    /// элемента — тем же перехватом, что и CollectionDetail). `sortBy: nil`
+    /// — не слать sort_by вообще (см. CollectionsListViewModel.fetchPage —
+    /// сервер в этой экосистеме строго валидирует sort_by и отвечает 422 на
+    /// неизвестное значение, см. тот же приём в TeamViewModel/
+    /// DirectoryListViewModel).
+    func fetchCollections(page: Int = 1, sortBy: String?, period: String? = nil) async throws -> (collections: [MangaCollection], hasNextPage: Bool) {
+        var items = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "limit", value: "15")
+        ]
+        if let sortBy { items.append(URLQueryItem(name: "sort_by", value: sortBy)) }
+        if let period { items.append(URLQueryItem(name: "period", value: period)) }
+        let request = try makeRequest(path: "/collections", queryItems: items)
+        let response: LossyListResponse<MangaCollection> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    /// Полная страница коллекции — ПОДТВЕРЖДЕНО перехватом `GET
+    /// /collections/{id}` (см. CollectionDetail).
+    func fetchCollectionDetail(id: Int) async throws -> CollectionDetail {
+        let request = try makeRequest(path: "/collections/\(id)", queryItems: [])
+        let response: APIObjectResponse<CollectionDetail> = try await perform(request)
+        return response.data
+    }
+
+    /// Голосование за коллекцию — ПОДТВЕРЖДЕНО перехватом `POST
+    /// /collection/{id}/vote` (ЕДИНСТВЕННОЕ число "collection", не
+    /// "collections" — так в реальном пути), тело `{"vote":1}` (плюс) /
+    /// `{"vote":0}` (минус) → `{"up","down","user"}` — та же форма и та же
+    /// конвенция (1=плюс/0=минус/null=не голосовал), что и у voteComment/
+    /// voteSimilar, поэтому переиспользуем SimilarVotes.
+    @discardableResult
+    func voteCollection(id: Int, direction: Int) async throws -> SimilarVotes {
+        let request = try makeJSONRequest(path: "/collection/\(id)/vote", method: "POST",
+                                           body: CommentVotePayload(vote: direction))
+        let response: APIObjectResponse<SimilarVotes> = try await perform(request)
+        return response.data
+    }
+
+    // MARK: Закладки другого пользователя («Списки тайтлов» в чужом профиле)
+
+    /// Папки закладок пользователя — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /bookmarks/folder/{userId}`.
+    func fetchUserBookmarkFolders(userId: Int) async throws -> [UserBookmarkFolder] {
+        let request = try makeRequest(path: "/bookmarks/folder/\(userId)", queryItems: [])
+        let response: LossyListResponse<UserBookmarkFolder> = try await perform(request)
+        return response.data
+    }
+
+    /// Тайтлы в конкретной папке закладок пользователя — ПОДТВЕРЖДЕНО
+    /// перехватом `GET /bookmarks?status=&user_id=&sort_by=name&sort_type=
+    /// desc&page=`, элементы — BookmarkListEntry (та же форма, что и у
+    /// собственных закладок аккаунта, см. её комментарий).
+    func fetchUserBookmarks(userId: Int, folderId: Int, page: Int = 1) async throws -> (items: [BookmarkListEntry], hasNextPage: Bool) {
+        let items = [
+            URLQueryItem(name: "status", value: String(folderId)),
+            URLQueryItem(name: "user_id", value: String(userId)),
+            URLQueryItem(name: "sort_by", value: "name"),
+            URLQueryItem(name: "sort_type", value: "desc"),
+            URLQueryItem(name: "page", value: String(max(page, 1)))
+        ]
+        let request = try makeRequest(path: "/bookmarks", queryItems: items)
+        let response: LossyListResponse<BookmarkListEntry> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
     }
 
     /// Тайтлы из закладок АККАУНТА на сервере — отдельного эндпоинта "мои
@@ -276,7 +738,12 @@ final class MangaNetworkService {
     /// Теперь вместо броска — при отсутствии кэша донтягиваем /auth/me прямо
     /// здесь и кэшируем результат обратно в AuthSession, чтобы больше не
     /// зависеть от того, успел ли параллельный refreshProfile() отработать.
-    func fetchBookmarksAccountList(status: Int = 0, page: Int = 1) async throws -> (items: [BookmarkListEntry], hasNextPage: Bool) {
+    /// `sortBy`/`sortType` — ПОДТВЕРЖДЕНО перехватом: реальный сайт умеет
+    /// `sort_by` = `name`/`rus_name`/`created_at`/`updated_at`/
+    /// `last_chapter_at`/`rating`, каждое с `sort_type` `asc`/`desc`.
+    /// Дефолты ("name"/"desc") — как было раньше, для полного синка
+    /// (syncFromServer), которому важен не порядок, а полный список.
+    func fetchBookmarksAccountList(status: Int = 0, page: Int = 1, sortBy: String = "name", sortType: String = "desc") async throws -> (items: [BookmarkListEntry], hasNextPage: Bool) {
         let userId: Int
         if let cached = AuthSession.shared.userId {
             userId = cached
@@ -287,16 +754,26 @@ final class MangaNetworkService {
         }
         let items: [URLQueryItem] = [
             URLQueryItem(name: "page", value: String(max(page, 1))),
-            URLQueryItem(name: "sort_by", value: "name"),
-            URLQueryItem(name: "sort_type", value: "desc"),
+            URLQueryItem(name: "sort_by", value: sortBy),
+            URLQueryItem(name: "sort_type", value: sortType),
             URLQueryItem(name: "status", value: String(status)),
             URLQueryItem(name: "user_id", value: String(userId))
         ]
-        let request = try makeRequest(path: "/bookmarks", queryItems: items)
         // LossyListResponse, а не APIListResponse — обычный `[T]` атомарен:
         // если хотя бы ОДНА закладка в списке "битая" (например, снятый с
         // публикации тайтл), весь decode массива падает и synchFromServer
         // тихо ничего не получает вообще (см. комментарий у LossyArray).
+        //
+        // Никаких доп. fields[] не нужно — ПОДТВЕРЖДЕНО реальным перехватом:
+        // metadata.last_item (бэйдж "Глава N" — см. MangaItem.latestChapter)
+        // и items_count.uploaded ("Начать 0/N" — см.
+        // MangaItem.uploadedChaptersCount) приходят в ответе /bookmarks И БЕЗ
+        // единого явного fields[] — в отличие от /manga/{slug}, здесь это,
+        // судя по всему, поля по умолчанию (раньше здесь стояло совсем
+        // другое, неверное предположение с fields[]=chap_count — такого поля
+        // в API вообще нет, chap_count существует только как имя sort/filter-
+        // параметра каталога).
+        let request = try makeRequest(path: "/bookmarks", queryItems: items)
         let response: LossyListResponse<BookmarkListEntry> = try await perform(request)
         return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
     }
@@ -321,6 +798,55 @@ final class MangaNetworkService {
         let request = try makeJSONRequest(path: "/bookmarks", method: "POST", body: payload)
         let data = try await performOptionalData(request)
         return try? decoder.decode(APIObjectResponse<BookmarkRecordID>.self, from: data).data.id
+    }
+
+    /// Сохранить историю перечитываний ("Прочитано N раз") + комментарий
+    /// закладки — ПОДТВЕРЖДЕНО перехватом: тот же `POST /bookmarks`, что и
+    /// смена папки (см. setBookmarkStatus выше), но с непустым meta. Сервер
+    /// требует meta ЦЕЛИКОМ вместе с bookmark.status — comment шлём КАК
+    /// ЕСТЬ (round-trip из последнего известного значения, см.
+    /// BookmarkedTitle.comment — в UI не редактируется), чтобы не затереть
+    /// то, что могло быть выставлено на сайте. `nil` comment → `false`,
+    /// ровно то, что реально приходит с сервера для пустого комментария
+    /// (см. BookmarkMeta) — уверенности, что именно `false`, а не омиссия
+    /// ключа, подходит и на запись, НЕТ (перехвачен только непустой
+    /// comment на запись) — сделан наиболее вероятный выбор по аналогии
+    /// с чтением.
+    func updateBookmarkMeta(slug: String, status: Int, comment: String?, rewatchHistory: [RewatchPeriod]) async throws {
+        let payload = BookmarkMetaPayload(
+            media_type: "manga", media_slug: slug,
+            bookmark: .init(status: status),
+            meta: .init(comment: comment, rewatches_history: rewatchHistory)
+        )
+        let request = try makeJSONRequest(path: "/bookmarks", method: "POST", body: payload)
+        try await performVoid(request)
+    }
+
+    private struct BookmarkMetaPayload: Encodable {
+        let media_type: String
+        let media_slug: String
+        let bookmark: Bookmark
+        let meta: Meta
+
+        struct Bookmark: Encodable { let status: Int }
+
+        struct Meta: Encodable {
+            let comment: String?
+            let rewatches_history: [RewatchPeriod]
+
+            private enum CodingKeys: String, CodingKey { case comment, rewatches_history }
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                // ИСПРАВЛЕНО перехватом: реальные записи с пустым
+                // комментарием шлют `""` (пустая строка), НЕ `false` —
+                // `false` встречался только на ЧТЕНИЕ (GET), никогда на
+                // запись. Прошлое предположение ("шлём false по аналогии с
+                // GET") не подтвердилось.
+                try container.encode(comment ?? "", forKey: .comment)
+                try container.encode(rewatches_history, forKey: .rewatches_history)
+            }
+        }
     }
 
     /// Убрать тайтл из закладок аккаунта — `DELETE /bookmarks/{id}`, где id —
@@ -354,15 +880,97 @@ final class MangaNetworkService {
     /// Создать пользовательскую папку закладок в РЕАЛЬНОМ аккаунте —
     /// `POST /bookmarks/folder`, подтверждено перехваченным запросом: тело
     /// всего лишь `{"name": "<строка>"}`, сервер сам присваивает id/цвет/
-    /// порядок/site_ids. Ответ (201 Created) — `{"data":{"id":N,"name":...,
-    /// "public":false,"notify":false,"color":"#...","textColor":"#...",
-    /// "order":N,"count":0,"site_ids":[...]}}`. Нам из ответа нужен только
-    /// числовой id — он потребуется, если понадобится настоящее удаление/
-    /// переименование папки на сервере (эти эндпоинты пока не перехвачены).
-    func createBookmarkFolder(name: String) async throws -> ServerBookmarkFolder {
+    /// порядок/site_ids/notify(false)/public(false). Ответ (201 Created) —
+    /// та же форма, что и у `GET /bookmarks/folder/{userId}` (см.
+    /// UserBookmarkFolder) — decode прямо в неё, чтобы сразу знать
+    /// РЕАЛЬНЫЕ color/notify/public/site_ids новой папки, а не гадать.
+    func createBookmarkFolder(name: String) async throws -> UserBookmarkFolder {
         let request = try makeJSONRequest(path: "/bookmarks/folder", method: "POST", body: CreateFolderPayload(name: name))
-        let response: APIObjectResponse<ServerBookmarkFolder> = try await perform(request)
+        let response: APIObjectResponse<UserBookmarkFolder> = try await perform(request)
         return response.data
+    }
+
+    /// Переименование/цвет/notify/приватность кастомной папки — ПОДТВЕРЖДЕНО
+    /// перехватом: `PUT /bookmarks/folder/{id}`, тело ВСЕГДА полное —
+    /// `{"name","color","notify","public"}` разом, не частичный патч (та же
+    /// логика, что у NotificationSettings/PUT /user/settings/notifications).
+    /// Значит переименование/смена цвета ОБЯЗАНЫ прислать текущие
+    /// notify/public неизменными — см. BookmarksStore.updateFolder. Ответ —
+    /// объект БЕЗ поля count (в отличие от GET/POST) — тело не разбираем.
+    func updateBookmarkFolder(id: Int, name: String, colorHex: String, notify: Bool, isPublic: Bool) async throws {
+        let payload = UpdateFolderPayload(name: name, color: colorHex, notify: notify, isPublic: isPublic)
+        let request = try makeJSONRequest(path: "/bookmarks/folder/\(id)", method: "PUT", body: payload)
+        try await performVoid(request)
+    }
+
+    private struct UpdateFolderPayload: Encodable {
+        let name: String
+        let color: String
+        let notify: Bool
+        let isPublic: Bool
+        enum CodingKeys: String, CodingKey { case name, color, notify, isPublic = "public" }
+    }
+
+    /// Удаление кастомной папки — ПОДТВЕРЖДЕНО перехватом: `DELETE
+    /// /bookmarks/folder/{id}`. Тело `{}` (папка пуста ИЛИ реальный сайт
+    /// специально решил не переносить тайтлы — по умолчанию на сайте это
+    /// НЕ отмечено, тайтлы просто уходят вместе с папкой) — либо
+    /// `{"move_to": <id другой папки>}`, если явно выбрали перенос. `nil`
+    /// здесь → ключ move_to не уйдёт вовсе (синтезированный Encodable у
+    /// Optional делает encodeIfPresent) — ровно то, что перехвачено для
+    /// пустого случая.
+    func deleteBookmarkFolder(id: Int, moveTo: Int?) async throws {
+        let request = try makeJSONRequest(path: "/bookmarks/folder/\(id)", method: "DELETE", body: DeleteFolderPayload(move_to: moveTo))
+        try await performVoid(request)
+    }
+
+    private struct DeleteFolderPayload: Encodable {
+        let move_to: Int?
+    }
+
+    /// Сортировка папок ТЕКУЩЕГО сайта — ПОДТВЕРЖДЕНО перехватом: `PUT
+    /// /bookmarks/folder/order`, тело `{"order":[id,id,...]}` — массив
+    /// РЕАЛЬНЫХ числовых id (apiId у стандартных / serverId у кастомных) в
+    /// новом порядке. У реального клиента массив содержит ТОЛЬКО папки
+    /// активного сайта — см. BookmarksStore.moveFolders.
+    func saveBookmarkFolderOrder(_ ids: [Int]) async throws {
+        let request = try makeJSONRequest(path: "/bookmarks/folder/order", method: "PUT", body: FolderOrderPayload(order: ids))
+        try await performVoid(request)
+    }
+
+    private struct FolderOrderPayload: Encodable {
+        let order: [Int]
+    }
+
+    /// Массово переместить тайтлы в другую папку — ПОДТВЕРЖДЕНО перехватом:
+    /// `PUT /bookmarks/bulk`, тело `{"media_type","media_ids","status"}`.
+    /// ВАЖНО: `mediaIds` — числовые id САМИХ ТАЙТЛОВ (`media.id`), НЕ id
+    /// записей закладки (в отличие от одиночного removeBookmark(id:) выше,
+    /// где нужен именно id записи) — см. BookmarkedTitle.mediaId.
+    func bulkMoveBookmarks(mediaIds: [Int], status: Int) async throws {
+        let payload = BulkBookmarkMovePayload(media_type: "manga", media_ids: mediaIds, status: status)
+        let request = try makeJSONRequest(path: "/bookmarks/bulk", method: "PUT", body: payload)
+        try await performVoid(request)
+    }
+
+    private struct BulkBookmarkMovePayload: Encodable {
+        let media_type: String
+        let media_ids: [Int]
+        let status: Int
+    }
+
+    /// Массово убрать тайтлы из закладок — ПОДТВЕРЖДЕНО перехватом: `DELETE
+    /// /bookmarks/bulk`, тело `{"media_ids","media_type"}` — те же
+    /// media_ids (id тайтлов), что и у bulkMoveBookmarks выше.
+    func bulkDeleteBookmarks(mediaIds: [Int]) async throws {
+        let payload = BulkBookmarkDeletePayload(media_ids: mediaIds, media_type: "manga")
+        let request = try makeJSONRequest(path: "/bookmarks/bulk", method: "DELETE", body: payload)
+        try await performVoid(request)
+    }
+
+    private struct BulkBookmarkDeletePayload: Encodable {
+        let media_ids: [Int]
+        let media_type: String
     }
 
     /// Отмечает главу просмотренной в РЕАЛЬНОМ аккаунте — настоящий,
@@ -372,8 +980,10 @@ final class MangaNetworkService {
     /// (fetchPages, который мы и так вызываем при чтении) её НЕ пишет, как
     /// предполагалось раньше; это отдельный, специальный вызов.
     /// `POST /manga/{manga_id}/chapters/{chapter_id}/view`, без тела.
-    func markChapterViewed(mangaId: Int, chapterId: Int) async throws {
-        var request = try makeRequest(path: "/manga/\(mangaId)/chapters/\(chapterId)/view", queryItems: [])
+    /// `siteId` — та же логика, что у fetchMangaDetail(siteId:): тайтл может
+    /// быть НЕ активного сайта.
+    func markChapterViewed(mangaId: Int, chapterId: Int, siteId: Int? = nil) async throws {
+        var request = try makeRequest(path: "/manga/\(mangaId)/chapters/\(chapterId)/view", queryItems: [], siteId: siteId)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await performVoid(request)
@@ -405,7 +1015,13 @@ final class MangaNetworkService {
     /// переворачиваем значение; сортировка "Популярные" — НЕ через сервер (не
     /// подтверждено, что сервер это умеет), считается на клиенте по score
     /// (см. MangaDetailViewModel.commentSort/MangaDetailView).
-    func fetchComments(postId: Int, postType: String = "manga", postPage: Int? = nil, sortBy: String = "id", sortType: String = "desc", page: Int = 1) async throws -> (comments: [Comment], hasNextPage: Bool) {
+    /// `siteId` — тайтл/глава, к которым идут комментарии, могут принадлежать
+    /// НЕ активному сайту (тот же смысл, что у fetchMangaDetail(siteId:) —
+    /// см. MangaDetailViewModel.resolvedSiteId/ReaderViewModel.siteId,
+    /// откуда он и приходит); раньше здесь его не было вообще, и открытие
+    /// комментариев к тайтлу с другого сайта уходило на хост АКТИВНОГО
+    /// сайта — то есть либо 404, либо не те комментарии.
+    func fetchComments(postId: Int, postType: String = "manga", postPage: Int? = nil, sortBy: String = "id", sortType: String = "desc", page: Int = 1, siteId: Int? = nil) async throws -> (comments: [Comment], hasNextPage: Bool) {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "post_id", value: String(postId)),
             URLQueryItem(name: "post_type", value: postType),
@@ -419,9 +1035,25 @@ final class MangaNetworkService {
         if let postPage {
             items.append(URLQueryItem(name: "post_page", value: String(postPage)))
         }
-        let request = try makeRequest(path: "/comments", queryItems: items)
+        let request = try makeRequest(path: "/comments", queryItems: items, siteId: siteId)
         let response: CommentsListResponse = try await perform(request)
         return (response.comments, response.hasNextPage)
+    }
+
+    /// Закреплённый комментарий тайтла — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /comments/sticky?post_id=&post_type=manga` → `{"data":[Comment-
+    /// форма, + sticky_info/relation_type/relation_id]}` — те же поля, что и
+    /// в обычных /comments, поэтому переиспользуем Comment как есть (лишние
+    /// ключи decoder просто игнорирует). `data` — массив, но на практике
+    /// закреплён максимум один комментарий — берём первый.
+    func fetchStickyComment(postId: Int, postType: String = "manga", siteId: Int? = nil) async throws -> Comment? {
+        let items = [
+            URLQueryItem(name: "post_id", value: String(postId)),
+            URLQueryItem(name: "post_type", value: postType)
+        ]
+        let request = try makeRequest(path: "/comments/sticky", queryItems: items, siteId: siteId)
+        let response: APIListResponse<Comment> = try await perform(request)
+        return response.data.first
     }
 
     /// `POST /comments` — ПОДТВЕРЖДЕНО реальным перехваченным запросом (см.
@@ -449,14 +1081,25 @@ final class MangaNetworkService {
     /// скорее всего, ожидается в такой же форме. Это ОБОСНОВАННОЕ предположение
     /// по аналогии (не гадание с нуля) — если сервер всё ещё вернёт 422, тело
     /// снова будет видно в NetworkLogsView и можно поправить точнее.
-    func postComment(postId: Int, postType: String = "manga", postPage: Int? = nil, text: String, commentLevel: Int, parentComment: Int? = nil) async throws -> Comment {
+    /// `siteId` — см. комментарий у fetchComments(siteId:) выше, тот же смысл.
+    /// `spoilerLabel` — ПОДТВЕРЖДЕНО реальным перехватом отправки спойлера
+    /// (см. ProseMirrorDoc.init(spoilerLabel:spoilerText:)): если задан,
+    /// комментарий целиком уходит одним spoilerInline-узлом вместо обычного
+    /// текстового.
+    func postComment(postId: Int, postType: String = "manga", postPage: Int? = nil, text: String, spoilerLabel: String? = nil, commentLevel: Int, parentComment: Int? = nil, siteId: Int? = nil) async throws -> Comment {
+        let doc: ProseMirrorDoc
+        if let spoilerLabel, !spoilerLabel.isEmpty {
+            doc = ProseMirrorDoc(spoilerLabel: spoilerLabel, spoilerText: text)
+        } else {
+            doc = ProseMirrorDoc(text: text)
+        }
         let payload = CommentPayload(
             post_id: postId, post_type: postType, post_page: postPage,
-            comment: ProseMirrorDoc(text: text),
+            comment: doc,
             comment_level: commentLevel,
             parent_comment: parentComment
         )
-        let request = try makeJSONRequest(path: "/comments", method: "POST", body: payload)
+        let request = try makeJSONRequest(path: "/comments", method: "POST", body: payload, siteId: siteId)
         let response: APIObjectResponse<Comment> = try await perform(request)
         return response.data
     }
@@ -466,10 +1109,12 @@ final class MangaNetworkService {
     /// `{"data":{"up":8,"down":0,"user":1}}` — актуальные счётчики + голос юзера
     /// (1 = плюс, 0 = минус, null = не голосовал), как и у «Похожего». Возвращаем
     /// их, чтобы сразу обновить UI без перезагрузки списка.
+    /// `siteId` — см. комментарий у fetchComments(siteId:), тот же смысл:
+    /// комментарий может принадлежать тайтлу НЕ активного сайта.
     @discardableResult
-    func voteComment(id: Int, direction: Int) async throws -> SimilarVotes {
+    func voteComment(id: Int, direction: Int, siteId: Int? = nil) async throws -> SimilarVotes {
         let payload = CommentVotePayload(vote: direction)
-        let request = try makeJSONRequest(path: "/comments/\(id)/vote", method: "POST", body: payload)
+        let request = try makeJSONRequest(path: "/comments/\(id)/vote", method: "POST", body: payload, siteId: siteId)
         let response: APIObjectResponse<SimilarVotes> = try await perform(request)
         return response.data
     }
@@ -484,11 +1129,9 @@ final class MangaNetworkService {
             URLQueryItem(name: "fields[]", value: "status"),
             URLQueryItem(name: "fields[]", value: "scanlateStatus"),
             URLQueryItem(name: "fields[]", value: "ageRestriction"),
-            // Не подтверждено перехватом реального запроса (в отличие от
-            // остальных полей выше) — но безопасно попробовать: если сервер
-            // не знает такого поля, он его просто не вернёт (imageServers
-            // останется nil), и приложение продолжит работать на
-            // захардкоженном списке (см. MangaImageURL.imageServers).
+            // ПОДТВЕРЖДЕНО перехватом (proxypin, 2026-08-26): реальный
+            // список серверов картинок, свой для каждого сайта экосистемы
+            // (см. ConstantImageServer / MangaImageURL.realServers).
             URLQueryItem(name: "fields[]", value: "imageServers")
         ]
         let request = try makeRequest(path: "/constants", queryItems: items)
@@ -574,10 +1217,39 @@ final class MangaNetworkService {
             // "moderated" — ПОДТВЕРЖДЕНО реальным перехваченным запросом (см.
             // MangaDetail.moderated) — нужно для проверки "главы удалены по
             // требованию правообладателя/РКН, либо тайтл на проверке".
-            URLQueryItem(name: "fields[]", value: "moderated")
+            URLQueryItem(name: "fields[]", value: "moderated"),
+            // "franchise" — ПОДТВЕРЖДЕНО реальным перехваченным запросом (см.
+            // MangaDetail.franchise/FranchiseRef) — чип-подкатегория франшизы
+            // на карточке тайтла.
+            URLQueryItem(name: "fields[]", value: "franchise"),
+            // "artists"/"publisher" — ПОДТВЕРЖДЕНО тем же перехватом, что и
+            // franchise/authors (см. MangaDetail.artists/publisher) —
+            // художники и издательство тайтла отдельными подкатегориями.
+            URLQueryItem(name: "fields[]", value: "artists"),
+            URLQueryItem(name: "fields[]", value: "publisher")
         ]
-        let request = try makeRequest(path: "/manga/\(encodePath(slug))", queryItems: items, siteId: siteId)
-        return try await performOptionalData(request)
+        // "userRating" — ПОДТВЕРЖДЕНО реальным перехваченным запросом
+        // (авторизованная сессия): без него `rating.user` (твоя личная
+        // оценка) на ЧИСТОМ GET (не сразу после POST /manga/rate) просто
+        // отсутствовал — отсюда "оценка пропадает при перезаходе на
+        // карточку". С этим полем реальный ответ содержал
+        // `"rating":{...,"user":10}`. ВАЖНО: НЕ "fields[]=user" — это
+        // совсем другое поле (объект автора/загрузившего тайтл
+        // пользователя, отдельный ключ "user" верхнего уровня, не имеет
+        // отношения к оценке). Перехват был с hapi.hentaicdn.org (сайт 4) —
+        // не на 100% подтверждено, что api.cdnlibs.org тоже знает это
+        // значение в своём белом списке fields[] (одно нераспознанное
+        // значение валит ВЕСЬ запрос 422, см. комментарий выше) — при 422
+        // повторяем БЕЗ этого поля, а не рискуем всей карточкой.
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))",
+                                       queryItems: items + [URLQueryItem(name: "fields[]", value: "userRating")],
+                                       siteId: siteId)
+        do {
+            return try await performOptionalData(request)
+        } catch NetworkError.server(let status) where status == 422 {
+            let fallback = try makeRequest(path: "/manga/\(encodePath(slug))", queryItems: items, siteId: siteId)
+            return try await performOptionalData(fallback)
+        }
     }
 
     /// Список глав манги.
@@ -597,6 +1269,17 @@ final class MangaNetworkService {
     func fetchSimilar(slug: String, siteId: Int? = nil) async throws -> [SimilarItem] {
         let request = try makeRequest(path: "/manga/\(encodePath(slug))/similar", queryItems: [], siteId: siteId)
         let response: LossyListResponse<SimilarItem> = try await perform(request)
+        return response.data
+    }
+
+    /// Доп. обложки (пользовательская галерея) — ПОДТВЕРЖДЕНО реальным
+    /// перехваченным запросом (пользователь прислал полное тело ответа):
+    /// `GET /manga/{slug}/covers` → `{"data":[{"id","cover","info","order",
+    /// "user"}]}`. LossyListResponse — один "битый" элемент не должен ронять
+    /// всю галерею.
+    func fetchCoverGallery(slug: String, siteId: Int? = nil) async throws -> [MangaCoverGalleryItem] {
+        let request = try makeRequest(path: "/manga/\(encodePath(slug))/covers", queryItems: [], siteId: siteId)
+        let response: LossyListResponse<MangaCoverGalleryItem> = try await perform(request)
         return response.data
     }
 
@@ -649,6 +1332,192 @@ final class MangaNetworkService {
         return response.data
     }
 
+    /// Детальная страница переводчика — ПОДТВЕРЖДЕНО перехватом:
+    /// `GET /teams/{slug_url}?fields[]=chaptersPerMonth&fields[]=auto_moderation&
+    /// fields[]=team_rating&fields[]=ignored_by_user` (те же fields[], что и в
+    /// реальном запросе — сервер отдаёт "Глав / мес" в stats[] только при
+    /// явном запросе chaptersPerMonth, по аналогии с background у MangaDetail).
+    func fetchTeamDetail(slugURL: String) async throws -> TeamDetail {
+        let items = ["chaptersPerMonth", "auto_moderation", "team_rating", "ignored_by_user"]
+            .map { URLQueryItem(name: "fields[]", value: $0) }
+        let request = try makeRequest(path: "/teams/\(encodePath(slugURL))", queryItems: items)
+        let response: APIObjectResponse<TeamDetail> = try await perform(request)
+        return response.data
+    }
+
+    /// Подписка/отписка на команду-переводчика — ПОДТВЕРЖДЕНО перехватом
+    /// `POST /favorites {source_id, source_type}` → `{data:{is_subscribed},
+    /// meta:{stats}}`. Toggle РАБОТАЕТ в обе стороны — ПОДТВЕРЖДЕНО повторным
+    /// перехватом (см. FavoriteToggleResponse): реальное новое состояние
+    /// всегда берётся из ответа, а не предполагается.
+    func toggleFavorite(sourceId: Int, sourceType: String) async throws -> FavoriteToggleResponse {
+        let body = FavoritePayload(source_id: sourceId, source_type: sourceType)
+        let request = try makeJSONRequest(path: "/favorites", method: "POST", body: body)
+        return try await perform(request)
+    }
+
+    /// Текущий статус подписки (без переключения) — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /favorites/{source_type}/{source_id}` → `{data:{is_subscribed,...}}`
+    /// (та же форма, что и у POST /favorites выше, просто без meta). Нужен,
+    /// чтобы колокольчик/кнопка подписки при открытии сразу показывали
+    /// РЕАЛЬНОЕ состояние, а не всегда стартовали с "не подписан".
+    func fetchFavoriteStatus(sourceId: Int, sourceType: String) async throws -> FavoriteToggleResponse {
+        let request = try makeRequest(path: "/favorites/\(sourceType)/\(sourceId)", queryItems: [])
+        return try await perform(request)
+    }
+
+    /// "Избранное" (Меню → Профиль → Избранное, см. FavoritesListView) —
+    /// ПОДТВЕРЖДЕНО перехватом (два дампа, обычный и 18+-сайт, все 5
+    /// категорий): `GET /favorites?user_id=&source_type=team|people|
+    /// character|franchise|publisher&page=&q=` (q — поиск по названию,
+    /// подтверждён перехватом с реальным вводом текста). `relation` внутри
+    /// каждого элемента — та же форма DirectoryEntity, что и у обычных
+    /// списков (см. FavoriteEntry). meta без has_next_page (в отличие от
+    /// большинства других списков) — считаем сами из current_page/last_page.
+    func fetchFavorites(userId: Int, category: FavoritesCategory, page: Int = 1, query: String = "") async throws -> (items: [DirectoryEntity], hasNextPage: Bool) {
+        var items = [
+            URLQueryItem(name: "user_id", value: String(userId)),
+            URLQueryItem(name: "source_type", value: category.sourceType),
+            URLQueryItem(name: "page", value: String(max(page, 1)))
+        ]
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
+        let request = try makeRequest(path: "/favorites", queryItems: items)
+        let response: FavoritesResponse = try await perform(request)
+        let currentPage = response.meta?.currentPage ?? page
+        let lastPage = response.meta?.lastPage ?? currentPage
+        return (response.data.map(\.relation), currentPage < lastPage)
+    }
+
+    private struct FavoritePayload: Encodable {
+        let source_id: Int
+        let source_type: String
+    }
+
+    /// Участники команды с РЕАЛЬНЫМИ данными (id/username/аватар) —
+    /// ПОДТВЕРЖДЕНО перехватом ОТДЕЛЬНОГО эндпоинта
+    /// `GET /teams/{slug_url}/users` → `{data:[TeamMemberEntry-форма]}`, без
+    /// пагинации (весь список одним ответом, даже у команд на 200+ человек —
+    /// ПОДТВЕРЖДЕНО реальным перехватом такой большой команды). LossyListResponse
+    /// на случай единичных битых записей; записи без userId (совсем без
+    /// вложенного "user") дополнительно отфильтровываются — decode для них не
+    /// падает (там сплошные try?), но показывать чип без id/имени/аватара
+    /// незачем — не на что было бы переходить.
+    func fetchTeamMembers(slugURL: String) async throws -> [TeamMemberEntry] {
+        let request = try makeRequest(path: "/teams/\(encodePath(slugURL))/users", queryItems: [])
+        let response: LossyListResponse<TeamMemberEntry> = try await perform(request)
+        return response.data.filter { $0.userId != 0 }
+    }
+
+    /// "Обновления" на TeamView (вкладка рядом с "Тайтлы") — ПОДТВЕРЖДЕНО
+    /// перехватом `GET /teams/{id}/chapters?page=` → `{data:[{chapters_count,
+    /// chapters:[...], manga:{...}}], meta:{has_next_page}}`, та же форма
+    /// пагинации (APIMeta.hasNextPage), что и у fetchLatestUpdates. Численный
+    /// id команды, не slug_url (см. TeamViewModel.teamId). LossyListResponse —
+    /// на случай группы с битым/удалённым тайтлом (та же причина, что у
+    /// fetchBookmarksAccountList).
+    func fetchTeamChapters(teamId: Int, page: Int = 1) async throws -> (items: [TeamChapterGroup], hasNextPage: Bool) {
+        let items: [URLQueryItem] = [URLQueryItem(name: "page", value: String(max(page, 1)))]
+        let request = try makeRequest(path: "/teams/\(teamId)/chapters", queryItems: items)
+        let response: LossyListResponse<TeamChapterGroup> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
+    // MARK: Каталожные сущности (команды/персонажи/люди/издательства)
+
+    /// Список одного вида каталожной сущности — ПОДТВЕРЖДЕНО перехватом
+    /// `GET /teams`, `GET /character`, `GET /people`, `GET /publisher` (см.
+    /// DirectoryKind/DirectoryEntity). `q` — по той же логике "не
+    /// подтверждено конкретно здесь, но по аналогии с остальными списковыми
+    /// эндпоинтами", что и в fetchFranchises.
+    ///
+    /// `sortBy: nil` — не слать `sort_by`/`sort_type` вообще (серверный
+    /// порядок по умолчанию), НУЖНО как запасной вариант: сервер этой
+    /// экосистемы (тот же бэкенд, что и у каталога, см. CatalogViewModel.
+    /// fetchPage/CharacterViewModel.fetchPage) СТРОГО валидирует sort_by и
+    /// отвечает 422 на неизвестное значение вместо того, чтобы молча его
+    /// проигнорировать — а часть значений у Команд/Персонажей/Людей здесь
+    /// добавлена ПО АНАЛОГИИ (см. DirectoryKind), без реального перехвата
+    /// именно для этих эндпоинтов, так что 422 на новом варианте вполне
+    /// возможен. См. DirectoryListViewModel.fetchPage — именно там ловится.
+    func fetchDirectory(kind: DirectoryKind, page: Int, sortBy: String?, sortType: String, query: String) async throws -> (items: [DirectoryEntity], hasNextPage: Bool) {
+        var items: [URLQueryItem] = [URLQueryItem(name: "page", value: String(max(page, 1)))]
+        if let sortBy {
+            items.append(URLQueryItem(name: "sort_by", value: sortBy))
+            items.append(URLQueryItem(name: "sort_type", value: sortType))
+        }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
+        let request = try makeRequest(path: kind.apiPath, queryItems: items)
+        let response: APIListResponse<DirectoryEntity> = try await perform(request)
+        return (response.data, !response.data.isEmpty)
+    }
+
+    /// Одна каталожная сущность — ПОДТВЕРЖДЕНО перехватом `GET /people/{id}--
+    /// {slug}` и `GET /publisher/{id}--{slug}` (Команды/Персонажи используют
+    /// СВОИ отдельные, уже реализованные эндпоинты — fetchTeamDetail/
+    /// fetchCharacterDetail — этот метод для People/Publisher).
+    func fetchDirectoryDetail(kind: DirectoryKind, slugURL: String) async throws -> DirectoryEntity {
+        let request = try makeRequest(path: "\(kind.apiPath)/\(encodePath(slugURL))", queryItems: [])
+        let response: APIObjectResponse<DirectoryEntity> = try await perform(request)
+        return response.data
+    }
+
+    // MARK: Пользователи (справочник, Меню → Каталог → Пользователи)
+
+    /// Список аккаунтов — ПОДТВЕРЖДЕНО перехватом `GET /user?page=&sort_by=
+    /// id&sort_type=desc` (+ вариант `filter=weekly-top`). Форма СОВСЕМ другая,
+    /// чем у DirectoryEntity — это учётные записи, не контент-сущности (нет
+    /// model/subscription/stats), см. DirectoryUserEntry.
+    func fetchUsers(page: Int, filter: String?, query: String) async throws -> (items: [DirectoryUserEntry], hasNextPage: Bool) {
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "sort_by", value: "id"),
+            URLQueryItem(name: "sort_type", value: "desc")
+        ]
+        if let filter { items.append(URLQueryItem(name: "filter", value: filter)) }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
+        let request = try makeRequest(path: "/user", queryItems: items)
+        let response: APIListResponse<DirectoryUserEntry> = try await perform(request)
+        return (response.data, !response.data.isEmpty)
+    }
+
+    // MARK: Франшизы
+
+    /// Список франшиз — ПОДТВЕРЖДЕНО перехватом `GET /franchise?page=&
+    /// sort_by=name|subscribes_count|titles_count&sort_type=asc|desc`. Общий
+    /// на всю экосистему справочник, НЕ завязан на активный сайт (см.
+    /// Franchise) — поэтому, в отличие от fetchCatalog, никакого site_id[]
+    /// здесь нет и не нужно. `q` — ПО АНАЛОГИИ с остальными списковыми
+    /// эндпоинтами (manga/teams/users), реальным перехватом для /franchise
+    /// конкретно НЕ подтверждён (в капче поиск не пробовали) — если сервер
+    /// его не примет, лишний параметр видимо будет просто проигнорирован
+    /// (так ведёт себя большинство параметров вне строгого fields[]-белого
+    /// списка, см. комментарий у fetchCatalog).
+    /// meta здесь — обычная Laravel-пагинация (current_page/last_page), а не
+    /// has_next_page, как у каталога — hasNextPage считаем по непустой
+    /// странице (см. fetchUserComments и другие похожие места).
+    func fetchFranchises(page: Int, sortBy: FranchiseSort, sortType: String, query: String) async throws -> (items: [Franchise], hasNextPage: Bool) {
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "sort_by", value: sortBy.apiValue),
+            URLQueryItem(name: "sort_type", value: sortType)
+        ]
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items.append(URLQueryItem(name: "q", value: trimmed)) }
+        let request = try makeRequest(path: "/franchise", queryItems: items)
+        let response: APIListResponse<Franchise> = try await perform(request)
+        return (response.data, !response.data.isEmpty)
+    }
+
+    /// Одна франшиза — ПОДТВЕРЖДЕНО перехватом `GET /franchise/{id}--{slug}`.
+    func fetchFranchiseDetail(slugURL: String) async throws -> Franchise {
+        let request = try makeRequest(path: "/franchise/\(encodePath(slugURL))", queryItems: [])
+        let response: APIObjectResponse<Franchise> = try await perform(request)
+        return response.data
+    }
+
     /// Голос "+"/"-" за рекомендацию из "Похожего" — ПОДТВЕРЖДЕНО реальным
     /// перехватом: `POST /similar/{id}/vote`, тело `{"vote":1}` для "+",
     /// `{"vote":0}` для "-"; ответ — АКТУАЛЬНЫЕ up/down/user целиком (не
@@ -657,9 +1526,11 @@ final class MangaNetworkService {
     /// MangaDetailViewModel.voteSimilar). `id` здесь — id ЭЛЕМЕНТА "Похожего"
     /// (SimilarItem.id), а НЕ id самой манги — тоже подтверждено перехватом
     /// (URL был `/similar/492/vote`, где 492 — id элемента из списка).
-    func voteSimilar(id: Int, isUp: Bool) async throws -> SimilarVotes {
+    /// `siteId` — см. комментарий у fetchComments(siteId:), тот же смысл:
+    /// связь "похожего" относится к тайтлу, который может быть НЕ активного сайта.
+    func voteSimilar(id: Int, isUp: Bool, siteId: Int? = nil) async throws -> SimilarVotes {
         let payload = SimilarVotePayload(vote: isUp ? 1 : 0)
-        let request = try makeJSONRequest(path: "/similar/\(id)/vote", method: "POST", body: payload)
+        let request = try makeJSONRequest(path: "/similar/\(id)/vote", method: "POST", body: payload, siteId: siteId)
         let response: APIObjectResponse<SimilarVotes> = try await perform(request)
         return response.data
     }
@@ -676,19 +1547,112 @@ final class MangaNetworkService {
         return response.data
     }
 
+    /// Оценка тайтла (звёзды 1-10) — ПОДТВЕРЖДЕНО реальным перехватом:
+    /// `POST /manga/rate`, тело `{"score":Int,"rateable_id":Int,
+    /// "rateable_type":"manga"}`. Ответ — АКТУАЛЬНЫЙ агрегат (average/
+    /// averageFormated/votes/user), тот же формат, что MangaDetail.rating —
+    /// подставляем в UI, не перезагружая всю карточку вручную (см.
+    /// MangaDetailViewModel.submitRating). Ошибка (например 403 "нужно
+    /// прочитать минимум 1 главу...") приходит с человекочитаемым текстом в
+    /// `{"data":{"toast":{"message":...}}}` — отсюда performToastAware.
+    ///
+    /// УДАЛЕНИЕ оценки — ТОТ ЖЕ эндпоинт с `score: 0` — ПОДТВЕРЖДЕНО
+    /// реальным перехватом ("Удалить оценку" на сайте шлёт именно это):
+    /// ответ `"user":0`, votes уменьшается на 1. Отдельного DELETE-эндпоинта
+    /// нет. См. RatingSheet.isDeleteAction/submit().
+    func rateManga(id: Int, score: Int, siteId: Int? = nil) async throws -> MangaRating {
+        let payload = RateMangaPayload(score: score, rateable_id: id, rateable_type: "manga")
+        let request = try makeJSONRequest(path: "/manga/rate", method: "POST", body: payload, siteId: siteId)
+        let response: APIObjectResponse<MangaRating> = try await performToastAware(request)
+        return response.data
+    }
+
+    private struct RateMangaPayload: Encodable {
+        let score: Int
+        let rateable_id: Int
+        let rateable_type: String
+    }
+
+    // MARK: - Лайк главы / оценка перевода
+
+    /// "Спасибо" переводчикам (лайк главы) — ПОДТВЕРЖДЕНО реальным
+    /// перехватом: `POST /chapters/{id}/like`, без тела. Тоггл — сайт шлёт
+    /// тот же запрос повторно, чтобы снять лайк (is_liked туда-обратно).
+    /// Ответ содержит актуальные likes_count/is_liked — подставляем в UI
+    /// напрямую, не перезагружая главу целиком. Те же поля, кстати, уже
+    /// приходят и в самом ответе главы (см. ChapterPagesData.likesCount/
+    /// isLiked) — используются, чтобы сразу знать состояние при открытии.
+    func likeChapter(id: Int, siteId: Int? = nil) async throws -> (likesCount: Int, isLiked: Bool) {
+        let request = try makeRequest(path: "/chapters/\(id)/like", queryItems: [], siteId: siteId, method: "POST")
+        let response: APIObjectResponse<LikeChapterResult> = try await performToastAware(request)
+        return (response.data.chapter.likesCount, response.data.chapter.isLiked)
+    }
+
+    private struct LikeChapterResult: Decodable {
+        let chapter: LikeChapterInfo
+    }
+
+    private struct LikeChapterInfo: Decodable {
+        let likesCount: Int
+        let isLiked: Bool
+        enum CodingKeys: String, CodingKey {
+            case likesCount = "likes_count"
+            case isLiked = "is_liked"
+        }
+    }
+
+    /// Оценка перевода главы по 3 категориям (точность/адаптация/вёрстка,
+    /// каждая 1-10) — ПОДТВЕРЖДЕНО реальным перехватом: `POST /chapters/
+    /// {id}/translation-rating`, тело `{"translation_accuracy":Int,
+    /// "readability_adaptation":Int,"editing_formatting":Int}`. Ответ —
+    /// актуальный агрегат, тот же формат, что и translation_quality_rating
+    /// в ответе самой главы (см. ChapterPagesData.translationRating/
+    /// TranslationRating).
+    func rateTranslation(chapterId: Int, accuracy: Int, readability: Int, editing: Int, siteId: Int? = nil) async throws -> TranslationRating {
+        let payload = RateTranslationPayload(
+            translation_accuracy: accuracy, readability_adaptation: readability, editing_formatting: editing
+        )
+        let request = try makeJSONRequest(path: "/chapters/\(chapterId)/translation-rating", method: "POST", body: payload, siteId: siteId)
+        let response: APIObjectResponse<TranslationRating> = try await performToastAware(request)
+        return response.data
+    }
+
+    private struct RateTranslationPayload: Encodable {
+        let translation_accuracy: Int
+        let readability_adaptation: Int
+        let editing_formatting: Int
+    }
+
+    // MARK: - Отзывы на тайтл
+
+    /// `GET /reviews?page=&sort_by=newest&reviewable_type=manga&reviewable_id=` —
+    /// ПОДТВЕРЖДЕНО перехватом (proxypin, 2026-08-26, HentaiLib).
+    func fetchReviews(mangaId: Int, page: Int = 1, siteId: Int? = nil) async throws -> (reviews: [MangaReview], hasNextPage: Bool) {
+        let items = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "sort_by", value: "newest"),
+            URLQueryItem(name: "reviewable_type", value: "manga"),
+            URLQueryItem(name: "reviewable_id", value: String(mangaId))
+        ]
+        let request = try makeRequest(path: "/reviews", queryItems: items, siteId: siteId)
+        let response: LossyListResponse<MangaReview> = try await perform(request)
+        return (response.data, response.meta?.hasNextPage ?? !response.data.isEmpty)
+    }
+
     // MARK: - Уведомления
 
-    /// `GET /notifications?notification_type=all&page=&read_type=&sort_type=` —
-    /// ПОДТВЕРЖДЕНО реальным перехватом (три devtools-файла от пользователя).
-    /// `notification_type` зафиксирован как "all" — отдельный фильтр по
-    /// категориям (chapter/comments/message/card/...) в этом раунде не
-    /// запрашивался, оставлен как есть, раз подтверждённое значение — "all".
-    /// Ни в одном перехвате нет meta для этого эндпоинта — как и у fetchHistory,
+    /// `GET /notifications?notification_type=&page=&read_type=&sort_type=` —
+    /// ПОДТВЕРЖДЕНО реальным перехватом. `notification_type` раньше был
+    /// зафиксирован на "all" — ПОДТВЕРЖДЕНО перехватом (proxypin,
+    /// 2026-08-26), что реально принимает и "chapter" (см.
+    /// NotificationTypeFilter — остальные значения по аналогии с уже
+    /// подтверждённой таксономией /notifications/count). Ни в одном
+    /// перехвате нет meta для этого эндпоинта — как и у fetchHistory,
     /// используем эвристику "непустая страница = вероятно есть ещё" через
     /// LossyListResponse.meta (там уже есть fallback на !data.isEmpty).
-    func fetchNotifications(readType: String, sortType: String, page: Int = 1) async throws -> (items: [NotificationItem], hasNextPage: Bool) {
+    func fetchNotifications(readType: String, sortType: String, notificationType: String = "all", page: Int = 1) async throws -> (items: [NotificationItem], hasNextPage: Bool) {
         let items: [URLQueryItem] = [
-            URLQueryItem(name: "notification_type", value: "all"),
+            URLQueryItem(name: "notification_type", value: notificationType),
             URLQueryItem(name: "page", value: String(max(page, 1))),
             URLQueryItem(name: "read_type", value: readType),
             URLQueryItem(name: "sort_type", value: sortType)
@@ -706,6 +1670,118 @@ final class MangaNetworkService {
         return response.data
     }
 
+    /// Отметить прочитанными ВСЕ уведомления категории `notificationType`
+    /// (та же категория, что и NotificationTypeFilter/typeFilter) —
+    /// ПОДТВЕРЖДЕНО реальным перехватом: `PUT /notifications/bulk`, тело
+    /// `{"notification_type":...}`, БЕЗ is_read (действие не зависит от
+    /// текущей вкладки прочитанности — уже прочитанные просто не меняются).
+    /// notification_type перехвачен буквально только как "all" и
+    /// "comments" — остальные категории (chapter/episode/message/card/
+    /// other) НЕ перехвачены отдельно для ИМЕННО этого эндпоинта, взяты по
+    /// аналогии с тем, что тот же параметр уже работает и в GET
+    /// /notifications, и в DELETE /notifications/bulk ниже (три разных
+    /// значения на двух bulk-эндпоинтах уже подтвердили, что поле
+    /// принимает полную таксономию, не только "all"). Ответ — silent toast
+    /// с человекочитаемым текстом ("Уведомления помечены прочитанными"),
+    /// тело не разбираем.
+    func markAllNotificationsRead(notificationType: String) async throws {
+        let payload = BulkNotificationTypePayload(notification_type: notificationType)
+        let request = try makeJSONRequest(path: "/notifications/bulk", method: "PUT", body: payload)
+        _ = try await performOptionalData(request)
+    }
+
+    /// Удалить ВСЕ уведомления категории `notificationType`, дополнительно
+    /// отфильтрованные по прочитанности — ПОДТВЕРЖДЕНО реальным перехватом:
+    /// `DELETE /notifications/bulk`, тело `{"notification_type":...,
+    /// "is_read":...}`. notification_type перехвачен буквально как "all",
+    /// "card" и "chapter" на этом эндпоинте. `isRead` — ТА ЖЕ логика, что и
+    /// текущая вкладка readFilter: false у "Непрочитанные", true у
+    /// "Прочитанные", nil у "Все" — перехвачены ТОЛЬКО false и null
+    /// (несколько раз каждый), явный `is_read:true` (вкладка "Прочитанные")
+    /// ни разу не перехвачен — выведен по симметрии, не подтверждён.
+    func deleteAllNotifications(notificationType: String, isRead: Bool?) async throws {
+        let payload = BulkNotificationDeletePayload(notification_type: notificationType, is_read: isRead)
+        let request = try makeJSONRequest(path: "/notifications/bulk", method: "DELETE", body: payload)
+        _ = try await performOptionalData(request)
+    }
+
+    /// Настройки уведомлений аккаунта — ПОДТВЕРЖДЕНО реальным перехватом
+    /// (см. NotificationSettings): `GET /user/settings/notifications`
+    /// возвращает текущий объект целиком.
+    func fetchNotificationSettings() async throws -> NotificationSettings {
+        let request = try makeRequest(path: "/user/settings/notifications", queryItems: [])
+        let response: APIObjectResponse<NotificationSettings> = try await perform(request)
+        return response.data
+    }
+
+    /// Сохранить настройки уведомлений — ПОДТВЕРЖДЕНО реальным перехватом:
+    /// `PUT /user/settings/notifications`, тело — ВЕСЬ объект целиком (см.
+    /// комментарий у NotificationSettings). Ответ — silent-тост, тело не
+    /// разбираем.
+    func saveNotificationSettings(_ settings: NotificationSettings) async throws {
+        let request = try makeJSONRequest(path: "/user/settings/notifications", method: "PUT", body: settings)
+        try await performVoid(request)
+    }
+
+    /// Настройки приватности — ПОДТВЕРЖДЕНО реальным перехватом (см.
+    /// PrivacySettings): `GET /user/settings/privacy`.
+    func fetchPrivacySettings() async throws -> PrivacySettings {
+        let request = try makeRequest(path: "/user/settings/privacy", queryItems: [])
+        let response: APIObjectResponse<PrivacySettings> = try await perform(request)
+        return response.data
+    }
+
+    /// Сохранить настройки приватности — ПОДТВЕРЖДЕНО реальным перехватом:
+    /// `PUT /user/settings/privacy`, тело — ВЕСЬ объект целиком (см.
+    /// комментарий у PrivacySettings). Ответ — silent-тост, тело не разбираем.
+    func savePrivacySettings(_ settings: PrivacySettings) async throws {
+        let request = try makeJSONRequest(path: "/user/settings/privacy", method: "PUT", body: settings)
+        try await performVoid(request)
+    }
+
+    /// Тумблер "уведомлять" по каждой папке закладок — ПОДТВЕРЖДЕНО реальным
+    /// перехватом: `PUT /bookmarks/folder/notifications`, тело — ВЕСЬ список
+    /// папок целиком, `{"folders":[{"id":Int,"notify":Bool},...]}`.
+    func saveBookmarkFolderNotifications(_ folders: [UserBookmarkFolder]) async throws {
+        let payload = FolderNotifyListPayload(folders: folders.map { FolderNotifyPayload(id: $0.id, notify: $0.notify) })
+        let request = try makeJSONRequest(path: "/bookmarks/folder/notifications", method: "PUT", body: payload)
+        try await performVoid(request)
+    }
+
+    private struct FolderNotifyPayload: Encodable {
+        let id: Int
+        let notify: Bool
+    }
+
+    private struct FolderNotifyListPayload: Encodable {
+        let folders: [FolderNotifyPayload]
+    }
+
+    private struct BulkNotificationTypePayload: Encodable {
+        let notification_type: String
+    }
+
+    /// Кастомный encode — ПОДТВЕРЖДЕНО перехватом, что "all" (nil isRead)
+    /// шлётся как ЯВНЫЙ `"is_read":null`, а не отсутствующий ключ (дефолтный
+    /// синтезированный Encodable у Optional-поля через encodeIfPresent
+    /// пропустил бы ключ целиком при nil — не то, что реально уходит с сайта).
+    private struct BulkNotificationDeletePayload: Encodable {
+        let notification_type: String
+        let is_read: Bool?
+
+        private enum CodingKeys: String, CodingKey { case notification_type, is_read }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(notification_type, forKey: .notification_type)
+            if let is_read {
+                try container.encode(is_read, forKey: .is_read)
+            } else {
+                try container.encodeNil(forKey: .is_read)
+            }
+        }
+    }
+
     /// Страницы конкретной главы + признак "уже просмотрена" (см.
     /// ChapterPagesData.isViewed — не подтверждено перехватом, декодируется
     /// защитно, по умолчанию false).
@@ -720,7 +1796,14 @@ final class MangaNetworkService {
         }
         let request = try makeRequest(path: "/manga/\(encodePath(slug))/chapter", queryItems: items, siteId: siteId)
         let response: ChapterPagesResponse = try await perform(request)
-        return ChapterPagesResult(pages: response.data.pages, isViewed: response.data.isViewed ?? false)
+        return ChapterPagesResult(
+            pages: response.data.pages,
+            isViewed: response.data.isViewed ?? false,
+            teams: response.data.teams ?? [],
+            likesCount: response.data.likesCount,
+            isLiked: response.data.isLiked,
+            translationRating: response.data.translationRating
+        )
     }
 
     // MARK: - Request building
@@ -733,7 +1816,7 @@ final class MangaNetworkService {
         // Собираем URL из строки, чтобы избежать percent-encoding разделителей пути
         // (appendingPathComponent мог кодировать «/» и ломать путь → 404).
         let normalizedPath = path.hasPrefix("/") ? path : "/" + path
-        guard var components = URLComponents(string: baseURL.absoluteString + normalizedPath) else {
+        guard var components = URLComponents(string: baseURL(siteId: siteId).absoluteString + normalizedPath) else {
             throw NetworkError.invalidURL
         }
         // URLComponents сам выполняет percent-encoding значений (в т.ч. кириллицы).
@@ -743,6 +1826,17 @@ final class MangaNetworkService {
 
         var request = URLRequest(url: url)
         request.httpMethod = method
+        // Игнорируем HTTP-кэш URLSession (URLCache.shared, дефолтный для
+        // .shared сессии) — иначе тянуть-обновить (.refreshable) мог молча
+        // получать назад ТУ ЖЕ закэшированную сетью страницу вместо реально
+        // новых данных с сервера (пример бага: оценка, поставленная с
+        // другого устройства, не появлялась после свайпа-обновления в
+        // Закладках — GET /bookmarks с теми же query-параметрами отдавался
+        // из локального URLCache, а не по сети). У нас уже есть свой,
+        // осознанный app-уровневый кэш там, где он нужен (см.
+        // MangaDetailCache) — полагаться ЕЩЁ и на непрозрачный HTTP-кэш
+        // поверх него не нужно.
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         for (field, value) in defaultHeaders {
             request.setValue(value, forHTTPHeaderField: field)
         }
@@ -754,18 +1848,53 @@ final class MangaNetworkService {
 
     /// Запрос с JSON-телом (POST/DELETE и т.д.) — для write-эндпоинтов вроде
     /// /bookmarks, в отличие от makeRequest выше (только GET, без тела).
-    private func makeJSONRequest<Body: Encodable>(path: String, method: String, body: Body) throws -> URLRequest {
+    /// `siteId` — тот же смысл, что у makeRequest (см. его комментарий):
+    /// переопределяет и хост, и заголовок Site-Id для ресурса, который
+    /// принадлежит НЕ активному сайту (например, комментарии/отправка
+    /// комментария к тайтлу, открытому из «Похожего» с другого сайта).
+    private func makeJSONRequest<Body: Encodable>(path: String, method: String, body: Body, siteId: Int? = nil) throws -> URLRequest {
         let normalizedPath = path.hasPrefix("/") ? path : "/" + path
-        guard let url = URL(string: baseURL.absoluteString + normalizedPath) else {
+        guard let url = URL(string: baseURL(siteId: siteId).absoluteString + normalizedPath) else {
             throw NetworkError.invalidURL
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
+        // См. тот же комментарий у makeRequest — игнорируем HTTP-кэш
+        // URLSession, чтобы не получать назад устаревший ответ.
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         for (field, value) in defaultHeaders {
             request.setValue(value, forHTTPHeaderField: field)
         }
+        if let siteId {
+            request.setValue(String(siteId), forHTTPHeaderField: "Site-Id")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
+        return request
+    }
+
+    /// multipart/form-data запрос — для загрузки картинок (см.
+    /// uploadAvatarImage выше). В отличие от makeRequest/makeJSONRequest не
+    /// проставляет "Content-Type: application/json", у него свой заголовок
+    /// с boundary.
+    private func makeMultipartRequest(path: String, fieldName: String, filename: String, mimeType: String, data: Data) -> URLRequest {
+        let normalizedPath = path.hasPrefix("/") ? path : "/" + path
+        let url = URL(string: baseURL().absoluteString + normalizedPath) ?? baseURL()
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        for (field, value) in defaultHeaders {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
         return request
     }
 
@@ -844,6 +1973,38 @@ final class MangaNetworkService {
             throw NetworkError.server(status: http.statusCode)
         }
 
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw NetworkError.decoding(error)
+        }
+    }
+
+    /// Как perform(_:), но при ошибке сначала пробует достать понятное
+    /// сообщение из `{"data":{"toast":{"message":...}}}` (см.
+    /// NetworkError.apiMessage) — нужно для write-эндпоинтов вроде
+    /// POST /friendship, у которых сервер отвечает антиспам-текстом внутри
+    /// формально ошибочного статус-кода (403).
+    private struct ToastEnvelope: Decodable {
+        struct Toast: Decodable { let message: String? }
+        struct Payload: Decodable { let toast: Toast? }
+        let data: Payload?
+    }
+
+    private func performToastAware<T: Decodable>(_ request: URLRequest) async throws -> T {
+        let (data, http) = try await executeLogged(request)
+        guard (200...299).contains(http.statusCode) else {
+            if let env = try? decoder.decode(ToastEnvelope.self, from: data),
+               let message = env.data?.toast?.message, !message.isEmpty {
+                throw NetworkError.apiMessage(message)
+            }
+            switch http.statusCode {
+            case 403: throw NetworkError.forbidden
+            case 404: throw NetworkError.notFound
+            case 429: throw NetworkError.rateLimited
+            default:  throw NetworkError.server(status: http.statusCode)
+            }
+        }
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
@@ -940,6 +2101,9 @@ private struct CommentPayload: Encodable {
     /// синтезированный Encodable опускает nil-поля, так что для manga его нет).
     let post_page: Int?
     let comment: ProseMirrorDoc
+    /// ПОДТВЕРЖДЕНО реальным перехватом — сервер ожидает это поле даже у
+    /// комментария без вложений (пустой массив), а не его отсутствие.
+    let attachments: [String] = []
     let comment_level: Int
     let parent_comment: Int?
 }
@@ -960,14 +2124,54 @@ private struct ProseMirrorDoc: Encodable {
     init(text: String) {
         content = text.components(separatedBy: "\n").map(ProseMirrorParagraph.init)
     }
+
+    /// Комментарий-спойлер целиком — ПОДТВЕРЖДЕНО реальным перехватом
+    /// отправки: один параграф из узла `spoilerInline` (плюс завершающий
+    /// текстовый узел с одним пробелом — сервер сам его добавляет в ответе,
+    /// повторяем то же самое, чтобы не расходиться с подтверждённой формой).
+    init(spoilerLabel: String, spoilerText: String) {
+        content = [ProseMirrorParagraph(spoilerLabel: spoilerLabel, spoilerText: spoilerText)]
+    }
 }
 
 private struct ProseMirrorParagraph: Encodable {
     let type = "paragraph"
-    let content: [ProseMirrorText]
+    let content: [ProseMirrorInline]
 
     init(_ text: String) {
-        content = text.isEmpty ? [] : [ProseMirrorText(text: text)]
+        content = text.isEmpty ? [] : [.text(text)]
+    }
+
+    init(spoilerLabel: String, spoilerText: String) {
+        content = [.spoiler(label: spoilerLabel, text: spoilerText), .text(" ")]
+    }
+}
+
+/// Один инлайн-узел параграфа — обычный текст ИЛИ спойлер. Форма спойлера
+/// ПОДТВЕРЖДЕНА реальным перехватом отправки: `{"type":"spoilerInline",
+/// "attrs":{"visibleText":"<подпись>"},"content":[{"type":"text",
+/// "text":"<скрытый текст>"}]}` — "visibleText" в запросе становится
+/// "data-spoiler-text" в HTML готового комментария (см. Comment.segments в
+/// MangaModels.swift).
+private enum ProseMirrorInline: Encodable {
+    case text(String)
+    case spoiler(label: String, text: String)
+
+    private enum CodingKeys: String, CodingKey { case type, text, attrs, content }
+    private struct Attrs: Encodable { let visibleText: String }
+    private struct InnerText: Encodable { let type = "text"; let text: String }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let value):
+            try c.encode("text", forKey: .type)
+            try c.encode(value, forKey: .text)
+        case .spoiler(let label, let value):
+            try c.encode("spoilerInline", forKey: .type)
+            try c.encode(Attrs(visibleText: label), forKey: .attrs)
+            try c.encode([InnerText(text: value)], forKey: .content)
+        }
     }
 }
 
@@ -1013,14 +2217,26 @@ enum ImageServerChoice: Int, CaseIterable, Identifiable {
         }
     }
 
-    /// Базовый хост для этого варианта. Значения — известные серверы картинок
-    /// экосистемы Lib (могут быть перекрыты реальным списком из /constants, см.
-    /// MangaImageURL.updateServers).
+    /// Запасной хост для этого варианта — используется только пока реальный
+    /// список с сервера ещё не подтянулся (см. MangaImageURL.pageURLs) или
+    /// если для активного сайта в /constants.imageServers нет данных.
     var baseURL: String {
         switch self {
         case .first:    return "https://img2.imglib.info"
         case .second:   return "https://img4.imgslib.link"
         case .compress: return "https://img3.cdnlibs.org"
+        }
+    }
+
+    /// `id` того же варианта в /constants.imageServers ("main"/"secondary"/
+    /// "compress" — ПОДТВЕРЖДЕНО перехватом, см. ConstantImageServer) — чтобы
+    /// найти РЕАЛЬНЫЙ url для активного сайта, соответствующий выбору
+    /// пользователя (Первый/Второй/Сжатия).
+    var serverId: String {
+        switch self {
+        case .first:    return "main"
+        case .second:   return "secondary"
+        case .compress: return "compress"
         }
     }
 
@@ -1036,33 +2252,31 @@ enum ImageServerChoice: Int, CaseIterable, Identifiable {
 enum MangaImageURL {
 
     /// Захардкоженный запасной список — используется, пока реальный список с
-    /// сервера ещё не подтянулся (или если сервер вообще не отдаёт это поле,
-    /// см. ConstantsResponse.Payload.imageServers).
+    /// /constants ещё не подтянулся, или если для активного сайта в нём
+    /// вообще нет записей. Это старые универсальные сервера MangaLib —
+    /// для 18+-сайтов (site_id 2/4) они не подойдут, но это крайний случай
+    /// (см. realServers ниже — реальные данные на них ЕСТЬ, отдельные для
+    /// каждого сайта).
     private static let fallbackServers: [String] = [
-        "https://img2.imglib.info",   // main / secondary
-        "https://img3.cdnlibs.org",   // compress / download
-        "https://img4.imgslib.link"   // дополнительный резерв
+        "https://img2.imglib.info",
+        "https://img3.cdnlibs.org",
+        "https://img4.imgslib.link"
     ]
 
-    /// Серверы картинок MangaLib (site_id = 1). Изначально — захардкоженный
-    /// список выше; при успешной загрузке /constants (см. ConstantsStore)
-    /// подставляются РЕАЛЬНЫЕ серверы с сервера первыми (в приоритете), а
-    /// захардкоженные остаются следом как дополнительный резерв — так,
-    /// даже если формат ответа сервера окажется неожиданным, ничего не
-    /// сломается, просто список останется прежним.
-    /// Порядок = приоритет; при неудаче загрузчик пробует следующий.
-    static var imageServers: [String] = fallbackServers
+    /// Реальные сервера картинок ПО САЙТАМ и уровням (main/secondary/
+    /// compress/download) — ПОДТВЕРЖДЕНО перехватом (proxypin, 2026-08-26,
+    /// прицельный `GET /constants?fields[0]=imageServers`): url РАЗНЫЙ для
+    /// каждого site_id (у MangaLib/RanobeLib — img2/img3.hentaicdn.org, у
+    /// SlashLib — свой порядок тех же хостов, у HentaiLib — ОТДЕЛЬНЫЕ
+    /// поддомены img2h/img3h.hentaicdn.org). Раньше здесь был единый плоский
+    /// список на все сайты — то есть, например, страницы HentaiLib никаким
+    /// общим сервером бы не открылись. Заполняется один раз из
+    /// ConstantsStore после загрузки /constants.
+    static var realServers: [ConstantImageServer] = []
 
-    /// Вызывается один раз из ConstantsStore после успешной загрузки
-    /// /constants — если сервер реально прислал список, ставит его первым,
-    /// сохраняя захардкоженные как резерв (без дублей).
-    static func updateServers(fromAccount servers: [String]) {
-        guard !servers.isEmpty else { return }
-        var merged = servers
-        for fallback in fallbackServers where !merged.contains(fallback) {
-            merged.append(fallback)
-        }
-        imageServers = merged
+    /// Вызывается один раз из ConstantsStore после успешной загрузки /constants.
+    static func updateServers(fromAccount servers: [ConstantImageServer]) {
+        realServers = servers
     }
 
     /// Все варианты URL страницы (по разным серверам) — для перебора при ошибке загрузки.
@@ -1085,16 +2299,26 @@ enum MangaImageURL {
         while path.hasPrefix("/") { path.removeFirst() }
         guard !path.isEmpty else { return [] }
 
-        // Выбранный пользователем сервер (Первый/Второй/Сжатия) пробуем ПЕРВЫМ,
-        // остальные — как резерв (если выбранный не отдал картинку). Так и
-        // читалка (перебор кандидатов в RemoteImage), и скачивание
-        // (DownloadsManager.fetchData) используют предпочитаемый сервер.
-        let preferred = ImageServerChoice.current.baseURL
-        var ordered = imageServers
-        if let idx = ordered.firstIndex(of: preferred) {
-            ordered.remove(at: idx)
+        // Реальные сервера ИМЕННО активного сайта (см. realServers) —
+        // предпочитаемый пользователем уровень (Первый/Второй/Сжатия,
+        // читалка/скачивание берут его через ImageServerChoice.current)
+        // первым, остальные уровни того же сайта следом, общий
+        // захардкоженный список — в самом конце как крайний резерв (вдруг
+        // /constants ещё не подтянулся или для сайта нет записей).
+        let site = SiteSession.shared.activeSite.rawValue
+        let preferredId = ImageServerChoice.current.serverId
+        let siteServers = realServers.filter { $0.siteIds.contains(site) && !$0.url.isEmpty }
+
+        var ordered: [String] = []
+        if let preferred = siteServers.first(where: { $0.id == preferredId })?.url {
+            ordered.append(preferred)
         }
-        ordered.insert(preferred, at: 0)
+        for s in siteServers where !ordered.contains(s.url) {
+            ordered.append(s.url)
+        }
+        for fallback in fallbackServers where !ordered.contains(fallback) {
+            ordered.append(fallback)
+        }
 
         return ordered.compactMap { URL(string: $0 + "/" + path) }
     }
