@@ -31,13 +31,16 @@ struct RecommendationExposure: Codable, Sendable {
     var seconds: Double
     var pages: Int
     var imageLoaded: Bool
+    var watchedFraction: Double? = nil
 
     var qualityReading: Bool {
-        Self.qualityReading(seconds: seconds, pages: pages, total: document.pageCount)
+        Self.qualityReading(seconds: seconds, pages: pages, total: document.pageCount, watchedFraction: watchedFraction)
     }
 
-    static func qualityReading(seconds: Double, pages: Int, total: Int) -> Bool {
-        seconds >= 10 && total > 0 && (pages >= 3 || Double(pages) / Double(total) >= 0.2)
+    static func qualityReading(seconds: Double, pages: Int, total: Int, watchedFraction: Double? = nil) -> Bool {
+        guard seconds >= 10 else { return false }
+        if let watchedFraction { return watchedFraction.isFinite && watchedFraction >= 0.2 }
+        return total > 0 && (pages >= 3 || Double(pages) / Double(total) >= 0.2)
     }
 }
 
@@ -92,6 +95,9 @@ final class ExternalRecommendationLearningStore {
         if var previous = latestVisits[exposure.document.id], previous.id == exposure.id {
             previous.seconds = max(previous.seconds, exposure.seconds)
             previous.pages = max(previous.pages, exposure.pages)
+            if let fraction = exposure.watchedFraction, fraction.isFinite {
+                previous.watchedFraction = max(previous.watchedFraction ?? 0, min(1, max(0, fraction)))
+            }
             latestVisits[exposure.document.id] = previous
         } else if latestVisits[exposure.document.id].map({ $0.shownAt <= exposure.shownAt }) ?? true {
             latestVisits[exposure.document.id] = exposure
@@ -105,7 +111,12 @@ final class ExternalRecommendationLearningStore {
             var merged = snapshot.exposures[index]
             merged.seconds = max(merged.seconds, exposure.seconds)
             merged.pages = max(merged.pages, exposure.pages)
-            guard merged.seconds != snapshot.exposures[index].seconds || merged.pages != snapshot.exposures[index].pages else { return }
+            if let fraction = exposure.watchedFraction, fraction.isFinite {
+                merged.watchedFraction = max(merged.watchedFraction ?? 0, min(1, max(0, fraction)))
+            }
+            guard merged.seconds != snapshot.exposures[index].seconds
+                || merged.pages != snapshot.exposures[index].pages
+                || merged.watchedFraction != snapshot.exposures[index].watchedFraction else { return }
             snapshot.exposures[index] = merged
         } else {
             snapshot.exposures.append(exposure)

@@ -35,6 +35,7 @@ struct ExternalGalleryDetailView: View {
     /// hence a fully local list) — the "Add to bookmarks" button in
     /// actionButtons below.
     @ObservedObject private var bookmarksStore = ExternalBookmarksStore.shared
+    @ObservedObject private var rule34VideoAuth = Rule34VideoAuthStore.shared
 
     @State private var detail: ExternalGalleryDetail?
     @State private var errorMessage: String?
@@ -124,8 +125,9 @@ struct ExternalGalleryDetailView: View {
                 }
             }
             .background(Theme.background.ignoresSafeArea())
-            .task {
-                if let preloaded {
+            .task(id: site == .rule34Video ? rule34VideoAuth.revision : nil) {
+                if site == .rule34Video { detail = nil; readerOpen = nil; errorMessage = nil }
+                if let preloaded, site != .rule34Video {
                     detail = preloaded
                     evaluateLanguageSuggestion(preloaded)
                 } else {
@@ -199,6 +201,11 @@ struct ExternalGalleryDetailView: View {
             return URL(string: "https://www.simply-hentai.com/manga/\(encodedSlug)")
         case .pixiv:
             return URL(string: "https://www.pixiv.net/artworks/\(id)")
+        case .rule34:
+            return URL(string: "https://rule34.xxx/index.php?page=post&s=view&id=\(id)")
+        case .rule34Video:
+            let key = await provider.resolveKey(for: id)
+            return (resolveKey ?? key).flatMap(URL.init(string:)) ?? URL(string: "https://rule34video.com/popup-video/\(id)/")
         }
     }
 
@@ -244,7 +251,11 @@ struct ExternalGalleryDetailView: View {
         }
         .scrollIndicators(.hidden)
         .fullScreenCover(item: $readerOpen) { open in
-            ExternalReaderView(site: site, detail: detail, initialPage: open.initialPage)
+            if detail.video != nil {
+                ExternalVideoViewer(detail: detail)
+            } else {
+                ExternalReaderView(site: site, detail: detail, initialPage: open.initialPage)
+            }
         }
         .navigationDestination(item: $tagCatalogTarget) { target in
             ExternalCatalogGridView(site: site, query: .tag(namespace: target.namespace, value: target.value), title: target.title)
@@ -366,7 +377,7 @@ struct ExternalGalleryDetailView: View {
                     : nil
                 readerOpen = ReaderOpen(initialPage: savedPage)
             } label: {
-                Text("Читать (\(detail.pages.count) стр.)")
+                Text(detail.video == nil ? "Читать (\(detail.pages.count) стр.)" : "Смотреть")
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -532,7 +543,7 @@ struct ExternalGalleryDetailView: View {
         let rawItems: [(heading: String, value: String?)] = [
             (heading: "Тип", value: detail.type.isEmpty ? nil : detail.type.capitalized),
             (heading: "Опубликовано", value: detail.posted),
-            (heading: "Длина", value: "\(detail.pages.count) стр."),
+            (heading: "Длина", value: detail.video == nil ? "\(detail.pages.count) стр." : nil),
             (heading: "Родитель", value: detail.parentId.map { "#\($0)" }),
             (heading: "Видимость", value: detail.visible),
             (heading: "Размер", value: detail.fileSize),
@@ -829,6 +840,8 @@ struct ExternalGalleryDetailView: View {
             // resolved by id alone (see the resolveKey doc-comment) —
             // honest message instead of the generic "check your connection".
             errorMessage = "Этот тайтл был добавлен в закладки до обновления и не может открыться напрямую. Найдите его снова в каталоге."
+        } catch let error as Rule34Error {
+            errorMessage = error.localizedDescription
         } catch {
             errorMessage = "Проверьте соединение и попробуйте ещё раз."
         }

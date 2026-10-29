@@ -53,6 +53,14 @@ enum ExternalTagNamespace: Hashable, Codable {
 /// against either way.
 enum ExternalCatalogLanguage: String, CaseIterable, Identifiable, Codable, Hashable {
     case english, japanese, chinese, korean, russian, spanish, french, german
+    // Rest of E-Hentai's own "language" tag namespace — without these,
+    // detectAll had no case to match a raw string like "Portuguese"
+    // against, came back empty, and matches(rawLanguage:selected:) below
+    // used to treat that the same as "no declared language at all" and
+    // let it through ANY language filter (confirmed live: a title tagged
+    // "Portuguese" was showing up with only "Русский" selected).
+    case italian, portuguese, polish, thai, vietnamese
+    case ukrainian
 
     var id: Self { self }
 
@@ -66,22 +74,44 @@ enum ExternalCatalogLanguage: String, CaseIterable, Identifiable, Codable, Hasha
         case .spanish: return "Испанский"
         case .french: return "Французский"
         case .german: return "Немецкий"
+        case .italian: return "Итальянский"
+        case .portuguese: return "Португальский"
+        case .polish: return "Польский"
+        case .thai: return "Тайский"
+        case .vietnamese: return "Вьетнамский"
+        case .ukrainian: return "Украинский"
         }
     }
 
     /// English + Russian keywords — providers' scraped `language` strings
     /// are always in English (site UI text), but matched case-insensitively
-    /// against the lowercased raw string either way.
+    /// against the lowercased raw string either way. Russian/Ukrainian get
+    /// a wider net of variants (language codes, native/transliterated
+    /// spellings, common site abbreviations) since those are the two
+    /// selected most often here and a missed raw spelling means a title
+    /// wrongly vanishes from (or sneaks into) the filtered page.
     private var keywords: [String] {
         switch self {
         case .english: return ["english", "английск"]
         case .japanese: return ["japan", "японск"]
         case .chinese: return ["chin", "mandarin", "китайск"]
         case .korean: return ["korea", "корейск"]
-        case .russian: return ["russian", "русск"]
+        case .russian: return [
+            "russian", "russia", "rus", "ru-ru",
+            "русск", "россия", "рус яз", "на рус"
+        ]
         case .spanish: return ["spanish", "испанск"]
         case .french: return ["french", "французск"]
         case .german: return ["german", "немецк"]
+        case .italian: return ["italian", "итальянск"]
+        case .portuguese: return ["portug", "португальск"]
+        case .polish: return ["polish", "польск"]
+        case .thai: return ["thai", "тайск"]
+        case .vietnamese: return ["vietnam", "вьетнамск"]
+        case .ukrainian: return [
+            "ukrainian", "ukraine", "ukr", "uk-ua",
+            "украинск", "украін", "укр яз", "на укр"
+        ]
         }
     }
 
@@ -94,6 +124,24 @@ enum ExternalCatalogLanguage: String, CaseIterable, Identifiable, Codable, Hasha
         guard let rawLanguage, !rawLanguage.isEmpty else { return [] }
         let normalized = rawLanguage.lowercased()
         return Set(allCases.filter { language in language.keywords.contains(where: normalized.contains) })
+    }
+
+    /// Whether a title with this raw declared-language string should show
+    /// under `selected` (the cross-site language filter) — the single
+    /// source of truth shared by ExternalCatalogGridView.filteredItems and
+    /// ExternalRecommendationFeedFilter.allows, so the two client-side
+    /// filters can't drift apart. No declared language AT ALL
+    /// (`rawLanguage == nil`/empty) still passes — there's nothing to
+    /// match against either way. But a declared language that just isn't
+    /// recognized by `keywords` above (an aggregator tag detectAll has no
+    /// case for yet) must NOT silently pass: it demonstrably has SOME
+    /// language, and an unrecognized one is never the selected one — this
+    /// falls out for free below, since an empty `detected` set is
+    /// disjoint with everything.
+    static func matches(rawLanguage: String?, selected: Set<ExternalCatalogLanguage>) -> Bool {
+        guard !selected.isEmpty else { return true }
+        guard let rawLanguage, !rawLanguage.isEmpty else { return true }
+        return !detectAll(from: rawLanguage).isDisjoint(with: selected)
     }
 }
 

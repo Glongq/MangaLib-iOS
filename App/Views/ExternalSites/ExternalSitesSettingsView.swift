@@ -1,57 +1,67 @@
 import SwiftUI
 
-/// "Other sites" — a settings section (Settings → App, at the bottom
-/// of the list, per a direct request). A simple list of Toggles over
-/// ExternalSite.allCases — enabled sites appear in the active-site
-/// switcher (see SideMenuView.siteRow) next to MangaLib/SlashLib/...
-///
-/// Style is 1-to-1 with SpecialFilterSettingsView (the same explanation
-/// card + a card with toggle rows), done by copy-paste rather than a
-/// shared component — per a direct request to minimize overlap with
-/// the old code.
+/// Each switch controls participation in discovery and combined search.
 struct ExternalSitesSettingsView: View {
-
     @ObservedObject private var session = ExternalSiteSession.shared
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var pixivAuth = PixivAuthStore.shared
+    @ObservedObject private var rule34Auth = Rule34AuthStore.shared
+    @ObservedObject private var rule34VideoAuth = Rule34VideoAuthStore.shared
     @State private var showPixivLogin = false
+    @State private var showRule34Login = false
+    @State private var showRule34VideoLogin = false
 
     var body: some View {
-        ZStack {
-            Theme.background.ignoresSafeArea()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    explanationCard
-                    sitesCard
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                ForEach(ExternalContentKind.allCases) { kind in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(kind.title)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.leading, 16)
+                        sitesCard(kind)
+                    }
                 }
-                .padding(16)
+                Picker("Показывать", selection: $session.contentKind) {
+                    ForEach(ExternalContentKind.allCases) { kind in
+                        Text(kind.title).tag(kind)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityLabel("Тип содержимого каталога и ленты")
             }
+            .padding(16)
         }
+        .background(Theme.background.ignoresSafeArea())
         .navigationTitle("Другие сайты")
         .navigationBarTitleDisplayMode(.inline)
         .tint(Theme.accent)
+        .sheet(isPresented: $showPixivLogin) { PixivLoginView() }
+        .sheet(isPresented: $showRule34Login) { Rule34LoginView() }
+        .sheet(isPresented: $showRule34VideoLogin) { Rule34VideoLoginView() }
+        .task { await rule34Auth.validateStoredSession() }
+        .task { await rule34VideoAuth.validateStoredSession() }
     }
 
-    private var explanationCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Что это")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.textPrimary)
-            Text("Это сайты с совсем другим API, не из экосистемы MangaLib — у них нет общего аккаунта с этим приложением, поэтому недоступны Закладки/История/Уведомления/Комментарии. Включите нужный сайт здесь, затем выберите его в переключателе сайта (там же, где обычно переключаете MangaLib/SlashLib/…) — вкладки останутся те же, просто покажут то, что есть у выбранного сайта. Если включено несколько сайтов сразу, там же появляется пункт «Все сайты» — совместный каталог и поиск сразу по всем включённым, карточка каждого тайтла подписана, с какого именно сайта он пришёл.")
-                .font(.footnote)
-                .foregroundStyle(Theme.textSecondary)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private var sitesCard: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(ExternalSite.allCases.enumerated()), id: \.element) { index, site in
-                siteRow(site)
-                if index != ExternalSite.allCases.count - 1 {
+    private func sitesCard(_ kind: ExternalContentKind) -> some View {
+        let sites = ExternalSite.allCases.filter { $0.contentKind == kind }
+        return VStack(spacing: 0) {
+            ForEach(Array(sites.enumerated()), id: \.element) { index, site in
+                VStack(spacing: 0) {
+                    Toggle(site.displayName, isOn: Binding(
+                        get: { session.enabledSites.contains(site) },
+                        set: { session.setEnabled($0, for: site) }
+                    ))
+                    .foregroundStyle(Theme.textPrimary)
+                    .tint(Theme.accent)
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 52)
+                    if site == .pixiv { pixivLoginRow }
+                    if site == .rule34 { rule34LoginRow }
+                    if site == .rule34Video { rule34VideoLoginRow }
+                }
+                if index < sites.count - 1 {
                     Divider().overlay(Theme.separator).padding(.horizontal, 16)
                 }
             }
@@ -59,73 +69,71 @@ struct ExternalSitesSettingsView: View {
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private func siteRow(_ site: ExternalSite) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(site.displayName)
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Toggle("", isOn: Binding(
-                    get: { session.enabledSites.contains(site) },
-                    set: { isOn in
-                        if isOn { session.enabledSites.insert(site) } else {
-                            session.enabledSites.remove(site)
-                            // Disabled the site that was active — fall back
-                            // to normal mode (the same principle as if the
-                            // site had disappeared from the picker entirely).
-                            if session.activeExternalSite == site { session.activeExternalSite = nil }
-                            // Combined mode ("All sites") makes no sense with
-                            // no sites enabled — otherwise it would silently
-                            // stay active, showing an empty catalog.
-                            if session.enabledSites.isEmpty { session.combinedModeActive = false }
-                        }
-                    }
-                ))
-                .labelsHidden()
-                .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 52)
-            // Pixiv is the one site in this list that's a real
-            // account-gated API (see PixivProvider's doc-comment) — every
-            // request 401s without a login, so unlike the other five
-            // (anonymous scrapes) it needs its own sign-in row here.
-            if site == .pixiv {
-                pixivLoginRow
-            }
-        }
-    }
-
     private var pixivLoginRow: some View {
         HStack {
             if pixivAuth.isLoggedIn {
                 Text(pixivAuth.username.map { "Вход выполнен: \($0)" } ?? "Вход выполнен")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.textSecondary)
                 Spacer()
                 Button("Выйти", role: .destructive) { pixivAuth.logout() }
-                    .font(.footnote.weight(.semibold))
             } else {
                 Text("Требуется вход в аккаунт Pixiv")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.textSecondary)
                 Spacer()
                 Button("Войти") { showPixivLogin = true }
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.accent)
             }
         }
+        .font(.footnote)
+        .foregroundStyle(Theme.textSecondary)
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
-        .sheet(isPresented: $showPixivLogin) {
-            PixivLoginView()
-        }
     }
-}
 
-#Preview {
-    NavigationStack {
-        ExternalSitesSettingsView()
+    private var rule34LoginRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                if rule34Auth.isLoggedIn {
+                    Text(rule34Auth.username.map { "Вход выполнен: \($0)" } ?? "Вход выполнен")
+                    if rule34Auth.isRefreshing { ProgressView().controlSize(.mini) }
+                    Spacer()
+                    Button("Выйти", role: .destructive) { rule34Auth.logout() }
+                } else {
+                    Text("Аккаунт Rule34")
+                    Spacer()
+                    Button("Войти") { showRule34Login = true }
+                }
+            }
+            if let error = rule34Auth.validationError {
+                Text(error).foregroundStyle(Theme.textSecondary)
+                Button("Проверить вход") { Task { await rule34Auth.validateStoredSession() } }
+                    .disabled(rule34Auth.isRefreshing)
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(Theme.textSecondary)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
     }
-    .preferredColorScheme(.dark)
+
+    private var rule34VideoLoginRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                if rule34VideoAuth.isLoggedIn {
+                    Text("Вход выполнен")
+                    if rule34VideoAuth.isRefreshing { ProgressView().controlSize(.mini) }
+                    Spacer()
+                    Button("Выйти", role: .destructive) { rule34VideoAuth.logout() }
+                } else {
+                    Text("Аккаунт Rule34Video")
+                    Spacer()
+                    Button("Войти") { showRule34VideoLogin = true }
+                }
+            }
+            if let error = rule34VideoAuth.validationError {
+                Text(error)
+                Button("Проверить вход") { Task { await rule34VideoAuth.validateStoredSession() } }
+                    .disabled(rule34VideoAuth.isRefreshing)
+            }
+        }
+        .font(.footnote).foregroundStyle(Theme.textSecondary)
+        .padding(.horizontal, 16).padding(.bottom, 12)
+    }
 }

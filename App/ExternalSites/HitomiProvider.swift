@@ -642,6 +642,12 @@ struct HitomiProvider: ExternalSiteProvider {
         case .spanish: return "spanish"
         case .french: return "french"
         case .german: return "german"
+        case .italian: return "italian"
+        case .portuguese: return "portuguese"
+        case .polish: return "polish"
+        case .thai: return "thai"
+        case .vietnamese: return "vietnamese"
+        case .ukrainian: return "ukrainian"
         }
     }
 

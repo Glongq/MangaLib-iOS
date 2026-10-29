@@ -28,8 +28,7 @@ struct ExternalRecommendationFeedFilter: Equatable {
         if excludedTypes[detail.site]?.contains(Self.normalizeType(detail.type)) == true { return false }
         if let language = detail.language,
            excludedLanguages[detail.site]?.contains(ExternalRecommendationFeature.normalize(language)) == true { return false }
-        let detected = ExternalCatalogLanguage.detectAll(from: detail.language)
-        return languages.isEmpty || detected.isEmpty || !detected.isDisjoint(with: languages)
+        return ExternalCatalogLanguage.matches(rawLanguage: detail.language, selected: languages)
     }
 
     private static func normalizeType(_ value: String) -> String {

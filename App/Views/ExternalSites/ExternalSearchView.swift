@@ -5,11 +5,11 @@ import SwiftUI
 /// EHentaiProvider; hitomi is the opposite case, see ExternalTagBrowserView).
 ///
 /// Visually — COMPLETELY 1-to-1 with MangaCatalogView (per a direct
-/// request on 08/30): the "Каталог" title is large .large (not
-/// "Поиск"/.inline as it used to be), the native `.searchable()` instead
+/// request on 08/30): the "Catalog" title is large .large (not
+/// "Search"/.inline as it used to be), the native `.searchable()` instead
 /// of a hand-rolled TextField+HStack box (the same trick as in
 /// MangaCatalogView itself — not a separate field position, but the
-/// system search bar under the nav bar), "Фильтры" is a glass pill in
+/// system search bar under the nav bar), "Filters" is a glass pill in
 /// the shared bottom bar (see ExternalCatalogGridView.controlsBar, passed
 /// in via leadingControls) instead of categories always sticking out on
 /// screen. No separate navigation: titles appear right below the field
@@ -19,6 +19,7 @@ struct ExternalSearchView: View {
     let site: ExternalSite
 
     @ObservedObject private var filterStore = ExternalCatalogFilterStore.shared
+    @ObservedObject private var rule34VideoAuth = Rule34VideoAuthStore.shared
     @State private var query = ""
     /// The query that is actually being searched right now — kept
     /// separate from `query` (what's currently typed in the field) so we
@@ -36,7 +37,7 @@ struct ExternalSearchView: View {
     /// True only when EVERY enabled site (here — always just `site`, a
     /// single one) gave a REAL total (see
     /// ExternalCatalogItemsSummary.isEstimateExact) — controls the "≈"/
-    /// "не менее" wording in foundCountBanner.
+    /// "at least" wording in foundCountBanner.
     @State private var searchResultIsExact = false
     /// True only right after Return was pressed, until the query changes
     /// again — gates the banner so it doesn't show for the ambient
@@ -80,12 +81,12 @@ struct ExternalSearchView: View {
         }
     }
     /// Advanced fields (Tags/Parodies/Artists/Characters/Groups, see
-    /// ImhentaiAdvancedQuery) — imhentai only, only inside "Фильтры".
+    /// ImhentaiAdvancedQuery) — imhentai only, only inside "Filters".
     private var advancedQueryIH: ImhentaiAdvancedQuery {
         get { filterStore.imhentaiAdvancedQueries[site] ?? ImhentaiAdvancedQuery() }
         nonmutating set { filterStore.imhentaiAdvancedQueries[site] = newValue }
     }
-    /// Simply Hentai advanced fields (Поиск/Tags/Parodies/Characters/
+    /// Simply Hentai advanced fields (Search/Tags/Parodies/Characters/
     /// Artists/Translators/Language/Series title, see
     /// SimplyHentaiAdvancedQuery) — EXCLUSIVE with respect to the shared
     /// committedQuery (see the resolvedQuery doc-comment: one rule
@@ -95,7 +96,7 @@ struct ExternalSearchView: View {
         get { filterStore.simplyHentaiAdvancedQueries[site] ?? SimplyHentaiAdvancedQuery() }
         nonmutating set { filterStore.simplyHentaiAdvancedQueries[site] = newValue }
     }
-    /// E-Hentai advanced fields (Поиск/Tags/Parodies/Characters/Artists/
+    /// E-Hentai advanced fields (Search/Tags/Parodies/Characters/Artists/
     /// Groups, see EHentaiAdvancedQuery) — work TOGETHER with the
     /// bitmask categories (excludedCategoriesEH, a separate channel), but
     /// are exclusive with respect to committedQuery.
@@ -103,7 +104,7 @@ struct ExternalSearchView: View {
         get { filterStore.ehentaiAdvancedQueries[site] ?? EHentaiAdvancedQuery() }
         nonmutating set { filterStore.ehentaiAdvancedQueries[site] = newValue }
     }
-    /// 3Hentai advanced fields (Поиск/Tags, see ThreeHentaiAdvancedQuery).
+    /// 3Hentai advanced fields (Search/Tags, see ThreeHentaiAdvancedQuery).
     private var advancedQuery3H: ThreeHentaiAdvancedQuery {
         get { filterStore.threeHentaiAdvancedQueries[site] ?? ThreeHentaiAdvancedQuery() }
         nonmutating set { filterStore.threeHentaiAdvancedQueries[site] = newValue }
@@ -153,13 +154,14 @@ struct ExternalSearchView: View {
             return advancedQueryHT.isEmpty ? 0 : 1
         case .pixiv:
             return advancedQueryPixiv.isEmpty ? 0 : 1
-        default: return 0
+        case .rule34: return (filterStore.rule34AdvancedQueries[site] ?? Rule34CatalogQuery()).filterCount
+        case .rule34Video: return (filterStore.rule34VideoAdvancedQueries[site] ?? Rule34VideoQuery()).filterCount
         }
     }
     /// The final query that actually goes to ExternalCatalogGridView.
     ///
     /// The rule is EXCLUSIVE (per a direct request on 09/01): if a site
-    /// has even one advanced field filled in ("Фильтры"), the shared top
+    /// has even one advanced field filled in ("Filters"), the shared top
     /// `.searchable()` field (committedQuery) stops applying to that site
     /// entirely — search is done strictly on what's typed into the
     /// advanced fields themselves. If the advanced fields are empty —
@@ -218,6 +220,12 @@ struct ExternalSearchView: View {
             let text = advanced.isEmpty ? committedQuery : advanced.encoded()
             return .search(query: text, excludedCategoryBits: 0)
         }
+        if site == .rule34 {
+            return .search(query: (filterStore.rule34AdvancedQueries[site] ?? Rule34CatalogQuery()).search(committedQuery), excludedCategoryBits: 0)
+        }
+        if site == .rule34Video {
+            return .search(query: (filterStore.rule34VideoAdvancedQueries[site] ?? Rule34VideoQuery()).encoded(search: committedQuery), excludedCategoryBits: 0)
+        }
         return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
     }
     /// The string portion of resolvedQuery — used only for `.id(...)`
@@ -271,7 +279,7 @@ struct ExternalSearchView: View {
         // nothing (search into the void), confusing the user with the
         // exact same bug that got it removed in the first place — so for
         // imhentai we don't show it at all, and instead there's its own
-        // field inside "Фильтры" (ImhentaiAdvancedFieldsPicker).
+        // field inside "Filters" (ImhentaiAdvancedFieldsPicker).
         if site == .imhentai {
             content
         } else {
@@ -285,7 +293,7 @@ struct ExternalSearchView: View {
                 // to commit a search.
                 .onSubmit(of: .search) { commitSearch() }
                 .searchSuggestions {
-                    if site == .pixiv {
+                    if [.pixiv, .rule34, .rule34Video].contains(site) {
                         ForEach(pixivSuggestions, id: \.name) { suggestion in
                             Text(suggestion.category.isEmpty ? suggestion.name : "\(suggestion.name) (\(suggestion.category))")
                                 .searchCompletion(suggestion.name)
@@ -301,18 +309,22 @@ struct ExternalSearchView: View {
     /// one, since the two screens' @State/`site` shape differs enough that
     /// sharing it would need its own tiny view model just for this.
     private func updatePixivSuggestions() async {
-        guard site == .pixiv else { pixivSuggestions = []; return }
+        guard [.pixiv, .rule34, .rule34Video].contains(site) else { pixivSuggestions = []; return }
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { pixivSuggestions = []; return }
         try? await Task.sleep(nanoseconds: 300_000_000)
         guard !Task.isCancelled, trimmed == query.trimmingCharacters(in: .whitespaces) else { return }
-        let provider = ExternalSiteRegistry.provider(for: .pixiv)
-        guard let results = try? await provider.fetchAutocomplete(query: trimmed, namespace: nil) else {
+        let provider = ExternalSiteRegistry.provider(for: site)
+        let prefix = site == .rule34 ? String(trimmed.split(whereSeparator: { $0.isWhitespace }).last ?? "") : trimmed
+        guard let results = try? await provider.fetchAutocomplete(query: prefix, namespace: nil) else {
             pixivSuggestions = []
             return
         }
         guard !Task.isCancelled else { return }
-        pixivSuggestions = Array(results.prefix(10))
+        let previous = site == .rule34 ? trimmed.split(whereSeparator: { $0.isWhitespace }).dropLast().joined(separator: " ") : ""
+        pixivSuggestions = Array(results.prefix(10)).map {
+            ExternalTagSuggestion(name: previous.isEmpty ? $0.name : previous + " " + $0.name, count: $0.count, category: $0.category)
+        }
     }
 
     /// Found-count banner — only visible right after Return was pressed
@@ -360,7 +372,7 @@ struct ExternalSearchView: View {
                 searchResultCount = summary.estimatedTotal
                 searchResultIsExact = summary.isEstimateExact
             }
-            .id("\(resolvedQueryIdentity)#\(excludedCategoryBits)")
+            .id("\(resolvedQueryIdentity)#\(excludedCategoryBits)#\(site == .rule34Video ? rule34VideoAuth.revision.uuidString : "")")
         }
         .navigationTitle("Каталог")
         .navigationBarTitleDisplayMode(.large)
@@ -442,7 +454,7 @@ struct ExternalSearchView: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
@@ -468,6 +480,10 @@ struct ExternalSearchView: View {
             advancedQueryHT = HitomiAdvancedQuery()
         case .pixiv:
             advancedQueryPixiv = PixivAdvancedQuery()
+        case .rule34:
+            filterStore.rule34AdvancedQueries[site] = Rule34CatalogQuery()
+        case .rule34Video:
+            filterStore.rule34VideoAdvancedQueries[site] = Rule34VideoQuery()
         }
     }
 
@@ -534,6 +550,10 @@ struct ExternalSearchView: View {
                 get: { advancedQueryPixiv },
                 set: { advancedQueryPixiv = $0 }
             ))
+        case .rule34:
+            Rule34CatalogFiltersView(query: Binding(get: { filterStore.rule34AdvancedQueries[site] ?? Rule34CatalogQuery() }, set: { filterStore.rule34AdvancedQueries[site] = $0 }))
+        case .rule34Video:
+            Rule34VideoFiltersView(query: Binding(get: { filterStore.rule34VideoAdvancedQueries[site] ?? Rule34VideoQuery() }, set: { filterStore.rule34VideoAdvancedQueries[site] = $0 }))
         }
     }
 }

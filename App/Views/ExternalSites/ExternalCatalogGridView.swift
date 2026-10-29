@@ -124,6 +124,14 @@ struct ExternalCatalogGridView: View {
     /// items, so they ignore `limit` and return the site's native page size.
     private static let pageSize = 45
 
+    /// Safety ceiling on EXTRA raw batches backfillForLanguageFilter will
+    /// fetch when the selected language(s) leave a freshly-loaded page
+    /// under `pageSize` titles. Caps WORK (an extremely rare language
+    /// shouldn't silently fire dozens of requests), not the result — if
+    /// the real match count across all these rounds is still smaller, the
+    /// page honestly ends up smaller too.
+    private static let maxLanguageBackfillRounds = 6
+
     /// Cross-site language filter (see ExternalCatalogLanguage/
     /// ExternalLanguagePicker) — applied here, client-side, rather than
     /// per-provider query params: most sites have no real language-filter
@@ -512,11 +520,15 @@ struct ExternalCatalogGridView: View {
     /// always passes because an absent language must not hide the title.
     private var filteredItems: [ExternalCatalogItem] {
         guard !filterStore.selectedLanguages.isEmpty else { return items }
-        return items.filter { item in
-            guard let language = details[item.id]?.language else { return true }
-            let detected = ExternalCatalogLanguage.detectAll(from: language)
-            return detected.isEmpty || !detected.isDisjoint(with: filterStore.selectedLanguages)
+        let filtered = items.filter { item in
+            guard let detail = details[item.id] else { return true }
+            return ExternalCatalogLanguage.matches(rawLanguage: detail.language, selected: filterStore.selectedLanguages)
         }
+        // `items` can hold several raw batches while a language filter is
+        // active (see backfillForLanguageFilter) — capped at pageSize here
+        // so "page 1" stays the same size as the unfiltered case instead of
+        // growing with every backfill round.
+        return Array(filtered.prefix(Self.pageSize))
     }
 
     /// Only loads the per-card detail (title/cover/pages) needed to render
@@ -614,6 +626,7 @@ struct ExternalCatalogGridView: View {
         // were no matches (per the complaint "the fallback suggests
         // hitting refresh too eagerly").
         let anySucceeded = await loadNextBatch()
+        await backfillForLanguageFilter()
         if items.isEmpty && pending.isEmpty && !anySucceeded {
             errorMessage = "Проверьте соединение и попробуйте ещё раз."
         }
@@ -731,9 +744,70 @@ struct ExternalCatalogGridView: View {
         // next native page (via cursorForPage), never "the rest of this
         // one". Only genuinely lossless for hitomi, whose single-site batch
         // never exceeds pageSize in the first place (real limit).
-        let capacity = max(0, Self.pageSize - items.count)
+        //
+        // While a language filter is active this cap is raised (see
+        // backfillForLanguageFilter) — several raw batches may need to be
+        // ingested into the SAME page before enough of them match, and
+        // filteredItems re-caps the FILTERED/displayed set back down to
+        // pageSize, so the page still looks the same size to the user.
+        let rawCap = filterStore.selectedLanguages.isEmpty
+            ? Self.pageSize
+            : Self.pageSize * (Self.maxLanguageBackfillRounds + 1)
+        let capacity = max(0, rawCap - items.count)
         items.append(contentsOf: newItems.prefix(capacity))
         return anySucceeded
+    }
+
+    /// Resolves `language` up front for items that don't have a detail yet.
+    /// Needed only while a language filter is active (see filteredItems) —
+    /// otherwise the client-side filter can't tell whether a freshly
+    /// fetched raw item actually matches until the user scrolls it into
+    /// view (see onCardAppear), so a page can look "full" going by raw IDs
+    /// alone yet collapse to a handful of cards a couple seconds later, as
+    /// off-screen titles never got the chance to prove they match. Bounded
+    /// concurrency (6 at once) — running a whole raw batch through this
+    /// one detail at a time would be slow.
+    private func prefetchDetails(for candidates: [ExternalCatalogItem]) async {
+        let missing = candidates.filter { details[$0.id] == nil }
+        guard !missing.isEmpty else { return }
+        await withTaskGroup(of: (String, ExternalGalleryDetail?).self) { group in
+            var iterator = missing.makeIterator()
+            func enqueue() {
+                guard let item = iterator.next() else { return }
+                group.addTask {
+                    let provider = ExternalSiteRegistry.provider(for: item.site)
+                    let detail = try? await provider.fetchGalleryDetail(id: item.galleryId)
+                    return (item.id, detail)
+                }
+            }
+            for _ in 0..<min(6, missing.count) { enqueue() }
+            for await (id, detail) in group {
+                if let detail { details[id] = detail }
+                enqueue()
+            }
+        }
+    }
+
+    /// When a language filter is active, keeps fetching additional raw
+    /// batches into the SAME page — resolving each batch's details up
+    /// front (see prefetchDetails) — until the FILTERED result reaches a
+    /// full page, every site runs dry (hasNextPage == false), or
+    /// maxLanguageBackfillRounds is hit. Most sites have no real
+    /// server-side language filter at all (see
+    /// HitomiProvider.appendingLanguageFilter/filteredItems), so a single
+    /// raw page can easily match on only a handful of titles even though
+    /// later raw pages have plenty more — this is what makes "page 1"
+    /// honestly full instead of silently thin.
+    private func backfillForLanguageFilter() async {
+        guard !filterStore.selectedLanguages.isEmpty else { return }
+        await prefetchDetails(for: items)
+        var rounds = 0
+        while hasNextPage, filteredItems.count < Self.pageSize, rounds < Self.maxLanguageBackfillRounds {
+            rounds += 1
+            let before = items.count
+            await loadNextBatch()
+            await prefetchDetails(for: Array(items[before...]))
+        }
     }
 }
 
