@@ -31,8 +31,6 @@ struct ExternalSavedFilter: Identifiable, Codable {
     var advancedQueryHP = HentaiPillAdvancedQuery()
     var advancedQueryHT = HitomiAdvancedQuery()
     var advancedQueryPixiv = PixivAdvancedQuery()
-    var advancedQueryRule34: Rule34CatalogQuery?
-    var advancedQueryRule34Video: Rule34VideoQuery?
 
     /// Active-filter count, for the small badge next to the name in the
     /// saved-filters list — same formula as
@@ -48,7 +46,6 @@ struct ExternalSavedFilter: Identifiable, Codable {
             + (advancedQueryHP.isEmpty ? 0 : 1)
             + (advancedQueryHT.isEmpty ? 0 : 1)
             + (advancedQueryPixiv.isEmpty ? 0 : 1)
-            + (advancedQueryRule34?.filterCount ?? 0) + (advancedQueryRule34Video?.filterCount ?? 0)
     }
 }
 
@@ -109,8 +106,6 @@ final class ExternalCatalogFilterStore: ObservableObject {
     /// search field rather than replacing it (see PixivAdvancedQuery's
     /// doc-comment), unlike every other entry in this file.
     @Published var pixivAdvancedQueries: [ExternalSite: PixivAdvancedQuery] = [:]
-    @Published var rule34AdvancedQueries: [ExternalSite: Rule34CatalogQuery] = [:]
-    @Published var rule34VideoAdvancedQueries: [ExternalSite: Rule34VideoQuery] = [:]
 
     /// Combined "All sites" catalog (ExternalCombinedCatalogView) — its own
     /// separate state, not mixed in with the single-site ones.
@@ -125,8 +120,6 @@ final class ExternalCatalogFilterStore: ObservableObject {
     @Published var combinedHentaiPillAdvancedQuery = HentaiPillAdvancedQuery()
     @Published var combinedHitomiAdvancedQuery = HitomiAdvancedQuery()
     @Published var combinedPixivAdvancedQuery = PixivAdvancedQuery()
-    @Published var combinedRule34AdvancedQuery = Rule34CatalogQuery()
-    @Published var combinedRule34VideoAdvancedQuery = Rule34VideoQuery()
     /// Active chip in the combined catalog's "Filters" sheet — which
     /// section is currently shown (see ExternalCombinedCatalogView.
     /// filtersSheet). nil = "All" (all sections at once, the old behavior).
@@ -166,9 +159,6 @@ final class ExternalCatalogFilterStore: ObservableObject {
         var hentaiPillAdvancedQueries: [ExternalSite: HentaiPillAdvancedQuery] = [:]
         var hitomiAdvancedQueries: [ExternalSite: HitomiAdvancedQuery] = [:]
         var pixivAdvancedQueries: [ExternalSite: PixivAdvancedQuery] = [:]
-        // Optional additions preserve the existing persisted filters and presets.
-        var rule34AdvancedQueries: [ExternalSite: Rule34CatalogQuery]?
-        var rule34VideoAdvancedQueries: [ExternalSite: Rule34VideoQuery]?
 
         var combinedQuery: String = ""
         var combinedExcludedCategories: Set<EHentaiCategory> = []
@@ -181,8 +171,6 @@ final class ExternalCatalogFilterStore: ObservableObject {
         var combinedHentaiPillAdvancedQuery = HentaiPillAdvancedQuery()
         var combinedHitomiAdvancedQuery = HitomiAdvancedQuery()
         var combinedPixivAdvancedQuery = PixivAdvancedQuery()
-        var combinedRule34AdvancedQuery: Rule34CatalogQuery?
-        var combinedRule34VideoAdvancedQuery: Rule34VideoQuery?
         var combinedFiltersActiveSite: ExternalSite?
 
         var savedCombinedFilters: [ExternalSavedFilter] = []
@@ -232,8 +220,6 @@ final class ExternalCatalogFilterStore: ObservableObject {
         hentaiPillAdvancedQueries = state.hentaiPillAdvancedQueries
         hitomiAdvancedQueries = state.hitomiAdvancedQueries
         pixivAdvancedQueries = state.pixivAdvancedQueries
-        rule34AdvancedQueries = state.rule34AdvancedQueries ?? [:]
-        rule34VideoAdvancedQueries = state.rule34VideoAdvancedQueries ?? [:]
         combinedQuery = state.combinedQuery
         combinedExcludedCategories = state.combinedExcludedCategories
         combinedExcludedImhentaiCategories = state.combinedExcludedImhentaiCategories
@@ -245,8 +231,6 @@ final class ExternalCatalogFilterStore: ObservableObject {
         combinedHentaiPillAdvancedQuery = state.combinedHentaiPillAdvancedQuery
         combinedHitomiAdvancedQuery = state.combinedHitomiAdvancedQuery
         combinedPixivAdvancedQuery = state.combinedPixivAdvancedQuery
-        combinedRule34AdvancedQuery = state.combinedRule34AdvancedQuery ?? Rule34CatalogQuery()
-        combinedRule34VideoAdvancedQuery = state.combinedRule34VideoAdvancedQuery ?? Rule34VideoQuery()
         combinedFiltersActiveSite = state.combinedFiltersActiveSite
         savedCombinedFilters = state.savedCombinedFilters
         selectedLanguages = state.selectedLanguages
@@ -265,8 +249,6 @@ final class ExternalCatalogFilterStore: ObservableObject {
             hentaiPillAdvancedQueries: hentaiPillAdvancedQueries,
             hitomiAdvancedQueries: hitomiAdvancedQueries,
             pixivAdvancedQueries: pixivAdvancedQueries,
-            rule34AdvancedQueries: rule34AdvancedQueries,
-            rule34VideoAdvancedQueries: rule34VideoAdvancedQueries,
             combinedQuery: combinedQuery,
             combinedExcludedCategories: combinedExcludedCategories,
             combinedExcludedImhentaiCategories: combinedExcludedImhentaiCategories,
@@ -278,8 +260,6 @@ final class ExternalCatalogFilterStore: ObservableObject {
             combinedHentaiPillAdvancedQuery: combinedHentaiPillAdvancedQuery,
             combinedHitomiAdvancedQuery: combinedHitomiAdvancedQuery,
             combinedPixivAdvancedQuery: combinedPixivAdvancedQuery,
-            combinedRule34AdvancedQuery: combinedRule34AdvancedQuery,
-            combinedRule34VideoAdvancedQuery: combinedRule34VideoAdvancedQuery,
             combinedFiltersActiveSite: combinedFiltersActiveSite,
             savedCombinedFilters: savedCombinedFilters,
             selectedLanguages: selectedLanguages

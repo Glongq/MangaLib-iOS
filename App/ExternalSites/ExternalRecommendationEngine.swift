@@ -57,7 +57,6 @@ struct ExternalRecommendationDocument: Codable, Identifiable, Sendable {
     let language: String?
     let features: [ExternalRecommendationFeature]
     var publishedAt: Date? = nil
-    var contentKind: ExternalContentKind? = nil
 
     var id: String { "\(siteID)#\(galleryID)" }
 
@@ -89,7 +88,6 @@ struct ExternalRecommendationFeedback: Codable, Sendable {
     var bookmarked = false
     var visibleSeconds: Double = 0
     var pagesRead = 0
-    var watchedFraction: Double? = nil
     var impressions = 0
     var lastSeen: Date?
     var qualifiedReadAt: Date?
@@ -122,9 +120,7 @@ struct ExternalRecommendationFeedback: Codable, Sendable {
         let implicitDecay = pow(0.5, implicitAge / 30)
         if hasQualifiedReading {
             result += min(0.5, visibleSeconds / 40) * implicitDecay
-            let fraction = document.contentKind == .video
-                ? min(1, watchedFraction ?? 0)
-                : min(1, Double(pagesRead) / Double(max(1, document.pageCount)))
+            let fraction = min(1, Double(pagesRead) / Double(max(1, document.pageCount)))
             result += 1.5 * pow(fraction, 0.65) * min(1, visibleSeconds / 6) * implicitDecay
         }
         return result
@@ -164,18 +160,15 @@ struct ExternalRecommendationProfile: Codable, Sendable {
         feedback[document.id] = record
     }
 
-    mutating func recordExposure(_ document: ExternalRecommendationDocument, seconds: Double, pages: Int, at now: Date, incrementImpression: Bool = true, watchedFraction: Double? = nil) {
+    mutating func recordExposure(_ document: ExternalRecommendationDocument, seconds: Double, pages: Int, at now: Date, incrementImpression: Bool = true) {
         guard seconds.isFinite, seconds >= 0, pages >= 0 else { return }
         var record = feedback[document.id] ?? ExternalRecommendationFeedback(document: document, updatedAt: now)
         record.document = document
         // Preserve eligible legacy reading once; new visits must qualify with their own metrics.
         if record.readingFactsVersion == nil && record.hasQualifiedReading { record.qualifiedReadAt = record.lastSeen ?? now }
         record.readingFactsVersion = 1
-        if RecommendationExposure.qualityReading(seconds: seconds, pages: pages, total: document.pageCount, watchedFraction: watchedFraction) {
+        if RecommendationExposure.qualityReading(seconds: seconds, pages: pages, total: document.pageCount) {
             record.qualifiedReadAt = now
-        }
-        if let watchedFraction, watchedFraction.isFinite {
-            record.watchedFraction = max(record.watchedFraction ?? 0, min(1, max(0, watchedFraction)))
         }
         record.visibleSeconds = max(record.visibleSeconds, min(120, seconds))
         record.pagesRead = max(record.pagesRead, min(document.pageCount, pages))
@@ -316,7 +309,7 @@ struct ExternalRecommendationEngine {
     }
 
     func isEligible(_ document: ExternalRecommendationDocument, ignoringSeen: Bool = false) -> Bool {
-        guard document.pageCount > 0 || document.contentKind == .video else { return false }
+        guard document.pageCount > 0 else { return false }
         if knownCopies.contains(document.duplicateKey) { return false }
         if !ignoringSeen && recentCopies.contains(document.duplicateKey) { return false }
         if let record = profile.feedback[document.id] {

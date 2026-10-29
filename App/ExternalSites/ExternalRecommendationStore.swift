@@ -26,8 +26,7 @@ extension ExternalGalleryDetail {
         let date = ExternalRecommendationDate.parse(posted)
         return ExternalRecommendationDocument(
             siteID: site.rawValue, galleryID: id, title: title, pageCount: pages.count,
-            language: language, features: features, publishedAt: date,
-            contentKind: video == nil ? .manga : .video
+            language: language, features: features, publishedAt: date
         )
     }
 }
@@ -68,10 +67,6 @@ final class ExternalRecommendationStore: ObservableObject {
             ExternalHistoryStore.shared.record(document: document, detail: detail, resolveKey: resolveKey)
         }
         save()
-        if newVote == .like, document.siteID == ExternalSite.rule34.rawValue {
-            // Website failures never undo local feedback or interrupt the feed.
-            Task { try? await Rule34Provider().upvote(id: document.galleryID) }
-        }
     }
 
     func setBookmark(_ saved: Bool, for document: ExternalRecommendationDocument) {
@@ -81,9 +76,9 @@ final class ExternalRecommendationStore: ObservableObject {
         save()
     }
 
-    func recordExposure(_ document: ExternalRecommendationDocument, seconds: Double, pages: Int, incrementImpression: Bool = true, watchedFraction: Double? = nil) {
+    func recordExposure(_ document: ExternalRecommendationDocument, seconds: Double, pages: Int, incrementImpression: Bool = true) {
         guard pages >= 0, seconds >= 0.6 else { return }
-        profile.recordExposure(document, seconds: seconds, pages: pages, at: Date(), incrementImpression: incrementImpression, watchedFraction: watchedFraction)
+        profile.recordExposure(document, seconds: seconds, pages: pages, at: Date(), incrementImpression: incrementImpression)
         save()
     }
 

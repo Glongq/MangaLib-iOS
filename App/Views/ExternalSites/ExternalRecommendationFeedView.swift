@@ -1,12 +1,11 @@
 import SwiftUI
 import UIKit
 
-/// A vertically paged feed with horizontal image reading or native video playback.
+/// A vertically paged gallery feed. Each gallery contains its own horizontal reader.
 struct ExternalRecommendationFeedView: View {
     let onBack: () -> Void
     @StateObject private var model = ExternalRecommendationFeedModel()
     @ObservedObject private var session = ExternalSiteSession.shared
-    @ObservedObject private var rule34VideoAuth = Rule34VideoAuthStore.shared
     @ObservedObject private var filters = ExternalCatalogFilterStore.shared
     @ObservedObject private var recommendations = ExternalRecommendationStore.shared
     @ObservedObject private var bookmarks = ExternalBookmarksStore.shared
@@ -19,7 +18,8 @@ struct ExternalRecommendationFeedView: View {
     @State private var isVisible = false
 
     private var sites: [ExternalSite] {
-        session.selectedSites
+        if let site = session.activeExternalSite { return [site] }
+        return ExternalSite.allCases.filter { session.enabledSites.contains($0) }
     }
 
     private var filter: ExternalRecommendationFeedFilter {
@@ -73,11 +73,6 @@ struct ExternalRecommendationFeedView: View {
         }
         .onChange(of: sites) { _, _ in resume() }
         .onChange(of: filter) { _, _ in resume() }
-        .onChange(of: rule34VideoAuth.revision) { _, _ in
-            guard sites.contains(.rule34Video) else { return }
-            selectedID = nil
-            resume()
-        }
         .onChange(of: isReading, initial: true) { _, reading in
             if reading { resume() }
             else { model.stop() }
@@ -156,7 +151,6 @@ struct ExternalRecommendationFeedView: View {
             .scrollTargetLayout()
         }
         .scrollIndicators(.hidden)
-        .accessibilityIdentifier("external.feed")
         .scrollTargetBehavior(.paging)
         .scrollPosition(id: $selectedID, anchor: .top)
         .scrollDisabled(isZoomed)
@@ -175,7 +169,7 @@ struct ExternalRecommendationFeedView: View {
         } else {
             VStack(spacing: 20) {
                 Image(systemName: "sparkles").font(.largeTitle)
-                Text(model.errorMessage ?? "Включи источники выбранного типа в Настройки → Другие сайты.")
+                Text(model.errorMessage ?? "Включи сайты в меню, чтобы открыть рекомендации.")
                     .font(.subheadline).multilineTextAlignment(.center)
                 HStack(spacing: 20) {
                     Button("Повторить") { model.retry() }
@@ -191,7 +185,7 @@ struct ExternalRecommendationFeedView: View {
 
     private func resume() {
         guard isReading else { return }
-        model.start(sites: sites, filter: filter, sourceSessionRevision: sites.contains(.rule34Video) ? rule34VideoAuth.revision : nil)
+        model.start(sites: sites, filter: filter)
     }
 }
 
@@ -231,8 +225,6 @@ private struct ExternalRecommendationCard: View {
     @State private var exposureID = UUID()
     @State private var exposureStartedAt: Date?
     @State private var zoomed = false
-    @State private var videoPlaying = false
-    @State private var watchedFraction = 0.0
 
     private var vote: ExternalRecommendationVote? { store.vote(for: item.document) }
     private var summaryTags: [ExternalRecommendationFeature] {
@@ -249,23 +241,11 @@ private struct ExternalRecommendationCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let video = item.detail.video {
-                ExternalVideoView(video: video, shouldPlay: isSelected && isReading, onState: { ready, playing in
-                    if ready { readyPages.insert(0) }
-                    else { readyPages.remove(0) }
-                    videoPlaying = playing
-                    updateExposure()
-                }, onProgress: { fraction in
-                    watchedFraction = max(watchedFraction, fraction)
-                })
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.top, 20)
-            } else {
-                ExternalRecommendationPagePager(
-                    ids: item.detail.pages.map { String($0.index) }, selection: $pageIndex, zoomed: zoomed,
-                    revision: ExternalRecommendationPagesRevision(selection: pageIndex, selected: isSelected, preload: shouldPreload)
-                ) { index in
-                    ExternalRecommendationImagePage(
+            ExternalRecommendationPagePager(
+                ids: item.detail.pages.map { String($0.index) }, selection: $pageIndex, zoomed: zoomed,
+                revision: ExternalRecommendationPagesRevision(selection: pageIndex, selected: isSelected, preload: shouldPreload)
+            ) { index in
+                ExternalRecommendationImagePage(
                         site: item.detail.site, galleryID: item.detail.id, page: item.detail.pages[index],
                         shouldLoad: shouldPreload && abs(index - pageIndex) <= (isSelected ? 1 : 0),
                         isCurrent: isSelected && index == pageIndex,
@@ -280,11 +260,10 @@ private struct ExternalRecommendationCard: View {
                                 onZoom(value)
                             }
                         }
-                    )
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.top, 20)
+                )
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top, 20)
 
             // Reserve space for controls so page text is never hidden underneath them.
             bottomControls
@@ -296,7 +275,7 @@ private struct ExternalRecommendationCard: View {
         }
         .background(.black)
         .task(id: PrefetchRequest(enabled: isReading && shouldPreload, pageIndex: pageIndex, pageCount: item.detail.pages.count)) {
-            guard isReading && shouldPreload && item.detail.video == nil else { pagePreloader.cancel(); return }
+            guard isReading && shouldPreload else { pagePreloader.cancel(); return }
             pagePreloader.update(
                 provider: ExternalSiteRegistry.provider(for: item.detail.site),
                 galleryID: item.detail.id, pages: item.detail.pages, currentIndex: pageIndex
@@ -332,7 +311,6 @@ private struct ExternalRecommendationCard: View {
                 visibleSeconds = 0
                 readPages = []
                 pageSeconds = [:]
-                watchedFraction = 0
                 hasRecordedImpression = false
                 exposureID = UUID()
                 exposureStartedAt = nil
@@ -357,12 +335,8 @@ private struct ExternalRecommendationCard: View {
             HStack(spacing: 4) {
                 Text(item.detail.site.displayName)
                 Text("·")
-                if item.detail.video != nil {
-                    Text("Видео")
-                } else {
-                    Text("\(pageIndex + 1) / \(item.document.pageCount)")
-                        .monospacedDigit()
-                }
+                Text("\(pageIndex + 1) / \(item.document.pageCount)")
+                    .monospacedDigit()
                 Spacer()
                 if loadingPages {
                     ProgressView().tint(.white).controlSize(.mini)
@@ -382,11 +356,9 @@ private struct ExternalRecommendationCard: View {
             }
             .font(.caption.weight(.medium))
             .foregroundStyle(.white.opacity(0.65))
-            .accessibilityLabel(item.detail.video == nil
-                ? "Страница \(pageIndex + 1) из \(item.document.pageCount)" : "Видео, \(item.detail.site.displayName)")
+            .accessibilityLabel("Страница \(pageIndex + 1) из \(item.document.pageCount)")
 
             Text(item.detail.title)
-                .accessibilityIdentifier("external.feed.title")
                 .font(.headline)
                 .foregroundStyle(.white)
                 .lineLimit(1)
@@ -431,7 +403,7 @@ private struct ExternalRecommendationCard: View {
                     commitExposure()
                 }
                 Button(action: onOpenDetail) {
-                    Text(item.detail.video == nil ? "Читать" : "Открыть")
+                    Text("Читать")
                         .font(.headline)
                         .foregroundStyle(.black)
                         .frame(maxWidth: .infinity)
@@ -472,9 +444,9 @@ private struct ExternalRecommendationCard: View {
 
     private func updateExposure() {
         finishInterval()
-        if isReading && readyPages.contains(pageIndex) && (item.detail.video == nil || videoPlaying) {
+        if isReading && readyPages.contains(pageIndex) {
             if exposureStartedAt == nil { exposureStartedAt = Date() }
-            intervalPage = item.detail.video == nil ? pageIndex : nil
+            intervalPage = pageIndex
             intervalStart = ProcessInfo.processInfo.systemUptime
             recordHistoryIfNeeded()
             recordPresentation()
@@ -482,19 +454,16 @@ private struct ExternalRecommendationCard: View {
     }
 
     private func recordHistoryIfNeeded() {
-        guard isReading, historyReady, readyPages.contains(pageIndex), lastHistoryPage != pageIndex,
-              item.detail.video == nil || videoPlaying else { return }
+        guard isReading, historyReady, readyPages.contains(pageIndex), lastHistoryPage != pageIndex else { return }
         lastHistoryPage = pageIndex
-        ExternalHistoryStore.shared.record(item.detail, page: item.detail.video == nil ? pageIndex + 1 : nil,
+        ExternalHistoryStore.shared.record(item.detail, page: pageIndex + 1,
                                            pageCount: item.document.pageCount, resolveKey: historyResolveKey)
     }
 
     private func commitExposure() {
         recordPresentation()
         guard visibleSeconds >= 0.6 else { return }
-        store.recordExposure(item.document, seconds: visibleSeconds, pages: readPages.count,
-                             incrementImpression: !hasRecordedImpression,
-                             watchedFraction: item.detail.video == nil ? nil : watchedFraction)
+        store.recordExposure(item.document, seconds: visibleSeconds, pages: readPages.count, incrementImpression: !hasRecordedImpression)
         hasRecordedImpression = true
     }
 
@@ -502,8 +471,7 @@ private struct ExternalRecommendationCard: View {
         guard let origin = item.selectedOrigin, let exposureStartedAt,
               isSelected || visibleSeconds > 0 else { return }
         store.recordPresentation(RecommendationExposure(id: exposureID, document: item.document,
-            origin: origin, shownAt: exposureStartedAt, seconds: visibleSeconds, pages: readPages.count, imageLoaded: true,
-            watchedFraction: item.detail.video == nil ? nil : watchedFraction))
+            origin: origin, shownAt: exposureStartedAt, seconds: visibleSeconds, pages: readPages.count, imageLoaded: true))
     }
 }
 

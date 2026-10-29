@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Placeholder destination for unfinished menu entries.
+/// Пункт-заглушка, на который ведут элементы меню.
 struct StubView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     let title: String
@@ -14,41 +14,60 @@ struct StubView: View {
     }
 }
 
-/// The menu content is presented by RootView; presentation and dismissal belong to its navigation container.
+/// Меню — теперь не боковой drawer на 75% ширины, а системный sheet почти на
+/// весь экран (стандартная анимация снизу вверх, свайп вниз для закрытия —
+/// это ровно то поведение, что просили; см. `.sheet` в RootView.swift, который
+/// презентует этот вью). Сам SideMenuView — просто КОНТЕНТ листа, больше не
+/// управляет своим показом/скримом/анимацией сам — это делает системный sheet.
 struct SideMenuView: View {
 
-    /// Open the selected placeholder section.
+    /// Переход на заглушку по выбранному разделу.
     var onSelect: (String) -> Void
-    /// Open the shared login presentation owned by RootView.
+    /// Открыть экран входа — теперь общий с быстрой кнопкой профиля в
+    /// RootView (та же самая, ОДНА sheet-презентация на двоих, см. RootView.swift).
     var onOpenLogin: () -> Void
-    /// Open the shared account information screen.
+    /// Открыть экран информации об аккаунте — общий с быстрой кнопкой профиля.
     var onOpenAccount: () -> Void
-    /// Open the catalog with the selected title type.
+    /// Открыть Каталог с выбранным типом тайтла (меню «Тайтлы» → Манга/Манхва/…).
     var onOpenCatalog: (Int) -> Void
 
-    // Observe the authentication session to update the account row after sign-in.
+    // Реальная сессия — см. AuthSession.swift/LoginView.swift. Карточка
+    // профиля переключается между "Войти" и данными аккаунта автоматически.
     @ObservedObject private var auth = AuthSession.shared
 
-    // Observe the active Lib site and its multi-site search selection.
+    // Активный сайт (каталог/закладки/история) + набор сайтов для мультипоиска
+    // — см. LibSite.swift/SiteSession. @ObservedObject, чтобы строка сайта и
+    // блок чекбоксов сразу перерисовывались при переключении.
     @ObservedObject private var siteSession = SiteSession.shared
-    /// External sources have their own session and settings, independent of Lib sites.
+    /// «Другие сайты» (hitomi.la и далее, см. App/ExternalSites/) — не
+    /// LibSite, отдельный независимый переключатель, см. siteRow.
     @ObservedObject private var externalSiteSession = ExternalSiteSession.shared
 
     @ObservedObject private var themeManager = ThemeManager.shared
 
-    // History, settings and downloads use push navigation inside the menu tab, preserving its tab bar.
+    // История по-прежнему свой локальный sheet прямо здесь — быстрая кнопка
+    // профиля её не касается, поэтому не нужно поднимать выше в RootView.
+    // История/Настройки/Загрузки теперь не sheet, а обычные PUSH-переходы внутри
+    // вкладки «Меню» (нижний таб-бар остаётся виден) — см. NavigationStack ниже.
     private enum MenuRoute: Hashable {
         case history, settings, downloads, comments, franchises, friends, collections, myCollections
         case teams, characters, people, publishers, users, nowReading, favorites, combinedCatalog
     }
-    // Use an untyped NavigationPath so nested destinations can push their own value types.
+    // NavigationPath (не типизированный [MenuRoute]) — иначе вложенные
+    // NavigationLink(value:) ВНУТРИ этих экранов (например, History →
+    // тайтл, см. HistoryView.navigationDestination(for: HistoryEntry.self))
+    // не могут запушиться в путь, типизированный только под MenuRoute, и тап
+    // по ссылке молча ничего не делает.
     @State private var path = NavigationPath()
 
-    // Expandable menu groups start expanded.
+    // Какие сворачиваемые разделы сейчас развёрнуты (Профиль/Каталог/Другое) —
+    // у каждого своя стрелка вверх/вниз в заголовке подложки. По умолчанию все
+    // развёрнуты.
     @State private var expandedSections: Set<String> = ["Профиль", "Каталог", "Другое"]
-    // The catalog group can replace its entries with the title-type picker.
+    // Внутри раздела «Каталог»: показывается ли под-экран выбора типа тайтла
+    // (Манга/ОЭЛ манга/…), заменяющий обычный список раздела (см. catalogSection).
     @State private var catalogShowingTypes = false
-    // Whether the Lib-site picker is expanded.
+    // Раскрыт ли список выбора активного сайта в блоке профиля (см. siteRow).
     @State private var siteExpanded = false
 
     var body: some View {
@@ -57,7 +76,12 @@ struct SideMenuView: View {
                 Theme.background.ignoresSafeArea()
 
                 ScrollView {
-                    // Separate rounded cards with the requested 34-point spacing.
+                    // Блоки-карточки с отступами между ними — как на референсе
+                    // (лист аккаунта Apple): каждая логическая группа пунктов —
+                    // отдельная закруглённая карточка, между карточками зазор.
+                    // Был удвоен (34→68) по прямой просьбе, затем возвращён
+                    // обратно (68→34, "уменьши в 2 раза") — на устройстве
+                    // удвоенный оказался слишком большим.
                     VStack(spacing: 34) {
                         block1
                         quickBlock
@@ -66,15 +90,28 @@ struct SideMenuView: View {
                         otherSection
                         searchSitesBlock
                         combinedCatalogBlock
+                        externalSitesSection
                     }
                     .padding(.horizontal, 16)
-                    // Align the top inset with the other main tabs.
+                    // Компенсация за отсутствующую строку поиска (была здесь
+                    // как +56 к top, см. тот же откат в NotificationsView) —
+                    // убрана: на устройстве роняла контент заметно ниже, чем
+                    // в Закладках/Каталоге, а не выравнивала с ними.
                     .padding(.top, 22)
                     .padding(.bottom, 24)
                 }
                 .scrollIndicators(.hidden)
             }
-            // Use the native large navigation title and its system scroll transition.
+            // Родной системный заголовок — Меню теперь наравне с остальными
+            // главными вкладками (Закладки/Каталог/Читают/Уведомления):
+            // .large, крупный заголовок без фона в покое, системный блюр
+            // проявляется при скролле, схлопывается в маленький
+            // центрированный — то же самое поведение, без своего
+            // "схлопывания"/блюр-фейда вручную. Опасение, что при схлопывании
+            // верх опустеет (у Меню, в отличие от Каталога/Закладок, нет
+            // строки поиска) — не актуально: нативный .large ВСЕГДА
+            // показывает хотя бы маленький заголовок, просто сжимается, а не
+            // пропадает целиком.
             .navigationTitle("Меню")
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: MenuRoute.self) { route in
@@ -94,28 +131,47 @@ struct SideMenuView: View {
                 case .users:      UserListView()
                 case .nowReading: TopViewsListView()
                 case .favorites:  if let uid = auth.userId { FavoritesListView(userId: uid) }
-                // Open the combined external catalog without changing the selected Lib site.
+                // Совместный поиск/каталог СРАЗУ по всем включённым внешним
+                // сайтам (см. ExternalCombinedCatalogView — уже умеет это
+                // делать, использовалась раньше только через "Все сайты" в
+                // развёрнутом siteRow, см. combinedCatalogBlock ниже) — по
+                // прямой просьбе (31.08) отдельным, всегда видимым пунктом
+                // в самом низу меню, не переключая при этом активный
+                // сайт/режим приложения (это просто отдельный экран поиска,
+                // не смена глобального состояния, как у siteRow).
                 case .combinedCatalog: ExternalCombinedCatalogView()
                 }
             }
         }
     }
 
-    // MARK: Menu groups
+    // MARK: Блоки (по группировке, которую попросили)
 
-    // Keep the account and active-site rows in the same card.
+    // Блок 1: профиль (карточка входа/аккаунта) + "Сайт (MangaLib)" сразу под ним,
+    // в той же карточке — это ровно то место, где на референсе было пустое
+    // (отмеченное красным) пространство под первой строкой аккаунта.
     private var block1: some View {
         card {
             profileRow
-            // Align the site text with the account text using the avatar column width.
+            // iconWidth: 52 — тот же, что у круглой аватарки в profileRow (16
+            // паддинг + 52 + 14 spacing = 82), поэтому текст "Сайт" выравнивается
+            // ровно по тому месту, где начинается текст ника/"Аккаунт MangaLib"
+            // в строке профиля.
             siteRow
         }
     }
 
-    // Select the active Lib site without signing out; Lib sites share one account token.
+    // Переключатель активного сайта (MangaLib/RanobeLib/HentaiLib/SlashLib) —
+    // определяет Site-Id для каталога/закладок/истории/карточки тайтла (см.
+    // MangaNetworkService.defaultHeaders, SiteSession.activeSite). Меню
+    // (Menu) вместо перехода на отдельный экран — переключение это просто
+    // выбор одного значения, отдельная страница избыточна. Один и тот же
+    // аккаунт работает на всех сайтах экосистемы, так что перелогин при
+    // переключении не требуется (общий Bearer-токен, см. LibSite.swift).
     private var siteRow: some View {
         VStack(spacing: 0) {
-            // Expand the site list inline instead of presenting another menu.
+            // Шапка строки — тап разворачивает/сворачивает список сайтов вниз
+            // (вместо всплывающего Menu), как в остальных списках меню.
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) { siteExpanded.toggle() }
             } label: {
@@ -127,8 +183,15 @@ struct SideMenuView: View {
                     Text("Сайт")
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
-                    // Display the active external content kind, while offering only Lib sites in this picker. External sources are managed in Settings.
-                    Text(externalSiteSession.isExternalModeActive ? externalSiteSession.contentKind.title : siteSession.activeSite.displayName)
+                    // Показывает РЕАЛЬНО активное — даже когда это внешний
+                    // сайт/совместный режим (см. externalSitesSection ниже) —
+                    // но список ВЫБОРА под ней (см. if siteExpanded) теперь
+                    // ВСЕГДА только сайты экосистемы Lib, по прямой просьбе
+                    // (31.08): "в обычном меню выбор сайтов остаётся всегда
+                    // только с сайтов от мангалиба" — переключение внешних
+                    // сайтов переехало целиком в отдельный раздел «Другие
+                    // сайты» в самом низу меню (см. externalSitesSection).
+                    Text(externalSiteSession.combinedModeActive ? "Все сайты" : (externalSiteSession.activeExternalSite?.displayName ?? siteSession.activeSite.displayName))
                         .foregroundStyle(Theme.textSecondary)
                     Image(systemName: siteExpanded ? "chevron.up" : "chevron.down")
                         .font(.subheadline.weight(.semibold))
@@ -155,15 +218,24 @@ struct SideMenuView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                // External source participation is controlled only in Settings.
+                // Внешние сайты (hitomi/e-hentai/3hentai/imhentai) и «Все
+                // сайты» здесь БОЛЬШЕ НЕ показываются — переехали целиком в
+                // раздел «Другие сайты» в самом низу меню (см.
+                // externalSitesSection/externalActiveSiteRows), по прямой
+                // просьбе (31.08).
             }
         }
     }
 
-    /// A site option aligned with the icon column of its parent row.
+    /// Одна строка в развёрнутом списке выбора сайта — общая для LibSite
+    /// (см. siteRow, iconWidth по умолчанию 52 — под её иконку "globe") и
+    /// ExternalSite (см. externalActiveSiteRows — iconWidth 24, под её
+    /// чекбокс-квадратики, чтобы отступ совпадал с остальными строками той
+    /// же карточки).
     private func siteOptionRow(title: String, isActive: Bool, iconWidth: CGFloat = 52) -> some View {
         HStack(spacing: 14) {
-            // Reserve the icon column so the label aligns with the heading above.
+            // Пустая колонка шириной иконки — чтобы название выровнялось
+            // под заголовком строки выше.
             Color.clear.frame(width: iconWidth)
             Text(title)
                 .foregroundStyle(isActive ? Theme.accent : Theme.textPrimary)
@@ -179,7 +251,8 @@ struct SideMenuView: View {
         .contentShape(Rectangle())
     }
 
-    // Quick navigation to settings, history and downloads.
+    // Быстрый блок БЕЗ заголовка подложки: Настройки, История, Загрузки — все
+    // с реальными действиями (открываются ПОВЕРХ меню).
     private var quickBlock: some View {
         card {
             row("Настройки", icon: "gearshape", action: { path.append(MenuRoute.settings) })
@@ -188,18 +261,24 @@ struct SideMenuView: View {
         }
     }
 
-    // Expandable profile shortcuts.
+    // Сворачиваемый раздел «Профиль» — все пункты пока заглушки (StubView).
     private var profileSection: some View {
         collapsibleCard("Профиль") {
             row("Комментарии", icon: "text.bubble", action: { path.append(MenuRoute.comments) })
-            // Open the existing friends screen, requesting sign-in when needed.
+            // Раньше вела на StubView (заглушку) — реальный экран друзей
+            // (FriendsView) давно есть в профиле, просто не был подключён
+            // здесь. Без аккаунта своих друзей нет — как и остальные
+            // персональные пункты, ведёт на вход вместо пустого экрана.
             row("Список друзей", icon: "person.2", action: {
                 if auth.userId != nil { path.append(MenuRoute.friends) } else { onOpenLogin() }
             })
             row("Избранное", icon: "heart", action: {
                 if auth.userId != nil { path.append(MenuRoute.favorites) } else { onOpenLogin() }
             })
-            // Open the existing personal collections screen.
+            // Раньше вела на StubView — реальный экран (UserCollectionsView,
+            // "мои коллекции") давно есть в профиле, просто не был
+            // подключён здесь (в отличие от Каталог → Коллекции — та уже
+            // вела на общую ленту CollectionsListView).
             row("Коллекции", icon: "square.stack", action: {
                 if auth.userId != nil { path.append(MenuRoute.myCollections) } else { onOpenLogin() }
             })
@@ -208,7 +287,17 @@ struct SideMenuView: View {
         }
     }
 
-    // The Lib catalog group is hidden in external mode because its directories belong to the Lib ecosystem.
+    // Сворачиваемый раздел «Каталог». Особый: у «Тайтлы» стрелка вправо, тап по
+    // ней ЗАМЕНЯЕТ содержимое подложки на под-экран выбора типа (см.
+    // catalogTypesView). Остальные пункты — заглушки.
+    // Целиком скрыт во внешнем режиме (см. ExternalSiteSession.
+    // isExternalModeActive) — раньше вместо обычного списка показывался
+    // пункт-указатель "Каталог — во вкладке «Каталог»", убран по прямой
+    // просьбе (31.08); список тегов/поиск внешнего сайта и так уже живут
+    // СВОЕЙ менюшкой прямо во вкладке «Каталог» (см.
+    // ExternalCatalogMenuView/ExternalCombinedCatalogView), а сами пункты
+    // ниже (Команды/Персонажи/Франшизы и т.д.) — сущности ИМЕННО экосистемы
+    // Lib, во внешнем режиме им попросту нечего показывать.
     @ViewBuilder
     private var catalogSection: some View {
         if !externalSiteSession.isExternalModeActive {
@@ -243,10 +332,14 @@ struct SideMenuView: View {
         }
     }
 
-    // The title-type picker replaces the catalog group and offers a back row and random-title shortcut.
+    // Под-экран выбора типа тайтла — заменяет обычный список раздела «Каталог».
+    // Сверху «Назад» (над «Манга»), затем типы по центру, внизу оранжевая
+    // кнопка «Случайный тайтл». Тап по типу открывает Каталог с этим фильтром.
     private var catalogTypesView: some View {
         VStack(spacing: 0) {
-            // Use the standard row height to avoid shifting the group when opening the picker.
+            // «Назад» той же строкой-шаблоном (row), что и остальные пункты
+            // меню — та же высота (52) и тот же размер текста/иконки, поэтому
+            // при открытии «Тайтлы» ничего не смещается вниз.
             row("Назад", icon: "chevron.left", showChevron: false, action: {
                 withAnimation(.easeInOut(duration: 0.2)) { catalogShowingTypes = false }
             })
@@ -258,7 +351,7 @@ struct SideMenuView: View {
             catalogTypeRow("Комикс", typeId: 9, showDivider: false)
 
             Button {
-                // Placeholder random-title action.
+                // ЗАГЛУШКА: случайный тайтл.
                 select("Случайный тайтл")
             } label: {
                 HStack(spacing: 8) {
@@ -274,7 +367,9 @@ struct SideMenuView: View {
         }
     }
 
-    // Select a title type and open the catalog using its ConstantsStore identifier.
+    // Строка типа тайтла — название СЛЕВА (как попросили). Тап закрывает
+    // под-экран и открывает Каталог с фильтром по этому типу (id из
+    // FilterCatalog.types).
     private func catalogTypeRow(_ title: String, typeId: Int, showDivider: Bool = true) -> some View {
         VStack(spacing: 0) {
             Button {
@@ -296,14 +391,14 @@ struct SideMenuView: View {
         }
     }
 
-    // Expandable miscellaneous shortcuts.
+    // Сворачиваемый раздел «Другое».
     private var otherSection: some View {
         collapsibleCard("Другое") {
             row("Вопросы и ответы", icon: "questionmark.circle", showDivider: false)
         }
     }
 
-    // MARK: Expandable section container
+    // MARK: Сворачиваемая подложка (заголовок со стрелкой вверх/вниз + контент)
 
     private func collapsibleCard(_ title: String, @ViewBuilder content: () -> some View) -> some View {
         let expanded = expandedSections.contains(title)
@@ -321,7 +416,8 @@ struct SideMenuView: View {
             withAnimation(.easeInOut(duration: 0.2)) {
                 if expanded {
                     expandedSections.remove(title)
-                    // Reset the title-type subview when collapsing the catalog group.
+                    // Сворачивая «Каталог», сбрасываем под-экран типов, чтобы при
+                    // следующем раскрытии снова показывался обычный список.
                     if title == "Каталог" { catalogShowingTypes = false }
                 } else {
                     expandedSections.insert(title)
@@ -348,7 +444,14 @@ struct SideMenuView: View {
         Divider().overlay(Theme.separator).padding(.horizontal, 16)
     }
 
-    // Lib multi-site search always includes the active site; change that site before disabling its search participation.
+    // Блок 4 (в самом низу): чекбоксы всех сайтов экосистемы, КРОМЕ AnimeLib
+    // (он сознательно не входит в LibSite — отдельная история с видео, не
+    // текст/картинки), для поиска СРАЗУ по нескольким сайтам одновременно, вне
+    // зависимости от того, какой сайт сейчас активен (см. SiteSession.searchSites/
+    // effectiveSearchSites, использовано в MangaNetworkService.searchManga/fetchCatalog).
+    // Активный сайт всегда участвует в поиске (effectiveSearchSites сама его
+    // добавляет), поэтому его чекбокс показан всегда отмеченным и недоступным
+    // для снятия — снять его можно только сменив активный сайт выше.
     private var searchSitesBlock: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Искать также на")
@@ -370,7 +473,7 @@ struct SideMenuView: View {
 
         return VStack(spacing: 0) {
             Button {
-                guard !isActive else { return } // The active Lib site is always included.
+                guard !isActive else { return } // активный сайт всегда включён, тап игнорируем
                 if siteSession.searchSites.contains(site) {
                     siteSession.searchSites.remove(site)
                 } else {
@@ -404,17 +507,170 @@ struct SideMenuView: View {
         }
     }
 
+    // Раздел «Другие сайты» — самый низ меню, по прямой просьбе (31.08):
+    // "добавить в меню в самом низу раздел другие сайты, перенести туда
+    // всё" — раньше выбор АКТИВНОГО внешнего сайта жил внутри siteRow (см.
+    // её doc-comment выше — оттуда убран), а какие внешние сайты вообще
+    // ВКЛЮЧЕНЫ — отдельным блоком "Отдельные сайты" (тоже убран, слит
+    // сюда же, в одну карточку). Тумблер в заголовке — простой
+    // мастер-переключатель "работать только с внешними сайтами": включил —
+    // приложение переходит в внешний режим (см. ExternalSiteSession.
+    // isExternalModeActive), выключил — возвращается к обычной экосистеме
+    // Lib (siteSession.activeSite при этом не трогается, как и раньше —
+    // просто снова выходит на передний план).
+    private var externalSitesSection: some View {
+        card {
+            externalModeToggleRow
+            if externalSiteSession.isExternalModeActive {
+                sectionDivider
+                ForEach(Array(ExternalSite.allCases.enumerated()), id: \.element) { index, site in
+                    // Без разделителя на последнем чекбоксе — сразу следом
+                    // идёт свой собственный (ВЕДУЩИЙ) разделитель у первой
+                    // строки externalActiveSiteRows, иначе задвоился бы.
+                    externalSiteCheckboxRow(site, showDivider: index != ExternalSite.allCases.count - 1)
+                }
+                externalActiveSiteRows
+            }
+        }
+    }
 
-    // Open combined external search using the enabled sources and selected content kind, including an empty state when none are enabled.
+    private var externalModeToggleRow: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "network")
+                .font(.title3)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 24)
+            Text("Другие сайты")
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Toggle("", isOn: externalModeToggle)
+                .labelsHidden()
+                .tint(Theme.accent)
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 52)
+    }
+
+    /// Включение — если ни один внешний сайт ещё не включён (см.
+    /// enabledSites), включает СРАЗУ ВСЕ (иначе тумблер щёлкнул бы, а
+    /// работать не с чем — ни один сайт не выбран) и переключает на «Все
+    /// сайты» при 2+ включённых либо на единственный включённый.
+    /// Выключение — просто выходит из внешнего режима, enabledSites не
+    /// трогает (чтобы при следующем включении не пришлось выбирать заново).
+    private var externalModeToggle: Binding<Bool> {
+        Binding(
+            get: { externalSiteSession.isExternalModeActive },
+            set: { newValue in
+                if newValue {
+                    if externalSiteSession.enabledSites.isEmpty {
+                        externalSiteSession.enabledSites = Set(ExternalSite.allCases)
+                    }
+                    if externalSiteSession.enabledSites.count >= 2 {
+                        externalSiteSession.combinedModeActive = true
+                    } else {
+                        externalSiteSession.activeExternalSite = externalSiteSession.enabledSites.first
+                    }
+                } else {
+                    externalSiteSession.activeExternalSite = nil
+                    externalSiteSession.combinedModeActive = false
+                }
+            }
+        )
+    }
+
+    /// Какой ИМЕННО внешний сайт активен (или «Все сайты» сразу, см.
+    /// combinedModeActive) — тот же приём (siteOptionRow + разделитель
+    /// ПЕРЕД каждой строкой), что раньше жил внутри siteRow, просто теперь
+    /// здесь, среди остальных настроек этого раздела.
+    @ViewBuilder
+    private var externalActiveSiteRows: some View {
+        ForEach(ExternalSite.allCases.filter { externalSiteSession.enabledSites.contains($0) }) { site in
+            let isActive = externalSiteSession.activeExternalSite == site
+            Divider().overlay(Theme.separator)
+                .padding(.leading, 16 + 24 + 14).padding(.trailing, 16)
+            Button {
+                externalSiteSession.activeExternalSite = site
+                externalSiteSession.combinedModeActive = false
+            } label: {
+                siteOptionRow(title: site.displayName, isActive: isActive, iconWidth: 24)
+            }
+            .buttonStyle(.plain)
+        }
+        // «Все сайты» — совместный каталог/выдача сразу по всем включённым
+        // сайтам (см. ExternalSiteSession.combinedModeActive,
+        // ExternalCombinedCatalogView). Имеет смысл только когда включено
+        // 2+ — с одним это то же самое, что и выбор этого одного сайта выше.
+        if externalSiteSession.enabledSites.count >= 2 {
+            let isActive = externalSiteSession.combinedModeActive
+            Divider().overlay(Theme.separator)
+                .padding(.leading, 16 + 24 + 14).padding(.trailing, 16)
+            Button {
+                externalSiteSession.activeExternalSite = nil
+                externalSiteSession.combinedModeActive = true
+            } label: {
+                siteOptionRow(title: "Все сайты", isActive: isActive, iconWidth: 24)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func externalSiteCheckboxRow(_ site: ExternalSite, showDivider: Bool) -> some View {
+        let isChecked = externalSiteSession.enabledSites.contains(site)
+
+        return VStack(spacing: 0) {
+            Button {
+                if isChecked {
+                    externalSiteSession.enabledSites.remove(site)
+                    // Выключили сайт, который был активным/участвовал в
+                    // совместном режиме — тот же принцип отката, что и в
+                    // ExternalSitesSettingsView.siteRow.
+                    if externalSiteSession.activeExternalSite == site { externalSiteSession.activeExternalSite = nil }
+                    if externalSiteSession.enabledSites.isEmpty { externalSiteSession.combinedModeActive = false }
+                } else {
+                    externalSiteSession.enabledSites.insert(site)
+                }
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: isChecked ? "checkmark.square.fill" : "square")
+                        .font(.title3)
+                        .foregroundStyle(isChecked ? Theme.accent : Theme.textSecondary)
+                        .frame(width: 24)
+                    Text(site.displayName)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 52)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showDivider {
+                Divider().overlay(Theme.separator).padding(.leading, 16 + 24 + 14).padding(.trailing, 16)
+            }
+        }
+    }
+
+    // Совместный каталог/поиск СРАЗУ по всем включённым внешним сайтам
+    // (см. ExternalCombinedCatalogView) — по прямой просьбе (31.08),
+    // отдельный ВСЕГДА видимый пункт (не гейтится ни числом включённых
+    // сайтов, ни тумблером externalModeToggle ниже — тот переключает
+    // ГЛОБАЛЬНЫЙ активный режим приложения, этот просто отдельный экран
+    // поиска, открывается ПОВЕРХ текущего режима, ничего не переключая). С
+    // 0 включёнными сайтами экран честно покажет "Тайтлов не найдено" — тот
+    // же принцип, что и у searchSitesBlock/externalSitesSection ниже (без
+    // искусственного скрытия строки).
     private var combinedCatalogBlock: some View {
         card {
             row("Совместный каталог", icon: "square.grid.3x3", showDivider: false, action: { path.append(MenuRoute.combinedCatalog) })
         }
     }
 
-    // MARK: Card container
+    // MARK: Карточка-контейнер
 
-    // Share the menu card corner radius with its presentation container.
+    // Радиус вынесен в константу — тот же самый радиус используется и для
+    // самого листа меню (.presentationCornerRadius в RootView.swift), чтобы
+    // скругления совпадали, как просили. 20→24 — чуть крупнее.
     static let cardCornerRadius: CGFloat = 24
 
     private func card(@ViewBuilder content: () -> some View) -> some View {
@@ -424,13 +680,18 @@ struct SideMenuView: View {
         .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous))
     }
 
-    // MARK: Account card
+    // MARK: Карточка профиля (верх блока 1)
 
-    // Open shared login or account information by tapping the account row.
+    // Тап по всей строке: если не залогинен — ведёт на "Войти" (LoginView,
+    // реальный WebView-логин на mangalib.me); если залогинен — на экран
+    // информации об аккаунте (AccountInfoView). Маршрутизация — в RootView.swift.
+    // Кнопки "Активировать код"/"Отправить подарочную карту" с референса
+    // сознательно не переносим — просили без них.
     private var profileRow: some View {
         VStack(spacing: 0) {
             Button {
-                // Reuse the RootView presentation callbacks.
+                // Теперь общие closures с быстрой кнопкой профиля в RootView —
+                // одна и та же sheet-презентация, откуда бы её ни открыли.
                 if auth.isLoggedIn { onOpenAccount() } else { onOpenLogin() }
             } label: {
                 HStack(spacing: 14) {
@@ -440,7 +701,7 @@ struct SideMenuView: View {
                         Text(auth.isLoggedIn ? (auth.username ?? "Аккаунт MangaLib") : "Вы не вошли")
                             .font(.headline)
                             .foregroundStyle(Theme.textPrimary)
-                        // Allow two lines for long account labels.
+                        // В 2 строки (lineLimit 2) — не входила бы: одна длинная строка.
                         Text(auth.isLoggedIn ? "Посмотреть информацию об аккаунте" : "Войдите, чтобы посмотреть информацию об аккаунте")
                             .font(.footnote)
                             .foregroundStyle(Theme.textSecondary)
@@ -449,7 +710,8 @@ struct SideMenuView: View {
 
                     Spacer()
 
-                    // The whole account row is the sign-in target, so no redundant login subtitle is needed.
+                    // Текст "Залогиниться" убрали — избыточен, вся строка и так
+                    // тап-таргет на вход. Шеврон остаётся в обоих состояниях.
                     chevron
                 }
                 .padding(.horizontal, 16)
@@ -458,12 +720,18 @@ struct SideMenuView: View {
             }
             .buttonStyle(.plain)
 
-            // Inset the divider to align with the text column.
+            // Разделитель начинается там же, где текст (16 паддинг + 52
+            // аватар + 14 spacing = 82), и не доходит до конца карточки
+            // (trailing 16) — раньше шёл во всю ширину до самого края.
             Divider().overlay(Theme.separator).padding(.leading, 82).padding(.trailing, 16)
         }
     }
 
-    // Use the authenticated image loader for the avatar and a placeholder until available.
+    // Круглая аватарка аккаунта: реальная картинка с сервера (auth.avatarURL,
+    // подтягивается в AuthSession.refreshProfile через /auth/me), пока грузится
+    // или если не залогинен — иконка-заглушка. RemoteImage — тот же кастомный
+    // загрузчик с заголовками, что и для обложек манги (обычный AsyncImage
+    // без Referer/User-Agent тут тоже может словить 403).
     private var avatarView: some View {
         Group {
             if let avatarURL = auth.avatarURL {
@@ -490,16 +758,22 @@ struct SideMenuView: View {
             )
     }
 
-    // Reuse the same chevron style for account and ordinary rows.
+    // Шеврон чуть крупнее (caption→subheadline) и один и тот же везде —
+    // в profileRow и в обычных row() используется этот же вычисляемый вью,
+    // так что положение и размер гарантированно совпадают во всех блоках.
     private var chevron: some View {
         Image(systemName: "chevron.right")
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(Theme.textSecondary.opacity(0.6))
     }
 
-    // MARK: Standard card row
+    // MARK: Обычная строка внутри карточки
 
-    // Allow custom icon-column widths and actions while preserving the shared row layout.
+    // iconWidth позволяет выровнять текст строки по чужому ориентиру (см.
+    // "Сайт (MangaLib)" в block1, где он выравнивается по тексту profileRow).
+    // action — переопределяет поведение по тапу (по умолчанию — select(title),
+    // закрывает меню и уходит на StubView); используется, когда строка должна
+    // открыть что-то ПОВЕРХ меню, не закрывая его (см. "История").
     private func row(_ title: String, icon: String, showDivider: Bool = true, showChevron: Bool = true, iconWidth: CGFloat = 24, action: (() -> Void)? = nil) -> some View {
         VStack(spacing: 0) {
             Button { (action ?? { select(title) })() } label: {
@@ -520,13 +794,14 @@ struct SideMenuView: View {
             .buttonStyle(.plain)
 
             if showDivider {
-                // Align the divider with the text and keep a trailing inset.
+                // Начало текста = 16 паддинг + iconWidth + 14 spacing;
+                // trailing 16 — чтобы не доходил до конца карточки.
                 Divider().overlay(Theme.separator).padding(.leading, 16 + iconWidth + 14).padding(.trailing, 16)
             }
         }
     }
 
-    // MARK: Actions
+    // MARK: Действия
 
     private func select(_ title: String) {
         onSelect(title)

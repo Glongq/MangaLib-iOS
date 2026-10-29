@@ -43,12 +43,6 @@ private enum ExternalImageCache {
 /// never come into play at all.
 private func externalImageReferer(for url: URL) -> String {
     let host = url.host ?? ""
-    if host == "rule34video.com" || host.hasSuffix(".rule34video.com") || host.hasSuffix(".boomio-cdn.com") {
-        return "https://rule34video.com/"
-    }
-    if host == "rule34.xxx" || host.hasSuffix(".rule34.xxx") {
-        return "https://rule34.xxx/"
-    }
     if host.hasSuffix("e-hentai.org") || host.hasSuffix("ehgt.org") || host.hasSuffix("hath.network") {
         return "https://e-hentai.org/"
     }

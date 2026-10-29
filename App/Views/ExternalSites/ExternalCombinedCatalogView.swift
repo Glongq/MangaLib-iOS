@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Combined catalog for sources enabled in Settings and the selected media kind.
-/// One query is sent to all selected sources at once
-/// (ExternalSiteSession.selectedSites), the results are merged into one grid
+/// Combined catalog/result set — "All sites" (see ExternalSiteSession.
+/// combinedModeActive, chosen in the site switcher — SideMenuView.
+/// siteRow). One query is sent to ALL enabled sites AT ONCE
+/// (ExternalSiteSession.enabledSites), the results are merged into one grid
 /// (see ExternalCatalogGridView, support for multiple `sites`) — each
 /// title's card is labeled with its source (ExternalCatalogGridView.
 /// showsSourceBadge / ExternalGalleryDetailView "Source").
@@ -21,7 +22,6 @@ import SwiftUI
 struct ExternalCombinedCatalogView: View {
     @ObservedObject private var session = ExternalSiteSession.shared
     @ObservedObject private var filterStore = ExternalCatalogFilterStore.shared
-    @ObservedObject private var rule34VideoAuth = Rule34VideoAuthStore.shared
     @State private var query = ""
     @State private var committedQuery = ""
     @State private var showFilters = false
@@ -51,10 +51,13 @@ struct ExternalCombinedCatalogView: View {
     @State private var searchResultCount: Int?
     @State private var searchResultIsExact = false
     @State private var searchJustSubmitted = false
-    /// Native tag suggestions for Pixiv and Rule34, depending on the selected sources.
-    @State private var suggestions: [ExternalTagSuggestion] = []
+    /// Pixiv tag suggestions for the shared search field (see
+    /// pixivSearchSuggestions) — "original (translation)", exactly the
+    /// real app's own search-bar behavior (per direct request), only
+    /// fetched/shown when pixiv is one of the enabled sites.
+    @State private var pixivSuggestions: [ExternalTagSuggestion] = []
 
-    private var sites: [ExternalSite] { session.selectedSites }
+    private var sites: [ExternalSite] { ExternalSite.allCases.filter { session.enabledSites.contains($0) } }
     /// Unlike ExternalSearchView (there it's always EXACTLY one site — you
     /// can switch on `site`), here several sites can be enabled at once —
     /// so BOTH category sets (e-hentai/imhentai) are summed, not selected
@@ -71,7 +74,7 @@ struct ExternalCombinedCatalogView: View {
     private var showsHitomiFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .hitomi } }
     private var showsPixivFilter: Bool { sites.contains { ExternalSiteRegistry.provider(for: $0).capabilities.hasCategoryFilter && $0 == .pixiv } }
     private var showsCategoryFilter: Bool {
-        showsEHentaiFilter || showsImhentaiFilter || showsSimplyHentaiFilter || showsThreeHentaiFilter || showsHentaiPillFilter || showsHitomiFilter || showsPixivFilter || sites.contains(.rule34) || sites.contains(.rule34Video)
+        showsEHentaiFilter || showsImhentaiFilter || showsSimplyHentaiFilter || showsThreeHentaiFilter || showsHentaiPillFilter || showsHitomiFilter || showsPixivFilter
     }
     /// Sites that currently have something to show in the "Filters" tab —
     /// the source of the switcher chips (see filtersSheet).
@@ -143,7 +146,6 @@ struct ExternalCombinedCatalogView: View {
             + (advancedQueryHP.isEmpty ? 0 : 1)
             + (advancedQueryHT.isEmpty ? 0 : 1)
             + (advancedQueryPixiv.isEmpty ? 0 : 1)
-            + filterStore.combinedRule34AdvancedQuery.filterCount + filterStore.combinedRule34VideoAdvancedQuery.filterCount
             + filterStore.selectedLanguages.count
     }
     /// Active filter count for ONE site — used only by the switcher chips
@@ -170,10 +172,6 @@ struct ExternalCombinedCatalogView: View {
             return advancedQueryHT.isEmpty ? 0 : 1
         case .pixiv:
             return advancedQueryPixiv.isEmpty ? 0 : 1
-        case .rule34:
-            return filterStore.combinedRule34AdvancedQuery.filterCount
-        case .rule34Video:
-            return filterStore.combinedRule34VideoAdvancedQuery.filterCount
         }
     }
     /// A separate query PER SITE — per direct feedback (Aug 31): imhentai
@@ -236,12 +234,6 @@ struct ExternalCombinedCatalogView: View {
             let text = advanced.isEmpty ? committedQuery : advanced.encoded()
             return .search(query: text, excludedCategoryBits: 0)
         }
-        if site == .rule34 {
-            return .search(query: filterStore.combinedRule34AdvancedQuery.search(committedQuery), excludedCategoryBits: 0)
-        }
-        if site == .rule34Video {
-            return .search(query: filterStore.combinedRule34VideoAdvancedQuery.encoded(search: committedQuery), excludedCategoryBits: 0)
-        }
         return .search(query: committedQuery, excludedCategoryBits: excludedCategoryBits)
     }
     /// A string "fingerprint" of each site's query — only for `.id(...)`
@@ -276,7 +268,7 @@ struct ExternalCombinedCatalogView: View {
             // instance on any change to any of the independent queries (shared
             // OR imhentai-specific), so the grid's @State resets and .task
             // reloads from scratch.
-            .id("\(session.contentKind.rawValue)#\(committedQuery)#\(sites.map { $0.rawValue + ":" + queryIdentity(for: $0) }.joined(separator: "|"))#\(excludedCategoryBits)#\(sites.contains(.rule34Video) ? rule34VideoAuth.revision.uuidString : "")")
+            .id("\(committedQuery)#\(sites.map { queryIdentity(for: $0) }.joined(separator: "|"))#\(excludedCategoryBits)")
         }
         .navigationTitle("Каталог")
         .navigationBarTitleDisplayMode(.large)
@@ -286,8 +278,8 @@ struct ExternalCombinedCatalogView: View {
         // than waiting out the debounce below.
         .onSubmit(of: .search) { commitSearch() }
         .searchSuggestions {
-            if sites.contains(.pixiv) || sites.contains(.rule34) || sites.contains(.rule34Video) {
-                ForEach(suggestions, id: \.name) { suggestion in
+            if sites.contains(.pixiv) {
+                ForEach(pixivSuggestions, id: \.name) { suggestion in
                     Text(suggestion.category.isEmpty ? suggestion.name : "\(suggestion.name) (\(suggestion.category))")
                         .searchCompletion(suggestion.name)
                 }
@@ -308,28 +300,27 @@ struct ExternalCombinedCatalogView: View {
             committedQuery = query.trimmingCharacters(in: .whitespaces)
             filterStore.combinedQuery = committedQuery
         }
-        .task(id: "\(query)#\(sites.map(\.rawValue).joined(separator: ","))") { await updateSuggestions() }
+        .task(id: query) { await updatePixivSuggestions() }
     }
 
-    /// Autocomplete runs separately so a slow endpoint never delays committing a search.
-    private func updateSuggestions() async {
-        guard let source = sites.first(where: { $0 == .pixiv || $0 == .rule34 || $0 == .rule34Video }) else { suggestions = []; return }
+    /// Pixiv's own `/v2/search/autocomplete` — see PixivProvider.
+    /// fetchAutocomplete's doc-comment for the translated-tag behavior.
+    /// Runs as its OWN separate `.task(id: query)` (not merged into the
+    /// debounce above) so a slow/failed autocomplete call can never delay
+    /// committing the actual search text.
+    private func updatePixivSuggestions() async {
+        guard sites.contains(.pixiv) else { pixivSuggestions = []; return }
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard trimmed.count >= 1 else { suggestions = []; return }
+        guard trimmed.count >= 1 else { pixivSuggestions = []; return }
         try? await Task.sleep(nanoseconds: 300_000_000)
         guard !Task.isCancelled, trimmed == query.trimmingCharacters(in: .whitespaces) else { return }
-        let provider = ExternalSiteRegistry.provider(for: source)
-        let prefix = source == .rule34 ? String(trimmed.split(whereSeparator: { $0.isWhitespace }).last ?? "") : trimmed
-        guard let results = try? await provider.fetchAutocomplete(query: prefix, namespace: nil) else {
-            suggestions = []
+        let provider = ExternalSiteRegistry.provider(for: .pixiv)
+        guard let results = try? await provider.fetchAutocomplete(query: trimmed, namespace: nil) else {
+            pixivSuggestions = []
             return
         }
         guard !Task.isCancelled else { return }
-        let previous = source == .rule34 ? trimmed.split(whereSeparator: { $0.isWhitespace }).dropLast().joined(separator: " ") : ""
-        suggestions = Array(results.prefix(10)).map { suggestion in
-            ExternalTagSuggestion(name: previous.isEmpty ? suggestion.name : previous + " " + suggestion.name,
-                                  count: suggestion.count, category: suggestion.category)
-        }
+        pixivSuggestions = Array(results.prefix(10))
     }
 
     private func commitSearch() {
@@ -576,8 +567,6 @@ struct ExternalCombinedCatalogView: View {
         snapshot.advancedQueryHP = advancedQueryHP
         snapshot.advancedQueryHT = advancedQueryHT
         snapshot.advancedQueryPixiv = advancedQueryPixiv
-        snapshot.advancedQueryRule34 = filterStore.combinedRule34AdvancedQuery
-        snapshot.advancedQueryRule34Video = filterStore.combinedRule34VideoAdvancedQuery
         return snapshot
     }
 
@@ -606,8 +595,6 @@ struct ExternalCombinedCatalogView: View {
         advancedQueryHP = preset.advancedQueryHP
         advancedQueryHT = preset.advancedQueryHT
         advancedQueryPixiv = preset.advancedQueryPixiv
-        filterStore.combinedRule34AdvancedQuery = preset.advancedQueryRule34 ?? Rule34CatalogQuery()
-        filterStore.combinedRule34VideoAdvancedQuery = preset.advancedQueryRule34Video ?? Rule34VideoQuery()
         showSavedFilters = false
     }
 
@@ -686,8 +673,6 @@ struct ExternalCombinedCatalogView: View {
                 if showsHentaiPillFilter { filterSection(for: .hentaiPill) }
                 if showsHitomiFilter { filterSection(for: .hitomi) }
                 if showsPixivFilter { filterSection(for: .pixiv) }
-                if sites.contains(.rule34) { filterSection(for: .rule34) }
-                if sites.contains(.rule34Video) { filterSection(for: .rule34Video) }
             }
         }
     }
@@ -776,10 +761,6 @@ struct ExternalCombinedCatalogView: View {
                     set: { advancedQueryPixiv = $0 }
                 ))
             }
-        case .rule34:
-            Rule34CatalogFiltersView(query: $filterStore.combinedRule34AdvancedQuery)
-        case .rule34Video:
-            Rule34VideoFiltersView(query: $filterStore.combinedRule34VideoAdvancedQuery)
         }
     }
 
@@ -820,10 +801,6 @@ struct ExternalCombinedCatalogView: View {
             advancedQueryHT = HitomiAdvancedQuery()
         case .pixiv:
             advancedQueryPixiv = PixivAdvancedQuery()
-        case .rule34:
-            filterStore.combinedRule34AdvancedQuery = Rule34CatalogQuery()
-        case .rule34Video:
-            filterStore.combinedRule34VideoAdvancedQuery = Rule34VideoQuery()
         }
     }
 }

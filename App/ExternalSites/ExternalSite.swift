@@ -1,11 +1,5 @@
 import Foundation
 
-enum ExternalContentKind: String, CaseIterable, Codable, Identifiable, Sendable {
-    case manga, video
-    var id: String { rawValue }
-    var title: String { self == .manga ? "Манга" : "Видео" }
-}
-
 /// "Other sites" — sites with a FUNDAMENTALLY different API, not part of
 /// the Lib.social ecosystem (see LibSite.swift — mangalib/slashlib/ranobelib/
 /// hentailib, a single REST/JSON API across two hosts). Per a direct
@@ -24,8 +18,6 @@ enum ExternalSite: String, CaseIterable, Identifiable, Codable {
     /// PixivProvider's doc-comment. Confirmed by a live HAR of the
     /// official iOS app (Sep 16).
     case pixiv
-    case rule34
-    case rule34Video
     // Further sites get added here as their HAR captures are analyzed (see the plan).
 
     var id: String { rawValue }
@@ -39,13 +31,7 @@ enum ExternalSite: String, CaseIterable, Identifiable, Codable {
         case .hentaiPill: return "HentaiPill"
         case .simplyHentai: return "Simply Hentai"
         case .pixiv: return "Pixiv"
-        case .rule34: return "Rule34"
-        case .rule34Video: return "Rule34Video"
         }
-    }
-
-    var contentKind: ExternalContentKind {
-        switch self { case .rule34, .rule34Video: return .video; default: return .manga }
     }
 }
 
